@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "excalidraw_mcp": {
+      "command": "bash",
+      "args": [
+        "./scripts/start-mcp.sh"
+      ],
+      "cwd": "."
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "name": "codex-excalidraw",
+  "version": "0.1.0",
+  "description": "A local Excalidraw canvas for Codex, modeled after Cowart's local canvas plus MCP design.",
+  "author": {
+    "name": "higataiyu"
+  },
+  "keywords": [
+    "canvas",
+    "excalidraw",
+    "whiteboard",
+    "mcp",
+    "visual-collaboration"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Codex Excalidraw",
+    "shortDescription": "Use a project-local Excalidraw canvas from Codex.",
+    "longDescription": "Codex Excalidraw runs a local Excalidraw web canvas for the active project and exposes MCP tools for Codex to read selected elements, insert assets, and generate images or videos into the scene.",
+    "developerName": "higataiyu",
+    "category": "Productivity",
+    "brandColor": "#5f3dc4",
+    "capabilities": [
+      "Interactive Excalidraw canvas",
+      "Project-local persistence",
+      "MCP selection reading",
+      "MCP image generation",
+      "MCP video generation"
+    ],
+    "defaultPrompt": [
+      "Open the Excalidraw canvas for this project.",
+      "Generate a new image into the selected Excalidraw AI holder.",
+      "Generate a Grok Imagine video next to the selected Excalidraw element."
+    ]
+  }
+}

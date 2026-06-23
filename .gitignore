@@ -1,0 +1,7 @@
+node_modules/
+dist/
+canvas/
+.claude/
+.env*
+.DS_Store
+*.log

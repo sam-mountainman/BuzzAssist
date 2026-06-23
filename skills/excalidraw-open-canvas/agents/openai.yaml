@@ -1,0 +1,4 @@
+interface:
+  display_name: "Excalidraw Open Canvas"
+  short_description: "Open the local Excalidraw canvas"
+  default_prompt: "Use $codex-excalidraw:excalidraw-open-canvas to open the Excalidraw canvas."

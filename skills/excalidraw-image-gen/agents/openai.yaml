@@ -1,0 +1,4 @@
+interface:
+  display_name: "Excalidraw Image Gen"
+  short_description: "Place generated images on the Excalidraw canvas"
+  default_prompt: "Use $codex-excalidraw:excalidraw-image-gen to generate an image on the Excalidraw canvas."
