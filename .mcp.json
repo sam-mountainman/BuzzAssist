@@ -1,5 +1,10 @@
 {
   "mcpServers": {
+    "excalidraw_official": {
+      "type": "http",
+      "url": "https://mcp.excalidraw.com/mcp",
+      "note": "Official open-source Excalidraw MCP App from excalidraw/excalidraw-mcp. Use for prompt-to-diagram Excalidraw generation and interactive MCP App rendering."
+    },
     "excalidraw_mcp": {
       "command": "bash",
       "args": [

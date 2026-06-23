@@ -1,0 +1,4 @@
+interface:
+  display_name: "Official Excalidraw MCP"
+  short_description: "Use the official Excalidraw MCP App"
+  default_prompt: "Use $codex-excalidraw:excalidraw-official-mcp to create a diagram with the official Excalidraw MCP."

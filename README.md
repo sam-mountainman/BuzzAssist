@@ -2,6 +2,7 @@
 
 Codex Excalidraw is a local Excalidraw canvas for Codex, modeled after Cowart's architecture:
 
+- official Excalidraw MCP App access through `https://mcp.excalidraw.com/mcp`
 - a local Vite/React canvas service
 - project-local canvas persistence under `canvas/`
 - MCP tools for Codex to read selection state, insert assets, and generate images/videos
@@ -30,13 +31,27 @@ canvas/assets/
 
 ## MCP Tools
 
-Start the MCP server:
+This plugin includes two Excalidraw MCP entries:
+
+- `excalidraw_official`: the official open-source Excalidraw MCP App hosted by Excalidraw, useful for prompt-to-diagram generation and MCP App rendering
+- `excalidraw_mcp`: this repository's local project-bound MCP server, useful for reading the current canvas selection, inserting local assets, and generating images/videos into the persisted canvas
+
+The official remote MCP is configured in `.mcp.json` as:
+
+```json
+{
+  "type": "http",
+  "url": "https://mcp.excalidraw.com/mcp"
+}
+```
+
+To use the local MCP server directly, start it with:
 
 ```bash
 ./scripts/start-mcp.sh
 ```
 
-Tools:
+Local tools:
 
 - `get_excalidraw_selection`: reads selected elements from `canvas/excalidraw-selection.json`
 - `insert_excalidraw_image`: copies a local bitmap into `canvas/assets/`, adds an Excalidraw image file and element, and saves the scene
