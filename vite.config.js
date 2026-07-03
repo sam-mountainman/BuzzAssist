@@ -3,8 +3,13 @@ import react from '@vitejs/plugin-react'
 import { createReadStream } from 'node:fs'
 import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path'
-import { generateImageMedia, generateVideoMedia, getGenerationCapabilities } from './lib/mediaGeneration.mjs'
-import { OFFICIAL_EXCALIDRAW_README, createExcalidrawView, insertExcalidrawImage, insertExcalidrawVideo } from './lib/canvasScene.mjs'
+import { Readable } from 'node:stream'
+import { generateImageMedia, generateVideoMedia, getGenerationCapabilities, runWithConcurrency } from './lib/mediaGeneration.mjs'
+import { getBuzzAssistAuthStatus, loginBuzzAssistViaBrowser } from './lib/buzzassistApi.mjs'
+import { OFFICIAL_EXCALIDRAW_README, createExcalidrawView, insertExcalidrawImage, insertExcalidrawSubtitle, insertExcalidrawVideo, insertExcalidrawMediaBatch } from './lib/canvasScene.mjs'
+import { generateSubtitleSrt } from './lib/subtitleGeneration.mjs'
+import { silenceCutVideo } from './lib/tempoCut.mjs'
+import { tmpdir } from 'node:os'
 
 const projectDir = resolve(process.env.EXCALIDRAW_PROJECT_DIR ?? process.cwd())
 const canvasDir = resolve(process.env.EXCALIDRAW_CANVAS_DIR ?? join(projectDir, 'canvas'))
@@ -32,6 +37,7 @@ const mimeTypes = new Map([
 
 const canvasEventClients = new Set()
 let canvasEventVersion = 0
+const jsonWriteQueues = new Map()
 
 function sendJson(res, statusCode, payload) {
   res.statusCode = statusCode
@@ -45,7 +51,7 @@ function readRequestBody(req) {
     req.setEncoding('utf8')
     req.on('data', (chunk) => {
       body += chunk
-      if (body.length > 50 * 1024 * 1024) {
+      if (body.length > 200 * 1024 * 1024) {
         rejectBody(new Error('Excalidraw payload is too large.'))
         req.destroy()
       }
@@ -114,10 +120,23 @@ async function readJsonFile(filePath) {
 }
 
 async function writeJsonAtomic(filePath, payload) {
-  await mkdir(dirname(filePath), { recursive: true })
-  const tempFile = `${filePath}.${process.pid}.tmp`
-  await writeFile(tempFile, `${JSON.stringify(payload, null, 2)}\n`)
-  await rename(tempFile, filePath)
+  const previous = jsonWriteQueues.get(filePath) ?? Promise.resolve()
+  const next = previous
+    .catch(() => {})
+    .then(async () => {
+      await mkdir(dirname(filePath), { recursive: true })
+      const tempFile = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`
+      await writeFile(tempFile, `${JSON.stringify(payload, null, 2)}\n`)
+      await rename(tempFile, filePath)
+    })
+  jsonWriteQueues.set(filePath, next)
+  try {
+    await next
+  } finally {
+    if (jsonWriteQueues.get(filePath) === next) {
+      jsonWriteQueues.delete(filePath)
+    }
+  }
 }
 
 function broadcastCanvasChanged(paths) {
@@ -279,7 +298,7 @@ function mcpToolDefinitions() {
     {
       name: TOOL_INSERT_VIDEO,
       title: 'Insert Excalidraw Video',
-      description: 'Copy a local video into canvas/assets, create a linked video card, and update the live browser canvas.',
+      description: 'Copy a local video into canvas/assets, create a Youtube-AGI-style video media element, and update the live browser canvas.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -338,7 +357,7 @@ function mcpToolDefinitions() {
     {
       name: TOOL_GENERATE_VIDEO,
       title: 'Generate Excalidraw Video',
-      description: 'Generate a video with Grok Imagine(Hermes), insert a linked video card, and update the live browser canvas.',
+      description: 'Generate a video with Grok Imagine(Hermes), insert a Youtube-AGI-style video media element, and update the live browser canvas.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -352,10 +371,16 @@ function mcpToolDefinitions() {
           aspect_ratio: { type: 'string' },
           duration: { type: 'string' },
           resolution: { type: 'string' },
+          generateAudio: { type: 'boolean' },
+          generate_audio: { type: 'boolean' },
           startFramePath: { type: 'string' },
           start_frame_path: { type: 'string' },
           referenceImagePaths: { type: 'array', items: { type: 'string' } },
           reference_image_paths: { type: 'array', items: { type: 'string' } },
+          referenceVideoPaths: { type: 'array', items: { type: 'string' } },
+          reference_video_paths: { type: 'array', items: { type: 'string' } },
+          referenceVideos: { type: 'array', items: { type: 'string' } },
+          reference_videos: { type: 'array', items: { type: 'string' } },
           placement: { type: 'string', enum: ['right', 'left', 'below', 'replace', 'inside'] },
           margin: { type: 'number' },
           matchAnchor: { type: 'boolean' },
@@ -424,7 +449,7 @@ async function callLocalMcpTool(name, args = {}) {
   if (name === TOOL_INSERT_VIDEO) {
     const result = await insertExcalidrawVideo(localArgs)
     if (!result.dryRun) broadcastCanvasChanged([canvasFile, result.assetFile])
-    return mcpToolResponse(`${result.dryRun ? 'Planned' : 'Inserted'} video card ${result.elementId}.`, result)
+    return mcpToolResponse(`${result.dryRun ? 'Planned' : 'Inserted'} video media element ${result.elementId}.`, result)
   }
 
   if (name === TOOL_GENERATE_IMAGE) {
@@ -476,12 +501,13 @@ async function callLocalMcpTool(name, args = {}) {
         videoAspectRatio: localArgs.aspectRatio ?? localArgs.aspect_ratio,
         videoDuration: localArgs.duration,
         videoResolution: localArgs.resolution,
+        videoGenerateAudio: localArgs.generateAudio ?? localArgs.generate_audio,
         codexGenerationSource: media.source,
         ...(localArgs.customData && typeof localArgs.customData === 'object' ? localArgs.customData : {})
       }
     })
     if (!result.dryRun) broadcastCanvasChanged([canvasFile, result.assetFile])
-    return mcpToolResponse(`${result.dryRun ? 'Planned' : 'Generated'} video card ${result.elementId}.`, { kind: 'video', model: media.model, ...result })
+    return mcpToolResponse(`${result.dryRun ? 'Planned' : 'Generated'} video media element ${result.elementId}.`, { kind: 'video', model: media.model, ...result })
   }
 
   throw new Error(`Unknown tool: ${name}`)
@@ -742,10 +768,25 @@ function canvasStoragePlugin() {
 
           if (req.method === 'PUT') {
             const body = await readRequestBody(req)
-            const scene = normalizeScene(JSON.parse(body))
+            const payload = JSON.parse(body)
+            const scene = normalizeScene(payload)
             if (!isScene(scene)) {
               sendJson(res, 400, { error: 'Expected an Excalidraw scene.' })
               return
+            }
+            if (scene.elements.length === 0 && payload?.allowClearCanvas !== true) {
+              try {
+                const existingScene = normalizeScene(await readJsonFile(canvasFile))
+                if (existingScene.elements.length > 0) {
+                  sendJson(res, 409, {
+                    error: 'Refusing to replace a non-empty Excalidraw canvas with an empty scene.',
+                    existingElementCount: existingScene.elements.length
+                  })
+                  return
+                }
+              } catch (error) {
+                if (error.code !== 'ENOENT') throw error
+              }
             }
 
             await writeJsonAtomic(canvasFile, scene)
@@ -773,6 +814,42 @@ function canvasStoragePlugin() {
         sendJson(res, 200, getGenerationCapabilities())
       })
 
+      server.middlewares.use('/api/buzzassist/auth-status', async (req, res) => {
+        try {
+          if (req.method !== 'GET') {
+            res.statusCode = 405
+            res.setHeader('allow', 'GET')
+            res.end()
+            return
+          }
+          sendJson(res, 200, await getBuzzAssistAuthStatus())
+        } catch (error) {
+          sendJson(res, 500, { error: error.message })
+        }
+      })
+
+      server.middlewares.use('/api/buzzassist/login', async (req, res) => {
+        try {
+          if (req.method !== 'GET' && req.method !== 'POST') {
+            res.statusCode = 405
+            res.setHeader('allow', 'GET, POST')
+            res.end()
+            return
+          }
+          let authUrl = null
+          const result = await loginBuzzAssistViaBrowser({
+            openBrowser: true,
+            timeoutMs: 5 * 60 * 1000,
+            onAuthUrl: (url) => {
+              authUrl = url
+            }
+          })
+          sendJson(res, 200, { ok: true, userId: result.userId, expiresAt: result.expiresAt, authUrl })
+        } catch (error) {
+          sendJson(res, 500, { error: error.message })
+        }
+      })
+
       server.middlewares.use('/api/generate/image', async (req, res) => {
         try {
           if (req.method !== 'POST') {
@@ -795,6 +872,7 @@ function canvasStoragePlugin() {
             margin: body.margin,
             matchAnchor: body.matchAnchor,
             replaceAnchor: body.replaceAnchor,
+            selectCreated: body.selectCreated,
             displayWidth: body.displayWidth,
             displayHeight: body.displayHeight,
             customData: {
@@ -847,6 +925,7 @@ function canvasStoragePlugin() {
             margin: body.margin,
             matchAnchor: body.matchAnchor,
             replaceAnchor: body.replaceAnchor,
+            selectCreated: body.selectCreated,
             displayWidth: body.displayWidth,
             displayHeight: body.displayHeight,
             aspectRatio: body.aspectRatio,
@@ -865,6 +944,7 @@ function canvasStoragePlugin() {
               videoAspectRatio: body.aspectRatio ?? body.aspect_ratio,
               videoDuration: body.duration,
               videoResolution: body.resolution,
+              videoGenerateAudio: body.generateAudio ?? body.generate_audio,
               codexGenerationSource: media.source,
               ...(body.customData && typeof body.customData === 'object' ? body.customData : {})
             }
@@ -877,6 +957,279 @@ function canvasStoragePlugin() {
             ...result
           })
           broadcastCanvasChanged([canvasFile, result.assetFile])
+        } catch (error) {
+          sendJson(res, 500, { error: error.message })
+        }
+      })
+
+      server.middlewares.use('/api/generate/images/batch', async (req, res) => {
+        try {
+          if (req.method !== 'POST') {
+            res.statusCode = 405
+            res.setHeader('allow', 'POST')
+            res.end()
+            return
+          }
+
+          const body = JSON.parse(await readRequestBody(req))
+          const jobs = Array.isArray(body.jobs) ? body.jobs : []
+          if (jobs.length === 0) {
+            sendJson(res, 400, { error: 'jobs must be a non-empty array' })
+            return
+          }
+          if (jobs.some((job) => typeof job?.prompt !== 'string' || job.prompt.trim().length === 0)) {
+            sendJson(res, 400, { error: 'each job requires a prompt' })
+            return
+          }
+
+          const generated = await runWithConcurrency(jobs, Number(body.concurrency) || 3, (job) => generateImageMedia(job))
+          const items = []
+          const itemJobIndexes = []
+          jobs.forEach((job, i) => {
+            const outcome = generated[i]
+            if (!outcome.ok) return
+            const media = outcome.value
+            items.push({
+              kind: 'image',
+              mediaBuffer: media.buffer,
+              mimeType: media.mimeType,
+              fileName: job.fileName || media.fileName,
+              customData: {
+                codexGeneratedImage: true,
+                codexGenerationModel: media.model,
+                codexGenerationPrompt: job.prompt,
+                codexGenerationAspectRatio: job.aspectRatio ?? job.aspect_ratio,
+                codexGenerationQuality: job.quality,
+                generatorPrompt: job.prompt,
+                generatorModel: job.model,
+                generatorAspectRatio: job.aspectRatio ?? job.aspect_ratio,
+                generatorImageQuality: job.quality,
+                generatorImageSize: job.imageSize ?? job.size ?? '1K',
+                codexGenerationSource: media.source,
+                ...(job.customData && typeof job.customData === 'object' ? job.customData : {})
+              }
+            })
+            itemJobIndexes.push(i)
+          })
+
+          let inserted = []
+          if (items.length > 0) {
+            inserted = await insertExcalidrawMediaBatch({
+              canvasDir,
+              items,
+              columns: Number(body.columns) || 4,
+              gap: Number(body.gap) || 24,
+              selectCreated: body.selectCreated
+            })
+          }
+
+          const results = jobs.map((job, i) => {
+            const outcome = generated[i]
+            if (!outcome.ok) return { prompt: job.prompt, error: outcome.error }
+            const placement = inserted[itemJobIndexes.indexOf(i)]
+            return {
+              prompt: job.prompt,
+              model: outcome.value.model,
+              elementId: placement?.elementId,
+              fileId: placement?.fileId,
+              bounds: placement?.bounds,
+              assetFile: placement?.assetFile,
+              assetUrl: placement?.assetUrl
+            }
+          })
+          const succeeded = results.filter((result) => !result.error).length
+
+          sendJson(res, 200, {
+            ok: true,
+            kind: 'image',
+            total: jobs.length,
+            succeeded,
+            failed: jobs.length - succeeded,
+            results
+          })
+          broadcastCanvasChanged([canvasFile, ...inserted.map((placement) => placement.assetFile)])
+        } catch (error) {
+          sendJson(res, 500, { error: error.message })
+        }
+      })
+
+      server.middlewares.use('/api/generate/videos/batch', async (req, res) => {
+        try {
+          if (req.method !== 'POST') {
+            res.statusCode = 405
+            res.setHeader('allow', 'POST')
+            res.end()
+            return
+          }
+
+          const body = JSON.parse(await readRequestBody(req))
+          const jobs = Array.isArray(body.jobs) ? body.jobs : []
+          if (jobs.length === 0) {
+            sendJson(res, 400, { error: 'jobs must be a non-empty array' })
+            return
+          }
+          if (jobs.some((job) => typeof job?.prompt !== 'string' || job.prompt.trim().length === 0)) {
+            sendJson(res, 400, { error: 'each job requires a prompt' })
+            return
+          }
+
+          const generated = await runWithConcurrency(jobs, Number(body.concurrency) || 1, (job) => generateVideoMedia(job))
+          const items = []
+          const itemJobIndexes = []
+          jobs.forEach((job, i) => {
+            const outcome = generated[i]
+            if (!outcome.ok) return
+            const media = outcome.value
+            items.push({
+              kind: 'video',
+              mediaBuffer: media.buffer,
+              mimeType: media.mimeType,
+              fileName: job.fileName || media.fileName,
+              aspectRatio: job.aspectRatio ?? job.aspect_ratio,
+              duration: job.duration,
+              customData: {
+                codexGeneratedVideo: true,
+                codexGenerationModel: media.model,
+                codexGenerationPrompt: job.prompt,
+                codexGenerationAspectRatio: job.aspectRatio ?? job.aspect_ratio,
+                codexGenerationDuration: job.duration,
+                codexGenerationResolution: job.resolution,
+                videoPrompt: job.prompt,
+                videoModel: job.model,
+                videoAspectRatio: job.aspectRatio ?? job.aspect_ratio,
+                videoDuration: job.duration,
+                videoResolution: job.resolution,
+                videoGenerateAudio: job.generateAudio ?? job.generate_audio,
+                codexGenerationSource: media.source,
+                ...(job.customData && typeof job.customData === 'object' ? job.customData : {})
+              }
+            })
+            itemJobIndexes.push(i)
+          })
+
+          let inserted = []
+          if (items.length > 0) {
+            inserted = await insertExcalidrawMediaBatch({
+              canvasDir,
+              items,
+              columns: Number(body.columns) || 3,
+              gap: Number(body.gap) || 24,
+              selectCreated: body.selectCreated
+            })
+          }
+
+          const results = jobs.map((job, i) => {
+            const outcome = generated[i]
+            if (!outcome.ok) return { prompt: job.prompt, error: outcome.error }
+            const placement = inserted[itemJobIndexes.indexOf(i)]
+            return {
+              prompt: job.prompt,
+              model: outcome.value.model,
+              elementId: placement?.elementId,
+              fileId: placement?.fileId,
+              bounds: placement?.bounds,
+              assetFile: placement?.assetFile,
+              assetUrl: placement?.assetUrl
+            }
+          })
+          const succeeded = results.filter((result) => !result.error).length
+
+          sendJson(res, 200, {
+            ok: true,
+            kind: 'video',
+            total: jobs.length,
+            succeeded,
+            failed: jobs.length - succeeded,
+            results
+          })
+          broadcastCanvasChanged([canvasFile, ...inserted.map((placement) => placement.assetFile)])
+        } catch (error) {
+          sendJson(res, 500, { error: error.message })
+        }
+      })
+
+      server.middlewares.use('/api/generate/subtitles', async (req, res) => {
+        try {
+          if (req.method !== 'POST') {
+            res.statusCode = 405
+            res.setHeader('allow', 'POST')
+            res.end()
+            return
+          }
+          const body = JSON.parse(await readRequestBody(req))
+          const generated = await generateSubtitleSrt(body)
+          const placement = await insertExcalidrawSubtitle({
+            canvasDir,
+            srtText: generated.srtText,
+            subtitleLines: generated.subtitleLines,
+            fileName: body.fileName,
+            model: generated.model,
+            mode: generated.mode,
+            anchorElementId: body.anchorElementId,
+            placement: body.placement,
+            margin: body.margin,
+            customData: body.customData
+          })
+          sendJson(res, 200, {
+            ok: true,
+            kind: 'subtitle',
+            model: generated.model,
+            mode: generated.mode,
+            cueCount: generated.subtitleLines.length,
+            credits: generated.credits,
+            ...placement
+          })
+          broadcastCanvasChanged([canvasFile, placement.assetFile])
+        } catch (error) {
+          sendJson(res, 500, { error: error.message })
+        }
+      })
+
+      server.middlewares.use('/api/video/silence-cut', async (req, res) => {
+        try {
+          if (req.method !== 'POST') {
+            res.statusCode = 405
+            res.setHeader('allow', 'POST')
+            res.end()
+            return
+          }
+          const body = JSON.parse(await readRequestBody(req))
+          const cut = await silenceCutVideo({
+            inputPath: body.videoPath,
+            outputDir: join(tmpdir(), 'codex-excalidraw-silence-cut'),
+            fileName: body.fileName,
+            detectSeconds: body.detectSeconds,
+            thresholdDb: body.thresholdDb,
+            keepSeconds: body.keepSeconds,
+            preMarginSeconds: body.preMarginSeconds,
+            postMarginSeconds: body.postMarginSeconds,
+            audioFadeSeconds: body.audioFadeSeconds
+          })
+          const stats = {
+            inputDuration: cut.inputDuration,
+            outputDuration: cut.outputDuration,
+            cutDuration: cut.cutDuration,
+            cutCount: cut.cutCount
+          }
+          const placement = await insertExcalidrawVideo({
+            canvasDir,
+            videoPath: cut.outputPath,
+            fileName: body.fileName,
+            anchorElementId: body.anchorElementId,
+            placement: body.placement,
+            margin: body.margin,
+            displayWidth: body.displayWidth,
+            displayHeight: body.displayHeight,
+            duration: cut.outputDuration,
+            customData: {
+              codexSilenceCutVideo: true,
+              silenceCut: stats,
+              silenceCutSourcePath: body.videoPath,
+              ...(body.customData && typeof body.customData === 'object' ? body.customData : {})
+            }
+          })
+          sendJson(res, 200, { ok: true, kind: 'silence-cut', ...stats, ...placement })
+          broadcastCanvasChanged([canvasFile, placement.assetFile])
         } catch (error) {
           sendJson(res, 500, { error: error.message })
         }
@@ -907,6 +1260,79 @@ function canvasStoragePlugin() {
             ok: true,
             path: destinationPath,
             url: `${canvasAssetsRoute}${encodeURIComponent(safeName)}`
+          })
+        } catch (error) {
+          sendJson(res, 500, { error: error.message })
+        }
+      })
+
+      server.middlewares.use('/api/assets/upload', async (req, res) => {
+        try {
+          if (req.method !== 'POST') {
+            res.statusCode = 405
+            res.setHeader('allow', 'POST')
+            res.end()
+            return
+          }
+
+          const contentType = String(req.headers['content-type'] || '').toLowerCase()
+          if (contentType.includes('multipart/form-data')) {
+            const request = new Request('http://127.0.0.1/api/assets/upload', {
+              method: 'POST',
+              headers: req.headers,
+              body: Readable.toWeb(req),
+              duplex: 'half'
+            })
+            const formData = await request.formData()
+            const file = formData.get('file')
+            if (!(file instanceof File)) {
+              sendJson(res, 400, { error: 'Expected multipart file field.' })
+              return
+            }
+
+            const requestedName = basename(String(formData.get('fileName') || file.name || `asset-${Date.now()}`))
+            const safeName = requestedName.replace(/[^a-zA-Z0-9._-]+/g, '-')
+            const destinationPath = resolve(canvasAssetsDir, safeName)
+            if (!isSafeChildPath(canvasAssetsDir, destinationPath)) {
+              sendJson(res, 403, { error: 'Unsafe destination path.' })
+              return
+            }
+
+            await mkdir(canvasAssetsDir, { recursive: true })
+            await writeFile(destinationPath, Buffer.from(await file.arrayBuffer()))
+            sendJson(res, 200, {
+              ok: true,
+              path: destinationPath,
+              url: `${canvasAssetsRoute}${encodeURIComponent(safeName)}`,
+              mimeType: file.type || mimeTypes.get(extname(safeName).toLowerCase()) || 'application/octet-stream'
+            })
+            return
+          }
+
+          const body = JSON.parse(await readRequestBody(req))
+          const dataUrl = String(body.dataURL ?? '')
+          const match = dataUrl.match(/^data:([^;,]+)?(?:;[^,]*)?;base64,(.+)$/s)
+          if (!match) {
+            sendJson(res, 400, { error: 'Expected a base64 dataURL.' })
+            return
+          }
+
+          const requestedName = basename(String(body.fileName || `asset-${Date.now()}`))
+          const safeName = requestedName.replace(/[^a-zA-Z0-9._-]+/g, '-')
+          const destinationPath = resolve(canvasAssetsDir, safeName)
+          if (!isSafeChildPath(canvasAssetsDir, destinationPath)) {
+            sendJson(res, 403, { error: 'Unsafe destination path.' })
+            return
+          }
+
+          await mkdir(canvasAssetsDir, { recursive: true })
+          const buffer = Buffer.from(match[2], 'base64')
+          await writeFile(destinationPath, buffer)
+          sendJson(res, 200, {
+            ok: true,
+            path: destinationPath,
+            url: `${canvasAssetsRoute}${encodeURIComponent(safeName)}`,
+            mimeType: match[1] || 'application/octet-stream'
           })
         } catch (error) {
           sendJson(res, 500, { error: error.message })

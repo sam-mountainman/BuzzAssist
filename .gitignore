@@ -5,3 +5,6 @@ canvas/
 .env*
 .DS_Store
 *.log
+!.claude/
+.claude/*
+!.claude/skills/

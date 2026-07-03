@@ -2,13 +2,19 @@ import { copyFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/prom
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import readline from "node:readline";
 import { generateKeyBetween } from "fractional-indexing";
-import { generateImageMedia, generateVideoMedia } from "../lib/mediaGeneration.mjs";
+import { generateImageMedia, generateVideoMedia, runWithConcurrency } from "../lib/mediaGeneration.mjs";
+import { getBuzzAssistAuthStatus, loginBuzzAssistViaBrowser } from "../lib/buzzassistApi.mjs";
 import {
   OFFICIAL_EXCALIDRAW_README,
   createExcalidrawView,
   insertExcalidrawImage as insertExcalidrawImageMedia,
+  insertExcalidrawSubtitle,
   insertExcalidrawVideo as insertExcalidrawVideoMedia,
+  insertGeneratorFrameBatch,
 } from "../lib/canvasScene.mjs";
+import { silenceCutVideo } from "../lib/tempoCut.mjs";
+import { generateSubtitleSrt } from "../lib/subtitleGeneration.mjs";
+import { tmpdir } from "node:os";
 
 const SERVER_NAME = "Codex Excalidraw MCP";
 const SERVER_VERSION = "0.1.0";
@@ -19,10 +25,33 @@ const TOOL_INSERT_IMAGE = "insert_excalidraw_image";
 const TOOL_INSERT_VIDEO = "insert_excalidraw_video";
 const TOOL_GENERATE_IMAGE = "generate_excalidraw_image";
 const TOOL_GENERATE_VIDEO = "generate_excalidraw_video";
+const TOOL_GENERATE_IMAGES_BATCH = "generate_excalidraw_images_batch";
+const TOOL_GENERATE_VIDEOS_BATCH = "generate_excalidraw_videos_batch";
+const TOOL_BUZZASSIST_LOGIN = "buzzassist_login";
+const TOOL_BUZZASSIST_AUTH_STATUS = "buzzassist_auth_status";
+const TOOL_GENERATE_SUBTITLES = "generate_excalidraw_subtitles";
+const TOOL_SILENCE_CUT_VIDEO = "silence_cut_excalidraw_video";
+const IMAGE_MODEL_IDS = ["gpt-image-2-codex", "grok-imagine-image-hermes", "nano-banana-2", "gpt-image-2", "seedream-v5-lite", "grok-imagine-image-api"];
+const VIDEO_MODEL_IDS = ["grok-imagine-video-hermes", "seedance-2", "seedance-2-fast", "kling-v3", "kling-o3", "kling-v2-6", "grok-imagine-video-api"];
 const CANVAS_FILE_NAME = "excalidraw-canvas.json";
 const SELECTION_FILE_NAME = "excalidraw-selection.json";
 const ASSETS_ROUTE = "/excalidraw-assets/";
 const AI_HOLDER_KEY = "codexAiImageHolder";
+const MEDIA_GENERATION_AGENT_INSTRUCTIONS = [
+  "Read and update the project-local Excalidraw browser canvas.",
+  "Use read_me/create_view for official-compatible Excalidraw MCP drawing into the live local canvas.",
+  "Use get_excalidraw_selection for persisted browser selection and insert_excalidraw_image/insert_excalidraw_video for local assets.",
+  "Use generate_excalidraw_image/generate_excalidraw_video for media generation. Local models: GPT-Image-2.0(Codex), Grok Imagine(Hermes). BuzzAssist cloud models (require buzzassist_login first): images nano-banana-2, gpt-image-2, seedream-v5-lite, grok-imagine-image-api; videos seedance-2, seedance-2-fast, kling-v3, kling-o3, kling-v2-6, grok-imagine-video-api.",
+  "Use buzzassist_auth_status to check BuzzAssist sign-in and buzzassist_login to sign in before using BuzzAssist cloud models, cloud subtitles, or when a tool reports missing login.",
+  "Use generate_excalidraw_subtitles to create Japanese SRT subtitles from an audio file (scripted mode aligns a provided script, scriptless mode transcribes) and place an SRT card on the canvas.",
+  "Use silence_cut_excalidraw_video to remove silences from a local video with ffmpeg (jet-cut) and insert the cut video into the canvas with cut statistics.",
+  "Use generate_excalidraw_images_batch/generate_excalidraw_videos_batch when the user asks for many images, many videos, storyboard scenes, or batch media; prepare one jobs item per requested output and let the tool lay results out as a grid.",
+  "Before invoking image or video generation, if the user did not specify settings that materially affect the output, ask the user via the host's AskUserQuestion/request_user_input mechanism instead of guessing.",
+  "Required image settings to confirm when missing: model, aspect ratio, and quality. Defaults to offer as Recommended are GPT-Image-2.0(Codex), 1:1, and Auto.",
+  "Required video settings to confirm when missing: model, aspect ratio, duration, and resolution. Defaults to offer as Recommended are Grok Imagine(Hermes), 16:9, 5 seconds, and 720p.",
+  "When an attached or selected image/video could be used in more than one way, ask one disambiguation question before generation. For video, distinguish start frame/image-to-video from style reference; do not silently put the same media into multiple payload fields.",
+  "For choice questions, keep options short and mark the default with (Recommended) in English or （推奨） in Japanese. Do not ask when only one value is valid.",
+].join(" ");
 
 const JsonRpcError = {
   METHOD_NOT_FOUND: -32601,
@@ -324,10 +353,20 @@ function choosePlacement({ scene, anchorElement, width, height, margin, placemen
 
 function chooseIndex(elements) {
   const indexes = elements
+    .filter((element) => element && !element.isDeleted)
     .map((element) => element.index)
     .filter((index) => typeof index === "string")
     .sort();
-  return generateKeyBetween(indexes.at(-1) ?? null, null);
+
+  while (indexes.length) {
+    const index = indexes.at(-1);
+    try {
+      return generateKeyBetween(index, null);
+    } catch {
+      indexes.pop();
+    }
+  }
+  return generateKeyBetween(null, null);
 }
 
 function firstSelectedElementId(selection, scene) {
@@ -518,8 +557,11 @@ async function generateExcalidrawVideo(args = {}) {
     aspectRatio: args.aspectRatio ?? args.aspect_ratio,
     duration: args.duration,
     fileName: args.fileName ?? args.videoName ?? args.video_name,
+    generateAudio: args.generateAudio ?? args.generate_audio,
     startFramePath: args.startFramePath ?? args.start_frame_path,
     referenceImagePaths: args.referenceImagePaths ?? args.reference_image_paths,
+    referenceVideoPaths: args.referenceVideoPaths ?? args.reference_video_paths,
+    referenceVideos: args.referenceVideos ?? args.reference_videos,
   });
   return insertExcalidrawVideoMedia({
     ...args,
@@ -542,10 +584,240 @@ async function generateExcalidrawVideo(args = {}) {
       videoAspectRatio: args.aspectRatio ?? args.aspect_ratio,
       videoDuration: args.duration,
       videoResolution: args.resolution,
+      videoGenerateAudio: args.generateAudio ?? args.generate_audio,
       codexGenerationSource: media.source,
       ...(args.customData && typeof args.customData === "object" ? args.customData : {}),
     },
   });
+}
+
+async function generateExcalidrawImagesBatch(args = {}) {
+  const jobs = Array.isArray(args.jobs) ? args.jobs : [];
+  if (jobs.length === 0) throw new Error("generate_excalidraw_images_batch requires a non-empty jobs array.");
+  for (const job of jobs) {
+    if (!nonEmptyString(job?.prompt)) throw new Error("Each image job requires a prompt.");
+  }
+
+  const columns = finiteNumber(Number(args.columns), 4);
+  const gap = finiteNumber(Number(args.gap), 24);
+  const concurrency = finiteNumber(Number(args.concurrency), 3);
+  const dryRun = Boolean(args.dryRun);
+
+  const frames = dryRun
+    ? []
+    : await insertGeneratorFrameBatch({
+        projectDir: args.projectDir,
+        canvasDir: args.canvasDir,
+        frames: jobs.map((job) => ({
+          kind: "image",
+          prompt: job.prompt,
+          model: job.model ?? "gpt-image-2-codex",
+          aspectRatio: job.aspectRatio ?? job.aspect_ratio ?? "1:1",
+          quality: job.quality ?? "auto",
+          imageSize: job.imageSize ?? job.size ?? "1K",
+          customData: job.customData,
+        })),
+        columns,
+        gap,
+        selectCreated: args.selectCreated !== false,
+        focusCreated: args.focusCreated !== false,
+      });
+
+  let writeQueue = Promise.resolve();
+  const enqueueWrite = (fn) => {
+    const next = writeQueue.then(fn, fn);
+    writeQueue = next.catch(() => {});
+    return next;
+  };
+
+  const generated = await runWithConcurrency(jobs, concurrency, async (job, index) => {
+    const media = await generateImageMedia({
+      ...job,
+      aspectRatio: job.aspectRatio ?? job.aspect_ratio,
+      imageSize: job.imageSize ?? job.size,
+      fileName: job.fileName ?? job.imageName ?? job.image_name,
+      referenceImagePaths: job.referenceImagePaths ?? job.reference_image_paths,
+    });
+    if (dryRun) {
+      return { media, placement: null, frame: null };
+    }
+    const frame = frames[index];
+    const placement = await enqueueWrite(() =>
+      insertExcalidrawImageMedia({
+        projectDir: args.projectDir,
+        canvasDir: args.canvasDir,
+        mediaBuffer: media.buffer,
+        mimeType: media.mimeType,
+        fileName: job.fileName ?? job.imageName ?? job.image_name ?? media.fileName,
+        anchorElementId: frame?.elementId,
+        replaceAnchor: Boolean(frame?.elementId),
+        matchAnchor: true,
+        selectCreated: false,
+        customData: {
+          codexGeneratedImage: true,
+          codexGenerationModel: media.model,
+          codexGenerationPrompt: job.prompt,
+          codexGenerationAspectRatio: job.aspectRatio ?? job.aspect_ratio,
+          codexGenerationQuality: job.quality,
+          generatorPrompt: job.prompt,
+          generatorModel: job.model,
+          generatorAspectRatio: job.aspectRatio ?? job.aspect_ratio,
+          generatorImageQuality: job.quality,
+          generatorImageSize: job.imageSize ?? job.size ?? "1K",
+          codexGenerationSource: media.source,
+          sourceFrameId: frame?.elementId,
+          ...(job.customData && typeof job.customData === "object" ? job.customData : {}),
+        },
+      }),
+    );
+    return { media, placement, frame };
+  });
+
+  const results = jobs.map((job, i) => {
+    const outcome = generated[i];
+    if (!outcome.ok) return { prompt: job.prompt, error: outcome.error };
+    const { media, placement, frame } = outcome.value;
+    return {
+      prompt: job.prompt,
+      model: media.model,
+      frameElementId: frame?.elementId,
+      elementId: placement?.elementId,
+      fileId: placement?.fileId,
+      bounds: placement?.bounds,
+      assetFile: placement?.assetFile,
+      assetUrl: placement?.assetUrl,
+    };
+  });
+
+  const succeeded = results.filter((result) => !result.error).length;
+  return {
+    ok: true,
+    total: jobs.length,
+    succeeded,
+    failed: jobs.length - succeeded,
+    dryRun,
+    results,
+  };
+}
+
+async function generateExcalidrawVideosBatch(args = {}) {
+  const jobs = Array.isArray(args.jobs) ? args.jobs : [];
+  if (jobs.length === 0) throw new Error("generate_excalidraw_videos_batch requires a non-empty jobs array.");
+  for (const job of jobs) {
+    if (!nonEmptyString(job?.prompt)) throw new Error("Each video job requires a prompt.");
+  }
+
+  const columns = finiteNumber(Number(args.columns), 3);
+  const gap = finiteNumber(Number(args.gap), 24);
+  const concurrency = finiteNumber(Number(args.concurrency), 1);
+  const dryRun = Boolean(args.dryRun);
+
+  const frames = dryRun
+    ? []
+    : await insertGeneratorFrameBatch({
+        projectDir: args.projectDir,
+        canvasDir: args.canvasDir,
+        frames: jobs.map((job) => ({
+          kind: "video",
+          prompt: job.prompt,
+          model: job.model ?? "grok-imagine-video-hermes",
+          aspectRatio: job.aspectRatio ?? job.aspect_ratio ?? "16:9",
+          duration: job.duration ?? "5",
+          resolution: job.resolution ?? "720p",
+          generateAudio: job.generateAudio ?? job.generate_audio ?? true,
+          customData: job.customData,
+        })),
+        columns,
+        gap,
+        selectCreated: args.selectCreated !== false,
+        focusCreated: args.focusCreated !== false,
+      });
+
+  let writeQueue = Promise.resolve();
+  const enqueueWrite = (fn) => {
+    const next = writeQueue.then(fn, fn);
+    writeQueue = next.catch(() => {});
+    return next;
+  };
+
+  const generated = await runWithConcurrency(jobs, concurrency, async (job, index) => {
+    const media = await generateVideoMedia({
+      ...job,
+      aspectRatio: job.aspectRatio ?? job.aspect_ratio,
+      duration: job.duration,
+      fileName: job.fileName ?? job.videoName ?? job.video_name,
+      generateAudio: job.generateAudio ?? job.generate_audio,
+      startFramePath: job.startFramePath ?? job.start_frame_path,
+      referenceImagePaths: job.referenceImagePaths ?? job.reference_image_paths,
+      referenceVideoPaths: job.referenceVideoPaths ?? job.reference_video_paths,
+      referenceVideos: job.referenceVideos ?? job.reference_videos,
+    });
+    if (dryRun) {
+      return { media, placement: null, frame: null };
+    }
+    const frame = frames[index];
+    const placement = await enqueueWrite(() =>
+      insertExcalidrawVideoMedia({
+        projectDir: args.projectDir,
+        canvasDir: args.canvasDir,
+        mediaBuffer: media.buffer,
+        mimeType: media.mimeType,
+        fileName: job.fileName ?? job.videoName ?? job.video_name ?? media.fileName,
+        anchorElementId: frame?.elementId,
+        replaceAnchor: Boolean(frame?.elementId),
+        matchAnchor: true,
+        selectCreated: false,
+        aspectRatio: job.aspectRatio ?? job.aspect_ratio,
+        duration: job.duration,
+        prompt: job.prompt,
+        model: media.model,
+        customData: {
+          codexGeneratedVideo: true,
+          codexGenerationModel: media.model,
+          codexGenerationPrompt: job.prompt,
+          codexGenerationAspectRatio: job.aspectRatio ?? job.aspect_ratio,
+          codexGenerationDuration: job.duration,
+          codexGenerationResolution: job.resolution,
+          videoPrompt: job.prompt,
+          videoModel: job.model,
+          videoAspectRatio: job.aspectRatio ?? job.aspect_ratio,
+          videoDuration: job.duration,
+          videoResolution: job.resolution,
+          videoGenerateAudio: job.generateAudio ?? job.generate_audio,
+          codexGenerationSource: media.source,
+          sourceFrameId: frame?.elementId,
+          ...(job.customData && typeof job.customData === "object" ? job.customData : {}),
+        },
+      }),
+    );
+    return { media, placement, frame };
+  });
+
+  const results = jobs.map((job, i) => {
+    const outcome = generated[i];
+    if (!outcome.ok) return { prompt: job.prompt, error: outcome.error };
+    const { media, placement, frame } = outcome.value;
+    return {
+      prompt: job.prompt,
+      model: media.model,
+      frameElementId: frame?.elementId,
+      elementId: placement?.elementId,
+      fileId: placement?.fileId,
+      bounds: placement?.bounds,
+      assetFile: placement?.assetFile,
+      assetUrl: placement?.assetUrl,
+    };
+  });
+
+  const succeeded = results.filter((result) => !result.error).length;
+  return {
+    ok: true,
+    total: jobs.length,
+    succeeded,
+    failed: jobs.length - succeeded,
+    dryRun,
+    results,
+  };
 }
 
 function toolDefinitions() {
@@ -644,7 +916,7 @@ function toolDefinitions() {
     {
       name: TOOL_INSERT_VIDEO,
       title: "Insert Excalidraw Video",
-      description: "Copy a local video into canvas/assets, create a linked video card, and save the scene.",
+      description: "Copy a local video into canvas/assets, create a Youtube-AGI-style video media element, and save the scene.",
       inputSchema: {
         type: "object",
         properties: {
@@ -655,11 +927,11 @@ function toolDefinitions() {
           sourceElementId: { type: "string", description: "Alias for anchorElementId." },
           fileName: { type: "string", description: "Optional destination filename under canvas/assets/." },
           placement: { type: "string", enum: ["right", "left", "below", "replace", "inside"] },
-          margin: { type: "number", description: "Canvas units between the new video card and nearby elements. Defaults to 40." },
+          margin: { type: "number", description: "Canvas units between the new video media element and nearby elements. Defaults to 40." },
           matchAnchor: { type: "boolean", description: "Use the anchor display size when possible. Defaults to true." },
-          replaceAnchor: { type: "boolean", description: "Replace the anchor element with the inserted video card." },
-          displayWidth: { type: "number", description: "Displayed card width in canvas units." },
-          displayHeight: { type: "number", description: "Displayed card height in canvas units." },
+          replaceAnchor: { type: "boolean", description: "Replace the anchor element with the inserted video media element." },
+          displayWidth: { type: "number", description: "Displayed media width in canvas units." },
+          displayHeight: { type: "number", description: "Displayed media height in canvas units." },
           aspectRatio: { type: "string", description: "Aspect ratio such as 16:9, 9:16, or 1:1." },
           prompt: { type: "string", description: "Optional generation prompt to store in customData." },
           model: { type: "string", description: "Optional generation model to store in customData." },
@@ -686,8 +958,8 @@ function toolDefinitions() {
           prompt: { type: "string", description: "Image prompt." },
           model: {
             type: "string",
-            enum: ["gpt-image-2-codex", "grok-imagine-image-hermes"],
-            description: "Defaults to gpt-image-2-codex.",
+            enum: IMAGE_MODEL_IDS,
+            description: "Defaults to gpt-image-2-codex. Non-Codex/Hermes models are BuzzAssist cloud models and need buzzassist_login.",
           },
           projectDir: { type: "string", description: "Absolute project directory containing canvas/." },
           canvasDir: { type: "string", description: "Absolute canvas directory. Overrides projectDir." },
@@ -723,16 +995,22 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE_VIDEO,
       title: "Generate Excalidraw Video",
-      description: "Generate a video with Grok Imagine(Hermes), insert a linked video card into the canvas, and save the scene.",
+      description: "Generate a video with Grok Imagine(Hermes), insert a Youtube-AGI-style video media element into the canvas, and save the scene.",
       inputSchema: {
         type: "object",
         properties: {
           prompt: { type: "string", description: "Video prompt." },
           model: {
             type: "string",
-            enum: ["grok-imagine-video-hermes"],
-            description: "Defaults to grok-imagine-video-hermes.",
+            enum: VIDEO_MODEL_IDS,
+            description: "Defaults to grok-imagine-video-hermes. Other models are BuzzAssist cloud models and need buzzassist_login.",
           },
+          mode: { type: "string", enum: ["standard", "pro"], description: "Kling quality mode. Defaults to standard." },
+          endFramePath: { type: "string", description: "Optional local image path for keyframe end-frame interpolation (Seedance/Kling only)." },
+          referenceAudioPaths: { type: "array", items: { type: "string" }, description: "Optional local audio reference paths (Seedance reference mode only)." },
+          useMotion: { type: "boolean", description: "Kling v2.6 motion-control mode. Requires startFramePath and one referenceVideoPaths entry." },
+          useReference: { type: "boolean", description: "Force reference mode when references are attached." },
+          motionOrientation: { type: "string", enum: ["image", "video"], description: "Kling v2.6 motion character orientation. Defaults to image." },
           projectDir: { type: "string", description: "Absolute project directory containing canvas/." },
           canvasDir: { type: "string", description: "Absolute canvas directory. Overrides projectDir." },
           anchorElementId: { type: "string", description: "Existing Excalidraw element id to place beside." },
@@ -742,15 +1020,21 @@ function toolDefinitions() {
           aspectRatio: { type: "string", description: "Aspect ratio such as 16:9, 9:16, or 1:1." },
           aspect_ratio: { type: "string", description: "Alias for aspectRatio." },
           duration: { type: "string", description: "Duration seconds. Grok Hermes clamps text-to-video to 1-15 seconds." },
-          resolution: { type: "string", description: "720p or 1080p." },
+          resolution: { type: "string", description: "480p or 720p." },
+          generateAudio: { type: "boolean", description: "Whether Grok Imagine should generate audio when supported." },
+          generate_audio: { type: "boolean", description: "Alias for generateAudio." },
           startFramePath: { type: "string", description: "Optional local image path for image-to-video start frame." },
           start_frame_path: { type: "string", description: "Alias for startFramePath." },
           referenceImagePaths: { type: "array", items: { type: "string" }, description: "Optional local reference image paths." },
           reference_image_paths: { type: "array", items: { type: "string" }, description: "Alias for referenceImagePaths." },
+          referenceVideoPaths: { type: "array", items: { type: "string" }, description: "Optional local reference video paths." },
+          reference_video_paths: { type: "array", items: { type: "string" }, description: "Alias for referenceVideoPaths." },
+          referenceVideos: { type: "array", items: { type: "string" }, description: "Optional reference video data URLs or URLs." },
+          reference_videos: { type: "array", items: { type: "string" }, description: "Alias for referenceVideos." },
           placement: { type: "string", enum: ["right", "left", "below", "replace", "inside"] },
           margin: { type: "number" },
           matchAnchor: { type: "boolean" },
-          replaceAnchor: { type: "boolean", description: "Replace the anchor element with the generated video card." },
+          replaceAnchor: { type: "boolean", description: "Replace the anchor element with the generated video media element." },
           displayWidth: { type: "number" },
           displayHeight: { type: "number" },
           customData: { type: "object" },
@@ -766,10 +1050,419 @@ function toolDefinitions() {
         openWorldHint: true,
       },
     },
+    {
+      name: TOOL_GENERATE_IMAGES_BATCH,
+      title: "Generate Excalidraw Images (Batch)",
+      description: "Create Youtube-AGI-style image generator frames first, then generate many images with GPT-Image-2.0(Codex) or Grok Imagine(Hermes) and replace each frame as its result finishes.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          jobs: {
+            type: "array",
+            description: "Image jobs to generate. Each requires a prompt.",
+            items: {
+              type: "object",
+              properties: {
+                prompt: { type: "string", description: "Image prompt." },
+                model: {
+                  type: "string",
+                  enum: IMAGE_MODEL_IDS,
+                  description: "Defaults to gpt-image-2-codex. Non-Codex/Hermes models need buzzassist_login.",
+                },
+                aspectRatio: { type: "string", description: "Aspect ratio such as 1:1, 16:9, or 9:16." },
+                imageSize: { type: "string", description: "Image size or Hermes resolution hint." },
+                quality: { type: "string", description: "Quality hint. high maps to Grok quality mode." },
+                referenceImagePaths: { type: "array", items: { type: "string" }, description: "Optional local image references for Hermes image edit." },
+                fileName: { type: "string", description: "Optional destination filename under canvas/assets/." },
+                customData: { type: "object", description: "Additional Excalidraw element customData." },
+              },
+              required: ["prompt"],
+              additionalProperties: true,
+            },
+          },
+          columns: { type: "number", description: "Grid columns. Defaults to 4." },
+          gap: { type: "number", description: "Canvas units between grid cells. Defaults to 24." },
+          concurrency: { type: "number", description: "Parallel generations. Defaults to 3." },
+          projectDir: { type: "string", description: "Absolute project directory containing canvas/." },
+          canvasDir: { type: "string", description: "Absolute canvas directory. Overrides projectDir." },
+          selectCreated: { type: "boolean", description: "Select the inserted elements after saving." },
+          focusCreated: { type: "boolean", description: "Focus the canvas viewport on the newly created generator-frame grid. Defaults to true." },
+          dryRun: { type: "boolean", description: "Generate without copying or saving." },
+        },
+        required: ["jobs"],
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+    },
+    {
+      name: TOOL_GENERATE_VIDEOS_BATCH,
+      title: "Generate Excalidraw Videos (Batch)",
+      description: "Create Youtube-AGI-style video generator frames first, then generate many videos with Grok Imagine(Hermes) and replace each frame as its result finishes.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          jobs: {
+            type: "array",
+            description: "Video jobs to generate. Each requires a prompt.",
+            items: {
+              type: "object",
+              properties: {
+                prompt: { type: "string", description: "Video prompt." },
+                model: {
+                  type: "string",
+                  enum: VIDEO_MODEL_IDS,
+                  description: "Defaults to grok-imagine-video-hermes. Other models need buzzassist_login.",
+                },
+                aspectRatio: { type: "string", description: "Aspect ratio such as 16:9, 9:16, or 1:1." },
+                duration: { type: "string", description: "Duration seconds. Grok Hermes clamps text-to-video to 1-15 seconds." },
+                resolution: { type: "string", description: "480p or 720p." },
+                generateAudio: { type: "boolean", description: "Whether Grok Imagine should generate audio when supported." },
+                referenceImagePaths: { type: "array", items: { type: "string" }, description: "Optional local reference image paths." },
+                fileName: { type: "string", description: "Optional destination filename under canvas/assets/." },
+                customData: { type: "object", description: "Additional Excalidraw element customData." },
+              },
+              required: ["prompt"],
+              additionalProperties: true,
+            },
+          },
+          columns: { type: "number", description: "Grid columns. Defaults to 3." },
+          gap: { type: "number", description: "Canvas units between grid cells. Defaults to 24." },
+          concurrency: { type: "number", description: "Parallel generations. Defaults to 1 because video is heavy." },
+          projectDir: { type: "string", description: "Absolute project directory containing canvas/." },
+          canvasDir: { type: "string", description: "Absolute canvas directory. Overrides projectDir." },
+          selectCreated: { type: "boolean", description: "Select the inserted elements after saving." },
+          focusCreated: { type: "boolean", description: "Focus the canvas viewport on the newly created generator-frame grid. Defaults to true." },
+          dryRun: { type: "boolean", description: "Generate without copying or saving." },
+        },
+        required: ["jobs"],
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+    },
+    {
+      name: TOOL_GENERATE_SUBTITLES,
+      title: "Generate Excalidraw Subtitles",
+      description: "Generate Japanese SRT subtitles from an audio file via BuzzAssist cloud (ElevenLabs forced alignment when a script is given, Scribe v2 otherwise), save the SRT under canvas/assets, and place an SRT card on the canvas. Requires buzzassist_login.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          audioPath: { type: "string", description: "Absolute local audio file path (mp3/wav/m4a/ogg/opus/webm/flac/aac)." },
+          scriptText: { type: "string", description: "Full narration script. Providing it switches to scripted mode (forced alignment)." },
+          scriptPath: { type: "string", description: "Absolute path to a UTF-8 script text file. Alternative to scriptText." },
+          mode: { type: "string", enum: ["scripted", "scriptless"], description: "Defaults to scripted when a script is provided, else scriptless." },
+          lineCount: { type: "number", description: "Subtitle lines per cue: 1 or 2." },
+          maxCharsPerLine: { type: "number", description: "Max characters per line (Japanese-aware)." },
+          holdSeconds: { type: "number", description: "Extra seconds each cue stays on screen." },
+          punctuationMode: { type: "string", enum: ["auto", "none"] },
+          fillerMode: { type: "string", enum: ["keep", "safe", "contextual"] },
+          durationSeconds: { type: "number", description: "Audio duration in seconds. Probed with ffprobe when omitted." },
+          fileName: { type: "string", description: "Destination SRT filename under canvas/assets/." },
+          projectDir: { type: "string", description: "Absolute project directory containing canvas/." },
+          canvasDir: { type: "string", description: "Absolute canvas directory. Overrides projectDir." },
+          anchorElementId: { type: "string", description: "Existing Excalidraw element id to place beside." },
+          placement: { type: "string", enum: ["right", "left", "below", "replace", "inside"] },
+          margin: { type: "number" },
+          dryRun: { type: "boolean", description: "Generate the SRT without saving it to the canvas." },
+        },
+        required: ["audioPath"],
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+    },
+    {
+      name: TOOL_SILENCE_CUT_VIDEO,
+      title: "Silence Cut Excalidraw Video",
+      description: "Remove silences from a local video with ffmpeg (jet cut), then insert the cut video into the canvas with cut statistics. Runs fully locally; requires ffmpeg/ffprobe on PATH.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          videoPath: { type: "string", description: "Absolute local video path to cut." },
+          detectSeconds: { type: "number", description: "Minimum silence length to detect. Defaults to 0.6." },
+          thresholdDb: { type: "number", description: "Silence threshold in dB. Defaults to -34." },
+          keepSeconds: { type: "number", description: "Silence seconds to keep around cuts. Defaults to 0.25." },
+          preMarginSeconds: { type: "number", description: "Safety margin before speech. Defaults to 0.08." },
+          postMarginSeconds: { type: "number", description: "Safety margin after speech. Defaults to 0.12." },
+          audioFadeSeconds: { type: "number", description: "Audio crossfade at cut points. Defaults to 0.03." },
+          fileName: { type: "string", description: "Destination filename under canvas/assets/." },
+          projectDir: { type: "string", description: "Absolute project directory containing canvas/." },
+          canvasDir: { type: "string", description: "Absolute canvas directory. Overrides projectDir." },
+          anchorElementId: { type: "string", description: "Existing Excalidraw element id to place beside." },
+          placement: { type: "string", enum: ["right", "left", "below", "replace", "inside"] },
+          margin: { type: "number" },
+          displayWidth: { type: "number" },
+          displayHeight: { type: "number" },
+          dryRun: { type: "boolean", description: "Cut the video without inserting it into the canvas." },
+        },
+        required: ["videoPath"],
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    {
+      name: TOOL_BUZZASSIST_LOGIN,
+      title: "BuzzAssist Login",
+      description: "Start BuzzAssist browser sign-in for fal-backed media models (Seedance/Kling/Nano Banana/Seedream/GPT Image 2 API/Grok API) and cloud subtitles. Opens the browser and returns the auth URL; confirm completion with buzzassist_auth_status.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          openBrowser: { type: "boolean", description: "Open the sign-in URL in the default browser. Defaults to true." },
+        },
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+    },
+    {
+      name: TOOL_BUZZASSIST_AUTH_STATUS,
+      title: "BuzzAssist Auth Status",
+      description: "Return the current BuzzAssist media auth status (logged in, user id, expiry).",
+      inputSchema: {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
   ];
 }
 
+let pendingBuzzAssistLogin = null;
+
+async function handleBuzzAssistLogin(args = {}) {
+  const openBrowser = args.openBrowser !== false;
+  let authUrl = null;
+  const urlReady = new Promise((resolveUrl) => {
+    const login = loginBuzzAssistViaBrowser({
+      openBrowser,
+      onAuthUrl: (url) => {
+        authUrl = url;
+        resolveUrl(url);
+      },
+    });
+    pendingBuzzAssistLogin = login;
+    login
+      .then(() => {
+        if (pendingBuzzAssistLogin === login) pendingBuzzAssistLogin = null;
+      })
+      .catch(() => {
+        if (pendingBuzzAssistLogin === login) pendingBuzzAssistLogin = null;
+      });
+  });
+  await urlReady;
+  return {
+    ok: true,
+    authUrl,
+    openedBrowser: openBrowser,
+    message: openBrowser
+      ? "Opened the BuzzAssist sign-in page in the browser. Complete sign-in there, then check buzzassist_auth_status."
+      : `Open this URL in a browser to sign in: ${authUrl}`,
+  };
+}
+
+async function generateExcalidrawSubtitles(args = {}) {
+  const generated = await generateSubtitleSrt({
+    audioPath: args.audioPath,
+    scriptText: args.scriptText,
+    scriptPath: args.scriptPath,
+    mode: args.mode,
+    model: args.model,
+    lineCount: args.lineCount,
+    maxCharsPerLine: args.maxCharsPerLine,
+    holdSeconds: args.holdSeconds,
+    punctuationMode: args.punctuationMode,
+    fillerMode: args.fillerMode,
+    durationSeconds: args.durationSeconds,
+    requestId: args.requestId,
+  });
+
+  const placement = args.dryRun
+    ? null
+    : await insertExcalidrawSubtitle({
+        projectDir: args.projectDir,
+        canvasDir: args.canvasDir,
+        srtText: generated.srtText,
+        subtitleLines: generated.subtitleLines,
+        fileName: args.fileName,
+        model: generated.model,
+        mode: generated.mode,
+        anchorElementId: args.anchorElementId,
+        placement: args.placement,
+        margin: args.margin,
+        customData: {
+          subtitleLineCount: args.lineCount,
+          subtitleMaxCharsPerLine: args.maxCharsPerLine,
+          subtitleHoldSeconds: args.holdSeconds,
+          subtitleDurationSeconds: generated.durationSeconds,
+          subtitleCredits: generated.credits,
+          ...(args.customData && typeof args.customData === "object" ? args.customData : {}),
+        },
+      });
+
+  return {
+    ok: true,
+    mode: generated.mode,
+    model: generated.model,
+    provider: generated.provider,
+    cueCount: generated.subtitleLines.length,
+    durationSeconds: generated.durationSeconds,
+    credits: generated.credits,
+    estimatedCostYen: generated.estimatedCostYen,
+    srtPreview: generated.srtText.split("\n").slice(0, 12).join("\n"),
+    ...(placement
+      ? {
+          elementId: placement.elementId,
+          groupId: placement.groupId,
+          assetFile: placement.assetFile,
+          assetUrl: placement.assetUrl,
+          bounds: placement.bounds,
+        }
+      : {}),
+    dryRun: Boolean(args.dryRun),
+  };
+}
+
+async function silenceCutExcalidrawVideo(args = {}) {
+  const videoPath = nonEmptyString(args.videoPath);
+  if (!videoPath) throw new Error("videoPath is required.");
+
+  const outputDir = join(tmpdir(), "codex-excalidraw-silence-cut");
+  const cut = await silenceCutVideo({
+    inputPath: pathResolve(videoPath),
+    outputDir,
+    fileName: args.fileName,
+    detectSeconds: args.detectSeconds,
+    thresholdDb: args.thresholdDb,
+    keepSeconds: args.keepSeconds,
+    preMarginSeconds: args.preMarginSeconds,
+    postMarginSeconds: args.postMarginSeconds,
+    audioFadeSeconds: args.audioFadeSeconds,
+  });
+
+  const stats = {
+    inputDuration: cut.inputDuration,
+    outputDuration: cut.outputDuration,
+    cutDuration: cut.cutDuration,
+    cutCount: cut.cutCount,
+  };
+
+  const placement = args.dryRun
+    ? null
+    : await insertExcalidrawVideoMedia({
+        projectDir: args.projectDir,
+        canvasDir: args.canvasDir,
+        videoPath: cut.outputPath,
+        fileName: args.fileName ?? basename(cut.outputPath),
+        anchorElementId: args.anchorElementId,
+        placement: args.placement,
+        margin: args.margin,
+        displayWidth: args.displayWidth,
+        displayHeight: args.displayHeight,
+        duration: cut.outputDuration,
+        customData: {
+          codexSilenceCutVideo: true,
+          silenceCut: stats,
+          silenceCutSourcePath: pathResolve(videoPath),
+          ...(args.customData && typeof args.customData === "object" ? args.customData : {}),
+        },
+      });
+
+  return {
+    ok: true,
+    ...stats,
+    outputPath: cut.outputPath,
+    ...(placement
+      ? {
+          elementId: placement.elementId,
+          assetFile: placement.assetFile,
+          assetUrl: placement.assetUrl,
+          bounds: placement.bounds,
+        }
+      : {}),
+    dryRun: Boolean(args.dryRun),
+  };
+}
+
 async function handleToolCall(id, params) {
+  if (params?.name === TOOL_GENERATE_SUBTITLES) {
+    const result = await generateExcalidrawSubtitles(params.arguments ?? {});
+    sendResult(id, {
+      content: [
+        {
+          type: "text",
+          text: `Generated ${result.cueCount} subtitle cue(s) with ${result.model} (${result.mode})${result.dryRun ? " [dry run]" : ""}.`,
+        },
+      ],
+      structuredContent: result,
+    });
+    return;
+  }
+
+  if (params?.name === TOOL_SILENCE_CUT_VIDEO) {
+    const result = await silenceCutExcalidrawVideo(params.arguments ?? {});
+    sendResult(id, {
+      content: [
+        {
+          type: "text",
+          text: `Silence-cut ${result.cutCount} range(s): ${result.inputDuration.toFixed(1)}s -> ${result.outputDuration.toFixed(1)}s (${result.cutDuration.toFixed(1)}s removed)${result.dryRun ? " [dry run]" : ""}.`,
+        },
+      ],
+      structuredContent: result,
+    });
+    return;
+  }
+
+  if (params?.name === TOOL_BUZZASSIST_LOGIN) {
+    const result = await handleBuzzAssistLogin(params.arguments ?? {});
+    sendResult(id, {
+      content: [{ type: "text", text: result.message }],
+      structuredContent: result,
+    });
+    return;
+  }
+
+  if (params?.name === TOOL_BUZZASSIST_AUTH_STATUS) {
+    const status = await getBuzzAssistAuthStatus();
+    const summary = status.loggedIn
+      ? `Logged in as ${status.userId ?? "unknown user"} (source: ${status.source}).`
+      : status.expired
+        ? "BuzzAssist login has expired. Run buzzassist_login."
+        : "Not logged in to BuzzAssist. Run buzzassist_login.";
+    sendResult(id, {
+      content: [{ type: "text", text: summary }],
+      structuredContent: status,
+    });
+    return;
+  }
+
   if (params?.name === TOOL_READ_ME) {
     sendResult(id, {
       content: [{ type: "text", text: OFFICIAL_EXCALIDRAW_README }],
@@ -831,7 +1524,7 @@ async function handleToolCall(id, params) {
       content: [
         {
           type: "text",
-          text: `${result.dryRun ? "Planned" : "Inserted"} video card ${result.elementId} at (${result.bounds.x}, ${result.bounds.y}) sized ${result.bounds.width}x${result.bounds.height}.`,
+          text: `${result.dryRun ? "Planned" : "Inserted"} video media element ${result.elementId} at (${result.bounds.x}, ${result.bounds.y}) sized ${result.bounds.width}x${result.bounds.height}.`,
         },
       ],
       structuredContent: result,
@@ -859,7 +1552,35 @@ async function handleToolCall(id, params) {
       content: [
         {
           type: "text",
-          text: `${result.dryRun ? "Planned" : "Generated"} video card ${result.elementId} at (${result.bounds.x}, ${result.bounds.y}) sized ${result.bounds.width}x${result.bounds.height}.`,
+          text: `${result.dryRun ? "Planned" : "Generated"} video media element ${result.elementId} at (${result.bounds.x}, ${result.bounds.y}) sized ${result.bounds.width}x${result.bounds.height}.`,
+        },
+      ],
+      structuredContent: result,
+    });
+    return;
+  }
+
+  if (params?.name === TOOL_GENERATE_IMAGES_BATCH) {
+    const result = await generateExcalidrawImagesBatch(params.arguments ?? {});
+    sendResult(id, {
+      content: [
+        {
+          type: "text",
+          text: `${result.dryRun ? "Planned" : "Generated"} ${result.succeeded}/${result.total} image(s) as a grid${result.failed ? `, ${result.failed} failed` : ""}.`,
+        },
+      ],
+      structuredContent: result,
+    });
+    return;
+  }
+
+  if (params?.name === TOOL_GENERATE_VIDEOS_BATCH) {
+    const result = await generateExcalidrawVideosBatch(params.arguments ?? {});
+    sendResult(id, {
+      content: [
+        {
+          type: "text",
+          text: `${result.dryRun ? "Planned" : "Generated"} ${result.succeeded}/${result.total} video media element(s) as a grid${result.failed ? `, ${result.failed} failed` : ""}.`,
         },
       ],
       structuredContent: result,
@@ -881,8 +1602,7 @@ async function handleRequest(message) {
         name: SERVER_NAME,
         version: SERVER_VERSION,
       },
-      instructions:
-        "Read and update the project-local Excalidraw browser canvas. Use read_me/create_view for official-compatible Excalidraw MCP drawing into the live local canvas, get_excalidraw_selection for persisted browser selection, insert_excalidraw_image/insert_excalidraw_video for local assets, and generate_excalidraw_image/generate_excalidraw_video for GPT-Image-2.0(Codex) or Grok Imagine(Hermes) generation.",
+      instructions: MEDIA_GENERATION_AGENT_INSTRUCTIONS,
     });
     return;
   }
