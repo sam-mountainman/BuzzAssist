@@ -3365,10 +3365,27 @@ export default function App() {
     let lastPointer = null
     let rafId = 0
     let wheelTrailFrames = 0
+    let hoverClearTimer = 0
+
+    // Clearing the video hover is debounced: crossing an element boundary
+    // (or an overlapping element) for a few frames used to unmount the
+    // playback controls mid-approach, making the expand button flicker.
+    const setVideoHover = (id) => {
+      if (id) {
+        window.clearTimeout(hoverClearTimer)
+        hoverClearTimer = 0
+        setHoveredVideoPlaybackId(id)
+      } else if (!hoverClearTimer) {
+        hoverClearTimer = window.setTimeout(() => {
+          hoverClearTimer = 0
+          setHoveredVideoPlaybackId('')
+        }, 160)
+      }
+    }
 
     const hideHover = () => {
       hover.style.display = 'none'
-      setHoveredVideoPlaybackId('')
+      setVideoHover('')
     }
 
     const updateHover = (event) => {
@@ -3401,7 +3418,7 @@ export default function App() {
         return
       }
 
-      setHoveredVideoPlaybackId(isCanvasVideoElement(target) ? target.id : '')
+      setVideoHover(isCanvasVideoElement(target) ? target.id : '')
       if (selectedIds.has(target.id)) {
         hover.style.display = 'none'
         return
@@ -3481,6 +3498,7 @@ export default function App() {
       window.removeEventListener('pointerup', onPointerUp, true)
       root.removeEventListener('wheel', onWheel, true)
       if (rafId) cancelAnimationFrame(rafId)
+      window.clearTimeout(hoverClearTimer)
     }
   }, [api])
 
@@ -4115,14 +4133,13 @@ export default function App() {
         : Math.round(center.y - size.height / 2 + (kind === 'video' ? -90 : -10))
       const originalFrameX = frameX
       const originalFrameY = frameY
-      let wasOverlapping = false
-
-      if (viewportMoved) {
-        const placement = findNonOverlappingPlacement(elements, { x: frameX, y: frameY, width: size.width, height: size.height })
-        frameX = placement.x
-        frameY = placement.y
-        wasOverlapping = frameX !== originalFrameX || frameY !== originalFrameY
-      }
+      // Always resolve collisions — repeated rail clicks used to stack frames
+      // straight onto existing media because the check only ran after the
+      // viewport moved.
+      const placement = findNonOverlappingPlacement(elements, { x: frameX, y: frameY, width: size.width, height: size.height })
+      frameX = placement.x
+      frameY = placement.y
+      const wasOverlapping = frameX !== originalFrameX || frameY !== originalFrameY
 
       const [frame] = convertToExcalidrawElements(
         [
