@@ -75,6 +75,7 @@ const DEFAULT_FRAME_FORM = {
   aspectRatio: '1:1',
   videoAspectRatio: '16:9',
   quality: 'auto',
+  imageSize: '1K',
   duration: '5',
   resolution: '720p',
   imageReferences: [],
@@ -85,6 +86,7 @@ const DEFAULT_FRAME_FORM = {
   videoReferenceVideos: [],
   videoReferenceAudios: [],
   videoGenerateAudio: true,
+  videoMode: 'pro',
   subtitleMode: 'scriptless',
   subtitleLineCount: 2,
   subtitleMaxChars: 30,
@@ -170,7 +172,138 @@ const VIDEO_ASPECTS = {
 }
 
 function isGrokVideoModel(model) {
-  return model === 'grok-imagine-video-hermes'
+  return model === 'grok-imagine-video-hermes' || model === 'grok-imagine-video-api'
+}
+
+// --- Per-model settings gating, ported from Youtube-AGI App.tsx ---
+const VIDEO_ASPECT_RATIO_OPTIONS = ['16:9', '9:16', '1:1']
+const SEEDANCE_VIDEO_ASPECT_RATIO_OPTIONS = ['auto', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9']
+const GROK_VIDEO_ASPECT_RATIO_OPTIONS = ['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3']
+const KLING_2_6_VIDEO_DURATIONS = ['5', '10']
+const VIDEO_MODE_OPTIONS = [
+  ['standard', 'Std'],
+  ['pro', 'Pro']
+]
+const GROK_IMAGE_ASPECT_RATIO_OPTIONS = {
+  '1:1': { baseWidth: 1024, baseHeight: 1024 },
+  '16:9': { baseWidth: 1456, baseHeight: 816 },
+  '9:16': { baseWidth: 816, baseHeight: 1456 },
+  '4:3': { baseWidth: 1232, baseHeight: 928 },
+  '3:4': { baseWidth: 928, baseHeight: 1232 },
+  '3:2': { baseWidth: 1344, baseHeight: 896 },
+  '2:3': { baseWidth: 896, baseHeight: 1344 },
+  '2:1': { baseWidth: 1440, baseHeight: 720 },
+  '1:2': { baseWidth: 720, baseHeight: 1440 },
+  '19.5:9': { baseWidth: 1560, baseHeight: 720 },
+  '9:19.5': { baseWidth: 720, baseHeight: 1560 },
+  '20:9': { baseWidth: 1600, baseHeight: 720 },
+  '9:20': { baseWidth: 720, baseHeight: 1600 }
+}
+const IMAGE_MODEL_SIZES = {
+  'gpt-image-2-codex': ['1K'],
+  'gpt-image-2': ['1K'],
+  'grok-imagine-image-hermes': ['1K', '2K'],
+  'grok-imagine-image-api': ['1K', '2K'],
+  'nano-banana-2': ['0.5K', '1K', '2K', '4K'],
+  'seedream-v5-lite': ['1K', '2K', '4K']
+}
+const GROK_IMAGE_QUALITY_OPTIONS = [
+  ['auto', 'Auto'],
+  ['standard', 'Standard'],
+  ['quality', 'Quality']
+]
+
+function isSeedanceModel(model) {
+  return model === 'seedance-2' || model === 'seedance-2-fast'
+}
+
+function isGrokImageModel(model) {
+  return model === 'grok-imagine-image-hermes' || model === 'grok-imagine-image-api'
+}
+
+function isGptStyleImageModel(model) {
+  return model === 'gpt-image-2' || model === 'gpt-image-2-codex'
+}
+
+function usesImageQualitySelection(model) {
+  return isGptStyleImageModel(model) || isGrokImageModel(model)
+}
+
+function getImageQualityOptions(model) {
+  return isGrokImageModel(model) ? GROK_IMAGE_QUALITY_OPTIONS : IMAGE_QUALITY_OPTIONS
+}
+
+function getAvailableImageSizes(model) {
+  return IMAGE_MODEL_SIZES[model] ?? ['1K']
+}
+
+function getAvailableImageAspectRatios(model) {
+  return isGrokImageModel(model) ? Object.keys(GROK_IMAGE_ASPECT_RATIO_OPTIONS) : Object.keys(IMAGE_ASPECTS)
+}
+
+function supportsResolutionSelection(model) {
+  return isSeedanceModel(model) || isGrokVideoModel(model)
+}
+
+function supportsGenerateAudio(model) {
+  return isSeedanceModel(model)
+}
+
+function getVideoAspectRatioOptions(model) {
+  if (isSeedanceModel(model)) return SEEDANCE_VIDEO_ASPECT_RATIO_OPTIONS
+  if (isGrokVideoModel(model)) return GROK_VIDEO_ASPECT_RATIO_OPTIONS
+  return VIDEO_ASPECT_RATIO_OPTIONS
+}
+
+function getAvailableVideoModes(model, tab) {
+  switch (model) {
+    case 'kling-v3':
+    case 'kling-o3':
+      return ['standard', 'pro']
+    case 'kling-v2-6':
+      return tab === 'motion' ? ['standard', 'pro'] : ['pro']
+    default:
+      return []
+  }
+}
+
+function getVideoDurationRange(model) {
+  if (isSeedanceModel(model)) return { min: 4, max: 15, step: 1 }
+  if (isGrokVideoModel(model)) return { min: 1, max: 15, step: 1 }
+  if (model === 'kling-v2-6') return { min: 5, max: 10, step: 5 }
+  return { min: 3, max: 15, step: 1 }
+}
+
+function getAvailableVideoTabs(model) {
+  if (model === 'kling-v2-6') return ['keyframe', 'motion']
+  if (model === 'kling-v3') return ['keyframe']
+  return ['keyframe', 'reference']
+}
+
+function normalizeVideoTabForModel(model, value) {
+  const tabs = getAvailableVideoTabs(model)
+  return tabs.includes(value) ? value : 'keyframe'
+}
+
+function normalizeVideoDurationForModel(model, value) {
+  if (model === 'kling-v2-6') {
+    return KLING_2_6_VIDEO_DURATIONS.includes(String(value)) ? String(value) : '5'
+  }
+  const { min, max } = getVideoDurationRange(model)
+  const parsed = Number.parseInt(String(value ?? ''), 10)
+  if (!Number.isFinite(parsed)) return '5'
+  return String(Math.min(max, Math.max(min, parsed)))
+}
+
+function normalizeVideoModeForContext(model, tab, value) {
+  const allowed = getAvailableVideoModes(model, tab)
+  if (allowed.length === 0) return 'standard'
+  return allowed.includes(value) ? value : allowed[0]
+}
+
+function normalizeVideoAspectRatioForModel(model, value) {
+  const allowed = getVideoAspectRatioOptions(model)
+  return allowed.includes(value) ? value : '16:9'
 }
 
 // Audio reference is only meaningful for models that consume an audio track
@@ -181,6 +314,7 @@ function supportsAudioReference(model) {
 }
 
 function getVideoFrameSlotMediaKind(tab, target) {
+  if (tab === 'motion') return target === 'start' ? 'image' : 'video'
   if (tab === 'reference') return target === 'start' ? 'video' : 'image'
   return 'image'
 }
@@ -188,13 +322,12 @@ function getVideoFrameSlotMediaKind(tab, target) {
 function canUseVideoFrameTarget(model, tab, target) {
   if (!isGrokVideoModel(model)) return true
   if (tab === 'keyframe' && target === 'end') return false
-  // Note: the reference restricts Grok reference to image-only, but the user
-  // wants both image and video attachable on the video generator, so the video
-  // (start) slot stays enabled here.
+  if (tab === 'reference' && target === 'start') return false
   return true
 }
 
 function getVideoFrameSlotLabel(tab, target) {
+  if (tab === 'motion') return target === 'start' ? '画像' : '動画'
   if (tab === 'reference') return target === 'start' ? '動画' : '画像'
   return target === 'start' ? '開始\nフレーム' : '終了\nフレーム'
 }
@@ -1473,6 +1606,7 @@ function frameFormFromElement(element) {
     videoReferenceVideos,
     videoReferenceAudios,
     videoGenerateAudio: customData.videoGenerateAudio !== undefined ? customData.videoGenerateAudio !== false : DEFAULT_FRAME_FORM.videoGenerateAudio,
+    videoMode: customData.videoMode === 'standard' ? 'standard' : DEFAULT_FRAME_FORM.videoMode,
     subtitleMode: customData.subtitleMode === 'scripted' || customData.subtitleMode === 'scriptless'
       ? customData.subtitleMode
       : DEFAULT_FRAME_FORM.subtitleMode,
@@ -1561,7 +1695,8 @@ function frameCustomDataFromForm(kind, form) {
         videoReferenceImages: normalizeAssetList(form.videoReferenceImages),
         videoReferenceVideos: normalizeAssetList(form.videoReferenceVideos),
         videoReferenceAudios: normalizeAssetList(form.videoReferenceAudios),
-        videoGenerateAudio: form.videoGenerateAudio !== false
+        videoGenerateAudio: form.videoGenerateAudio !== false,
+        videoMode: form.videoMode === 'standard' ? 'standard' : 'pro'
       }
     : {
         generatorPrompt: form.prompt,
@@ -4181,7 +4316,9 @@ export default function App() {
               aspectRatio: savedForm.videoAspectRatio,
               duration: savedForm.duration,
               resolution: savedForm.resolution,
+              mode: normalizeVideoModeForContext(savedForm.videoModel, savedForm.videoTab, savedForm.videoMode),
               useReference: savedForm.videoTab === 'reference',
+              useMotion: savedForm.videoTab === 'motion',
               startFramePath: savedForm.videoTab === 'reference' ? undefined : savedForm.videoStartFrame?.path || undefined,
               imageUrl: savedForm.videoTab === 'reference' || savedForm.videoStartFrame?.path ? undefined : savedForm.videoStartFrame?.dataURL || undefined,
               endFramePath: savedForm.videoTab === 'keyframe' ? savedForm.videoEndFrame?.path || undefined : undefined,
@@ -4189,8 +4326,14 @@ export default function App() {
               referenceAudioPaths: savedForm.videoTab === 'reference' ? normalizeAssetList(savedForm.videoReferenceAudios).map((asset) => asset.path).filter(Boolean) : [],
               referenceImagePaths: savedForm.videoTab === 'reference' ? savedVideoReferenceImages.map((asset) => asset.path).filter(Boolean) : [],
               referenceImages: savedForm.videoTab === 'reference' ? savedVideoReferenceImages.map((asset) => asset.dataURL || asset.url).filter(Boolean) : [],
-              referenceVideoPaths: savedForm.videoTab === 'reference' ? savedVideoReferenceVideos.map((asset) => asset.path).filter(Boolean) : [],
+              referenceVideoPaths:
+                savedForm.videoTab === 'reference'
+                  ? savedVideoReferenceVideos.map((asset) => asset.path).filter(Boolean)
+                  : savedForm.videoTab === 'motion' && savedForm.videoEndFrame?.path
+                    ? [savedForm.videoEndFrame.path]
+                    : [],
               referenceVideos: savedForm.videoTab === 'reference' ? savedVideoReferenceVideos.map((asset) => asset.dataURL || asset.url).filter(Boolean) : [],
+              motionOrientation: savedForm.videoTab === 'motion' ? 'image' : undefined,
               generateAudio: savedForm.videoGenerateAudio !== false,
               selectCreated: true,
               anchorElementId,
@@ -4206,6 +4349,7 @@ export default function App() {
               model: savedForm.imageModel,
               aspectRatio: savedForm.aspectRatio,
               quality: savedForm.quality,
+              imageSize: savedForm.imageSize,
               referenceImagePaths: normalizeAssetList(savedForm.imageReferences)
                 .filter((asset) => asset.kind !== 'video')
                 .map((asset) => asset.path)
@@ -5280,26 +5424,39 @@ export default function App() {
               ) : null}
               {activeFrameKind === 'video' ? (
                 <div className="lovart-video-tabs">
-                  <button
-                    type="button"
-                    className={frameForm.videoTab === 'keyframe' ? 'is-selected' : ''}
-                    onClick={() => {
-                      setOpenMenu(null)
-                      patchFrameForm({ videoTab: 'keyframe' })
-                    }}
-                  >
-                    キーフレーム
-                  </button>
-                  <button
-                    type="button"
-                    className={frameForm.videoTab === 'reference' ? 'is-selected' : ''}
-                    onClick={() => {
-                      setOpenMenu(null)
-                      patchFrameForm({ videoTab: 'reference' })
-                    }}
-                  >
-                    リファレンス
-                  </button>
+                  {getAvailableVideoTabs(frameForm.videoModel).map((tab) => (
+                    <button
+                      type="button"
+                      key={tab}
+                      className={frameForm.videoTab === tab ? 'is-selected' : ''}
+                      onClick={() => {
+                        setOpenMenu(null)
+                        patchFrameForm({
+                          videoTab: tab,
+                          videoMode: normalizeVideoModeForContext(frameForm.videoModel, tab, frameForm.videoMode)
+                        })
+                      }}
+                    >
+                      {tab === 'keyframe' ? 'キーフレーム' : tab === 'motion' ? 'モーション' : 'リファレンス'}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {activeFrameKind === 'video' && getAvailableVideoModes(frameForm.videoModel, frameForm.videoTab).length > 0 ? (
+                <div className="lovart-video-tabs">
+                  {getAvailableVideoModes(frameForm.videoModel, frameForm.videoTab).map((mode) => (
+                    <button
+                      type="button"
+                      key={mode}
+                      className={normalizeVideoModeForContext(frameForm.videoModel, frameForm.videoTab, frameForm.videoMode) === mode ? 'is-selected' : ''}
+                      onClick={() => {
+                        setOpenMenu(null)
+                        patchFrameForm({ videoMode: mode })
+                      }}
+                    >
+                      {VIDEO_MODE_OPTIONS.find(([value]) => value === mode)?.[1] ?? mode}
+                    </button>
+                  ))}
                 </div>
               ) : null}
               <div className="lovart-menu-wrap">
@@ -5328,12 +5485,30 @@ export default function App() {
                         type="button"
                         key={model.id}
                         onClick={() => {
-                          updateFrameForm(
-                            activeFrameKind === 'lovart'
-                              ? frameForm.lovartKind === 'video' ? 'lovartVideoModel' : 'lovartModel'
-                              : activeFrameKind === 'video' ? 'videoModel' : 'imageModel',
-                            model.id
-                          )
+                          if (activeFrameKind === 'video') {
+                            // Youtube-AGI normalizes every dependent setting
+                            // when the model changes.
+                            const nextTab = normalizeVideoTabForModel(model.id, frameForm.videoTab)
+                            patchFrameForm({
+                              videoModel: model.id,
+                              videoTab: nextTab,
+                              videoMode: normalizeVideoModeForContext(model.id, nextTab, frameForm.videoMode),
+                              duration: normalizeVideoDurationForModel(model.id, frameForm.duration),
+                              videoAspectRatio: normalizeVideoAspectRatioForModel(model.id, frameForm.videoAspectRatio)
+                            })
+                          } else if (activeFrameKind === 'image') {
+                            patchFrameForm({
+                              imageModel: model.id,
+                              aspectRatio: getAvailableImageAspectRatios(model.id).includes(frameForm.aspectRatio) ? frameForm.aspectRatio : '1:1',
+                              quality: getImageQualityOptions(model.id).some(([value]) => value === frameForm.quality) ? frameForm.quality : 'auto',
+                              imageSize: getAvailableImageSizes(model.id).includes(frameForm.imageSize) ? frameForm.imageSize : getAvailableImageSizes(model.id)[0]
+                            })
+                          } else {
+                            updateFrameForm(
+                              frameForm.lovartKind === 'video' ? 'lovartVideoModel' : 'lovartModel',
+                              model.id
+                            )
+                          }
                           setOpenMenu(null)
                         }}
                       >
@@ -5441,25 +5616,52 @@ export default function App() {
                       className="lovart-pill"
                       onClick={() => setOpenMenu((current) => (current === 'quality' ? null : 'quality'))}
                     >
-                      <span>{IMAGE_QUALITY_OPTIONS.find(([value]) => value === frameForm.quality)?.[1] ?? 'Auto'}</span>
+                      <span>
+                        {usesImageQualitySelection(frameForm.imageModel)
+                          ? getImageQualityOptions(frameForm.imageModel).find(([value]) => value === frameForm.quality)?.[1] ?? 'Auto'
+                          : frameForm.imageSize ?? '1K'}
+                        {isGrokImageModel(frameForm.imageModel) ? `・${frameForm.imageSize ?? '1K'}` : ''}
+                      </span>
                       <ChevronIcon />
                     </button>
                     {openMenu === 'quality' ? (
                       <div className="lovart-menu" data-lovart-menu="quality">
-                        <div className="lovart-menu-header">品質</div>
-                        {IMAGE_QUALITY_OPTIONS.map(([value, label]) => (
-                          <button
-                            type="button"
-                            key={value}
-                            onClick={() => {
-                              updateFrameForm('quality', value)
-                              setOpenMenu(null)
-                            }}
-                          >
-                            <span>{label}</span>
-                            {frameForm.quality === value ? <span className="menu-check">✓</span> : null}
-                          </button>
-                        ))}
+                        {usesImageQualitySelection(frameForm.imageModel) ? (
+                          <>
+                            <div className="lovart-menu-header">品質</div>
+                            {getImageQualityOptions(frameForm.imageModel).map(([value, label]) => (
+                              <button
+                                type="button"
+                                key={value}
+                                onClick={() => {
+                                  updateFrameForm('quality', value)
+                                  setOpenMenu(null)
+                                }}
+                              >
+                                <span>{label}</span>
+                                {frameForm.quality === value ? <span className="menu-check">✓</span> : null}
+                              </button>
+                            ))}
+                          </>
+                        ) : null}
+                        {getAvailableImageSizes(frameForm.imageModel).length > 1 ? (
+                          <>
+                            <div className="lovart-menu-header">サイズ</div>
+                            {getAvailableImageSizes(frameForm.imageModel).map((size) => (
+                              <button
+                                type="button"
+                                key={size}
+                                onClick={() => {
+                                  updateFrameForm('imageSize', size)
+                                  setOpenMenu(null)
+                                }}
+                              >
+                                <span>{size}</span>
+                                {(frameForm.imageSize ?? '1K') === size ? <span className="menu-check">✓</span> : null}
+                              </button>
+                            ))}
+                          </>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>
@@ -5476,7 +5678,9 @@ export default function App() {
                     {openMenu === 'ratio' ? (
                       <div className="lovart-menu wide" data-lovart-menu="ratio">
                         <div className="lovart-menu-header">形式</div>
-                        {Object.entries(IMAGE_ASPECTS).map(([ratio, size]) => (
+                        {getAvailableImageAspectRatios(frameForm.imageModel)
+                          .map((ratio) => [ratio, IMAGE_ASPECTS[ratio] ?? GROK_IMAGE_ASPECT_RATIO_OPTIONS[ratio]])
+                          .map(([ratio, size]) => (
                           <button
                             type="button"
                             key={ratio}
@@ -5518,7 +5722,7 @@ export default function App() {
                     <div className="lovart-menu wide lovart-video-settings" data-lovart-menu="video-settings">
                       <div className="lovart-menu-header">Size</div>
                       <div className="lovart-menu-grid">
-                        {Object.keys(VIDEO_ASPECTS).map((ratio) => (
+                        {getVideoAspectRatioOptions(frameForm.videoModel).map((ratio) => (
                           <button
                             type="button"
                             key={ratio}
@@ -5540,41 +5744,68 @@ export default function App() {
                         <div className="lovart-menu-header">Duration</div>
                         <span>{frameForm.duration}s</span>
                       </div>
-                      <input
-                        type="range"
-                        min="1"
-                        max="15"
-                        step="1"
-                        className="lovart-duration-slider"
-                        value={frameForm.duration}
-                        style={{ background: `linear-gradient(to right, #7c3aed 0%, #7c3aed ${(Number(frameForm.duration) - 1) / 14 * 100}%, #e0e0e0 ${(Number(frameForm.duration) - 1) / 14 * 100}%, #e0e0e0 100%)` }}
-                        onChange={(event) => updateFrameForm('duration', event.target.value)}
-                      />
-                      <div className="lovart-menu-header">Quality</div>
-                      <div className="lovart-menu-grid compact">
-                        {['480p', '720p'].map((resolution) => (
+                      {frameForm.videoModel === 'kling-v2-6' ? (
+                        <div className="lovart-menu-grid compact">
+                          {KLING_2_6_VIDEO_DURATIONS.map((duration) => (
+                            <button
+                              type="button"
+                              key={duration}
+                              onClick={() => updateFrameForm('duration', duration)}
+                              className={String(frameForm.duration) === duration ? 'is-selected' : ''}
+                            >
+                              <span>{duration}s</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <input
+                          type="range"
+                          min={getVideoDurationRange(frameForm.videoModel).min}
+                          max={getVideoDurationRange(frameForm.videoModel).max}
+                          step={getVideoDurationRange(frameForm.videoModel).step}
+                          className="lovart-duration-slider"
+                          value={frameForm.duration}
+                          style={{
+                            background: (() => {
+                              const { min, max } = getVideoDurationRange(frameForm.videoModel)
+                              const pct = ((Number(frameForm.duration) - min) / Math.max(1, max - min)) * 100
+                              return `linear-gradient(to right, #7c3aed 0%, #7c3aed ${pct}%, #e0e0e0 ${pct}%, #e0e0e0 100%)`
+                            })()
+                          }}
+                          onChange={(event) => updateFrameForm('duration', event.target.value)}
+                        />
+                      )}
+                      {supportsResolutionSelection(frameForm.videoModel) ? (
+                        <>
+                          <div className="lovart-menu-header">Quality</div>
+                          <div className="lovart-menu-grid compact">
+                            {['480p', '720p'].map((resolution) => (
+                              <button
+                                type="button"
+                                key={resolution}
+                                onClick={() => updateFrameForm('resolution', resolution)}
+                                className={frameForm.resolution === resolution ? 'is-selected' : ''}
+                              >
+                                <span>{resolution}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      ) : null}
+                      {supportsGenerateAudio(frameForm.videoModel) ? (
+                        <div className="lovart-audio-row">
+                          <div className="lovart-menu-header">オーディオ</div>
                           <button
                             type="button"
-                            key={resolution}
-                            onClick={() => updateFrameForm('resolution', resolution)}
-                            className={frameForm.resolution === resolution ? 'is-selected' : ''}
+                            className={`lovart-audio-toggle${frameForm.videoGenerateAudio ? ' is-on' : ''}`}
+                            onClick={() => updateFrameForm('videoGenerateAudio', !frameForm.videoGenerateAudio)}
+                            aria-pressed={frameForm.videoGenerateAudio}
+                            aria-label="オーディオ"
                           >
-                            <span>{resolution}</span>
+                            <span />
                           </button>
-                        ))}
-                      </div>
-                      <div className="lovart-audio-row">
-                        <div className="lovart-menu-header">オーディオ</div>
-                        <button
-                          type="button"
-                          className={`lovart-audio-toggle${frameForm.videoGenerateAudio ? ' is-on' : ''}`}
-                          onClick={() => updateFrameForm('videoGenerateAudio', !frameForm.videoGenerateAudio)}
-                          aria-pressed={frameForm.videoGenerateAudio}
-                          aria-label="オーディオ"
-                        >
-                          <span />
-                        </button>
-                      </div>
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
