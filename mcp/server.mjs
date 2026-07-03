@@ -11,6 +11,7 @@ import {
   insertExcalidrawSubtitle,
   insertExcalidrawVideo as insertExcalidrawVideoMedia,
   insertGeneratorFrameBatch,
+  performCanvasMaintenance,
 } from "../lib/canvasScene.mjs";
 import { silenceCutVideo } from "../lib/tempoCut.mjs";
 import { estimateCreditsForJob } from "../lib/mediaCredits.mjs";
@@ -1795,6 +1796,16 @@ async function handleRequest(message) {
     sendError(id, JsonRpcError.METHOD_NOT_FOUND, `Method not found: ${method}`);
   }
 }
+
+// Startup housekeeping: migrate legacy inline file records, sweep stale .tmp
+// files, and trash orphaned assets. Fire-and-forget — stdout is reserved for
+// JSON-RPC, so results go to stderr.
+performCanvasMaintenance({})
+  .then((results) => {
+    const summary = JSON.stringify(results);
+    if (summary !== "{}") process.stderr.write(`[canvas-maintenance] ${summary}\n`);
+  })
+  .catch((error) => process.stderr.write(`[canvas-maintenance] failed: ${error?.message}\n`));
 
 const lines = readline.createInterface({
   input: process.stdin,

@@ -6,7 +6,7 @@ import { basename, dirname, extname, join, relative, resolve, sep } from 'node:p
 import { Readable } from 'node:stream'
 import { generateImageMedia, generateVideoMedia, getGenerationCapabilities, runWithConcurrency } from './lib/mediaGeneration.mjs'
 import { getBuzzAssistAuthStatus, loginBuzzAssistViaBrowser } from './lib/buzzassistApi.mjs'
-import { OFFICIAL_EXCALIDRAW_README, createExcalidrawView, insertExcalidrawImage, insertExcalidrawSubtitle, insertExcalidrawVideo, insertExcalidrawMediaBatch, stripAssetBackedFileDataURLs } from './lib/canvasScene.mjs'
+import { OFFICIAL_EXCALIDRAW_README, createExcalidrawView, insertExcalidrawImage, insertExcalidrawSubtitle, insertExcalidrawVideo, insertExcalidrawMediaBatch, performCanvasMaintenance, stripAssetBackedFileDataURLs } from './lib/canvasScene.mjs'
 import { generateSubtitleSrt } from './lib/subtitleGeneration.mjs'
 import { silenceCutVideo } from './lib/tempoCut.mjs'
 import { getLovartAuthStatus, saveLovartCredentials } from './lib/lovartMediaGeneration.mjs'
@@ -605,6 +605,18 @@ function canvasStoragePlugin() {
   return {
     name: 'codex-excalidraw-storage',
     configureServer(server) {
+      performCanvasMaintenance({ canvasDir })
+        .then((results) => {
+          const { migration, tmpCleanup, orphans } = results
+          if (migration?.migrated || migration?.dropped || tmpCleanup?.removed || orphans?.trashed) {
+            console.log(
+              `[canvas-maintenance] migrated=${migration?.migrated ?? 0} (${Math.round((migration?.migratedBytes ?? 0) / 1024)}KB) ` +
+                `droppedRecords=${migration?.dropped ?? 0} tmpRemoved=${tmpCleanup?.removed ?? 0} ` +
+                `orphansTrashed=${orphans?.trashed ?? 0} (${Math.round((orphans?.trashedBytes ?? 0) / 1024 / 1024)}MB)`
+            )
+          }
+        })
+        .catch((error) => console.warn('[canvas-maintenance] failed:', error.message))
       server.middlewares.use(async (req, res, next) => {
         try {
           if (await serveMcp(req, res)) return
