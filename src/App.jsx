@@ -2598,7 +2598,10 @@ export default function App() {
     (scene) => {
       hasLocalChangesRef.current = true
       window.clearTimeout(saveTimerRef.current)
-      saveTimerRef.current = window.setTimeout(() => saveCanvas(scene), SAVE_DELAY_MS)
+      // Save the freshest scene at fire time: a debounced frame-form write can
+      // land between scheduling and firing, and saving the stale snapshot
+      // would drop it from disk.
+      saveTimerRef.current = window.setTimeout(() => saveCanvas(latestSceneRef.current ?? scene), SAVE_DELAY_MS)
     },
     [saveCanvas]
   )
@@ -2630,11 +2633,41 @@ export default function App() {
     )
   }, [])
 
+  // Writing the panel form into the frame's customData on every keystroke made
+  // Excalidraw fire onChange mid-IME-composition; the unconditional
+  // setFrameForm below then reset the textarea to a stale value, duplicating
+  // composed text. Writes are debounced and only flushed when leaving a frame,
+  // and the form is only re-read from the element when the selection changes.
+  const pendingFrameFormWriteRef = useRef(null)
+  const updateActiveFrameElementRef = useRef(null)
+
+  const flushPendingFrameFormWrite = useCallback(() => {
+    const pending = pendingFrameFormWriteRef.current
+    if (!pending) return
+    pendingFrameFormWriteRef.current = null
+    window.clearTimeout(pending.timer)
+    updateActiveFrameElementRef.current?.(pending.form, pending.frameId)
+  }, [])
+
+  const scheduleFrameFormWrite = useCallback((form) => {
+    const frameId = activeFrameIdRef.current
+    if (!frameId) return
+    const pending = pendingFrameFormWriteRef.current
+    if (pending) window.clearTimeout(pending.timer)
+    const timer = window.setTimeout(() => {
+      if (pendingFrameFormWriteRef.current?.timer === timer) pendingFrameFormWriteRef.current = null
+      updateActiveFrameElementRef.current?.(form, frameId)
+    }, 300)
+    pendingFrameFormWriteRef.current = { timer, form, frameId }
+  }, [])
+
   const syncGeneratorUi = useCallback((scene) => {
     refreshOverlayStates(scene)
     const elementsById = new Map(scene.elements.map((element) => [element.id, element]))
     const selectedIds = getSelectedIds(scene.appState)
     const selectedFrameId = selectedIds.find((id) => isGeneratorFrame(elementsById.get(id))) ?? ''
+    const pendingWrite = pendingFrameFormWriteRef.current
+    if (pendingWrite && pendingWrite.frameId !== selectedFrameId) flushPendingFrameFormWrite()
     const selectedResultId = !selectedFrameId
       ? (selectedIds.find((id) => isGeneratedResult(elementsById.get(id))) ??
           selectedIds
@@ -2654,9 +2687,9 @@ export default function App() {
       if (frameChanged) {
         setOpenMenu(null)
         setGenerationError('')
+        setActiveFrameKind(getGeneratorKind(selectedFrame))
+        setFrameForm(frameFormFromElement(selectedFrame))
       }
-      setActiveFrameKind(getGeneratorKind(selectedFrame))
-      setFrameForm(frameFormFromElement(selectedFrame))
       return
     }
 
@@ -2679,9 +2712,9 @@ export default function App() {
       if (resultChanged) {
         setOpenMenu(null)
         setGenerationError('')
+        setActiveFrameKind(kind)
+        setFrameForm(frameFormFromElement(selectedResult))
       }
-      setActiveFrameKind(kind)
-      setFrameForm(frameFormFromElement(selectedResult))
       return
     }
 
@@ -2701,7 +2734,7 @@ export default function App() {
       setSelectedGeneratedResult(null)
       setOpenMenu(null)
     }
-  }, [refreshOverlayStates])
+  }, [refreshOverlayStates, flushPendingFrameFormWrite])
 
   useEffect(() => {
     if (initialScene) syncGeneratorUi(initialScene)
@@ -3377,14 +3410,23 @@ export default function App() {
       window.clearTimeout(saveTimerRef.current)
       window.clearTimeout(selectionTimerRef.current)
       window.clearTimeout(videoFrameLeaveTimerRef.current)
+      if (pendingFrameFormWriteRef.current) window.clearTimeout(pendingFrameFormWriteRef.current.timer)
     }
   }, [])
 
   const updateActiveFrameElement = useCallback(
-    (nextForm) => {
-      if (!api || !activeFrameIdRef.current) return
+    (nextForm, frameIdOverride) => {
+      const frameId = frameIdOverride || activeFrameIdRef.current
+      if (!api || !frameId) return
+      const pendingWrite = pendingFrameFormWriteRef.current
+      if (pendingWrite && pendingWrite.frameId === frameId) {
+        // This write derives from newer state than the queued one — drop the
+        // queued write so it can't fire later and revert this one.
+        pendingFrameFormWriteRef.current = null
+        window.clearTimeout(pendingWrite.timer)
+      }
       const elements = api.getSceneElementsIncludingDeleted()
-      const frame = elements.find((element) => element.id === activeFrameIdRef.current)
+      const frame = elements.find((element) => element.id === frameId)
       if (!frame || !isGeneratorFrame(frame)) return
 
       const kind = getGeneratorKind(frame)
@@ -3427,6 +3469,10 @@ export default function App() {
     [api, refreshOverlayStates, scheduleCanvasSave]
   )
 
+  useEffect(() => {
+    updateActiveFrameElementRef.current = updateActiveFrameElement
+  }, [updateActiveFrameElement])
+
   const updateFrameForm = useCallback(
     (key, value) => {
       let nextForm = null
@@ -3436,11 +3482,11 @@ export default function App() {
         return next
       })
       window.setTimeout(() => {
-        if (nextForm) updateActiveFrameElement(nextForm)
+        if (nextForm) scheduleFrameFormWrite(nextForm)
       }, 0)
       setGenerationError('')
     },
-    [updateActiveFrameElement]
+    [scheduleFrameFormWrite]
   )
 
   const patchFrameForm = useCallback(
@@ -3452,11 +3498,11 @@ export default function App() {
         return next
       })
       window.setTimeout(() => {
-        if (nextForm) updateActiveFrameElement(nextForm)
+        if (nextForm) scheduleFrameFormWrite(nextForm)
       }, 0)
       setGenerationError('')
     },
-    [updateActiveFrameElement]
+    [scheduleFrameFormWrite]
   )
 
   const uploadAssetFile = useCallback(async (file, options = {}) => {
