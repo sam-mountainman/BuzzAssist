@@ -22,6 +22,7 @@ const GENERATOR_FRAME_TAG = 'buzzassist.imageGenerator.frame'
 const VIDEO_GENERATOR_FRAME_TAG = 'buzzassist.videoGenerator.frame'
 const SUBTITLE_GENERATOR_FRAME_TAG = 'buzzassist.subtitleGenerator.frame'
 const SILENCE_CUT_GENERATOR_FRAME_TAG = 'buzzassist.silenceCutGenerator.frame'
+const LOVART_GENERATOR_FRAME_TAG = 'buzzassist.lovartGenerator.frame'
 const GENERATOR_FRAME_BORDER_COLOR = '#c4a5f7'
 const GENERATOR_FRAME_FILL_COLOR = '#e8ddf5'
 const GENERATOR_FRAME_STROKE_WIDTH = 1
@@ -100,6 +101,12 @@ const DEFAULT_FRAME_FORM = {
   silenceCutPreMarginSeconds: 0.08,
   silenceCutPostMarginSeconds: 0.12,
   silenceCutAudioFadeSeconds: 0.03,
+  lovartKind: 'image',
+  lovartModel: 'lovart-midjourney',
+  lovartVideoModel: 'lovart-veo-3-1',
+  lovartAspectRatio: '1:1',
+  lovartVideoAspectRatio: '16:9',
+  lovartReferences: [],
 }
 
 const SUBTITLE_MODE_OPTIONS = [
@@ -278,6 +285,130 @@ function SilenceCutGeneratorToolIcon() {
       <path d="M13.4 12l1.2 1.1" />
     </svg>
   )
+}
+
+function LovartGeneratorToolIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22C6.47717 22 2 17.5228 2 12C2 6.47716 6.47716 2.00001 12 2ZM10.0685 16.9556H13.8904V15.615H11.5607V10.804H10.0685V16.9556ZM16.2078 8.25793C14.6578 8.25793 13.4015 9.51735 13.4015 11.0689C13.4015 12.6205 14.6578 13.8799 16.2078 13.8799C17.7577 13.8799 19.0155 12.622 19.0155 11.0689C19.0155 9.51579 17.7593 8.25794 16.2078 8.25793ZM15.2077 10.0673C15.7608 9.51263 16.6578 9.51263 17.2109 10.0673C17.764 10.622 17.764 11.5173 17.2109 12.072C16.6578 12.6267 15.7624 12.6267 15.2077 12.072C14.6546 11.5189 14.6546 10.6204 15.2077 10.0673ZM5.29681 12.2361H8.65466V10.6688H5.29681V12.2361Z"
+        fill="currentColor"
+      />
+    </svg>
+  )
+}
+
+// Small provider glyphs for the Lovart / BuzzAssist model pickers, in the
+// spirit of Lovart's model list icons (simplified, monochrome).
+function ModelProviderIcon({ provider, size = 16 }) {
+  const common = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true }
+  switch (provider) {
+    case 'midjourney':
+      return (
+        <svg {...common}>
+          <path d="M3 18c5-1 13-1 18 0" />
+          <path d="M5 15c4-8 9-9 13-9-2 3-3 6-3 9" />
+          <path d="M10 6v9" />
+        </svg>
+      )
+    case 'nano-banana':
+      return (
+        <svg {...common}>
+          <path d="M4 14c2 4 8 6 13 3 3-2 4-5 4-8-1 5-6 8-10 7-3-1-5-3-5-6z" fill="currentColor" stroke="none" />
+          <path d="M20 6l1-2" />
+        </svg>
+      )
+    case 'openai':
+      return (
+        <svg {...common} strokeWidth={1.5}>
+          <path d="M12 3l6.5 3.75v7.5L12 18l-6.5-3.75v-7.5z" />
+          <path d="M12 8.2l3.3 1.9v3.8L12 15.8l-3.3-1.9v-3.8z" />
+        </svg>
+      )
+    case 'luma':
+      return (
+        <svg {...common}>
+          <path d="M12 3l2.2 6.8L21 12l-6.8 2.2L12 21l-2.2-6.8L3 12l6.8-2.2z" fill="currentColor" stroke="none" />
+        </svg>
+      )
+    case 'flux':
+      return (
+        <svg {...common}>
+          <path d="M12 4l8 14H4z" />
+          <path d="M8.5 13.5h7" />
+        </svg>
+      )
+    case 'seedream':
+    case 'seedance':
+      return (
+        <svg {...common}>
+          <path d="M12 4c4 3 5 7 3 11-1.6 3-6 4-9 2 4 0 6-2 6.5-5C13 9 12.5 6.5 12 4z" fill="currentColor" stroke="none" />
+        </svg>
+      )
+    case 'kling':
+      return (
+        <svg {...common}>
+          <path d="M5 5v14" />
+          <path d="M18 5l-9 7 9 7" />
+        </svg>
+      )
+    case 'ideogram':
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="8" />
+          <circle cx="12" cy="12" r="2.6" fill="currentColor" stroke="none" />
+        </svg>
+      )
+    case 'veo':
+    case 'gemini':
+      return (
+        <svg {...common}>
+          <path d="M12 3c1 5 4 8 9 9-5 1-8 4-9 9-1-5-4-8-9-9 5-1 8-4 9-9z" fill="currentColor" stroke="none" />
+        </svg>
+      )
+    case 'hailuo':
+      return (
+        <svg {...common}>
+          <path d="M4 12a8 8 0 0116 0" />
+          <path d="M4 12c2.5 2 5.5 2 8 0s5.5-2 8 0" />
+        </svg>
+      )
+    case 'wan':
+      return (
+        <svg {...common}>
+          <path d="M3 8l3.5 8L12 8l5.5 8L21 8" />
+        </svg>
+      )
+    case 'vidu':
+      return (
+        <svg {...common}>
+          <path d="M4 6l8 12L20 6" />
+          <path d="M8.5 6L12 11.5 15.5 6" />
+        </svg>
+      )
+    case 'grok':
+      return (
+        <svg {...common}>
+          <path d="M5 5l14 14" />
+          <path d="M19 5L5 19" />
+        </svg>
+      )
+    case 'codex':
+      return (
+        <svg {...common}>
+          <path d="M9 6L4 12l5 6" />
+          <path d="M15 6l5 6-5 6" />
+        </svg>
+      )
+    case 'lovart':
+      return <LovartGeneratorToolIcon />
+    default:
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="7" />
+        </svg>
+      )
+  }
 }
 
 function LightningIcon() {
@@ -907,13 +1038,18 @@ function isSilenceCutGeneratorFrame(element) {
   return element?.customData?.[SILENCE_CUT_GENERATOR_FRAME_TAG] === true
 }
 
+function isLovartGeneratorFrame(element) {
+  return element?.customData?.[LOVART_GENERATOR_FRAME_TAG] === true
+}
+
 function isGeneratorFrame(element) {
   return (
     !element?.isDeleted &&
     (isImageGeneratorFrame(element) ||
       isVideoGeneratorFrame(element) ||
       isSubtitleGeneratorFrame(element) ||
-      isSilenceCutGeneratorFrame(element))
+      isSilenceCutGeneratorFrame(element) ||
+      isLovartGeneratorFrame(element))
   )
 }
 
@@ -921,6 +1057,7 @@ function generatorFrameTagFor(kind) {
   if (kind === 'video') return VIDEO_GENERATOR_FRAME_TAG
   if (kind === 'subtitle') return SUBTITLE_GENERATOR_FRAME_TAG
   if (kind === 'silenceCut') return SILENCE_CUT_GENERATOR_FRAME_TAG
+  if (kind === 'lovart') return LOVART_GENERATOR_FRAME_TAG
   return GENERATOR_FRAME_TAG
 }
 
@@ -948,6 +1085,7 @@ function getGeneratorKind(element) {
   if (isVideoGeneratorFrame(element)) return 'video'
   if (isSubtitleGeneratorFrame(element)) return 'subtitle'
   if (isSilenceCutGeneratorFrame(element)) return 'silenceCut'
+  if (isLovartGeneratorFrame(element)) return 'lovart'
   return 'image'
 }
 
@@ -1304,7 +1442,13 @@ function frameFormFromElement(element) {
     silenceCutThresholdDb: clamp(finiteNumberOr(customData.silenceCutThresholdDb, DEFAULT_FRAME_FORM.silenceCutThresholdDb), -60, -20),
     silenceCutPreMarginSeconds: clamp(finiteNumberOr(customData.silenceCutPreMarginSeconds, DEFAULT_FRAME_FORM.silenceCutPreMarginSeconds), 0.05, 0.3),
     silenceCutPostMarginSeconds: clamp(finiteNumberOr(customData.silenceCutPostMarginSeconds, DEFAULT_FRAME_FORM.silenceCutPostMarginSeconds), 0.05, 0.3),
-    silenceCutAudioFadeSeconds: clamp(finiteNumberOr(customData.silenceCutAudioFadeSeconds, DEFAULT_FRAME_FORM.silenceCutAudioFadeSeconds), 0, 0.1)
+    silenceCutAudioFadeSeconds: clamp(finiteNumberOr(customData.silenceCutAudioFadeSeconds, DEFAULT_FRAME_FORM.silenceCutAudioFadeSeconds), 0, 0.1),
+    lovartKind: customData.lovartKind === 'video' ? 'video' : DEFAULT_FRAME_FORM.lovartKind,
+    lovartModel: typeof customData.lovartModel === 'string' && customData.lovartModel ? customData.lovartModel : DEFAULT_FRAME_FORM.lovartModel,
+    lovartVideoModel: typeof customData.lovartVideoModel === 'string' && customData.lovartVideoModel ? customData.lovartVideoModel : DEFAULT_FRAME_FORM.lovartVideoModel,
+    lovartAspectRatio: IMAGE_ASPECTS[customData.lovartAspectRatio] ? customData.lovartAspectRatio : DEFAULT_FRAME_FORM.lovartAspectRatio,
+    lovartVideoAspectRatio: VIDEO_ASPECTS[customData.lovartVideoAspectRatio] ? customData.lovartVideoAspectRatio : DEFAULT_FRAME_FORM.lovartVideoAspectRatio,
+    lovartReferences: normalizeAssetList(customData.lovartReferences)
   }
 }
 
@@ -1331,6 +1475,17 @@ function frameCustomDataFromForm(kind, form) {
       silenceCutPostMarginSeconds: form.silenceCutPostMarginSeconds,
       silenceCutAudioFadeSeconds: form.silenceCutAudioFadeSeconds,
       silenceCutVideoAsset: form.silenceCutVideo || null
+    }
+  }
+  if (kind === 'lovart') {
+    return {
+      lovartPrompt: form.prompt,
+      lovartKind: form.lovartKind === 'video' ? 'video' : 'image',
+      lovartModel: form.lovartModel,
+      lovartVideoModel: form.lovartVideoModel,
+      lovartAspectRatio: form.lovartAspectRatio,
+      lovartVideoAspectRatio: form.lovartVideoAspectRatio,
+      lovartReferences: normalizeAssetList(form.lovartReferences)
     }
   }
   return kind === 'video'
@@ -2007,6 +2162,16 @@ function frameSizeFor(kind, form) {
   if (kind === 'video') return VIDEO_ASPECTS[form.videoAspectRatio] ?? VIDEO_ASPECTS['16:9']
   if (kind === 'subtitle') return { width: 205, height: 364 }
   if (kind === 'silenceCut') return { width: 364, height: 205 }
+  if (kind === 'lovart') {
+    if (form.lovartKind === 'video') return VIDEO_ASPECTS[form.lovartVideoAspectRatio] ?? VIDEO_ASPECTS['16:9']
+    const lovartOption = IMAGE_ASPECTS[form.lovartAspectRatio] ?? IMAGE_ASPECTS['1:1']
+    return {
+      width: Math.max(140, Math.min(980, Math.round(lovartOption.baseWidth * 0.25))),
+      height: Math.max(140, Math.min(980, Math.round(lovartOption.baseHeight * 0.25))),
+      pixelWidth: lovartOption.baseWidth,
+      pixelHeight: lovartOption.baseHeight
+    }
+  }
   const option = IMAGE_ASPECTS[form.aspectRatio] ?? IMAGE_ASPECTS['1:1']
   return {
     width: Math.max(140, Math.min(980, Math.round(option.baseWidth * 0.25))),
@@ -2028,6 +2193,7 @@ export default function App() {
   const [videoPlaybackOverlays, setVideoPlaybackOverlays] = useState([])
   const [subtitlePreviewOverlays, setSubtitlePreviewOverlays] = useState([])
   const [subtitleScrollOffsets, setSubtitleScrollOffsets] = useState({})
+  const [managedSelectionActive, setManagedSelectionActive] = useState(false)
   const subtitlePreviewOverlaysRef = useRef([])
   const [silenceCutAdvancedOpen, setSilenceCutAdvancedOpen] = useState(false)
   const [hoveredVideoPlaybackId, setHoveredVideoPlaybackId] = useState('')
@@ -2245,6 +2411,24 @@ export default function App() {
     const subtitleOverlays = buildSubtitlePreviewOverlays(scene)
     subtitlePreviewOverlaysRef.current = subtitleOverlays
     setSubtitlePreviewOverlays(subtitleOverlays)
+    // Hide Excalidraw's shape-properties panel while only app-managed
+    // elements (generator frames, SRT cards, generated media) are selected —
+    // their UI lives in our overlays/panels, like Youtube-AGI.
+    const elementsById = new Map(scene.elements.map((element) => [element.id, element]))
+    const selectedIds = getSelectedIds(scene.appState)
+    setManagedSelectionActive(
+      selectedIds.length > 0 &&
+        selectedIds.every((id) => {
+          const element = elementsById.get(id)
+          return (
+            element &&
+            (isGeneratorFrame(element) ||
+              isGeneratedSubtitleResult(element) ||
+              isCanvasVideoElement(element) ||
+              isCanvasImageElement(element))
+          )
+        })
+    )
   }, [])
 
   const syncGeneratorUi = useCallback((scene) => {
@@ -3901,9 +4085,32 @@ export default function App() {
 
     try {
       await saveCanvas(latestSceneRef.current)
-      const endpoint = kind === 'video' ? GENERATE_VIDEO_ENDPOINT : GENERATE_IMAGE_ENDPOINT
+      const lovartIsVideo = kind === 'lovart' && savedForm.lovartKind === 'video'
+      const endpoint = kind === 'video' || lovartIsVideo ? GENERATE_VIDEO_ENDPOINT : GENERATE_IMAGE_ENDPOINT
       const body =
-        kind === 'video'
+        kind === 'lovart'
+          ? {
+              prompt,
+              model: lovartIsVideo ? savedForm.lovartVideoModel : savedForm.lovartModel,
+              aspectRatio: lovartIsVideo ? savedForm.lovartVideoAspectRatio : savedForm.lovartAspectRatio,
+              referenceImagePaths: normalizeAssetList(savedForm.imageReferences)
+                .filter((asset) => asset.kind !== 'video')
+                .map((asset) => asset.path)
+                .filter(Boolean),
+              referenceImages: normalizeAssetList(savedForm.imageReferences)
+                .filter((asset) => asset.kind !== 'video' && !asset.path)
+                .map((asset) => asset.dataURL || asset.url)
+                .filter(Boolean),
+              selectCreated: true,
+              anchorElementId,
+              placement: 'replace',
+              replaceAnchor: true,
+              matchAnchor: true,
+              displayWidth: anchorElement.width,
+              displayHeight: anchorElement.height,
+              customData: frameCustomDataFromForm(kind, savedForm)
+            }
+          : kind === 'video'
           ? {
               prompt,
               model: savedForm.videoModel,
@@ -4234,13 +4441,23 @@ export default function App() {
     ? isViewportPlacementNearViewport(activePanelTarget, panelAppState, 24)
     : false
   const showPromptPanel = Boolean(activePanelTarget && activePanelTargetIsVisible && !isCurrentFrameGenerating)
-  const imageModels = capabilities?.imageModels ?? [
-    { id: 'gpt-image-2-codex', label: 'GPT-Image-2.0(Codex)' },
-    { id: 'grok-imagine-image-hermes', label: 'Grok Imagine(Hermes)' }
+  const allImageModels = capabilities?.imageModels ?? [
+    { id: 'gpt-image-2-codex', label: 'GPT Image 2 (Codex)', provider: 'codex' },
+    { id: 'grok-imagine-image-hermes', label: 'Grok Imagine (Hermes)', provider: 'grok' }
   ]
-  const videoModels = capabilities?.videoModels ?? [{ id: 'grok-imagine-video-hermes', label: 'Grok Imagine(Hermes)' }]
+  const allVideoModels = capabilities?.videoModels ?? [{ id: 'grok-imagine-video-hermes', label: 'Grok Imagine (Hermes)', provider: 'grok' }]
+  // The standard generators carry Codex/Hermes/BuzzAssist models; Lovart
+  // models live in the dedicated Lovart generator.
+  const imageModels = allImageModels.filter((model) => !model.requiresLovart)
+  const videoModels = allVideoModels.filter((model) => !model.requiresLovart)
+  const lovartImageModels = allImageModels.filter((model) => model.requiresLovart)
+  const lovartVideoModels = allVideoModels.filter((model) => model.requiresLovart)
   const imageModelLabel = imageModels.find((model) => model.id === frameForm.imageModel)?.label ?? frameForm.imageModel
   const videoModelLabel = videoModels.find((model) => model.id === frameForm.videoModel)?.label ?? frameForm.videoModel
+  const lovartActiveModels = frameForm.lovartKind === 'video' ? lovartVideoModels : lovartImageModels
+  const lovartActiveModelId = frameForm.lovartKind === 'video' ? frameForm.lovartVideoModel : frameForm.lovartModel
+  const lovartModelEntry = lovartActiveModels.find((model) => model.id === lovartActiveModelId) ?? lovartActiveModels[0] ?? null
+  const lovartReferences = normalizeAssetList(frameForm.lovartReferences)
   const imageReferences = normalizeAssetList(frameForm.imageReferences)
   const videoReferenceImages = normalizeAssetList(frameForm.videoReferenceImages)
   const videoReferenceVideos = normalizeAssetList(frameForm.videoReferenceVideos)
@@ -4289,7 +4506,7 @@ export default function App() {
 
   return (
     <main
-      className={`codex-excalidraw-shell lovart-ai-root${showPromptPanel ? ' hide-generator-props' : ''}`}
+      className={`codex-excalidraw-shell lovart-ai-root${showPromptPanel || managedSelectionActive ? ' hide-generator-props' : ''}`}
       aria-label="Codex Excalidraw canvas"
       onPointerDownCapture={closeOpenMenuIfOutsideGeneratorUi}
       onMouseDownCapture={closeOpenMenuIfOutsideGeneratorUi}
@@ -4378,6 +4595,24 @@ export default function App() {
           >
             <SilenceCutGeneratorToolIcon />
           </button>
+          <button
+            type="button"
+            className="lovart-ai-button"
+            aria-label="Lovartジェネレーター"
+            data-lovart-tooltip="Lovartジェネレーター"
+            data-lovart-generator-kind="lovart"
+            onPointerDown={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+            }}
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              createGeneratorFrame('lovart')
+            }}
+          >
+            <LovartGeneratorToolIcon />
+          </button>
         </div>
       ) : null}
 
@@ -4392,7 +4627,9 @@ export default function App() {
               ? 'SRT Generator'
               : overlay.kind === 'silenceCut'
                 ? 'Silence Cut Generator'
-                : 'Image Generator'
+                : overlay.kind === 'lovart'
+                  ? 'Lovart Generator'
+                  : 'Image Generator'
         const overlayMetrics = getFrameOverlayMetrics(overlay.width, overlay.height)
         return (
           <div
@@ -4502,6 +4739,10 @@ export default function App() {
                   <SrtCenterIcon size={overlayMetrics.iconSize} />
                 ) : overlay.kind === 'silenceCut' ? (
                   <SilenceCutCenterIcon size={overlayMetrics.iconSize} />
+                ) : overlay.kind === 'lovart' ? (
+                  <span style={{ width: overlayMetrics.iconSize, height: overlayMetrics.iconSize, display: 'inline-flex', color: '#b89de0' }}>
+                    <LovartGeneratorToolIcon />
+                  </span>
                 ) : isVideo ? (
                   <VideoCenterIcon size={overlayMetrics.iconSize} />
                 ) : (
@@ -4661,7 +4902,7 @@ export default function App() {
                     ? { height: '48px', minHeight: '48px', overflowY: 'auto', paddingBottom: 0, resize: 'none' }
                     : undefined
               }
-              placeholder="今日は何をしますか？"
+              placeholder={activeFrameKind === 'lovart' ? 'Lovart に依頼…' : '今日は何をしますか？'}
               value={frameForm.prompt}
               onChange={(event) => updateFrameForm('prompt', event.target.value)}
               onFocus={() => setOpenMenu(null)}
@@ -4872,6 +5113,30 @@ export default function App() {
           {generationError ? <div className="lovart-error">{generationError}</div> : null}
           <div className="lovart-ai-bottom">
             <div className="lovart-ai-left">
+              {activeFrameKind === 'lovart' ? (
+                <div className="lovart-video-tabs">
+                  <button
+                    type="button"
+                    className={frameForm.lovartKind !== 'video' ? 'is-selected' : ''}
+                    onClick={() => {
+                      setOpenMenu(null)
+                      patchFrameForm({ lovartKind: 'image' })
+                    }}
+                  >
+                    画像
+                  </button>
+                  <button
+                    type="button"
+                    className={frameForm.lovartKind === 'video' ? 'is-selected' : ''}
+                    onClick={() => {
+                      setOpenMenu(null)
+                      patchFrameForm({ lovartKind: 'video' })
+                    }}
+                  >
+                    動画
+                  </button>
+                </div>
+              ) : null}
               {activeFrameKind === 'video' ? (
                 <div className="lovart-video-tabs">
                   <button
@@ -4902,23 +5167,40 @@ export default function App() {
                   className={`lovart-pill${openMenu === 'model' ? ' tooltip-hidden' : ''}`}
                   onClick={() => setOpenMenu((current) => (current === 'model' ? null : 'model'))}
                 >
-                  <span>{activeFrameKind === 'video' ? videoModelLabel : imageModelLabel}</span>
+                  {activeFrameKind === 'lovart' && lovartModelEntry ? (
+                    <span className="lovart-model-icon"><ModelProviderIcon provider={lovartModelEntry.provider} /></span>
+                  ) : null}
+                  <span>
+                    {activeFrameKind === 'lovart'
+                      ? lovartModelEntry?.label ?? lovartActiveModelId
+                      : activeFrameKind === 'video'
+                        ? videoModelLabel
+                        : imageModelLabel}
+                  </span>
                   <ChevronIcon />
                 </button>
                 {openMenu === 'model' ? (
                   <div className="lovart-menu" data-lovart-menu="model">
                     <div className="lovart-menu-header">モデル</div>
-                    {(activeFrameKind === 'video' ? videoModels : imageModels).map((model) => (
+                    {(activeFrameKind === 'lovart' ? lovartActiveModels : activeFrameKind === 'video' ? videoModels : imageModels).map((model) => (
                       <button
                         type="button"
                         key={model.id}
                         onClick={() => {
-                          updateFrameForm(activeFrameKind === 'video' ? 'videoModel' : 'imageModel', model.id)
+                          updateFrameForm(
+                            activeFrameKind === 'lovart'
+                              ? frameForm.lovartKind === 'video' ? 'lovartVideoModel' : 'lovartModel'
+                              : activeFrameKind === 'video' ? 'videoModel' : 'imageModel',
+                            model.id
+                          )
                           setOpenMenu(null)
                         }}
                       >
+                        <span className="lovart-model-icon"><ModelProviderIcon provider={model.provider} /></span>
                         <span>{model.label}</span>
-                        {(activeFrameKind === 'video' ? frameForm.videoModel : frameForm.imageModel) === model.id ? (
+                        {(activeFrameKind === 'lovart'
+                          ? lovartActiveModelId
+                          : activeFrameKind === 'video' ? frameForm.videoModel : frameForm.imageModel) === model.id ? (
                           <span className="menu-check">✓</span>
                         ) : null}
                       </button>
@@ -4926,7 +5208,7 @@ export default function App() {
                   </div>
                 ) : null}
               </div>
-              {activeFrameKind === 'image' ? (
+              {activeFrameKind !== 'video' ? (
                 <div className="lovart-menu-wrap">
                   <button
                     type="button"
@@ -4968,6 +5250,48 @@ export default function App() {
               ) : null}
             </div>
             <div className="lovart-ai-right">
+              {activeFrameKind === 'lovart' ? (
+                <div className="lovart-menu-wrap">
+                  <button
+                    type="button"
+                    className="lovart-pill"
+                    data-lovart-tooltip="サイズ"
+                    onClick={() => setOpenMenu((current) => (current === 'ratio' ? null : 'ratio'))}
+                  >
+                    <span>{frameForm.lovartKind === 'video' ? frameForm.lovartVideoAspectRatio : frameForm.lovartAspectRatio}</span>
+                    <ChevronIcon />
+                  </button>
+                  {openMenu === 'ratio' ? (
+                    <div className="lovart-menu wide" data-lovart-menu="ratio">
+                      <div className="lovart-menu-header">形式</div>
+                      {Object.keys(frameForm.lovartKind === 'video' ? VIDEO_ASPECTS : IMAGE_ASPECTS).map((ratio) => (
+                        <button
+                          type="button"
+                          key={ratio}
+                          onClick={() => {
+                            updateFrameForm(frameForm.lovartKind === 'video' ? 'lovartVideoAspectRatio' : 'lovartAspectRatio', ratio)
+                            setOpenMenu(null)
+                          }}
+                        >
+                          <span className="lovart-ratio-icon">
+                            <span
+                              className="lovart-ratio-shape"
+                              style={{
+                                width: ratio.startsWith('16') || ratio === '21:9' ? 16 : ratio.endsWith(':16') || ratio === '9:16' ? 8 : 12,
+                                height: ratio.endsWith(':16') || ratio === '9:16' ? 16 : ratio.startsWith('16') || ratio === '21:9' ? 8 : 12
+                              }}
+                            />
+                          </span>
+                          <span>{ratio}</span>
+                          {(frameForm.lovartKind === 'video' ? frameForm.lovartVideoAspectRatio : frameForm.lovartAspectRatio) === ratio ? (
+                            <span className="menu-check">✓</span>
+                          ) : null}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               {activeFrameKind === 'image' ? (
                 <>
                   <div className="lovart-menu-wrap">
@@ -5038,7 +5362,7 @@ export default function App() {
                     ) : null}
                   </div>
                 </>
-              ) : (
+              ) : activeFrameKind === 'video' ? (
                 <div className="lovart-menu-wrap">
                   <button
                     type="button"
@@ -5113,7 +5437,7 @@ export default function App() {
                     </div>
                   ) : null}
                 </div>
-              )}
+              ) : null}
               <button
                 type="button"
                 className={`lovart-generate${isCurrentFrameGenerating ? ' is-generating' : ''}`}

@@ -1338,3 +1338,17 @@ body {
     width: min(96vw, 520px);
   }
 }
+
+.lovart-model-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  color: #3d3d4e;
+}
+
+.lovart-menu button .lovart-model-icon {
+  margin-right: 2px;
+}

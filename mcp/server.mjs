@@ -2,7 +2,7 @@ import { copyFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/prom
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import readline from "node:readline";
 import { generateKeyBetween } from "fractional-indexing";
-import { generateImageMedia, generateVideoMedia, runWithConcurrency } from "../lib/mediaGeneration.mjs";
+import { IMAGE_MODELS, VIDEO_MODELS, generateImageMedia, generateVideoMedia, runWithConcurrency } from "../lib/mediaGeneration.mjs";
 import { getBuzzAssistAuthStatus, loginBuzzAssistViaBrowser } from "../lib/buzzassistApi.mjs";
 import {
   OFFICIAL_EXCALIDRAW_README,
@@ -33,16 +33,8 @@ const TOOL_BUZZASSIST_LOGIN = "buzzassist_login";
 const TOOL_BUZZASSIST_AUTH_STATUS = "buzzassist_auth_status";
 const TOOL_GENERATE_SUBTITLES = "generate_excalidraw_subtitles";
 const TOOL_SILENCE_CUT_VIDEO = "silence_cut_excalidraw_video";
-const IMAGE_MODEL_IDS = [
-  "gpt-image-2-codex", "grok-imagine-image-hermes",
-  "nano-banana-2", "gpt-image-2", "seedream-v5-lite", "grok-imagine-image-api",
-  "lovart-midjourney", "lovart-flux-2-max", "lovart-nano-banana-pro", "lovart-ideogram-v4", "lovart-agent",
-];
-const VIDEO_MODEL_IDS = [
-  "grok-imagine-video-hermes",
-  "seedance-2", "seedance-2-fast", "kling-v3", "kling-o3", "kling-v2-6", "grok-imagine-video-api",
-  "lovart-veo-3-1", "lovart-veo-3-1-fast", "lovart-hailuo-2-3", "lovart-kling-3-omni", "lovart-wan-2-6",
-];
+const IMAGE_MODEL_IDS = IMAGE_MODELS.map((model) => model.id);
+const VIDEO_MODEL_IDS = VIDEO_MODELS.map((model) => model.id);
 const CANVAS_FILE_NAME = "excalidraw-canvas.json";
 const SELECTION_FILE_NAME = "excalidraw-selection.json";
 const ASSETS_ROUTE = "/excalidraw-assets/";
