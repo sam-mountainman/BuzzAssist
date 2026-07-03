@@ -5397,7 +5397,12 @@ export default function App() {
             event.stopPropagation()
             openCanvasPicker(target)
           }}
-          onPointerDown={(event) => event.stopPropagation()}
+          onPointerDown={(event) => {
+            event.stopPropagation()
+            // Clicking anywhere in the panel outside a pill/menu (prompt
+            // textarea, slots, tabs) closes the open settings menu.
+            if (event.target instanceof Element && !event.target.closest('.lovart-menu-wrap')) setOpenMenu(null)
+          }}
           onMouseDown={(event) => event.stopPropagation()}
           onClick={(event) => {
             event.stopPropagation()
@@ -6070,7 +6075,10 @@ export default function App() {
           className={`lovart-ai-panel lovart-utility-panel${openMenuBlocksPrompt ? ' has-open-menu' : ''}`}
           style={panelStyle}
           aria-label="SRT Generator"
-          onPointerDown={(event) => event.stopPropagation()}
+          onPointerDown={(event) => {
+            event.stopPropagation()
+            if (event.target instanceof Element && !event.target.closest('.lovart-menu-wrap')) setOpenMenu(null)
+          }}
           onMouseDown={(event) => event.stopPropagation()}
           onClick={(event) => event.stopPropagation()}
         >
@@ -6366,7 +6374,10 @@ export default function App() {
           className={`lovart-ai-panel lovart-utility-panel${openMenuBlocksPrompt ? ' has-open-menu' : ''}`}
           style={panelStyle}
           aria-label="Silence Cut Generator"
-          onPointerDown={(event) => event.stopPropagation()}
+          onPointerDown={(event) => {
+            event.stopPropagation()
+            if (event.target instanceof Element && !event.target.closest('.lovart-menu-wrap')) setOpenMenu(null)
+          }}
           onMouseDown={(event) => event.stopPropagation()}
           onClick={(event) => event.stopPropagation()}
         >

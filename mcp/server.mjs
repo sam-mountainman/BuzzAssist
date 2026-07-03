@@ -101,11 +101,12 @@ async function ensureCanvasVisible(args = {}) {
     let status = await fetchJsonQuick(`${baseUrl}/api/canvas-clients`);
     if (!status) {
       const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-      const child = spawn("npm", ["run", "dev"], {
+      const child = spawn(process.platform === "win32" ? "npm.cmd" : "npm", ["run", "dev"], {
         cwd: repoRoot,
         env: { ...process.env, EXCALIDRAW_CANVAS_DIR: resolveCanvasDir(args) },
         detached: true,
         stdio: "ignore",
+        shell: process.platform === "win32",
       });
       child.unref();
       const deadline = Date.now() + 15_000;
@@ -114,8 +115,10 @@ async function ensureCanvasVisible(args = {}) {
         status = await fetchJsonQuick(`${baseUrl}/api/canvas-clients`);
       }
     }
-    if (status && Number(status.clients) === 0 && process.platform === "darwin") {
-      spawn("open", [baseUrl], { detached: true, stdio: "ignore" }).unref();
+    if (status && Number(status.clients) === 0) {
+      const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
+      const openerArgs = process.platform === "win32" ? ["/c", "start", "", baseUrl] : [baseUrl];
+      spawn(opener, openerArgs, { detached: true, stdio: "ignore" }).unref();
     }
   } catch {
     // best-effort — never block the tool call

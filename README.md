@@ -11,7 +11,11 @@ Codex Excalidraw is a local Excalidraw canvas for Codex and Claude Code, modeled
 ## Run The Canvas
 
 ```bash
+# macOS / Linux
 ./scripts/start-canvas.sh /path/to/user/project
+
+# any OS (Windows included)
+node scripts/start-canvas.mjs /path/to/user/project
 ```
 
 Default URL:
@@ -181,7 +185,7 @@ Same model as the Youtube-AGI (BuzzAssist) folder canvas: a canvas belongs to on
   canvas/assets-trash/              # orphaned assets moved here by startup maintenance (recoverable)
 ```
 
-Bind the canvas to a project with `./scripts/start-canvas.sh /path/to/project` (or `EXCALIDRAW_PROJECT_DIR`). MCP tools take `projectDir` per call, so different projects keep separate canvases and assets.
+Bind the canvas to a project with `./scripts/start-canvas.sh /path/to/project` (macOS/Linux), `node scripts/start-canvas.mjs /path/to/project` (any OS), or `EXCALIDRAW_PROJECT_DIR`. MCP tools take `projectDir` per call, so different projects keep separate canvases and assets.
 
 Downloads: every media header has a ⬇ button (`/excalidraw-assets/<name>?download=1`); selecting two or more media shows a ZIP chip backed by `POST /api/assets/archive` (STORE-method ZIP, `lib/zipStore.mjs`). Select-all + chip = bulk export.
 
