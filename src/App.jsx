@@ -31,6 +31,8 @@ const GENERATOR_PANEL_VIDEO_WIDTH = 580
 const GENERATOR_SCROLL_ANIMATION_MS = 600
 const SAVE_DELAY_MS = 450
 const SELECTION_DELAY_MS = 180
+const CANVAS_ASSETS_ROUTE = '/excalidraw-assets/'
+const ASSET_HYDRATION_CONCURRENCY = 6
 const VIDEO_POSTER_FALLBACK_DATA_URL =
   'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjgwIDcyMCI+PHJlY3Qgd2lkdGg9IjEyODAiIGhlaWdodD0iNzIwIiBmaWxsPSIjMTExODI3Ii8+PHBhdGggZD0iTTU2MCAyNTB2MjIwbDE5MC0xMTB6IiBmaWxsPSIjZmZmIiBvcGFjaXR5PSIuOSIvPjwvc3ZnPg=='
 
@@ -357,6 +359,108 @@ function normalizeExcalidrawFiles(files) {
     const dataURL = normalizeDataURL(file.dataURL)
     next[id] = dataURL === file.dataURL ? file : { ...file, dataURL }
     if (next[id] !== file) changed = true
+  }
+  return changed ? next : files
+}
+
+// Disk-backed file records store their asset URL ('/excalidraw-assets/...') in
+// dataURL instead of inline base64 so the scene JSON stays small. They are
+// hydrated back to base64 client-side before being handed to Excalidraw.
+function isAssetBackedFileRecord(file) {
+  return typeof file?.dataURL === 'string' && file.dataURL.startsWith(CANVAS_ASSETS_ROUTE)
+}
+
+const assetDataURLCache = new Map()
+
+function fetchAssetDataURL(url) {
+  let pending = assetDataURLCache.get(url)
+  if (pending) return pending
+  pending = (async () => {
+    const response = await fetch(url)
+    if (!response.ok) throw new Error(`Failed to load asset ${url}: ${response.status}`)
+    const blob = await response.blob()
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onerror = () => reject(reader.error || new Error(`Failed to read asset ${url}`))
+      reader.onload = () => resolve(String(reader.result || ''))
+      reader.readAsDataURL(blob)
+    })
+  })()
+  pending.catch(() => {
+    if (assetDataURLCache.get(url) === pending) assetDataURLCache.delete(url)
+  })
+  assetDataURLCache.set(url, pending)
+  return pending
+}
+
+// Fetch asset-backed file records (concurrency-limited) and hand each hydrated
+// record to `onHydrated` as it resolves, so the scene renders immediately and
+// images pop in as their assets load.
+async function hydrateAssetBackedFiles(files, onHydrated) {
+  const pending = Object.values(files ?? {}).filter(isAssetBackedFileRecord)
+  if (pending.length === 0) return
+  let cursor = 0
+  const worker = async () => {
+    while (cursor < pending.length) {
+      const file = pending[cursor]
+      cursor += 1
+      const url = file.dataURL
+      try {
+        const dataURL = await fetchAssetDataURL(url)
+        onHydrated({ ...file, dataURL, codexAssetBacked: true, codexAssetUrl: url })
+      } catch (error) {
+        console.error(error)
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(ASSET_HYDRATION_CONCURRENCY, pending.length) }, worker))
+}
+
+// Inverse of hydration for the save path: swap hydrated base64 back to the
+// asset URL so PUT /api/canvas payloads stay small over the wire. Only records
+// verifiably asset-backed are stripped (marked codexAssetBacked during
+// hydration, or their element customData points at a canvas asset). Video
+// posters and drag-dropped inline images keep their inline base64.
+function stripAssetBackedFilesForSave(elements, files) {
+  if (!files || typeof files !== 'object') return files
+  const videoFileIds = new Set()
+  const assetUrlByFileId = new Map()
+  for (const element of elements ?? []) {
+    if (!element?.fileId) continue
+    const customData = element.customData ?? {}
+    if (customData.codexMediaKind === 'video') {
+      videoFileIds.add(element.fileId)
+      continue
+    }
+    if (
+      typeof customData.codexAssetPath === 'string' && customData.codexAssetPath &&
+      typeof customData.codexAssetUrl === 'string' && customData.codexAssetUrl.startsWith(CANVAS_ASSETS_ROUTE) &&
+      !assetUrlByFileId.has(element.fileId)
+    ) {
+      assetUrlByFileId.set(element.fileId, customData.codexAssetUrl)
+    }
+  }
+  let changed = false
+  const next = {}
+  for (const [id, file] of Object.entries(files)) {
+    const inline = typeof file?.dataURL === 'string' && file.dataURL.startsWith('data:')
+    if (!inline || videoFileIds.has(id)) {
+      next[id] = file
+      continue
+    }
+    const markedUrl =
+      file.codexAssetBacked === true &&
+      typeof file.codexAssetUrl === 'string' &&
+      file.codexAssetUrl.startsWith(CANVAS_ASSETS_ROUTE)
+        ? file.codexAssetUrl
+        : null
+    const assetUrl = markedUrl || assetUrlByFileId.get(id) || null
+    if (!assetUrl) {
+      next[id] = file
+      continue
+    }
+    next[id] = { ...file, dataURL: assetUrl, codexAssetBacked: true }
+    changed = true
   }
   return changed ? next : files
 }
@@ -1557,8 +1661,14 @@ export default function App() {
     window.clearTimeout(saveTimerRef.current)
     saveTimerRef.current = null
     // Persist viewport only (never selection) so the round-tripped scene can't
-    // re-impose a stale selection on the live editor.
-    const persisted = { ...scene, appState: persistableAppState(scene.appState) }
+    // re-impose a stale selection on the live editor. Asset-backed file records
+    // are stripped back to their asset URL so we never re-embed hydrated base64
+    // into the persisted scene (the server applies the same rule as a backstop).
+    const persisted = {
+      ...scene,
+      appState: persistableAppState(scene.appState),
+      files: stripAssetBackedFilesForSave(scene.elements, scene.files)
+    }
     // Remember what we just saved so the SSE echo of this exact content is
     // ignored instead of clobbering newer local edits.
     lastSyncedFingerprintRef.current = sceneFingerprint(persisted)
@@ -1666,6 +1776,13 @@ export default function App() {
   useEffect(() => {
     if (initialScene) syncGeneratorUi(initialScene)
   }, [initialScene, syncGeneratorUi])
+
+  // Hydrate disk-backed file records once the Excalidraw API is ready. The
+  // scene renders immediately; images pop in as each asset finishes loading.
+  useEffect(() => {
+    if (!api || !initialScene) return
+    hydrateAssetBackedFiles(initialScene.files, (file) => api.addFiles([file]))
+  }, [api, initialScene])
 
   const handleChange = useCallback(
     (elements, appState, files) => {
@@ -1877,7 +1994,12 @@ export default function App() {
         const nextScene = { ...normalized, appState: nextAppState }
         latestSceneRef.current = nextScene
         syncGeneratorUi(nextScene)
-        api.addFiles(Object.values(normalized.files))
+        const fileRecords = Object.values(normalized.files)
+        const readyFiles = fileRecords.filter((file) => !isAssetBackedFileRecord(file))
+        if (readyFiles.length > 0) api.addFiles(readyFiles)
+        // Disk-backed records hydrate asynchronously after the scene applies;
+        // images pop in as each asset resolves instead of blocking the update.
+        hydrateAssetBackedFiles(normalized.files, (file) => api.addFiles([file]))
         window.setTimeout(() => {
           api.updateScene({
             elements: normalized.elements,

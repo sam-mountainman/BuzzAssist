@@ -13,7 +13,9 @@ import {
   insertGeneratorFrameBatch,
 } from "../lib/canvasScene.mjs";
 import { silenceCutVideo } from "../lib/tempoCut.mjs";
-import { generateSubtitleSrt } from "../lib/subtitleGeneration.mjs";
+import { estimateCreditsForJob } from "../lib/mediaCredits.mjs";
+import { isFalImageModel, isFalVideoModel, previewFalImageRequest, previewFalVideoRequest } from "../lib/falMediaGeneration.mjs";
+import { generateSubtitleSrt, normalizeSubtitleHoldSeconds, renderSrt } from "../lib/subtitleGeneration.mjs";
 import { tmpdir } from "node:os";
 
 const SERVER_NAME = "Codex Excalidraw MCP";
@@ -445,8 +447,9 @@ async function insertExcalidrawImage(args = {}) {
 
   const { fileName, filePath } = await uniqueFilePath(assetsDir, args.fileName || basename(sourceImagePath));
   const mimeType = mimeTypeForFile(fileName);
-  const fileData = await readFile(sourceImagePath);
-  const dataURL = `data:${mimeType};base64,${fileData.toString("base64")}`;
+  const assetUrl = `${ASSETS_ROUTE}${encodeURIComponent(fileName)}`;
+  // The asset is always copied into canvas/assets, so reference it by URL
+  // instead of embedding base64 into the scene JSON (hydrated client-side).
   const existingIds = new Set([
     ...scene.elements.map((element) => element.id),
     ...Object.keys(scene.files ?? {}),
@@ -458,7 +461,7 @@ async function insertExcalidrawImage(args = {}) {
   const customData = {
     codexInsertedImage: true,
     codexAssetPath: filePath,
-    codexAssetUrl: `${ASSETS_ROUTE}${encodeURIComponent(fileName)}`,
+    codexAssetUrl: assetUrl,
     ...(anchorElementId ? { codexAnchorElementId: anchorElementId } : {}),
     ...(args.customData && typeof args.customData === "object" ? args.customData : {}),
   };
@@ -473,7 +476,8 @@ async function insertExcalidrawImage(args = {}) {
   const fileRecord = {
     id: fileId,
     mimeType,
-    dataURL,
+    dataURL: assetUrl,
+    codexAssetBacked: true,
     created: Date.now(),
     lastRetrieved: Date.now(),
   };
@@ -521,7 +525,49 @@ async function insertExcalidrawVideo(args = {}) {
   return insertExcalidrawVideoMedia(args);
 }
 
+function estimateJobCredits(kind, args) {
+  try {
+    return estimateCreditsForJob({
+      kind,
+      model: args.model,
+      imageSize: args.imageSize ?? args.size,
+      quality: args.quality,
+      duration: args.duration,
+      resolution: args.resolution,
+      generateAudio: args.generateAudio ?? args.generate_audio,
+      durationSeconds: args.durationSeconds,
+    });
+  } catch {
+    return null;
+  }
+}
+
+function buildGenerationPayloadPreview(kind, args = {}) {
+  const isFal = kind === "image" ? isFalImageModel(args.model) : isFalVideoModel(args.model);
+  const estimate = estimateJobCredits(kind, args);
+  if (!isFal) {
+    return {
+      ok: true,
+      payloadPreview: true,
+      model: args.model ?? (kind === "image" ? "gpt-image-2-codex" : "grok-imagine-video-hermes"),
+      local: true,
+      estimatedCredits: estimate?.credits ?? 0,
+      estimatedCostYen: estimate?.estimatedCostYen ?? 0,
+      note: "Local model (Codex/Hermes) — no BuzzAssist credits consumed.",
+    };
+  }
+  const preview = kind === "image" ? previewFalImageRequest(args) : previewFalVideoRequest(args);
+  return {
+    ok: true,
+    payloadPreview: true,
+    ...preview,
+    estimatedCredits: estimate?.credits ?? null,
+    estimatedCostYen: estimate?.estimatedCostYen ?? null,
+  };
+}
+
 async function generateExcalidrawImage(args = {}) {
+  if (args.payloadPreview) return buildGenerationPayloadPreview("image", args);
   const media = await generateImageMedia({
     ...args,
     aspectRatio: args.aspectRatio ?? args.aspect_ratio,
@@ -552,6 +598,7 @@ async function generateExcalidrawImage(args = {}) {
 }
 
 async function generateExcalidrawVideo(args = {}) {
+  if (args.payloadPreview) return buildGenerationPayloadPreview("video", args);
   const media = await generateVideoMedia({
     ...args,
     aspectRatio: args.aspectRatio ?? args.aspect_ratio,
@@ -973,6 +1020,7 @@ function toolDefinitions() {
           quality: { type: "string", description: "Quality hint. high maps to Grok quality mode." },
           referenceImagePaths: { type: "array", items: { type: "string" }, description: "Optional local image references for Hermes image edit." },
           reference_image_paths: { type: "array", items: { type: "string" }, description: "Alias for referenceImagePaths." },
+          payloadPreview: { type: "boolean", description: "Return the resolved endpoint, request payload, and estimated BuzzAssist credits without generating." },
           placement: { type: "string", enum: ["right", "left", "below", "replace", "inside"] },
           margin: { type: "number" },
           matchAnchor: { type: "boolean" },
@@ -1031,6 +1079,7 @@ function toolDefinitions() {
           reference_video_paths: { type: "array", items: { type: "string" }, description: "Alias for referenceVideoPaths." },
           referenceVideos: { type: "array", items: { type: "string" }, description: "Optional reference video data URLs or URLs." },
           reference_videos: { type: "array", items: { type: "string" }, description: "Alias for referenceVideos." },
+          payloadPreview: { type: "boolean", description: "Return the resolved endpoint, request payload, and estimated BuzzAssist credits without generating." },
           placement: { type: "string", enum: ["right", "left", "below", "replace", "inside"] },
           margin: { type: "number" },
           matchAnchor: { type: "boolean" },
@@ -1152,11 +1201,26 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE_SUBTITLES,
       title: "Generate Excalidraw Subtitles",
-      description: "Generate Japanese SRT subtitles from an audio file via BuzzAssist cloud (ElevenLabs forced alignment when a script is given, Scribe v2 otherwise), save the SRT under canvas/assets, and place an SRT card on the canvas. Requires buzzassist_login.",
+      description: "Generate Japanese SRT subtitles from an audio file via BuzzAssist cloud (ElevenLabs forced alignment when a script is given, Scribe v2 otherwise), save the SRT under canvas/assets, and place an SRT card on the canvas. Requires buzzassist_login. For best line breaks use the two-step LLM flow: call once with returnWordsOnly=true to get timed words, decide semantic line breaks yourself (respect maxCharsPerLine and 1-2 lines per cue), then call again with subtitleLines to render and place the SRT without a second cloud call.",
       inputSchema: {
         type: "object",
         properties: {
-          audioPath: { type: "string", description: "Absolute local audio file path (mp3/wav/m4a/ogg/opus/webm/flac/aac)." },
+          audioPath: { type: "string", description: "Absolute local audio file path (mp3/wav/m4a/ogg/opus/webm/flac/aac). Required unless subtitleLines is given." },
+          returnWordsOnly: { type: "boolean", description: "Return the transcript and timed words without building SRT or touching the canvas. Use as step 1 of the LLM segmentation flow." },
+          subtitleLines: {
+            type: "array",
+            description: "Pre-segmented cues (step 2 of the LLM flow). Each cue is rendered as one SRT block; no cloud call is made.",
+            items: {
+              type: "object",
+              properties: {
+                text: { type: "string", description: "Cue text. Use \\n for a second line." },
+                start: { type: "number", description: "Cue start seconds." },
+                end: { type: "number", description: "Cue end seconds." },
+              },
+              required: ["text", "start", "end"],
+              additionalProperties: false,
+            },
+          },
           scriptText: { type: "string", description: "Full narration script. Providing it switches to scripted mode (forced alignment)." },
           scriptPath: { type: "string", description: "Absolute path to a UTF-8 script text file. Alternative to scriptText." },
           mode: { type: "string", enum: ["scripted", "scriptless"], description: "Defaults to scripted when a script is provided, else scriptless." },
@@ -1174,7 +1238,6 @@ function toolDefinitions() {
           margin: { type: "number" },
           dryRun: { type: "boolean", description: "Generate the SRT without saving it to the canvas." },
         },
-        required: ["audioPath"],
         additionalProperties: false,
       },
       annotations: {
@@ -1288,7 +1351,59 @@ async function handleBuzzAssistLogin(args = {}) {
   };
 }
 
+function normalizeProvidedSubtitleLines(rawLines) {
+  const lines = rawLines
+    .map((line) => ({
+      text: String(line?.text ?? "").trim(),
+      start: Number(line?.start),
+      end: Number(line?.end),
+    }))
+    .filter((line) => line.text && Number.isFinite(line.start) && Number.isFinite(line.end) && line.end > line.start)
+    .sort((a, b) => a.start - b.start);
+  if (lines.length === 0) throw new Error("subtitleLines must contain cues with text, start, and end (end > start).");
+  return lines;
+}
+
 async function generateExcalidrawSubtitles(args = {}) {
+  if (Array.isArray(args.subtitleLines) && args.subtitleLines.length > 0) {
+    const holdSeconds = normalizeSubtitleHoldSeconds(args.holdSeconds);
+    const lines = normalizeProvidedSubtitleLines(args.subtitleLines).map((line, index, all) => {
+      const nextStart = index + 1 < all.length ? all[index + 1].start : Infinity;
+      return { ...line, end: Math.min(line.end + holdSeconds, nextStart) };
+    });
+    const srtText = renderSrt(lines);
+    const placement = args.dryRun
+      ? null
+      : await insertExcalidrawSubtitle({
+          projectDir: args.projectDir,
+          canvasDir: args.canvasDir,
+          srtText,
+          subtitleLines: lines,
+          fileName: args.fileName,
+          model: args.model ?? "host-llm-segmented",
+          mode: args.mode ?? "llm",
+          anchorElementId: args.anchorElementId,
+          placement: args.placement,
+          margin: args.margin,
+          customData: args.customData,
+        });
+    return {
+      ok: true,
+      mode: args.mode ?? "llm",
+      model: args.model ?? "host-llm-segmented",
+      cueCount: lines.length,
+      srtPreview: srtText.split("\n").slice(0, 12).join("\n"),
+      ...(placement
+        ? { elementId: placement.elementId, groupId: placement.groupId, assetFile: placement.assetFile, assetUrl: placement.assetUrl, bounds: placement.bounds }
+        : {}),
+      dryRun: Boolean(args.dryRun),
+    };
+  }
+
+  if (!nonEmptyString(args.audioPath)) {
+    throw new Error("audioPath is required unless subtitleLines is provided.");
+  }
+
   const generated = await generateSubtitleSrt({
     audioPath: args.audioPath,
     scriptText: args.scriptText,
@@ -1303,6 +1418,23 @@ async function generateExcalidrawSubtitles(args = {}) {
     durationSeconds: args.durationSeconds,
     requestId: args.requestId,
   });
+
+  if (args.returnWordsOnly) {
+    return {
+      ok: true,
+      returnWordsOnly: true,
+      mode: generated.mode,
+      model: generated.model,
+      provider: generated.provider,
+      text: generated.text,
+      words: generated.words,
+      durationSeconds: generated.durationSeconds,
+      credits: generated.credits,
+      estimatedCostYen: generated.estimatedCostYen,
+      requestId: generated.requestId,
+      hint: "Decide semantic line breaks from words (respect maxCharsPerLine, 1-2 lines per cue, natural Japanese boundaries), then call this tool again with subtitleLines.",
+    };
+  }
 
   const placement = args.dryRun
     ? null
@@ -1452,7 +1584,7 @@ async function handleToolCall(id, params) {
   if (params?.name === TOOL_BUZZASSIST_AUTH_STATUS) {
     const status = await getBuzzAssistAuthStatus();
     const summary = status.loggedIn
-      ? `Logged in as ${status.userId ?? "unknown user"} (source: ${status.source}).`
+      ? `Logged in as ${status.userId ?? "unknown user"} (source: ${status.source}).${status.expiresSoon ? ` WARNING: token expires in ${status.expiresInDays} day(s) — run buzzassist_login to renew.` : ""}`
       : status.expired
         ? "BuzzAssist login has expired. Run buzzassist_login."
         : "Not logged in to BuzzAssist. Run buzzassist_login.";
@@ -1538,7 +1670,9 @@ async function handleToolCall(id, params) {
       content: [
         {
           type: "text",
-          text: `${result.dryRun ? "Planned" : "Generated"} image ${result.elementId} at (${result.bounds.x}, ${result.bounds.y}) sized ${result.bounds.width}x${result.bounds.height}.`,
+          text: result.payloadPreview
+            ? `Payload preview for ${result.model}${result.endpoint ? ` -> ${result.endpoint}` : ""}: ~${result.estimatedCredits ?? "?"} credits.`
+            : `${result.dryRun ? "Planned" : "Generated"} image ${result.elementId} at (${result.bounds.x}, ${result.bounds.y}) sized ${result.bounds.width}x${result.bounds.height}.`,
         },
       ],
       structuredContent: result,
@@ -1552,7 +1686,9 @@ async function handleToolCall(id, params) {
       content: [
         {
           type: "text",
-          text: `${result.dryRun ? "Planned" : "Generated"} video media element ${result.elementId} at (${result.bounds.x}, ${result.bounds.y}) sized ${result.bounds.width}x${result.bounds.height}.`,
+          text: result.payloadPreview
+            ? `Payload preview for ${result.model}${result.endpoint ? ` -> ${result.endpoint}` : ""}: ~${result.estimatedCredits ?? "?"} credits.`
+            : `${result.dryRun ? "Planned" : "Generated"} video media element ${result.elementId} at (${result.bounds.x}, ${result.bounds.y}) sized ${result.bounds.width}x${result.bounds.height}.`,
         },
       ],
       structuredContent: result,

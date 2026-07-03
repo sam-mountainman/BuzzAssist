@@ -83,7 +83,13 @@ Local tools include both official-compatible diagram tools and media tools:
 - `generate_excalidraw_subtitles`: generates Japanese SRT subtitles from an audio file via BuzzAssist cloud (ElevenLabs forced alignment / Scribe v2), saves the SRT under `canvas/assets/`, and places an SRT card on the canvas
 - `silence_cut_excalidraw_video`: removes silences from a local video with ffmpeg (jet cut) and inserts the cut video with cut statistics
 - `buzzassist_login`: browser sign-in to BuzzAssist for cloud models and cloud subtitles (token saved to `~/.buzzassist/excalidraw-media-auth.json`)
-- `buzzassist_auth_status`: reports the current BuzzAssist sign-in state
+- `buzzassist_auth_status`: reports the current BuzzAssist sign-in state (warns when the token expires within 3 days)
+
+Generation extras:
+
+- `generate_excalidraw_image` / `generate_excalidraw_video` accept `payloadPreview: true` to return the resolved fal endpoint, request payload, and estimated BuzzAssist credits without generating (`lib/mediaCredits.mjs` ports the BuzzAssist rate card)
+- `generate_excalidraw_subtitles` supports a two-step LLM segmentation flow: call with `returnWordsOnly: true` to get timed words, let the agent decide semantic line breaks, then call again with `subtitleLines` to render and place the SRT without a second cloud call
+- 429 responses retry automatically with backoff; payload builders are covered by `node scripts/test-fal-payloads.mjs`
 
 ## Batch Generation
 

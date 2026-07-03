@@ -36,6 +36,14 @@ Use this skill when the user wants SRT subtitles generated from audio and placed
 
 4. The tool reserves BuzzAssist credits, generates timed words, builds SRT cues locally, saves the `.srt` under `canvas/assets/`, and places an SRT card on the canvas. Report `cueCount`, `credits`, and the asset path.
 
+## Higher-Quality Line Breaks (LLM Flow)
+
+For the best semantic line breaks, use the two-step flow instead of one call:
+
+1. Call `generate_excalidraw_subtitles` with `returnWordsOnly: true` — you get the transcript and timed `words`.
+2. Decide cue boundaries yourself: natural Japanese phrase boundaries, 1-2 lines per cue, respect `maxCharsPerLine`, never split 名詞+助詞 pairs awkwardly, and use `\n` for the second line.
+3. Call the tool again with `subtitleLines: [{text, start, end}, ...]` — it renders the SRT and places the card without a second cloud call (no extra credits).
+
 ## Guardrails
 
 - Confirm settings that materially change output (mode, lineCount, maxCharsPerLine) instead of guessing when the user did not specify them.

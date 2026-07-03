@@ -6,7 +6,7 @@ import { basename, dirname, extname, join, relative, resolve, sep } from 'node:p
 import { Readable } from 'node:stream'
 import { generateImageMedia, generateVideoMedia, getGenerationCapabilities, runWithConcurrency } from './lib/mediaGeneration.mjs'
 import { getBuzzAssistAuthStatus, loginBuzzAssistViaBrowser } from './lib/buzzassistApi.mjs'
-import { OFFICIAL_EXCALIDRAW_README, createExcalidrawView, insertExcalidrawImage, insertExcalidrawSubtitle, insertExcalidrawVideo, insertExcalidrawMediaBatch } from './lib/canvasScene.mjs'
+import { OFFICIAL_EXCALIDRAW_README, createExcalidrawView, insertExcalidrawImage, insertExcalidrawSubtitle, insertExcalidrawVideo, insertExcalidrawMediaBatch, stripAssetBackedFileDataURLs } from './lib/canvasScene.mjs'
 import { generateSubtitleSrt } from './lib/subtitleGeneration.mjs'
 import { silenceCutVideo } from './lib/tempoCut.mjs'
 import { tmpdir } from 'node:os'
@@ -789,6 +789,9 @@ function canvasStoragePlugin() {
               }
             }
 
+            // Strip inline base64 for file records verifiably backed by an
+            // on-disk asset (keeps drag-dropped images and video posters inline).
+            await stripAssetBackedFileDataURLs(scene)
             await writeJsonAtomic(canvasFile, scene)
             sendJson(res, 200, { ok: true, path: canvasFile, storage: 'single-file' })
             broadcastCanvasChanged([canvasFile])
