@@ -9,6 +9,7 @@ import { getBuzzAssistAuthStatus, loginBuzzAssistViaBrowser } from './lib/buzzas
 import { OFFICIAL_EXCALIDRAW_README, createExcalidrawView, insertExcalidrawImage, insertExcalidrawSubtitle, insertExcalidrawVideo, insertExcalidrawMediaBatch, stripAssetBackedFileDataURLs } from './lib/canvasScene.mjs'
 import { generateSubtitleSrt } from './lib/subtitleGeneration.mjs'
 import { silenceCutVideo } from './lib/tempoCut.mjs'
+import { getLovartAuthStatus, saveLovartCredentials } from './lib/lovartMediaGeneration.mjs'
 import { tmpdir } from 'node:os'
 
 const projectDir = resolve(process.env.EXCALIDRAW_PROJECT_DIR ?? process.cwd())
@@ -1151,6 +1152,35 @@ function canvasStoragePlugin() {
         }
       })
 
+      server.middlewares.use('/api/lovart/auth-status', async (req, res) => {
+        try {
+          if (req.method !== 'GET') {
+            res.statusCode = 405
+            res.setHeader('allow', 'GET')
+            res.end()
+            return
+          }
+          sendJson(res, 200, await getLovartAuthStatus())
+        } catch (error) {
+          sendJson(res, 500, { error: error.message })
+        }
+      })
+
+      server.middlewares.use('/api/lovart/credentials', async (req, res) => {
+        try {
+          if (req.method !== 'POST') {
+            res.statusCode = 405
+            res.setHeader('allow', 'POST')
+            res.end()
+            return
+          }
+          const body = JSON.parse(await readRequestBody(req))
+          sendJson(res, 200, await saveLovartCredentials(body))
+        } catch (error) {
+          sendJson(res, 400, { error: error.message })
+        }
+      })
+
       server.middlewares.use('/api/generate/subtitles', async (req, res) => {
         try {
           if (req.method !== 'POST') {
@@ -1201,6 +1231,12 @@ function canvasStoragePlugin() {
             inputPath: body.videoPath,
             outputDir: join(tmpdir(), 'codex-excalidraw-silence-cut'),
             fileName: body.fileName,
+            model: body.model,
+            fillerRemoval: body.fillerRemoval,
+            coughRemoval: body.coughRemoval,
+            retakeRemoval: body.retakeRemoval,
+            instructionPrompt: body.instructionPrompt,
+            glossary: body.glossary,
             detectSeconds: body.detectSeconds,
             thresholdDb: body.thresholdDb,
             keepSeconds: body.keepSeconds,

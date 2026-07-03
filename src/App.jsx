@@ -94,6 +94,9 @@ const DEFAULT_FRAME_FORM = {
   subtitleScriptText: '',
   subtitleAudio: null,
   silenceCutModel: 'ffmpeg-local',
+  silenceCutFillerRemoval: 50,
+  silenceCutCoughRemoval: 50,
+  silenceCutRetakeRemoval: 0,
   silenceCutVideo: null,
   silenceCutDetectSeconds: 0.6,
   silenceCutKeepSeconds: 0.25,
@@ -125,7 +128,18 @@ const SUBTITLE_FILLER_OPTIONS = [
   ['contextual', 'AI判断']
 ]
 
-const SILENCE_CUT_MODEL_LABEL = 'FFmpeg（ローカル）'
+// Youtube-AGI SILENCE_CUT_MODEL_OPTIONS
+const SILENCE_CUT_MODEL_OPTIONS = [
+  ['ffmpeg-local', 'FFmpeg Local'],
+  ['elevenlabs-scribe-v2', 'ElevenLabs Scribe v2']
+]
+// AI cleanup intensity presets (オフ/弱/中/強), matching Youtube-AGI
+const SILENCE_CUT_INTENSITY_OPTIONS = [
+  [0, 'オフ'],
+  [25, '弱'],
+  [50, '中'],
+  [80, '強']
+]
 
 function defaultSubtitleMaxCharsFor(lineCount) {
   return lineCount === 1 ? 20 : 30
@@ -298,9 +312,49 @@ function LovartGeneratorToolIcon() {
   )
 }
 
-// Small provider glyphs for the Lovart / BuzzAssist model pickers, in the
-// spirit of Lovart's model list icons (simplified, monochrome).
+// Real provider logos, fetched as favicons from each vendor's domain (like
+// Lovart's model list). Falls back to the local glyphs offline / on error.
+const PROVIDER_FAVICON_DOMAINS = {
+  midjourney: 'midjourney.com',
+  'nano-banana': 'deepmind.google',
+  openai: 'openai.com',
+  luma: 'lumalabs.ai',
+  flux: 'bfl.ai',
+  seedream: 'seed.bytedance.com',
+  seedance: 'seed.bytedance.com',
+  kling: 'klingai.com',
+  ideogram: 'ideogram.ai',
+  veo: 'deepmind.google',
+  gemini: 'gemini.google.com',
+  hailuo: 'hailuoai.video',
+  wan: 'wan.video',
+  vidu: 'vidu.com',
+  grok: 'x.ai',
+  codex: 'openai.com',
+  lovart: 'lovart.ai'
+}
+
 function ModelProviderIcon({ provider, size = 16 }) {
+  const [faviconFailed, setFaviconFailed] = useState(false)
+  const domain = PROVIDER_FAVICON_DOMAINS[provider]
+  if (domain && !faviconFailed) {
+    return (
+      <img
+        src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`}
+        width={size}
+        height={size}
+        alt=""
+        loading="lazy"
+        draggable={false}
+        style={{ borderRadius: 4, display: 'block' }}
+        onError={() => setFaviconFailed(true)}
+      />
+    )
+  }
+  return <ModelProviderGlyph provider={provider} size={size} />
+}
+
+function ModelProviderGlyph({ provider, size = 16 }) {
   const common = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true }
   switch (provider) {
     case 'midjourney':
@@ -1433,7 +1487,10 @@ function frameFormFromElement(element) {
     subtitleAudio: customData.subtitleAudioAsset && typeof customData.subtitleAudioAsset === 'object'
       ? customData.subtitleAudioAsset
       : null,
-    silenceCutModel: DEFAULT_FRAME_FORM.silenceCutModel,
+    silenceCutModel: customData.silenceCutModel === 'elevenlabs-scribe-v2' ? 'elevenlabs-scribe-v2' : 'ffmpeg-local',
+    silenceCutFillerRemoval: clamp(finiteNumberOr(customData.silenceCutFillerRemoval, DEFAULT_FRAME_FORM.silenceCutFillerRemoval), 0, 100),
+    silenceCutCoughRemoval: clamp(finiteNumberOr(customData.silenceCutCoughRemoval, DEFAULT_FRAME_FORM.silenceCutCoughRemoval), 0, 100),
+    silenceCutRetakeRemoval: clamp(finiteNumberOr(customData.silenceCutRetakeRemoval, DEFAULT_FRAME_FORM.silenceCutRetakeRemoval), 0, 100),
     silenceCutVideo: customData.silenceCutVideoAsset && typeof customData.silenceCutVideoAsset === 'object'
       ? customData.silenceCutVideoAsset
       : null,
@@ -1468,6 +1525,9 @@ function frameCustomDataFromForm(kind, form) {
   if (kind === 'silenceCut') {
     return {
       silenceCutModel: form.silenceCutModel,
+      silenceCutFillerRemoval: form.silenceCutFillerRemoval,
+      silenceCutCoughRemoval: form.silenceCutCoughRemoval,
+      silenceCutRetakeRemoval: form.silenceCutRetakeRemoval,
       silenceCutDetectSeconds: form.silenceCutDetectSeconds,
       silenceCutKeepSeconds: form.silenceCutKeepSeconds,
       silenceCutThresholdDb: form.silenceCutThresholdDb,
@@ -2194,6 +2254,10 @@ export default function App() {
   const [subtitlePreviewOverlays, setSubtitlePreviewOverlays] = useState([])
   const [subtitleScrollOffsets, setSubtitleScrollOffsets] = useState({})
   const [managedSelectionActive, setManagedSelectionActive] = useState(false)
+  const [lovartAuth, setLovartAuth] = useState(null)
+  const [lovartKeySaving, setLovartKeySaving] = useState(false)
+  const lovartAccessKeyInputRef = useRef(null)
+  const lovartSecretKeyInputRef = useRef(null)
   const subtitlePreviewOverlaysRef = useRef([])
   const [silenceCutAdvancedOpen, setSilenceCutAdvancedOpen] = useState(false)
   const [hoveredVideoPlaybackId, setHoveredVideoPlaybackId] = useState('')
@@ -4295,6 +4359,10 @@ export default function App() {
             }
           : {
               videoPath: savedForm.silenceCutVideo.path,
+              model: savedForm.silenceCutModel,
+              fillerRemoval: savedForm.silenceCutModel === 'elevenlabs-scribe-v2' ? savedForm.silenceCutFillerRemoval : 0,
+              coughRemoval: savedForm.silenceCutModel === 'elevenlabs-scribe-v2' ? savedForm.silenceCutCoughRemoval : 0,
+              retakeRemoval: savedForm.silenceCutModel === 'elevenlabs-scribe-v2' ? savedForm.silenceCutRetakeRemoval : 0,
               detectSeconds: savedForm.silenceCutDetectSeconds,
               thresholdDb: savedForm.silenceCutThresholdDb,
               keepSeconds: savedForm.silenceCutKeepSeconds,
@@ -5114,28 +5182,101 @@ export default function App() {
           <div className="lovart-ai-bottom">
             <div className="lovart-ai-left">
               {activeFrameKind === 'lovart' ? (
-                <div className="lovart-video-tabs">
-                  <button
-                    type="button"
-                    className={frameForm.lovartKind !== 'video' ? 'is-selected' : ''}
-                    onClick={() => {
-                      setOpenMenu(null)
-                      patchFrameForm({ lovartKind: 'image' })
-                    }}
-                  >
-                    画像
-                  </button>
-                  <button
-                    type="button"
-                    className={frameForm.lovartKind === 'video' ? 'is-selected' : ''}
-                    onClick={() => {
-                      setOpenMenu(null)
-                      patchFrameForm({ lovartKind: 'video' })
-                    }}
-                  >
-                    動画
-                  </button>
-                </div>
+                <>
+                  <div className="lovart-video-tabs">
+                    <button
+                      type="button"
+                      className={frameForm.lovartKind !== 'video' ? 'is-selected' : ''}
+                      onClick={() => {
+                        setOpenMenu(null)
+                        patchFrameForm({ lovartKind: 'image' })
+                      }}
+                    >
+                      画像
+                    </button>
+                    <button
+                      type="button"
+                      className={frameForm.lovartKind === 'video' ? 'is-selected' : ''}
+                      onClick={() => {
+                        setOpenMenu(null)
+                        patchFrameForm({ lovartKind: 'video' })
+                      }}
+                    >
+                      動画
+                    </button>
+                  </div>
+                  <div className="lovart-menu-wrap">
+                    <button
+                      type="button"
+                      className={`lovart-pill${openMenu === 'lovart-key' ? ' tooltip-hidden' : ''}`}
+                      data-lovart-tooltip="Lovart APIキー"
+                      onClick={() => {
+                        setOpenMenu((current) => (current === 'lovart-key' ? null : 'lovart-key'))
+                        fetch('/api/lovart/auth-status')
+                          .then((response) => response.json())
+                          .then(setLovartAuth)
+                          .catch(() => {})
+                      }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+                        <circle cx="8" cy="12" r="4" />
+                        <path d="M12 12h9M17 12v3M21 12v2" />
+                      </svg>
+                      <span
+                        className="lovart-key-dot"
+                        style={{ background: lovartAuth?.configured ? '#22c55e' : '#d1d5db' }}
+                      />
+                    </button>
+                    {openMenu === 'lovart-key' ? (
+                      <div className="lovart-menu wide" data-lovart-menu="lovart-key">
+                        <div className="lovart-menu-header">Lovart APIキー</div>
+                        <div className="lovart-key-form">
+                          <div className="lovart-key-status">
+                            {lovartAuth?.configured
+                              ? `接続済み: ${lovartAuth.accessKeyPreview ?? ''}`
+                              : '未設定（Lovart の OpenClaw 設定で発行した ak_/sk_ を入力）'}
+                          </div>
+                          <input ref={lovartAccessKeyInputRef} type="password" placeholder="ak_..." autoComplete="off" />
+                          <input ref={lovartSecretKeyInputRef} type="password" placeholder="sk_..." autoComplete="off" />
+                          <button
+                            type="button"
+                            className="lovart-key-save"
+                            disabled={lovartKeySaving}
+                            onClick={async () => {
+                              const accessKey = lovartAccessKeyInputRef.current?.value?.trim()
+                              const secretKey = lovartSecretKeyInputRef.current?.value?.trim()
+                              if (!accessKey || !secretKey) {
+                                setGenerationError('Lovart の Access Key と Secret Key を両方入力してください。')
+                                return
+                              }
+                              setLovartKeySaving(true)
+                              try {
+                                const response = await fetch('/api/lovart/credentials', {
+                                  method: 'POST',
+                                  headers: { 'content-type': 'application/json' },
+                                  body: JSON.stringify({ accessKey, secretKey })
+                                })
+                                const payload = await response.json()
+                                if (!response.ok) throw new Error(payload.error || '保存に失敗しました')
+                                setLovartAuth(payload)
+                                setGenerationError('')
+                                if (lovartAccessKeyInputRef.current) lovartAccessKeyInputRef.current.value = ''
+                                if (lovartSecretKeyInputRef.current) lovartSecretKeyInputRef.current.value = ''
+                                setOpenMenu(null)
+                              } catch (error) {
+                                setGenerationError(error.message)
+                              } finally {
+                                setLovartKeySaving(false)
+                              }
+                            }}
+                          >
+                            {lovartKeySaving ? '保存中…' : '保存'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </>
               ) : null}
               {activeFrameKind === 'video' ? (
                 <div className="lovart-video-tabs">
@@ -5509,6 +5650,29 @@ export default function App() {
                   </button>
                 ) : null}
               </div>
+              <div className="lovart-video-slot end">
+                <button
+                  type="button"
+                  className={`lovart-add-frame-btn end${frameForm.subtitleScriptText ? ' has-asset' : ''}${frameForm.subtitleMode !== 'scripted' ? ' is-disabled' : ''}`}
+                  disabled={frameForm.subtitleMode !== 'scripted'}
+                  title={frameForm.subtitleMode === 'scripted' ? '台本ファイルをアップロード' : '台本ありモードで使用できます'}
+                  onClick={() => {
+                    if (frameForm.subtitleMode !== 'scripted') return
+                    const input = document.createElement('input')
+                    input.type = 'file'
+                    input.accept = '.txt,.md,text/plain'
+                    input.onchange = () => {
+                      const file = input.files?.[0]
+                      if (!file) return
+                      file.text().then((text) => patchFrameForm({ subtitleScriptText: text.trim() }))
+                    }
+                    input.click()
+                  }}
+                >
+                  <span className="lovart-add-plus">+</span>
+                  <span className="lovart-add-label">台本</span>
+                </button>
+              </div>
               {frameForm.subtitleAudio?.name ? (
                 <span className="lovart-utility-asset-name">{frameForm.subtitleAudio.name}</span>
               ) : null}
@@ -5531,6 +5695,25 @@ export default function App() {
                     {label}
                   </button>
                 ))}
+              </div>
+              <div className="lovart-menu-wrap">
+                <button
+                  type="button"
+                  className="lovart-pill"
+                  onClick={() => setOpenMenu((current) => (current === 'subtitle-model' ? null : 'subtitle-model'))}
+                >
+                  <span>{frameForm.subtitleMode === 'scripted' ? 'ElevenLabs Forced Alignment' : 'ElevenLabs Scribe v2'}</span>
+                  <ChevronIcon />
+                </button>
+                {openMenu === 'subtitle-model' ? (
+                  <div className="lovart-menu" data-lovart-menu="subtitle-model">
+                    <div className="lovart-menu-header">モデル</div>
+                    <button type="button" onClick={() => setOpenMenu(null)}>
+                      <span>{frameForm.subtitleMode === 'scripted' ? 'ElevenLabs Forced Alignment' : 'ElevenLabs Scribe v2'}</span>
+                      <span className="menu-check">✓</span>
+                    </button>
+                  </div>
+                ) : null}
               </div>
             </div>
             <div className="lovart-ai-right">
@@ -5711,16 +5894,25 @@ export default function App() {
                   className="lovart-pill"
                   onClick={() => setOpenMenu((current) => (current === 'silence-cut-model' ? null : 'silence-cut-model'))}
                 >
-                  <span>{SILENCE_CUT_MODEL_LABEL}</span>
+                  <span>{SILENCE_CUT_MODEL_OPTIONS.find(([value]) => value === frameForm.silenceCutModel)?.[1] ?? 'FFmpeg Local'}</span>
                   <ChevronIcon />
                 </button>
                 {openMenu === 'silence-cut-model' ? (
                   <div className="lovart-menu" data-lovart-menu="silence-cut-model">
                     <div className="lovart-menu-header">モデル</div>
-                    <button type="button" onClick={() => setOpenMenu(null)}>
-                      <span>{SILENCE_CUT_MODEL_LABEL}</span>
-                      <span className="menu-check">✓</span>
-                    </button>
+                    {SILENCE_CUT_MODEL_OPTIONS.map(([value, label]) => (
+                      <button
+                        type="button"
+                        key={value}
+                        onClick={() => {
+                          updateFrameForm('silenceCutModel', value)
+                          setOpenMenu(null)
+                        }}
+                      >
+                        <span>{label}</span>
+                        {frameForm.silenceCutModel === value ? <span className="menu-check">✓</span> : null}
+                      </button>
+                    ))}
                   </div>
                 ) : null}
               </div>
@@ -5738,6 +5930,32 @@ export default function App() {
                 </button>
                 {openMenu === 'silence-cut-settings' ? (
                   <div className="lovart-menu wide lovart-video-settings lovart-utility-settings" data-lovart-menu="silence-cut-settings">
+                    {frameForm.silenceCutModel === 'elevenlabs-scribe-v2' ? (
+                      <>
+                        <div className="lovart-menu-header">AIクリーンアップ</div>
+                        {[
+                          ['silenceCutFillerRemoval', 'フィラー削除'],
+                          ['silenceCutCoughRemoval', '咳・くしゃみ削除'],
+                          ['silenceCutRetakeRemoval', '言い直し削除']
+                        ].map(([field, label]) => (
+                          <div className="lovart-setting-row lovart-intensity-row" key={field}>
+                            <span className="lovart-intensity-label">{label}</span>
+                            <div className="lovart-video-tabs lovart-intensity-tabs">
+                              {SILENCE_CUT_INTENSITY_OPTIONS.map(([value, optionLabel]) => (
+                                <button
+                                  type="button"
+                                  key={value}
+                                  className={frameForm[field] === value ? 'is-selected' : ''}
+                                  onClick={() => updateFrameForm(field, value)}
+                                >
+                                  {optionLabel}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </>
+                    ) : null}
                     <div className="lovart-menu-header">カットの強さ</div>
                     <div className="lovart-setting-row">
                       <div className="lovart-menu-header">無音検出秒数</div>

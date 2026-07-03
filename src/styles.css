@@ -1352,3 +1352,65 @@ body {
 .lovart-menu button .lovart-model-icon {
   margin-right: 2px;
 }
+
+.lovart-key-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.lovart-key-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px 10px;
+  min-width: 240px;
+}
+
+.lovart-key-status {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.lovart-key-form input {
+  border: 1px solid #e0e0e6;
+  border-radius: 8px;
+  padding: 7px 9px;
+  font-size: 12px;
+  font-family: ui-monospace, monospace;
+}
+
+.lovart-key-save {
+  align-self: flex-end;
+  background: #111827;
+  color: #fff;
+  border: 0;
+  border-radius: 8px;
+  padding: 7px 16px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.lovart-key-save:disabled {
+  opacity: 0.5;
+}
+
+.lovart-intensity-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 0;
+}
+
+.lovart-intensity-label {
+  font-size: 12px;
+  color: #3d3d4e;
+  flex: 0 0 auto;
+}
+
+.lovart-intensity-tabs button {
+  font-size: 11px;
+  padding: 4px 9px;
+}
