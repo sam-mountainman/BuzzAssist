@@ -1434,3 +1434,23 @@ body {
   margin-top: 6px;
   padding-top: 8px;
 }
+
+.lovart-glossary-input {
+  width: 100%;
+  min-height: 58px;
+  resize: vertical;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #374151;
+  background: #fafafa;
+  outline: none;
+  font-family: inherit;
+}
+
+.lovart-glossary-input:focus {
+  border-color: #c4b5fd;
+  background: #fff;
+}

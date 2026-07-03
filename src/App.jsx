@@ -16,6 +16,7 @@ import {
   routeIdForModel,
   videoFamilyForModel
 } from '../lib/modelCatalog.mjs'
+import { estimateCreditsForJob } from '../lib/mediaCredits.mjs'
 
 const CANVAS_ENDPOINT = '/api/canvas'
 const CANVAS_EVENTS_ENDPOINT = '/api/canvas-events'
@@ -104,8 +105,10 @@ const DEFAULT_FRAME_FORM = {
   subtitlePunctuationMode: 'auto',
   subtitleFillerMode: 'keep',
   subtitleScriptText: '',
+  subtitleGlossary: '',
   subtitleAudio: null,
   silenceCutModel: 'ffmpeg-local',
+  silenceCutInstruction: '',
   silenceCutFillerRemoval: 50,
   silenceCutCoughRemoval: 50,
   silenceCutRetakeRemoval: 0,
@@ -357,6 +360,16 @@ function canUseVideoFrameTarget(model, tab, target) {
   if (tab === 'keyframe' && target === 'end') return false
   if (tab === 'reference' && target === 'start') return false
   return true
+}
+
+// 用語辞書 input: one "wrong,correct" pair per line ("," "、" "→" "=>" all
+// accepted as separators). Matches the backend glossary shape [{from, to}].
+function parseGlossaryInput(value) {
+  return String(value || '')
+    .split(/\r?\n/)
+    .map((line) => line.split(/,|、|→|=>/).map((part) => part.trim()))
+    .filter((parts) => parts.length >= 2 && parts[0])
+    .map(([from, to]) => ({ from, to: to ?? '' }))
 }
 
 function getVideoFrameSlotLabel(tab, target) {
@@ -1652,10 +1665,12 @@ function frameFormFromElement(element) {
       ? customData.subtitleFillerMode
       : DEFAULT_FRAME_FORM.subtitleFillerMode,
     subtitleScriptText: typeof customData.subtitleScriptText === 'string' ? customData.subtitleScriptText : '',
+    subtitleGlossary: typeof customData.subtitleGlossary === 'string' ? customData.subtitleGlossary : '',
     subtitleAudio: customData.subtitleAudioAsset && typeof customData.subtitleAudioAsset === 'object'
       ? customData.subtitleAudioAsset
       : null,
     silenceCutModel: customData.silenceCutModel === 'elevenlabs-scribe-v2' ? 'elevenlabs-scribe-v2' : 'ffmpeg-local',
+    silenceCutInstruction: typeof customData.silenceCutInstruction === 'string' ? customData.silenceCutInstruction : '',
     silenceCutFillerRemoval: clamp(finiteNumberOr(customData.silenceCutFillerRemoval, DEFAULT_FRAME_FORM.silenceCutFillerRemoval), 0, 100),
     silenceCutCoughRemoval: clamp(finiteNumberOr(customData.silenceCutCoughRemoval, DEFAULT_FRAME_FORM.silenceCutCoughRemoval), 0, 100),
     silenceCutRetakeRemoval: clamp(finiteNumberOr(customData.silenceCutRetakeRemoval, DEFAULT_FRAME_FORM.silenceCutRetakeRemoval), 0, 100),
@@ -1687,12 +1702,14 @@ function frameCustomDataFromForm(kind, form) {
       subtitlePunctuationMode: form.subtitlePunctuationMode,
       subtitleFillerMode: form.subtitleFillerMode,
       subtitleScriptText: form.subtitleScriptText,
+      subtitleGlossary: form.subtitleGlossary,
       subtitleAudioAsset: form.subtitleAudio || null
     }
   }
   if (kind === 'silenceCut') {
     return {
       silenceCutModel: form.silenceCutModel,
+      silenceCutInstruction: form.silenceCutInstruction,
       silenceCutFillerRemoval: form.silenceCutFillerRemoval,
       silenceCutCoughRemoval: form.silenceCutCoughRemoval,
       silenceCutRetakeRemoval: form.silenceCutRetakeRemoval,
@@ -4552,6 +4569,7 @@ export default function App() {
               holdSeconds: savedForm.subtitleHoldSeconds,
               punctuationMode: savedForm.subtitlePunctuationMode,
               fillerMode: savedForm.subtitleFillerMode,
+              glossary: parseGlossaryInput(savedForm.subtitleGlossary),
               durationSeconds: Number(savedForm.subtitleAudio.duration) || undefined,
               anchorElementId,
               placement: 'replace',
@@ -4561,6 +4579,7 @@ export default function App() {
           : {
               videoPath: savedForm.silenceCutVideo.path,
               model: savedForm.silenceCutModel,
+              instructionPrompt: savedForm.silenceCutModel === 'elevenlabs-scribe-v2' ? savedForm.silenceCutInstruction : undefined,
               fillerRemoval: savedForm.silenceCutModel === 'elevenlabs-scribe-v2' ? savedForm.silenceCutFillerRemoval : 0,
               coughRemoval: savedForm.silenceCutModel === 'elevenlabs-scribe-v2' ? savedForm.silenceCutCoughRemoval : 0,
               retakeRemoval: savedForm.silenceCutModel === 'elevenlabs-scribe-v2' ? savedForm.silenceCutRetakeRemoval : 0,
@@ -4743,6 +4762,58 @@ export default function App() {
       })
     }
   }
+  // Pre-generation credit estimate for the ⚡ button (BuzzAssist rate card).
+  // Local routes cost 0; Lovart rates are unknown → null hides the number.
+  const activePanelCreditEstimate = (() => {
+    try {
+      if (activeFrameKind === 'image') {
+        const model = frameForm.imageModel
+        if (String(model).startsWith('lovart-')) return null
+        if (model === 'gpt-image-2-codex') return 0
+        return estimateCreditsForJob({
+          kind: 'image',
+          model,
+          prompt: frameForm.prompt,
+          imageSize: frameForm.imageSize,
+          aspectRatio: frameForm.aspectRatio,
+          quality: frameForm.quality,
+          referenceImageCount: normalizeAssetList(frameForm.imageReferences).length
+        }).credits
+      }
+      if (activeFrameKind === 'video') {
+        const model = frameForm.videoModel
+        if (String(model).startsWith('lovart-')) return null
+        if (model === 'grok-imagine-video-hermes') return 0
+        return estimateCreditsForJob({
+          kind: 'video',
+          model,
+          mode: normalizeVideoModeForContext(model, frameForm.videoTab, frameForm.videoMode),
+          tab: frameForm.videoTab,
+          duration: Number(frameForm.duration) || 5,
+          aspectRatio: frameForm.videoAspectRatio,
+          resolution: frameForm.resolution,
+          hasStartImage: Boolean(frameForm.videoStartFrame),
+          referenceImageCount: normalizeAssetList(frameForm.videoReferenceImages).length,
+          hasReferenceVideo: normalizeAssetList(frameForm.videoReferenceVideos).length > 0 || Boolean(frameForm.videoEndFrame),
+          generateAudio: supportsGenerateAudio(model) ? frameForm.videoGenerateAudio : false
+        }).credits
+      }
+      if (activeFrameKind === 'subtitle') {
+        const seconds = Number(frameForm.subtitleAudio?.duration) || 0
+        if (!seconds) return null
+        return estimateCreditsForJob({ kind: 'subtitle', model: 'elevenlabs-scribe-v2', durationSeconds: seconds }).credits
+      }
+      if (activeFrameKind === 'silenceCut') {
+        if (frameForm.silenceCutModel !== 'elevenlabs-scribe-v2') return 0
+        const seconds = Number(frameForm.silenceCutVideo?.duration) || 0
+        if (!seconds) return null
+        return estimateCreditsForJob({ kind: 'subtitle', model: 'elevenlabs-scribe-v2', durationSeconds: seconds }).credits
+      }
+    } catch {
+      return null
+    }
+    return null
+  })()
   const lovartReferences = normalizeAssetList(frameForm.lovartReferences)
   const imageReferences = normalizeAssetList(frameForm.imageReferences)
   const videoReferenceImages = normalizeAssetList(frameForm.videoReferenceImages)
@@ -5789,7 +5860,11 @@ export default function App() {
                 onClick={runFrameGeneration}
               >
                 <LightningIcon />
-                {isCurrentFrameGenerating ? <span>Generating...</span> : <span>0</span>}
+                {isCurrentFrameGenerating ? (
+                  <span>Generating...</span>
+                ) : (
+                  <span>{activePanelCreditEstimate ?? '—'}</span>
+                )}
               </button>
             </div>
           </div>
@@ -6010,6 +6085,15 @@ export default function App() {
                         </button>
                       ))}
                     </div>
+                    <div className="lovart-setting-row">
+                      <div className="lovart-menu-header">用語辞書</div>
+                    </div>
+                    <textarea
+                      className="lovart-glossary-input"
+                      placeholder={'誤,正（1行に1組）\n例: ばずあしすと,BuzzAssist'}
+                      value={frameForm.subtitleGlossary}
+                      onChange={(event) => updateFrameForm('subtitleGlossary', event.target.value)}
+                    />
                   </div>
                 ) : null}
               </div>
@@ -6020,7 +6104,11 @@ export default function App() {
                 onClick={runUtilityGeneration}
               >
                 <LightningIcon />
-                {isCurrentFrameGenerating ? <span>Generating...</span> : <span>生成</span>}
+                {isCurrentFrameGenerating ? (
+                  <span>Generating...</span>
+                ) : (
+                  <span>{activePanelCreditEstimate ? `${activePanelCreditEstimate} 生成` : '生成'}</span>
+                )}
               </button>
             </div>
           </div>
@@ -6037,7 +6125,17 @@ export default function App() {
           onClick={(event) => event.stopPropagation()}
         >
           <div className="lovart-prompt-wrap has-video-slots">
-            <div className="lovart-utility-hint">動画を添付すると、無音部分を自動でカットします。</div>
+            {frameForm.silenceCutModel === 'elevenlabs-scribe-v2' ? (
+              <textarea
+                className="lovart-ai-prompt"
+                placeholder="カットの指示（例: テンポよく / 間を残して自然に）"
+                value={frameForm.silenceCutInstruction}
+                onChange={(event) => updateFrameForm('silenceCutInstruction', event.target.value)}
+                onFocus={() => setOpenMenu(null)}
+              />
+            ) : (
+              <div className="lovart-utility-hint">動画を添付すると、無音部分を自動でカットします。</div>
+            )}
             <div className={`lovart-video-frame-tray${frameForm.silenceCutVideo ? ' is-open' : ''}`}>
               <div className="lovart-video-slot start">
                 <button
@@ -6265,7 +6363,11 @@ export default function App() {
                 onClick={runUtilityGeneration}
               >
                 <LightningIcon />
-                {isCurrentFrameGenerating ? <span>Generating...</span> : <span>生成</span>}
+                {isCurrentFrameGenerating ? (
+                  <span>Generating...</span>
+                ) : (
+                  <span>{activePanelCreditEstimate ? `${activePanelCreditEstimate} 生成` : '生成'}</span>
+                )}
               </button>
             </div>
           </div>
