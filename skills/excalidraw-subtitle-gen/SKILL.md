@@ -44,6 +44,13 @@ For the best semantic line breaks, use the two-step flow instead of one call:
 2. Decide cue boundaries yourself: natural Japanese phrase boundaries, 1-2 lines per cue, respect `maxCharsPerLine`, never split 名詞+助詞 pairs awkwardly, and use `\n` for the second line.
 3. Call the tool again with `subtitleLines: [{text, start, end}, ...]` — it renders the SRT and places the card without a second cloud call (no extra credits).
 
+
+## 高精度化オプション
+
+- `glossary: [{from, to}]` — 固有名詞の表記補正（用語辞書）。文字起こし直後に適用
+- `normalizeAudio` (default true) — 音量が小さい音源（平均 -30dB 未満）を自動でラウドネス正規化してから転写
+- 品質検証: 行長超過・重複・極短キューを自動検出し、違反があれば文字数を詰めて一度だけ再分割した良い方を採用（結果の `quality.issues` で確認可能)
+
 ## Guardrails
 
 - Confirm settings that materially change output (mode, lineCount, maxCharsPerLine) instead of guessing when the user did not specify them.

@@ -1238,6 +1238,8 @@ function toolDefinitions() {
           holdSeconds: { type: "number", description: "Extra seconds each cue stays on screen." },
           punctuationMode: { type: "string", enum: ["auto", "none"] },
           fillerMode: { type: "string", enum: ["keep", "safe", "contextual"] },
+          glossary: { type: "array", items: { type: "object", properties: { from: { type: "string" }, to: { type: "string" } }, required: ["from", "to"], additionalProperties: false }, description: "Term corrections applied to the transcription before segmentation (用語辞書)." },
+          normalizeAudio: { type: "boolean", description: "Loudness-normalize quiet audio before transcription. Defaults to true." },
           durationSeconds: { type: "number", description: "Audio duration in seconds. Probed with ffprobe when omitted." },
           fileName: { type: "string", description: "Destination SRT filename under canvas/assets/." },
           projectDir: { type: "string", description: "Absolute project directory containing canvas/." },
@@ -1259,13 +1261,19 @@ function toolDefinitions() {
     {
       name: TOOL_SILENCE_CUT_VIDEO,
       title: "Silence Cut Excalidraw Video",
-      description: "Remove silences from a local video with ffmpeg (jet cut), then insert the cut video into the canvas with cut statistics. Runs fully locally; requires ffmpeg/ffprobe on PATH.",
+      description: "Remove silences from a local video (jet cut), then insert the cut video into the canvas with cut statistics. model=ffmpeg-local runs fully offline; model=elevenlabs-scribe-v2 transcribes via BuzzAssist (requires buzzassist_login, ~1 credit/min) and additionally removes fillers, coughs, and retakes from word timestamps. Use dryRun first to preview the cut plan without rendering.",
       inputSchema: {
         type: "object",
         properties: {
           videoPath: { type: "string", description: "Absolute local video path to cut." },
+          model: { type: "string", enum: ["ffmpeg-local", "elevenlabs-scribe-v2"], description: "Cut engine. Defaults to ffmpeg-local." },
+          fillerRemoval: { type: "number", description: "0-100. Scribe mode only: remove Japanese fillers (えー/あのー…). 0 off, 35+ adds その/なんか, 70+ adds ていうか/やっぱり." },
+          coughRemoval: { type: "number", description: "0-100. Scribe mode only: cut coughs/sneezes detected as audio events." },
+          retakeRemoval: { type: "number", description: "0-100. Scribe mode only: cut retake markers (いや/違う/もう一回…); 70+ also rewinds over the flubbed phrase." },
+          instructionPrompt: { type: "string", description: "Scribe mode only: natural-language bias, e.g. テンポよく (tighter) or 自然に余韻を残して (looser)." },
+          glossary: { type: "array", items: { type: "object", properties: { from: { type: "string" }, to: { type: "string" } }, required: ["from", "to"], additionalProperties: false }, description: "Scribe mode only: term corrections applied to the transcription." },
           detectSeconds: { type: "number", description: "Minimum silence length to detect. Defaults to 0.6." },
-          thresholdDb: { type: "number", description: "Silence threshold in dB. Defaults to -34." },
+          thresholdDb: { type: "number", description: "Silence threshold in dB (ffmpeg-local only). Defaults to -34." },
           keepSeconds: { type: "number", description: "Silence seconds to keep around cuts. Defaults to 0.25." },
           preMarginSeconds: { type: "number", description: "Safety margin before speech. Defaults to 0.08." },
           postMarginSeconds: { type: "number", description: "Safety margin after speech. Defaults to 0.12." },
@@ -1278,7 +1286,7 @@ function toolDefinitions() {
           margin: { type: "number" },
           displayWidth: { type: "number" },
           displayHeight: { type: "number" },
-          dryRun: { type: "boolean", description: "Cut the video without inserting it into the canvas." },
+          dryRun: { type: "boolean", description: "Preview only: return the cut plan (ranges, candidates, durations) without rendering or touching the canvas." },
         },
         required: ["videoPath"],
         additionalProperties: false,
@@ -1424,6 +1432,8 @@ async function generateExcalidrawSubtitles(args = {}) {
     holdSeconds: args.holdSeconds,
     punctuationMode: args.punctuationMode,
     fillerMode: args.fillerMode,
+    glossary: args.glossary,
+    normalizeAudio: args.normalizeAudio,
     durationSeconds: args.durationSeconds,
     requestId: args.requestId,
   });
@@ -1500,12 +1510,19 @@ async function silenceCutExcalidrawVideo(args = {}) {
     inputPath: pathResolve(videoPath),
     outputDir,
     fileName: args.fileName,
+    model: args.model,
+    fillerRemoval: args.fillerRemoval,
+    coughRemoval: args.coughRemoval,
+    retakeRemoval: args.retakeRemoval,
+    instructionPrompt: args.instructionPrompt,
+    glossary: args.glossary,
     detectSeconds: args.detectSeconds,
     thresholdDb: args.thresholdDb,
     keepSeconds: args.keepSeconds,
     preMarginSeconds: args.preMarginSeconds,
     postMarginSeconds: args.postMarginSeconds,
     audioFadeSeconds: args.audioFadeSeconds,
+    planOnly: Boolean(args.dryRun),
   });
 
   const stats = {
@@ -1515,9 +1532,18 @@ async function silenceCutExcalidrawVideo(args = {}) {
     cutCount: cut.cutCount,
   };
 
-  const placement = args.dryRun
-    ? null
-    : await insertExcalidrawVideoMedia({
+  if (args.dryRun) {
+    return {
+      ok: true,
+      dryRun: true,
+      model: cut.model,
+      ...stats,
+      plan: cut.plan,
+      ...(cut.transcription ? { transcription: cut.transcription } : {}),
+    };
+  }
+
+  const placement = await insertExcalidrawVideoMedia({
         projectDir: args.projectDir,
         canvasDir: args.canvasDir,
         videoPath: cut.outputPath,
@@ -1538,8 +1564,10 @@ async function silenceCutExcalidrawVideo(args = {}) {
 
   return {
     ok: true,
+    model: cut.model,
     ...stats,
     outputPath: cut.outputPath,
+    ...(cut.transcription ? { transcription: cut.transcription } : {}),
     ...(placement
       ? {
           elementId: placement.elementId,
@@ -1548,7 +1576,7 @@ async function silenceCutExcalidrawVideo(args = {}) {
           bounds: placement.bounds,
         }
       : {}),
-    dryRun: Boolean(args.dryRun),
+    dryRun: false,
   };
 }
 
