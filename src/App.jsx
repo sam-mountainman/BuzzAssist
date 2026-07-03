@@ -367,16 +367,6 @@ function canUseVideoFrameTarget(model, tab, target) {
   return true
 }
 
-// 用語辞書 input: one "wrong,correct" pair per line ("," "、" "→" "=>" all
-// accepted as separators). Matches the backend glossary shape [{from, to}].
-function parseGlossaryInput(value) {
-  return String(value || '')
-    .split(/\r?\n/)
-    .map((line) => line.split(/,|、|→|=>/).map((part) => part.trim()))
-    .filter((parts) => parts.length >= 2 && parts[0])
-    .map(([from, to]) => ({ from, to: to ?? '' }))
-}
-
 function getVideoFrameSlotLabel(tab, target) {
   if (tab === 'motion') return target === 'start' ? '画像' : '動画'
   if (tab === 'reference') return target === 'start' ? '動画' : '画像'
@@ -2471,6 +2461,26 @@ export default function App() {
   const [runwayKeySaving, setRunwayKeySaving] = useState(false)
   const [higgsfieldStatus, setHiggsfieldStatus] = useState(null)
   const runwaySecretInputRef = useRef(null)
+  // Project-common 用語辞書 (canvas/subtitle-glossary.json), edited from the
+  // SRT panel's 用語 pill and merged server-side into every transcription.
+  const [glossaryTerms, setGlossaryTerms] = useState(null)
+  const glossarySaveTimerRef = useRef(null)
+  const persistGlossaryTerms = (terms) => {
+    setGlossaryTerms(terms)
+    window.clearTimeout(glossarySaveTimerRef.current)
+    glossarySaveTimerRef.current = window.setTimeout(() => {
+      fetch('/api/subtitle-glossary', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ terms })
+      }).catch(() => {})
+    }, 600)
+  }
+  const updateGlossaryTerm = (id, key, value) =>
+    persistGlossaryTerms((glossaryTerms ?? []).map((term) => (term.id === id ? { ...term, [key]: value } : term)))
+  const removeGlossaryTerm = (id) => persistGlossaryTerms((glossaryTerms ?? []).filter((term) => term.id !== id))
+  const addGlossaryTerm = () => persistGlossaryTerms([...(glossaryTerms ?? []), { id: crypto.randomUUID(), from: '', to: '' }])
+  const glossaryActiveCount = (glossaryTerms ?? []).filter((term) => term.from?.trim()).length
   const lovartAccessKeyInputRef = useRef(null)
   const lovartSecretKeyInputRef = useRef(null)
   const subtitlePreviewOverlaysRef = useRef([])
@@ -4600,7 +4610,6 @@ export default function App() {
               holdSeconds: savedForm.subtitleHoldSeconds,
               punctuationMode: savedForm.subtitlePunctuationMode,
               fillerMode: savedForm.subtitleFillerMode,
-              glossary: parseGlossaryInput(savedForm.subtitleGlossary),
               durationSeconds: Number(savedForm.subtitleAudio.duration) || undefined,
               anchorElementId,
               placement: 'replace',
@@ -6133,6 +6142,58 @@ export default function App() {
                   </div>
                 ) : null}
               </div>
+              <div className="lovart-menu-wrap">
+                <button
+                  type="button"
+                  className={`lovart-pill${openMenu === 'glossary' ? ' tooltip-hidden' : ''}`}
+                  data-lovart-tooltip="用語辞書"
+                  onClick={() => {
+                    setOpenMenu((current) => (current === 'glossary' ? null : 'glossary'))
+                    fetch('/api/subtitle-glossary')
+                      .then((response) => response.json())
+                      .then((payload) => setGlossaryTerms(Array.isArray(payload.terms) ? payload.terms : []))
+                      .catch(() => setGlossaryTerms([]))
+                  }}
+                >
+                  <span>{glossaryActiveCount > 0 ? `用語 ${glossaryActiveCount}` : '用語'}</span>
+                  <ChevronIcon />
+                </button>
+                {openMenu === 'glossary' ? (
+                  <div className="lovart-menu wide lovart-glossary-menu" data-lovart-menu="glossary">
+                    <div className="lovart-glossary-head">
+                      <div className="lovart-menu-header">用語辞書</div>
+                      <span className="lovart-glossary-scope">プロジェクト共通</span>
+                    </div>
+                    <div className="lovart-glossary-desc">音声認識の表記ゆれを、SRT生成時に統一します。</div>
+                    <div className="lovart-glossary-rows">
+                      {glossaryTerms === null ? (
+                        <div className="lovart-glossary-empty">読み込み中...</div>
+                      ) : glossaryTerms.length === 0 ? (
+                        <div className="lovart-glossary-empty">まだ用語はありません。</div>
+                      ) : (
+                        glossaryTerms.map((term) => (
+                          <div key={term.id} className="lovart-glossary-row">
+                            <input
+                              value={term.from}
+                              placeholder="変換元"
+                              onChange={(event) => updateGlossaryTerm(term.id, 'from', event.target.value)}
+                            />
+                            <input
+                              value={term.to}
+                              placeholder="表示"
+                              onChange={(event) => updateGlossaryTerm(term.id, 'to', event.target.value)}
+                            />
+                            <button type="button" title="削除" onClick={() => removeGlossaryTerm(term.id)}>×</button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                    <button type="button" className="lovart-glossary-add" onClick={addGlossaryTerm}>
+                      + 用語を追加
+                    </button>
+                  </div>
+                ) : null}
+              </div>
             </div>
             <div className="lovart-ai-right">
               <div className="lovart-menu-wrap">
@@ -6225,15 +6286,6 @@ export default function App() {
                         </button>
                       ))}
                     </div>
-                    <div className="lovart-setting-row">
-                      <div className="lovart-menu-header">用語辞書</div>
-                    </div>
-                    <textarea
-                      className="lovart-glossary-input"
-                      placeholder={'誤,正（1行に1組）\n例: ばずあしすと,BuzzAssist'}
-                      value={frameForm.subtitleGlossary}
-                      onChange={(event) => updateFrameForm('subtitleGlossary', event.target.value)}
-                    />
                   </div>
                 ) : null}
               </div>

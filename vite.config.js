@@ -607,6 +607,16 @@ async function serveMcp(req, res) {
   return true
 }
 
+async function readProjectGlossary() {
+  try {
+    const parsed = JSON.parse(await readFile(join(canvasDir, 'subtitle-glossary.json'), 'utf8'))
+    const terms = Array.isArray(parsed?.terms) ? parsed.terms : []
+    return { terms: terms.filter((term) => term && typeof term === 'object') }
+  } catch {
+    return { terms: [] }
+  }
+}
+
 function canvasStoragePlugin() {
   return {
     name: 'codex-excalidraw-storage',
@@ -1209,6 +1219,43 @@ function canvasStoragePlugin() {
         }
       })
 
+      // Lets the MCP server decide whether to open a browser tab (auto-open
+      // when no canvas tab is connected).
+      server.middlewares.use('/api/canvas-clients', (req, res) => {
+        sendJson(res, 200, { clients: canvasEventClients.size })
+      })
+
+      // Project-common 用語辞書 (same model as the BuzzAssist desktop app):
+      // one list per project, merged into every SRT generation.
+      server.middlewares.use('/api/subtitle-glossary', async (req, res) => {
+        try {
+          const glossaryFile = join(canvasDir, 'subtitle-glossary.json')
+          if (req.method === 'GET') {
+            sendJson(res, 200, await readProjectGlossary())
+            return
+          }
+          if (req.method === 'PUT' || req.method === 'POST') {
+            const body = JSON.parse((await readRequestBody(req)) || '{}')
+            const terms = (Array.isArray(body.terms) ? body.terms : [])
+              .map((term) => ({
+                id: String(term?.id || Math.random().toString(36).slice(2)),
+                from: String(term?.from ?? ''),
+                to: String(term?.to ?? '')
+              }))
+              .slice(0, 200)
+            await mkdir(canvasDir, { recursive: true })
+            await writeFile(glossaryFile, `${JSON.stringify({ terms }, null, 2)}\n`)
+            sendJson(res, 200, { terms })
+            return
+          }
+          res.statusCode = 405
+          res.setHeader('allow', 'GET, PUT')
+          res.end()
+        } catch (error) {
+          sendJson(res, 500, { error: error.message })
+        }
+      })
+
       server.middlewares.use('/api/runway/auth-status', async (req, res) => {
         try {
           if (req.method !== 'GET') {
@@ -1336,7 +1383,10 @@ function canvasStoragePlugin() {
             coughRemoval: body.coughRemoval,
             retakeRemoval: body.retakeRemoval,
             instructionPrompt: body.instructionPrompt,
-            glossary: body.glossary,
+            glossary: [
+              ...(await readProjectGlossary()).terms.filter((term) => term.from),
+              ...(Array.isArray(body.glossary) ? body.glossary : [])
+            ],
             detectSeconds: body.detectSeconds,
             thresholdDb: body.thresholdDb,
             keepSeconds: body.keepSeconds,

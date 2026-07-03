@@ -1,5 +1,7 @@
 import { copyFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import readline from "node:readline";
 import { generateKeyBetween } from "fractional-indexing";
 import { IMAGE_MODELS, VIDEO_MODELS, generateImageMedia, generateVideoMedia, runWithConcurrency } from "../lib/mediaGeneration.mjs";
@@ -53,9 +55,73 @@ const MEDIA_GENERATION_AGENT_INSTRUCTIONS = [
   "Before invoking image or video generation, if the user did not specify settings that materially affect the output, ask the user via the host's AskUserQuestion/request_user_input mechanism instead of guessing.",
   "Required image settings to confirm when missing: model, aspect ratio, and quality. Defaults to offer as Recommended are GPT-Image-2.0(Codex), 1:1, and Auto.",
   "Required video settings to confirm when missing: model, aspect ratio, duration, and resolution. Defaults to offer as Recommended are Grok Imagine(Hermes), 16:9, 5 seconds, and 720p.",
+  "Runway models (require RUNWAYML_API_SECRET or ~/.runway/credentials.json): image runway-gen4-image (reference images supported), video runway-gen4-5 (5 or 10 seconds; image-to-video when a start frame is given, text-to-video otherwise).",
+  "Higgsfield models (require the official Higgsfield CLI installed and `higgsfield auth login`): images higgsfield-gpt-image-2, higgsfield-nano-banana-2, higgsfield-soul-2, higgsfield-recraft-4-1, higgsfield-flux-2; videos higgsfield-kling-3, higgsfield-seedance-2, higgsfield-veo-3-1.",
+  "Before generating subtitles, confirm when missing: mode (scripted needs the script text; scriptless transcribes), lineCount (1 or 2), and maxCharsPerLine. Defaults to offer as Recommended are scriptless, 2 lines, 30 chars.",
+  "Before silence-cutting, confirm when missing: model (ffmpeg-local jet-cut, or elevenlabs-scribe-v2 for AI cleanup of fillers/coughs/retakes) and for scribe the removal intensities (0/25/50/80, defaults 50/50/0). Default model to offer as Recommended is ffmpeg-local.",
+  "The project-common 用語辞書 (canvas/subtitle-glossary.json, editable from the SRT panel's 用語 pill) is merged into every subtitle/scribe transcription automatically.",
+  "Canvas tools auto-start the local canvas server and open it in the browser once when no tab is connected (set EXCALIDRAW_NO_AUTO_OPEN=1 to disable).",
   "When an attached or selected image/video could be used in more than one way, ask one disambiguation question before generation. For video, distinguish start frame/image-to-video from style reference; do not silently put the same media into multiple payload fields.",
   "For choice questions, keep options short and mark the default with (Recommended) in English or （推奨） in Japanese. Do not ask when only one value is valid.",
 ].join(" ");
+
+// Project-common 用語辞書 (canvas/subtitle-glossary.json) merges into every
+// SRT / scribe-cut transcription, matching the BuzzAssist desktop app.
+async function mergedProjectGlossary(args = {}) {
+  const stored = await readJsonIfExists(join(resolveCanvasDir(args), "subtitle-glossary.json"), { terms: [] });
+  const projectTerms = (Array.isArray(stored?.terms) ? stored.terms : []).filter((term) => nonEmptyString(term?.from));
+  const requestTerms = Array.isArray(args.glossary) ? args.glossary : [];
+  return [...projectTerms, ...requestTerms];
+}
+
+// Auto-open: when a canvas tool runs and no browser tab is connected, start
+// the local canvas server if needed and open it once per MCP process.
+// Disable with EXCALIDRAW_NO_AUTO_OPEN=1.
+let canvasAutoOpenAttempted = false;
+
+async function fetchJsonQuick(url, timeoutMs = 1500) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    return response.ok ? await response.json() : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function ensureCanvasVisible(args = {}) {
+  if (canvasAutoOpenAttempted) return;
+  canvasAutoOpenAttempted = true;
+  if (/^(1|true|yes)$/i.test(String(process.env.EXCALIDRAW_NO_AUTO_OPEN || ""))) return;
+  try {
+    const port = Number(process.env.EXCALIDRAW_PORT ?? 43219);
+    const baseUrl = nonEmptyString(process.env.EXCALIDRAW_CANVAS_URL) || `http://127.0.0.1:${port}`;
+    let status = await fetchJsonQuick(`${baseUrl}/api/canvas-clients`);
+    if (!status) {
+      const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+      const child = spawn("npm", ["run", "dev"], {
+        cwd: repoRoot,
+        env: { ...process.env, EXCALIDRAW_CANVAS_DIR: resolveCanvasDir(args) },
+        detached: true,
+        stdio: "ignore",
+      });
+      child.unref();
+      const deadline = Date.now() + 15_000;
+      while (Date.now() < deadline && !status) {
+        await new Promise((resolveSleep) => setTimeout(resolveSleep, 1000));
+        status = await fetchJsonQuick(`${baseUrl}/api/canvas-clients`);
+      }
+    }
+    if (status && Number(status.clients) === 0 && process.platform === "darwin") {
+      spawn("open", [baseUrl], { detached: true, stdio: "ignore" }).unref();
+    }
+  } catch {
+    // best-effort — never block the tool call
+  }
+}
 
 const JsonRpcError = {
   METHOD_NOT_FOUND: -32601,
@@ -1425,7 +1491,7 @@ async function generateExcalidrawSubtitles(args = {}) {
     holdSeconds: args.holdSeconds,
     punctuationMode: args.punctuationMode,
     fillerMode: args.fillerMode,
-    glossary: args.glossary,
+    glossary: await mergedProjectGlossary(args),
     normalizeAudio: args.normalizeAudio,
     durationSeconds: args.durationSeconds,
     requestId: args.requestId,
@@ -1508,7 +1574,7 @@ async function silenceCutExcalidrawVideo(args = {}) {
     coughRemoval: args.coughRemoval,
     retakeRemoval: args.retakeRemoval,
     instructionPrompt: args.instructionPrompt,
-    glossary: args.glossary,
+    glossary: await mergedProjectGlossary(args),
     detectSeconds: args.detectSeconds,
     thresholdDb: args.thresholdDb,
     keepSeconds: args.keepSeconds,
@@ -1573,7 +1639,22 @@ async function silenceCutExcalidrawVideo(args = {}) {
   };
 }
 
+const CANVAS_AUTO_OPEN_TOOLS = new Set([
+  TOOL_CREATE_VIEW,
+  TOOL_INSERT_IMAGE,
+  TOOL_INSERT_VIDEO,
+  TOOL_GENERATE_IMAGE,
+  TOOL_GENERATE_VIDEO,
+  TOOL_GENERATE_IMAGES_BATCH,
+  TOOL_GENERATE_VIDEOS_BATCH,
+  TOOL_GENERATE_SUBTITLES,
+  TOOL_SILENCE_CUT_VIDEO,
+]);
+
 async function handleToolCall(id, params) {
+  if (CANVAS_AUTO_OPEN_TOOLS.has(params?.name)) {
+    await ensureCanvasVisible(params.arguments ?? {});
+  }
   if (params?.name === TOOL_GENERATE_SUBTITLES) {
     const result = await generateExcalidrawSubtitles(params.arguments ?? {});
     sendResult(id, {
