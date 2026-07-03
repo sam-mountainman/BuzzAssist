@@ -2341,7 +2341,8 @@ export default function App() {
       }
 
       const appState = api.getAppState?.() ?? {}
-      const zoom = Math.max(0.1, Number(appState.zoom?.value) || 1)
+      const zoomValue = Number(appState.zoom?.value)
+      const zoom = Number.isFinite(zoomValue) && zoomValue > 0 ? zoomValue : 1
       const rootRect = root.getBoundingClientRect()
       const scenePoint = {
         x: (lastPointer.clientX - rootRect.left) / zoom - (Number(appState.scrollX) || 0),
@@ -3013,7 +3014,8 @@ export default function App() {
       event.preventDefault()
       event.stopPropagation()
       const appState = api.getAppState?.() ?? {}
-      const zoom = Math.max(0.1, Number(appState.zoom?.value) || 1)
+      const zoomValue = Number(appState.zoom?.value)
+      const zoom = Number.isFinite(zoomValue) && zoomValue > 0 ? zoomValue : 1
       const rootRect = root.getBoundingClientRect()
       const point = {
         x: (event.clientX - rootRect.left) / zoom - (Number(appState.scrollX) || 0),
