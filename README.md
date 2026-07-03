@@ -140,6 +140,17 @@ kling-v3                 kling-o3                 kling-v2-6
 grok-imagine-video-api
 ```
 
+## Lovart Models
+
+Lovart's Agent OpenAPI (issued from Lovart's OpenClaw settings) adds models the fal proxy does not have:
+
+```text
+images: lovart-midjourney  lovart-flux-2-max  lovart-nano-banana-pro  lovart-ideogram-v4  lovart-agent
+videos: lovart-veo-3-1  lovart-veo-3-1-fast  lovart-hailuo-2-3  lovart-kling-3-omni  lovart-wan-2-6
+```
+
+Auth: set `LOVART_ACCESS_KEY` / `LOVART_SECRET_KEY`, or put `access_key` / `secret_key` in `~/.lovart/credentials.json` (0600). Requests are HMAC-SHA256 signed against `https://lgw.lovart.ai/v1/openapi` (`lib/lovartMediaGeneration.mjs`). Generation is prompt-driven (aspect ratio / duration are hints); results are billed in Lovart credits, generated inside a dedicated "Codex Excalidraw" Lovart project, and downloaded onto the canvas. High-cost confirmations are auto-approved by default (`autoConfirmCredits: false` to require explicit approval).
+
 ## BuzzAssist Sign-In
 
 Cloud models, cloud subtitles, and their credits use your BuzzAssist account:
@@ -154,6 +165,20 @@ Tokens are desktop-app auth tokens (30-day TTL) stored at `~/.buzzassist/excalid
 
 - `silence_cut_excalidraw_video` runs the BuzzAssist tempo-cut pipeline (ffmpeg-local mode) ported to `lib/tempoCut.mjs`: silencedetect with adaptive threshold fallback, margin/keep cutlist math, and a filter_complex jet-cut render. Requires `ffmpeg`/`ffprobe`.
 - `generate_excalidraw_subtitles` reserves subtitle credits, calls the BuzzAssist subtitle API (ElevenLabs forced alignment for scripted mode, Scribe v2 for scriptless), then builds SRT cues locally with the ported Japanese-aware segmentation (`lib/subtitleGeneration.mjs`).
+
+## Folder-Canvas Storage
+
+Same model as the Youtube-AGI (BuzzAssist) folder canvas: a canvas belongs to one project folder, and everything generated on it is written under that folder.
+
+```text
+<project>/
+  canvas/excalidraw-canvas.json     # the canvas (BuzzAssist: the folder's .excalidraw canvas)
+  canvas/excalidraw-selection.json
+  canvas/excalidraw-view-state.json
+  canvas/assets/                    # generated images, videos, SRT files (BuzzAssist: .excalidraw/)
+```
+
+Bind the canvas to a project with `./scripts/start-canvas.sh /path/to/project` (or `EXCALIDRAW_PROJECT_DIR`). MCP tools take `projectDir` per call, so different projects keep separate canvases and assets.
 
 ## Claude Code
 

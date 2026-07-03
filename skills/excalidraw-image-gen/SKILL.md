@@ -1,6 +1,6 @@
 ---
 name: excalidraw-image-gen
-description: Generate or insert a bitmap into the local Codex Excalidraw canvas. Use when the user asks to create, fill, replace, or place an AI-generated image on the Excalidraw canvas using GPT Image 2(Codex), Grok Imagine(Hermes), or BuzzAssist cloud models (Nano Banana 2, GPT Image 2 API, Seedream 5.0 Lite, Grok Imagine API — require the buzzassist_login MCP tool).
+description: Generate or insert a bitmap into the local Codex Excalidraw canvas. Use when the user asks to create, fill, replace, or place an AI-generated image on the Excalidraw canvas using GPT Image 2(Codex), Grok Imagine(Hermes), or BuzzAssist cloud models (Nano Banana 2, GPT Image 2 API, Seedream 5.0 Lite, Grok Imagine API — require the buzzassist_login MCP tool), or Lovart models (Midjourney, Flux.2 Max, Nano Banana Pro, Ideogram 4 — require LOVART_ACCESS_KEY/SECRET_KEY or ~/.lovart/credentials.json).
 ---
 
 # Excalidraw Image Gen

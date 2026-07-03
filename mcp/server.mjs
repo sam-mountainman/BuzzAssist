@@ -33,8 +33,16 @@ const TOOL_BUZZASSIST_LOGIN = "buzzassist_login";
 const TOOL_BUZZASSIST_AUTH_STATUS = "buzzassist_auth_status";
 const TOOL_GENERATE_SUBTITLES = "generate_excalidraw_subtitles";
 const TOOL_SILENCE_CUT_VIDEO = "silence_cut_excalidraw_video";
-const IMAGE_MODEL_IDS = ["gpt-image-2-codex", "grok-imagine-image-hermes", "nano-banana-2", "gpt-image-2", "seedream-v5-lite", "grok-imagine-image-api"];
-const VIDEO_MODEL_IDS = ["grok-imagine-video-hermes", "seedance-2", "seedance-2-fast", "kling-v3", "kling-o3", "kling-v2-6", "grok-imagine-video-api"];
+const IMAGE_MODEL_IDS = [
+  "gpt-image-2-codex", "grok-imagine-image-hermes",
+  "nano-banana-2", "gpt-image-2", "seedream-v5-lite", "grok-imagine-image-api",
+  "lovart-midjourney", "lovart-flux-2-max", "lovart-nano-banana-pro", "lovart-ideogram-v4", "lovart-agent",
+];
+const VIDEO_MODEL_IDS = [
+  "grok-imagine-video-hermes",
+  "seedance-2", "seedance-2-fast", "kling-v3", "kling-o3", "kling-v2-6", "grok-imagine-video-api",
+  "lovart-veo-3-1", "lovart-veo-3-1-fast", "lovart-hailuo-2-3", "lovart-kling-3-omni", "lovart-wan-2-6",
+];
 const CANVAS_FILE_NAME = "excalidraw-canvas.json";
 const SELECTION_FILE_NAME = "excalidraw-selection.json";
 const ASSETS_ROUTE = "/excalidraw-assets/";
@@ -45,6 +53,7 @@ const MEDIA_GENERATION_AGENT_INSTRUCTIONS = [
   "Use get_excalidraw_selection for persisted browser selection and insert_excalidraw_image/insert_excalidraw_video for local assets.",
   "Use generate_excalidraw_image/generate_excalidraw_video for media generation. Local models: GPT-Image-2.0(Codex), Grok Imagine(Hermes). BuzzAssist cloud models (require buzzassist_login first): images nano-banana-2, gpt-image-2, seedream-v5-lite, grok-imagine-image-api; videos seedance-2, seedance-2-fast, kling-v3, kling-o3, kling-v2-6, grok-imagine-video-api.",
   "Use buzzassist_auth_status to check BuzzAssist sign-in and buzzassist_login to sign in before using BuzzAssist cloud models, cloud subtitles, or when a tool reports missing login.",
+  "Lovart models (require LOVART_ACCESS_KEY/LOVART_SECRET_KEY or ~/.lovart/credentials.json; billed in Lovart credits): images lovart-midjourney, lovart-flux-2-max, lovart-nano-banana-pro, lovart-ideogram-v4, lovart-agent (Lovart picks the model); videos lovart-veo-3-1, lovart-veo-3-1-fast, lovart-hailuo-2-3, lovart-kling-3-omni, lovart-wan-2-6. Lovart is prompt-driven: aspect ratio and duration are hints, not hard parameters.",
   "Use generate_excalidraw_subtitles to create Japanese SRT subtitles from an audio file (scripted mode aligns a provided script, scriptless mode transcribes) and place an SRT card on the canvas.",
   "Use silence_cut_excalidraw_video to remove silences from a local video with ffmpeg (jet-cut) and insert the cut video into the canvas with cut statistics.",
   "Use generate_excalidraw_images_batch/generate_excalidraw_videos_batch when the user asks for many images, many videos, storyboard scenes, or batch media; prepare one jobs item per requested output and let the tool lay results out as a grid.",

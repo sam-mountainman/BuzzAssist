@@ -1,6 +1,6 @@
 ---
 name: excalidraw-video-gen
-description: Generate or insert a video into the local Codex Excalidraw canvas. Use when the user asks to create, place, or generate a video on the Excalidraw canvas using Grok Imagine(Hermes) or BuzzAssist cloud models (Seedance 2, Seedance 2 Fast, Kling v3, Kling o3, Kling v2.6, Grok Imagine API).
+description: Generate or insert a video into the local Codex Excalidraw canvas. Use when the user asks to create, place, or generate a video on the Excalidraw canvas using Grok Imagine(Hermes) or BuzzAssist cloud models (Seedance 2, Seedance 2 Fast, Kling v3, Kling o3, Kling v2.6, Grok Imagine API), or Lovart models (Veo 3.1, Hailuo 2.3, Kling 3.0 Omni, Wan 2.6).
 ---
 
 # Excalidraw Video Gen
