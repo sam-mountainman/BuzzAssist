@@ -5808,7 +5808,7 @@ export default function App() {
                     type="button"
                     data-lovart-trigger="asset"
                     className={`lovart-pill${openMenu === 'asset' ? ' tooltip-hidden' : ''}`}
-                    data-lovart-tooltip="参照"
+                    data-lovart-tooltip="画像参照"
                     onClick={() => setOpenMenu((current) => (current === 'asset' ? null : 'asset'))}
                   >
                       <PhotoIcon />
@@ -5954,9 +5954,16 @@ export default function App() {
                     onClick={() => setOpenMenu((current) => (current === 'video-settings' ? null : 'video-settings'))}
                   >
                     <span>
-                      {supportsResolutionSelection(frameForm.videoModel)
-                        ? `${frameForm.videoAspectRatio}・${frameForm.duration}s・${frameForm.resolution}`
-                        : `${frameForm.videoAspectRatio}・${frameForm.duration}s`}
+                      {(() => {
+                        const modes = getAvailableVideoModes(frameForm.videoModel, frameForm.videoTab)
+                        const activeMode = normalizeVideoModeForContext(frameForm.videoModel, frameForm.videoTab, frameForm.videoMode)
+                        const modePrefix = modes.length > 0
+                          ? `${VIDEO_MODE_OPTIONS.find(([value]) => value === activeMode)?.[1] ?? ''}・`
+                          : ''
+                        const aspect = frameForm.videoAspectRatio === 'auto' ? 'Auto' : frameForm.videoAspectRatio
+                        const resolution = supportsResolutionSelection(frameForm.videoModel) ? `・${frameForm.resolution}` : ''
+                        return `${modePrefix}${aspect}・${frameForm.duration}s${resolution}`
+                      })()}
                     </span>
                     <ChevronIcon />
                   </button>
@@ -6062,7 +6069,7 @@ export default function App() {
                 {isCurrentFrameGenerating ? (
                   <span>Generating...</span>
                 ) : (
-                  <span>{activePanelCreditEstimate ?? '—'}</span>
+                  <span>{typeof activePanelCreditEstimate === 'number' ? activePanelCreditEstimate.toLocaleString('ja-JP') : '—'}</span>
                 )}
               </button>
             </div>
