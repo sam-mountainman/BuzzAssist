@@ -1627,7 +1627,8 @@ function normalizeGeneratorFrameVisuals(elements) {
       element.backgroundColor === spec.backgroundColor &&
       element.fillStyle === 'solid' &&
       Number(element.strokeWidth || 1) === spec.strokeWidth &&
-      element.strokeStyle === 'solid'
+      element.strokeStyle === 'solid' &&
+      element.roundness == null
     ) {
       return element
     }
@@ -1639,6 +1640,7 @@ function normalizeGeneratorFrameVisuals(elements) {
       fillStyle: 'solid',
       strokeWidth: spec.strokeWidth,
       strokeStyle: 'solid',
+      roundness: null,
       version: (Number(element.version) || 1) + 1,
       versionNonce: Math.floor(Math.random() * 2 ** 31),
       updated: now
@@ -1835,6 +1837,9 @@ function buildFrameOverlays(scene) {
         id: element.id,
         kind,
         isSelected: selectedIds.has(element.id),
+        // MCP/batch jobs mark their placeholder frames so the browser shows
+        // the Generating... overlay for work it did not start itself.
+        remoteGenerating: element.customData?.codexGenerating === true,
         left: placement.left,
         top: placement.top,
         width: placement.width,
@@ -4438,6 +4443,32 @@ export default function App() {
     [insertGeneratorFrame]
   )
 
+  // BuzzAssist-billed generations require a login. The login endpoint opens
+  // the browser auth window and blocks until sign-in completes, so pressing
+  // generate while logged out flows straight into the auth screen and the
+  // generation continues automatically after sign-in (BuzzAssist behavior).
+  const ensureBuzzAssistLoggedIn = useCallback(async () => {
+    try {
+      const status = await (await fetch('/api/buzzassist/auth-status')).json()
+      if (status?.loggedIn) return true
+    } catch {
+      // status probe failed — fall through to the login flow
+    }
+    setGenerationError('BuzzAssistのログイン画面を開きました。ブラウザでサインインすると自動で続行します…')
+    try {
+      const response = await fetch('/api/buzzassist/login', { method: 'POST' })
+      const payload = await response.json().catch(() => ({}))
+      if (response.ok && payload.ok) {
+        setGenerationError('')
+        return true
+      }
+      setGenerationError(payload.error || 'BuzzAssistのログインに失敗しました。')
+    } catch (error) {
+      setGenerationError(`BuzzAssistのログインに失敗しました: ${error.message}`)
+    }
+    return false
+  }, [])
+
   const runFrameGeneration = useCallback(async () => {
     if (!api) return
     const selectedResult = selectedGeneratedResultRef.current
@@ -4486,6 +4517,13 @@ export default function App() {
         }
       }
     }
+    const generationModel = kind === 'video' ? savedForm.videoModel : savedForm.imageModel
+    const requiresBuzzAssist =
+      [...(capabilities?.imageModels ?? []), ...(capabilities?.videoModels ?? [])].find(
+        (entry) => entry.id === generationModel
+      )?.requiresBuzzAssist === true
+    if (requiresBuzzAssist && !(await ensureBuzzAssistLoggedIn())) return
+
     if (!isRegeneratingResult) updateActiveFrameElement(savedForm)
     setOpenMenu(null)
     setGenerationError('')
@@ -4636,7 +4674,7 @@ export default function App() {
         return next
       })
     }
-  }, [api, applyRemoteScene, frameForm, generatingFrameIds, insertGeneratorFrame, refreshOverlayStates, saveCanvas, scheduleCanvasSave, scheduleSelectionSave, selectedGeneratedResult, updateActiveFrameElement])
+  }, [api, applyRemoteScene, capabilities, ensureBuzzAssistLoggedIn, frameForm, generatingFrameIds, insertGeneratorFrame, refreshOverlayStates, saveCanvas, scheduleCanvasSave, scheduleSelectionSave, selectedGeneratedResult, updateActiveFrameElement])
 
   // Generation for the utility frames (SRT subtitles / silence cut). The server
   // replaces the anchor frame with the result card/video and broadcasts the new
@@ -4665,6 +4703,9 @@ export default function App() {
       setGenerationError('無音カットする動画を添付してください。')
       return
     }
+
+    const needsCloud = kind === 'subtitle' || savedForm.silenceCutModel === 'elevenlabs-scribe-v2'
+    if (needsCloud && !(await ensureBuzzAssistLoggedIn())) return
 
     updateActiveFrameElement(savedForm)
     setOpenMenu(null)
@@ -4792,7 +4833,7 @@ export default function App() {
         return next
       })
     }
-  }, [api, applyRemoteScene, frameForm, generatingFrameIds, refreshOverlayStates, saveCanvas, scheduleCanvasSave, scheduleSelectionSave, updateActiveFrameElement])
+  }, [api, applyRemoteScene, ensureBuzzAssistLoggedIn, frameForm, generatingFrameIds, refreshOverlayStates, saveCanvas, scheduleCanvasSave, scheduleSelectionSave, updateActiveFrameElement])
 
   // Wheel over a subtitle result card scrolls its SRT preview instead of
   // panning the canvas (Youtube-AGI parity). The overlay itself is
@@ -5083,7 +5124,7 @@ export default function App() {
       ) : null}
 
       {frameOverlays.map((overlay) => {
-        const isGenerating = generatingFrameIds.has(overlay.id)
+        const isGenerating = generatingFrameIds.has(overlay.id) || overlay.remoteGenerating
         const isVideo = overlay.kind === 'video'
         const isUtilityFrame = overlay.kind === 'subtitle' || overlay.kind === 'silenceCut'
         const overlayTitle =

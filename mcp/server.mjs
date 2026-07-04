@@ -12,6 +12,7 @@ import {
   insertExcalidrawImage as insertExcalidrawImageMedia,
   insertExcalidrawSubtitle,
   insertExcalidrawVideo as insertExcalidrawVideoMedia,
+  clearFrameGeneratingFlags,
   insertGeneratorFrameBatch,
   performCanvasMaintenance,
 } from "../lib/canvasScene.mjs";
@@ -794,7 +795,7 @@ async function generateExcalidrawImagesBatch(args = {}) {
 
   const results = jobs.map((job, i) => {
     const outcome = generated[i];
-    if (!outcome.ok) return { prompt: job.prompt, error: outcome.error };
+    if (!outcome.ok) return { prompt: job.prompt, error: outcome.error, frameElementId: frames[i]?.elementId };
     const { media, placement, frame } = outcome.value;
     return {
       prompt: job.prompt,
@@ -807,6 +808,13 @@ async function generateExcalidrawImagesBatch(args = {}) {
       assetUrl: placement?.assetUrl,
     };
   });
+
+  if (!dryRun) {
+    const failedFrameIds = results.filter((result) => result.error).map((result) => result.frameElementId);
+    if (failedFrameIds.length > 0) {
+      await enqueueWrite(() => clearFrameGeneratingFlags({ projectDir: args.projectDir, canvasDir: args.canvasDir }, failedFrameIds));
+    }
+  }
 
   const succeeded = results.filter((result) => !result.error).length;
   return {
@@ -914,7 +922,7 @@ async function generateExcalidrawVideosBatch(args = {}) {
 
   const results = jobs.map((job, i) => {
     const outcome = generated[i];
-    if (!outcome.ok) return { prompt: job.prompt, error: outcome.error };
+    if (!outcome.ok) return { prompt: job.prompt, error: outcome.error, frameElementId: frames[i]?.elementId };
     const { media, placement, frame } = outcome.value;
     return {
       prompt: job.prompt,
@@ -927,6 +935,13 @@ async function generateExcalidrawVideosBatch(args = {}) {
       assetUrl: placement?.assetUrl,
     };
   });
+
+  if (!dryRun) {
+    const failedFrameIds = results.filter((result) => result.error).map((result) => result.frameElementId);
+    if (failedFrameIds.length > 0) {
+      await enqueueWrite(() => clearFrameGeneratingFlags({ projectDir: args.projectDir, canvasDir: args.canvasDir }, failedFrameIds));
+    }
+  }
 
   const succeeded = results.filter((result) => !result.error).length;
   return {
