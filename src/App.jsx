@@ -667,6 +667,33 @@ function LovartGeneratorToolIcon() {
   )
 }
 
+// Robust file picker for embedded browsers (the in-app preview): a hidden
+// <input> inside a <label> opens the native dialog when the label is clicked,
+// with NO programmatic input.click() — which some webviews block, making
+// "アップロード" appear to do nothing. onOpen runs on pointer-down (before the
+// dialog) to remember the target frame; onChange gets the file input event.
+function FileUploadLabel({ accept, multiple = false, className = '', title, onOpen, onChange, children }) {
+  return (
+    <label
+      className={className}
+      title={title}
+      style={{ position: 'relative' }}
+      onPointerDown={(event) => { event.stopPropagation(); onOpen?.() }}
+    >
+      {/* The input overlays the label, so a tap IS a native file-input click —
+          no programmatic .click() that embedded webviews may block. */}
+      <input
+        type="file"
+        accept={accept}
+        multiple={multiple}
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', margin: 0, padding: 0, opacity: 0, cursor: 'pointer' }}
+        onChange={onChange}
+      />
+      {children}
+    </label>
+  )
+}
+
 function ModelProviderIcon({ provider, size = 16 }) {
   // Real brand icon embedded at build time (src/providerIcons.js) → it paints
   // instantly on the first frame, no network, no glyph placeholder. Only
@@ -2817,12 +2844,10 @@ export default function App() {
   const canvasPickerRef = useRef(null)
   const canvasPickerFrameIdRef = useRef('')
   const consumeCanvasPickerSelectionRef = useRef(null)
-  const imageUploadInputRef = useRef(null)
   const toolbarMediaInputRef = useRef(null)
   const toolbarMediaPickerActiveRef = useRef(false)
   const hoverOverlayRef = useRef(null)
   const menuBackdropRef = useRef(null)
-  const videoFrameUploadInputRef = useRef(null)
   const videoFrameUploadTargetRef = useRef('start')
   const pendingGeneratorUploadFrameIdRef = useRef('')
   const videoFrameLeaveTimerRef = useRef(0)
@@ -5975,22 +6000,19 @@ export default function App() {
                   ) : null}
                   {openMenu === target ? (
                     <div className="lovart-menu lovart-slot-menu" data-lovart-menu={`video-frame-${slot}`}>
-                      <button
-                        type="button"
-                        onClick={() => {
+                      <FileUploadLabel
+                        className="lovart-upload-label"
+                        accept={getUploadTargetAccept(target)}
+                        multiple={frameForm.videoTab === 'reference'}
+                        onOpen={() => {
                           rememberGeneratorUploadFrame()
                           videoFrameUploadTargetRef.current = target
-                          if (videoFrameUploadInputRef.current) {
-                            videoFrameUploadInputRef.current.accept = getUploadTargetAccept(target)
-                            videoFrameUploadInputRef.current.multiple = frameForm.videoTab === 'reference'
-                            videoFrameUploadInputRef.current.click()
-                          }
-                          setOpenMenu(null)
                         }}
+                        onChange={(event) => { setOpenMenu(null); onVideoFrameUploadChange(event) }}
                       >
                         <UploadIcon />
                         <span>{getVideoFrameUploadLabel(frameForm.videoTab, slotTarget)}</span>
-                      </button>
+                      </FileUploadLabel>
                       <button
                         type="button"
                         data-lovart-canvas-pick-target={target}
@@ -6033,26 +6055,21 @@ export default function App() {
                   <>
                     {supportsAudioReference(frameForm.videoModel) ? (
                     <div className="lovart-video-slot audio">
-                      <button
-                        type="button"
-                        data-lovart-trigger="video-frame-audio"
+                      <FileUploadLabel
                         className="lovart-add-frame-btn audio"
                         title="音声"
-                        onClick={() => {
+                        accept={getUploadTargetAccept('videoReferenceAudios')}
+                        multiple
+                        onOpen={() => {
                           setVideoFrameBtnsHovered(true)
                           rememberGeneratorUploadFrame()
                           videoFrameUploadTargetRef.current = 'videoReferenceAudios'
-                          if (videoFrameUploadInputRef.current) {
-                            videoFrameUploadInputRef.current.accept = getUploadTargetAccept('videoReferenceAudios')
-                            videoFrameUploadInputRef.current.multiple = true
-                            videoFrameUploadInputRef.current.click()
-                          }
-                          setOpenMenu(null)
                         }}
+                        onChange={(event) => { setOpenMenu(null); onVideoFrameUploadChange(event) }}
                       >
                         <span className="lovart-add-plus">+</span>
                         <span className="lovart-add-label">音声</span>
-                      </button>
+                      </FileUploadLabel>
                     </div>
                     ) : null}
                     {[...videoReferenceVideos, ...videoReferenceImages].map((asset) => (
@@ -6296,17 +6313,16 @@ export default function App() {
                   </button>
                   {openMenu === 'asset' ? (
                     <div className="lovart-menu" data-lovart-menu="asset">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          rememberGeneratorUploadFrame()
-                          imageUploadInputRef.current?.click()
-                          setOpenMenu(null)
-                        }}
+                      <FileUploadLabel
+                        className="lovart-upload-label"
+                        accept="image/*"
+                        multiple
+                        onOpen={rememberGeneratorUploadFrame}
+                        onChange={(event) => { setOpenMenu(null); onImageUploadChange(event) }}
                       >
                         <UploadIcon />
                         <span>画像をアップロード</span>
-                      </button>
+                      </FileUploadLabel>
                       <button
                         type="button"
                         data-lovart-canvas-pick-target="imageReferences"
@@ -6586,34 +6602,18 @@ export default function App() {
           Boolean(primaryAsset) ||
           (!isSilencePanel && frameForm.subtitleMode === 'scripted' && hasScriptFile)
         const primaryTarget = isSilencePanel ? 'silenceCutVideo' : 'subtitleAudio'
-        const openPrimaryPicker = (acceptOverride) => {
-          setOpenMenu(null)
-          rememberGeneratorUploadFrame()
-          videoFrameUploadTargetRef.current = primaryTarget
-          if (videoFrameUploadInputRef.current) {
-            videoFrameUploadInputRef.current.accept = acceptOverride || getUploadTargetAccept(primaryTarget)
-            videoFrameUploadInputRef.current.multiple = false
-            videoFrameUploadInputRef.current.click()
-          }
-        }
         // Silence cut takes ONE source but shows two slots (動画 / XML) for
         // clarity — attaching to either replaces the source.
         const silenceVideoAsset = isSilencePanel && primaryAsset && !primaryIsXml ? primaryAsset : null
         const silenceXmlAsset = isSilencePanel && primaryIsXml ? primaryAsset : null
-        const openScriptPicker = () => {
-          if (scriptSlotDisabled) return
+        const handleScriptFileChange = (event) => {
           setOpenMenu(null)
-          const input = document.createElement('input')
-          input.type = 'file'
-          input.accept = '.txt,.md,.markdown,text/plain,text/markdown'
-          input.onchange = () => {
-            const file = input.files?.[0]
-            if (!file) return
-            file.text().then((text) =>
-              patchFrameForm({ subtitleScriptText: text.trim(), subtitleScriptName: file.name })
-            )
-          }
-          input.click()
+          const file = event.target.files?.[0]
+          event.target.value = ''
+          if (!file) return
+          file.text().then((text) =>
+            patchFrameForm({ subtitleScriptText: text.trim(), subtitleScriptName: file.name })
+          )
         }
         const canGenerate = isSilencePanel
           ? Boolean(frameForm.silenceCutVideo)
@@ -6715,10 +6715,15 @@ export default function App() {
                     )}
                     {openMenu === 'silence-video-source' ? (
                       <div className="lovart-menu lovart-slot-menu" data-lovart-menu="silence-video-source">
-                        <button type="button" onClick={() => { setOpenMenu(null); openPrimaryPicker('video/*') }}>
+                        <FileUploadLabel
+                          className="lovart-upload-label"
+                          accept="video/*"
+                          onOpen={() => { rememberGeneratorUploadFrame(); videoFrameUploadTargetRef.current = primaryTarget }}
+                          onChange={(event) => { setOpenMenu(null); onVideoFrameUploadChange(event) }}
+                        >
                           <UploadIcon />
                           <span>動画をアップロード</span>
-                        </button>
+                        </FileUploadLabel>
                         <button type="button" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setOpenMenu(null); openCanvasPicker('silenceCutVideo') }}>
                           <CanvasPickIcon />
                           <span>キャンバスから選択</span>
@@ -6730,15 +6735,16 @@ export default function App() {
                   <div className="lovart-utility-slot script">
                     {silenceXmlAsset ? (
                       <div className="lovart-utility-card-wrap">
-                        <button
-                          type="button"
+                        <FileUploadLabel
                           className="lovart-utility-asset-card script"
                           title={silenceXmlAsset.name || 'Premiere XMLを添付'}
-                          onClick={() => openPrimaryPicker('.xml,application/xml,text/xml')}
+                          accept=".xml,application/xml,text/xml"
+                          onOpen={() => { rememberGeneratorUploadFrame(); videoFrameUploadTargetRef.current = primaryTarget }}
+                          onChange={(event) => { setOpenMenu(null); onVideoFrameUploadChange(event) }}
                         >
                           <ScriptFileIcon size={24} />
                           <span className="lovart-utility-card-label">XML</span>
-                        </button>
+                        </FileUploadLabel>
                         <button
                           type="button"
                           className="lovart-frame-del"
@@ -6748,15 +6754,16 @@ export default function App() {
                         </button>
                       </div>
                     ) : (
-                      <button
-                        type="button"
+                      <FileUploadLabel
                         className="lovart-utility-tilt-card script"
                         title="Premiere XMLを添付"
-                        onClick={() => openPrimaryPicker('.xml,application/xml,text/xml')}
+                        accept=".xml,application/xml,text/xml"
+                        onOpen={() => { rememberGeneratorUploadFrame(); videoFrameUploadTargetRef.current = primaryTarget }}
+                        onChange={(event) => { setOpenMenu(null); onVideoFrameUploadChange(event) }}
                       >
                         <span className="lovart-add-plus">+</span>
                         {trayOpen ? <span className="lovart-utility-card-hint">XML</span> : null}
-                      </button>
+                      </FileUploadLabel>
                     )}
                   </div>
                 </>
@@ -6797,10 +6804,15 @@ export default function App() {
                     )}
                     {openMenu === 'subtitle-audio-source' ? (
                       <div className="lovart-menu lovart-slot-menu" data-lovart-menu="subtitle-audio-source">
-                        <button type="button" onClick={() => { setOpenMenu(null); openPrimaryPicker() }}>
+                        <FileUploadLabel
+                          className="lovart-upload-label"
+                          accept={getUploadTargetAccept('subtitleAudio')}
+                          onOpen={() => { rememberGeneratorUploadFrame(); videoFrameUploadTargetRef.current = primaryTarget }}
+                          onChange={(event) => { setOpenMenu(null); onVideoFrameUploadChange(event) }}
+                        >
                           <UploadIcon />
                           <span>音声・動画をアップロード</span>
-                        </button>
+                        </FileUploadLabel>
                         <button type="button" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setOpenMenu(null); openCanvasPicker('subtitleAudio') }}>
                           <CanvasPickIcon />
                           <span>キャンバスから選択</span>
@@ -6821,15 +6833,15 @@ export default function App() {
                       </button>
                     ) : hasScriptFile ? (
                       <div className="lovart-utility-card-wrap">
-                        <button
-                          type="button"
+                        <FileUploadLabel
                           className="lovart-utility-asset-card script"
                           title={frameForm.subtitleScriptName || '台本を添付'}
-                          onClick={openScriptPicker}
+                          accept=".txt,.md,.markdown,text/plain,text/markdown"
+                          onChange={handleScriptFileChange}
                         >
                           <ScriptFileIcon size={24} />
                           <span className="lovart-utility-card-label">台本</span>
-                        </button>
+                        </FileUploadLabel>
                         <button
                           type="button"
                           className="lovart-frame-del"
@@ -6839,15 +6851,15 @@ export default function App() {
                         </button>
                       </div>
                     ) : (
-                      <button
-                        type="button"
+                      <FileUploadLabel
                         className="lovart-utility-tilt-card script"
                         title="台本を添付"
-                        onClick={openScriptPicker}
+                        accept=".txt,.md,.markdown,text/plain,text/markdown"
+                        onChange={handleScriptFileChange}
                       >
                         <span className="lovart-add-plus">+</span>
                         {trayOpen ? <span className="lovart-utility-card-hint">台本</span> : null}
-                      </button>
+                      </FileUploadLabel>
                     )}
                   </div>
                 </>
@@ -7299,14 +7311,6 @@ export default function App() {
         </div>
       ) : null}
       <input
-        ref={imageUploadInputRef}
-        type="file"
-        accept="image/*"
-        multiple
-        hidden
-        onChange={onImageUploadChange}
-      />
-      <input
         ref={toolbarMediaInputRef}
         data-lovart-upload-input="toolbar-media"
         type="file"
@@ -7314,15 +7318,6 @@ export default function App() {
         multiple
         hidden
         onChange={onToolbarMediaInputChange}
-      />
-      <input
-        ref={videoFrameUploadInputRef}
-        data-lovart-upload-input="video-frame"
-        type="file"
-        accept="image/*,video/*"
-        multiple={videoFrameUploadTargetRef.current === 'videoReferenceImages' || videoFrameUploadTargetRef.current === 'videoReferenceVideos' || videoFrameUploadTargetRef.current === 'videoReferenceAudios'}
-        hidden
-        onChange={onVideoFrameUploadChange}
       />
     </main>
   )
