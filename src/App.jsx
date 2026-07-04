@@ -6535,25 +6535,10 @@ export default function App() {
                         </button>
                       ))
                     ) : (
-                      // Each subtitle mode has exactly one model, so picking
-                      // the other model switches the mode with it.
-                      [
-                        ['scripted', 'ElevenLabs Forced Alignment'],
-                        ['scriptless', 'ElevenLabs Scribe v2']
-                      ].map(([mode, label]) => (
-                        <button
-                          type="button"
-                          key={mode}
-                          onClick={() => {
-                            updateFrameForm('subtitleMode', mode)
-                            setOpenMenu(null)
-                          }}
-                        >
-                          <span>{label}</span>
-                          <span className="menu-right">{mode === 'scripted' ? '台本あり' : '台本なし'}</span>
-                          {frameForm.subtitleMode === mode ? <span className="menu-check">✓</span> : null}
-                        </button>
-                      ))
+                      <button type="button" onClick={() => setOpenMenu(null)}>
+                        <span>{frameForm.subtitleMode === 'scripted' ? 'ElevenLabs Forced Alignment' : 'ElevenLabs Scribe v2'}</span>
+                        <span className="menu-check">✓</span>
+                      </button>
                     )}
                   </div>
                 ) : null}
