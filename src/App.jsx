@@ -292,6 +292,9 @@ function getImageQualityOptions(model) {
 }
 
 function getAvailableImageSizes(model) {
+  // Lovart's API cannot set an output size — the picker only shows on
+  // routes where size is a real parameter.
+  if (String(model || '').startsWith('lovart-')) return ['1K']
   return IMAGE_MODEL_SIZES[resolveGatingImageModel(model)] ?? ['1K']
 }
 
@@ -303,10 +306,12 @@ function getAvailableImageAspectRatios(model) {
 }
 
 function supportsResolutionSelection(model) {
+  if (String(model || '').startsWith('lovart-')) return false
   return isSeedanceModel(model) || isGrokVideoModel(model)
 }
 
 function supportsGenerateAudio(model) {
+  if (String(model || '').startsWith('lovart-')) return false
   return isSeedanceModel(model)
 }
 
@@ -317,6 +322,8 @@ function getVideoAspectRatioOptions(model) {
 }
 
 function getAvailableVideoModes(model, tab) {
+  // Std/Pro is a structured parameter only on the BuzzAssist route.
+  if (String(model || '').startsWith('lovart-')) return []
   switch (resolveGatingVideoModel(model)) {
     case 'kling-v3':
     case 'kling-o3':
@@ -6033,7 +6040,7 @@ export default function App() {
                       {getAvailableVideoModes(frameForm.videoModel, frameForm.videoTab).length > 0 ? (
                         <>
                           <div className="lovart-menu-header">Mode</div>
-                          <div className="lovart-choice-row">
+                          <div className="lovart-menu-grid compact mode">
                             {getAvailableVideoModes(frameForm.videoModel, frameForm.videoTab).map((mode) => (
                               <button
                                 type="button"
@@ -6041,7 +6048,7 @@ export default function App() {
                                 className={normalizeVideoModeForContext(frameForm.videoModel, frameForm.videoTab, frameForm.videoMode) === mode ? 'is-selected' : ''}
                                 onClick={() => patchFrameForm({ videoMode: mode })}
                               >
-                                {VIDEO_MODE_OPTIONS.find(([value]) => value === mode)?.[1] ?? mode}
+                                <span>{VIDEO_MODE_OPTIONS.find(([value]) => value === mode)?.[1] ?? mode}</span>
                               </button>
                             ))}
                           </div>
@@ -6069,7 +6076,7 @@ export default function App() {
                       </div>
                       <div className="lovart-setting-row">
                         <div className="lovart-menu-header">Duration</div>
-                        <span>{frameForm.duration}s</span>
+                        {getVideoDurationChoices(frameForm.videoModel) ? null : <span>{frameForm.duration}s</span>}
                       </div>
                       {getVideoDurationChoices(frameForm.videoModel) ? (
                         <div className="lovart-menu-grid compact">

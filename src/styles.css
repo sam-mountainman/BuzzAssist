@@ -1750,3 +1750,14 @@ body {
   align-items: center;
   justify-content: center;
 }
+
+/* Desktop-app measurements: Mode buttons are 78x34, duration/quality 68x34 */
+.lovart-menu-grid.compact button {
+  width: 68px;
+  flex: 0 0 auto;
+  justify-content: center;
+}
+
+.lovart-menu-grid.compact.mode button {
+  width: 78px;
+}
