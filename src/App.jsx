@@ -651,53 +651,10 @@ function LovartGeneratorToolIcon() {
   )
 }
 
-// Use the same real provider favicons as the original model picker. The local
-// glyphs are only a fallback for offline/error cases.
-const PROVIDER_FAVICON_DOMAINS = {
-  midjourney: 'midjourney.com',
-  'nano-banana': 'deepmind.google',
-  openai: 'openai.com',
-  luma: 'lumalabs.ai',
-  flux: 'bfl.ai',
-  seedream: 'seed.bytedance.com',
-  seedance: 'seed.bytedance.com',
-  kling: 'klingai.com',
-  ideogram: 'ideogram.ai',
-  veo: 'deepmind.google',
-  gemini: 'gemini.google.com',
-  hailuo: 'hailuoai.video',
-  wan: 'wan.video',
-  vidu: 'vidu.com',
-  grok: 'x.ai',
-  codex: 'openai.com',
-  lovart: 'lovart.ai',
-  buzzassist: 'buzzassist.ai'
-}
-
 function ModelProviderIcon({ provider, size = 16 }) {
-  const [faviconFailed, setFaviconFailed] = useState(false)
-  const domain = PROVIDER_FAVICON_DOMAINS[provider]
-
-  useEffect(() => {
-    setFaviconFailed(false)
-  }, [domain])
-
-  if (domain && !faviconFailed) {
-    return (
-      <img
-        src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`}
-        width={size}
-        height={size}
-        alt=""
-        loading="eager"
-        decoding="async"
-        draggable={false}
-        style={{ borderRadius: 4, display: 'block' }}
-        onError={() => setFaviconFailed(true)}
-      />
-    )
-  }
-
+  // Render the inline SVG glyph directly. The old path fetched a Google
+  // favicon per provider over the network, so icons appeared with a lag (and
+  // failed offline); the local glyph is instant and dependency-free.
   return <ModelProviderGlyph provider={provider} size={size} />
 }
 
@@ -6831,10 +6788,15 @@ export default function App() {
                       setOpenMenu(opening ? 'glossary' : null)
                       if (opening) {
                         setGlossaryStatus('')
+                        // Refresh in the background but never clear what's
+                        // already shown — the terms load once at startup, so
+                        // opening must not flash to empty on a slow/failed fetch.
                         fetch('/api/subtitle-glossary')
                           .then((response) => response.json())
-                          .then((payload) => setGlossaryTerms(Array.isArray(payload.terms) ? payload.terms : []))
-                          .catch(() => setGlossaryTerms([]))
+                          .then((payload) => {
+                            if (Array.isArray(payload.terms)) setGlossaryTerms(payload.terms)
+                          })
+                          .catch(() => {})
                       }
                     }}
                   >
