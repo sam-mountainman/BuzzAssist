@@ -5751,18 +5751,14 @@ export default function App() {
                         <span className="lovart-model-icon"><ModelProviderIcon provider={route.icon} /></span>
                         <span>{route.label}</span>
                         <span className="lovart-route-note">{route.note}</span>
-                        {activeMediaRouteId === route.id ? <span className="menu-check">✓</span> : null}
+                        <span className="menu-check lovart-route-check">{activeMediaRouteId === route.id ? '✓' : ''}</span>
                       </button>
                     ))}
                     {/* Lovart keys are account-level config — always reachable
                         from the route menu, whatever model is selected. */}
                     <div className="lovart-key-form">
-                        <div className="lovart-key-status">
-                          <span>
-                            {lovartAuth?.configured
-                              ? `Lovart APIキー 接続済み: ${lovartAuth.accessKeyPreview ?? ''}`
-                              : 'Lovart APIキー未設定（OpenClaw の ak_/sk_ を入力）'}
-                          </span>
+                        <div className="lovart-key-head">
+                          <span className="lovart-key-title">Lovart APIキー</span>
                           {lovartAuth?.configured ? (
                             <button
                               type="button"
@@ -5772,6 +5768,11 @@ export default function App() {
                               {lovartKeyEditing ? '閉じる' : '変更'}
                             </button>
                           ) : null}
+                        </div>
+                        <div className="lovart-key-substatus">
+                          {lovartAuth?.configured
+                            ? `接続済み: ${lovartAuth.accessKeyPreview ?? ''}`
+                            : '未設定（OpenClaw の ak_/sk_ を入力）'}
                         </div>
                         {!lovartAuth?.configured || lovartKeyEditing ? (
                           <>

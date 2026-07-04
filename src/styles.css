@@ -1680,3 +1680,49 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Route rows: fixed columns so ローカル/クレジット notes align regardless of
+   the checkmark; key section gets an explicit title + status line */
+.lovart-menu[data-lovart-menu='route'] .lovart-route-note {
+  margin-left: auto;
+  min-width: 52px;
+  text-align: right;
+}
+
+.lovart-route-check {
+  width: 14px;
+  flex: 0 0 auto;
+  text-align: right;
+}
+
+.lovart-key-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.lovart-key-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #5f6368;
+}
+
+.lovart-key-substatus {
+  margin-top: 2px;
+  font-size: 10px;
+  color: #9aa0a6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lovart-menu button .lovart-route-check {
+  margin-left: 0;
+}
+
+.lovart-key-title {
+  display: inline-flex;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
