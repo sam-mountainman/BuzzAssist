@@ -4205,6 +4205,9 @@ export default function App() {
       if (picker.target === 'imageReferences' && asset.kind !== 'image') return false
       if (picker.target === 'videoReferenceVideos' && asset.kind !== 'video') return false
       if (picker.target === 'videoReferenceAudios' && asset.kind !== 'audio') return false
+      // SRT audio / silence cut take a canvas video (SRT extracts its audio).
+      if (picker.target === 'subtitleAudio' && asset.kind !== 'video') return false
+      if (picker.target === 'silenceCutVideo' && asset.kind !== 'video') return false
       const restoreFrameId = picker.frameId || canvasPickerFrameIdRef.current || ''
       const applyPickedAsset = (pickedAsset) => {
         if (restoreFrameId) activeFrameIdRef.current = restoreFrameId
@@ -6663,8 +6666,8 @@ export default function App() {
             >
               {isSilencePanel ? (
                 <>
-                  {/* 動画スロット */}
-                  <div className="lovart-utility-slot primary">
+                  {/* 動画スロット（アップロード / キャンバスから選択） */}
+                  <div className="lovart-utility-slot primary lovart-menu-wrap">
                     {silenceVideoAsset ? (
                       <div className="lovart-utility-card-wrap">
                         <button
@@ -6672,7 +6675,7 @@ export default function App() {
                           data-lovart-trigger="silence-cut-video"
                           className="lovart-utility-asset-card video"
                           title={silenceVideoAsset.name || '動画を添付'}
-                          onClick={() => openPrimaryPicker('video/*')}
+                          onClick={() => setOpenMenu((c) => (c === 'silence-video-source' ? null : 'silence-video-source'))}
                         >
                           {isRenderableVideoPosterDataURL(silenceVideoAsset.thumbnail) ? (
                             <img className="lovart-utility-card-thumb" src={silenceVideoAsset.thumbnail} alt={silenceVideoAsset.name || 'video'} />
@@ -6695,12 +6698,24 @@ export default function App() {
                         data-lovart-trigger="silence-cut-video"
                         className="lovart-utility-tilt-card primary"
                         title="動画を添付"
-                        onClick={() => openPrimaryPicker('video/*')}
+                        onClick={() => setOpenMenu((c) => (c === 'silence-video-source' ? null : 'silence-video-source'))}
                       >
                         <span className="lovart-add-plus">+</span>
                         {trayOpen ? <span className="lovart-utility-card-hint">動画</span> : null}
                       </button>
                     )}
+                    {openMenu === 'silence-video-source' ? (
+                      <div className="lovart-menu lovart-slot-menu" data-lovart-menu="silence-video-source">
+                        <button type="button" onClick={() => { setOpenMenu(null); openPrimaryPicker('video/*') }}>
+                          <UploadIcon />
+                          <span>動画をアップロード</span>
+                        </button>
+                        <button type="button" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setOpenMenu(null); openCanvasPicker('silenceCutVideo') }}>
+                          <CanvasPickIcon />
+                          <span>キャンバスから選択</span>
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                   {/* XMLスロット（Premiere Pro） */}
                   <div className="lovart-utility-slot script">
@@ -6738,7 +6753,7 @@ export default function App() {
                 </>
               ) : (
                 <>
-                  <div className="lovart-utility-slot primary">
+                  <div className="lovart-utility-slot primary lovart-menu-wrap">
                     {primaryAsset ? (
                       <div className="lovart-utility-card-wrap">
                         <button
@@ -6746,7 +6761,7 @@ export default function App() {
                           data-lovart-trigger="subtitle-audio"
                           className="lovart-utility-asset-card audio"
                           title={primaryAsset.name || '音声・動画を添付'}
-                          onClick={() => openPrimaryPicker()}
+                          onClick={() => setOpenMenu((c) => (c === 'subtitle-audio-source' ? null : 'subtitle-audio-source'))}
                         >
                           <AudioWaveIcon size={18} />
                           <span className="lovart-utility-card-label">音声</span>
@@ -6765,12 +6780,24 @@ export default function App() {
                         data-lovart-trigger="subtitle-audio"
                         className="lovart-utility-tilt-card primary"
                         title="音声・動画を添付"
-                        onClick={() => openPrimaryPicker()}
+                        onClick={() => setOpenMenu((c) => (c === 'subtitle-audio-source' ? null : 'subtitle-audio-source'))}
                       >
                         <span className="lovart-add-plus">+</span>
                         {trayOpen ? <span className="lovart-utility-card-hint">音声</span> : null}
                       </button>
                     )}
+                    {openMenu === 'subtitle-audio-source' ? (
+                      <div className="lovart-menu lovart-slot-menu" data-lovart-menu="subtitle-audio-source">
+                        <button type="button" onClick={() => { setOpenMenu(null); openPrimaryPicker() }}>
+                          <UploadIcon />
+                          <span>音声・動画をアップロード</span>
+                        </button>
+                        <button type="button" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setOpenMenu(null); openCanvasPicker('subtitleAudio') }}>
+                          <CanvasPickIcon />
+                          <span>キャンバスから選択</span>
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                   <div className="lovart-utility-slot script">
                     {scriptSlotDisabled ? (
