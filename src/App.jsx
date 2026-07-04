@@ -91,6 +91,10 @@ const DEFAULT_FRAME_FORM = {
   duration: '5',
   resolution: '720p',
   imageReferences: [],
+  mjMode: 'standard',
+  mjSpeed: 'fast',
+  mjVersion: 'v7',
+  ideogramStyle: 'auto',
   videoTab: 'keyframe',
   videoStartFrame: null,
   videoEndFrame: null,
@@ -278,7 +282,11 @@ const IMAGE_MODEL_SIZES = {
   'grok-imagine-image-hermes': ['1K', '2K'],
   'grok-imagine-image-api': ['1K', '2K'],
   'nano-banana-2': ['0.5K', '1K', '2K', '4K'],
-  'seedream-v5-lite': ['1K', '2K', '4K']
+  'seedream-v5-lite': ['1K', '2K', '4K'],
+  'lovart-flux-2-max': ['1K', '2K'],
+  'lovart-flux-2-pro': ['1K', '2K'],
+  'lovart-luma-uni-1': ['1K', '2K'],
+  'lovart-luma-uni-1-max': ['1K', '2K']
 }
 const GROK_IMAGE_QUALITY_OPTIONS = [
   ['auto', 'Auto'],
@@ -313,7 +321,10 @@ function getAvailableImageSizes(model) {
   return IMAGE_MODEL_SIZES[resolveGatingImageModel(model)] ?? ['1K']
 }
 
+const MIDJOURNEY_ASPECT_RATIO_OPTIONS = ['16:9', '4:3', '1:1', '3:4', '9:16', '2:3', '3:2']
+
 function getAvailableImageAspectRatios(model) {
+  if (resolveGatingImageModel(model) === 'lovart-midjourney') return MIDJOURNEY_ASPECT_RATIO_OPTIONS
   return isGrokImageModel(model) ? Object.keys(GROK_IMAGE_ASPECT_RATIO_OPTIONS) : Object.keys(IMAGE_ASPECTS)
 }
 
@@ -322,7 +333,9 @@ function supportsResolutionSelection(model) {
 }
 
 function supportsGenerateAudio(model) {
-  return isSeedanceModel(model)
+  if (isSeedanceModel(model)) return true
+  // Veo generates audio natively; Lovart's UI exposes an on/off switch.
+  return /^lovart-veo/.test(resolveGatingVideoModel(model))
 }
 
 function getVideoAspectRatioOptions(model) {
@@ -1723,6 +1736,12 @@ function frameFormFromElement(element) {
     aspectRatio: customData.generatorAspectRatio || customData.codexGenerationAspectRatio || DEFAULT_FRAME_FORM.aspectRatio,
     videoAspectRatio: customData.videoAspectRatio || customData.codexGenerationAspectRatio || DEFAULT_FRAME_FORM.videoAspectRatio,
     quality: customData.generatorImageQuality || customData.codexGenerationQuality || DEFAULT_FRAME_FORM.quality,
+    mjMode: customData.generatorMjMode === 'draft' ? 'draft' : DEFAULT_FRAME_FORM.mjMode,
+    mjSpeed: customData.generatorMjSpeed === 'turbo' ? 'turbo' : DEFAULT_FRAME_FORM.mjSpeed,
+    mjVersion: ['v7', 'niji', 'niji7'].includes(customData.generatorMjVersion) ? customData.generatorMjVersion : DEFAULT_FRAME_FORM.mjVersion,
+    ideogramStyle: ['auto', 'general', 'realistic', 'design'].includes(customData.generatorIdeogramStyle)
+      ? customData.generatorIdeogramStyle
+      : DEFAULT_FRAME_FORM.ideogramStyle,
     duration: customData.videoDuration || customData.codexGenerationDuration || DEFAULT_FRAME_FORM.duration,
     resolution: customData.videoResolution || customData.codexGenerationResolution || DEFAULT_FRAME_FORM.resolution,
     imageReferences,
@@ -1834,6 +1853,10 @@ function frameCustomDataFromForm(kind, form) {
         generatorModel: form.imageModel,
         generatorAspectRatio: form.aspectRatio,
         generatorImageQuality: form.quality,
+        generatorMjMode: form.mjMode,
+        generatorMjSpeed: form.mjSpeed,
+        generatorMjVersion: form.mjVersion,
+        generatorIdeogramStyle: form.ideogramStyle,
         generatorImageSize: '1K',
         generatorReferenceImages: normalizeAssetList(form.imageReferences)
       }
@@ -2471,17 +2494,19 @@ function createImageElementRecord({ fileId, bounds, index, customData }) {
 // Youtube-AGI uses 1.25 for the tall subtitle/silence-cut generators
 // (SUBTITLE_GENERATOR_CREATE_ZOOM) and 2 for image/video.
 function generatorCreateZoomFor(kind) {
-  // Same target zoom for every generator — fittedGeneratorZoom caps it so
-  // the frame plus its panel always fit inside the viewport (the tall SRT
-  // frame simply clamps lower). The old 1.25 made SRT/silence frames feel
-  // needlessly far away.
-  return 2
+  // fittedGeneratorZoom caps these so frame + panel always fit the
+  // viewport. The tall SRT card targets ~150% (a full 2x would push the
+  // panel off-screen on shorter displays).
+  return kind === 'subtitle' ? 1.5 : 2
 }
 
 // Vertical viewport space to reserve for the input panel below the frame.
 function generatorPanelReserveFor(kind) {
   if (kind === 'image') return 195
   if (kind === 'video') return 280
+  // The SRT panel is shorter than the video one; a 300px reserve kept the
+  // tall SRT card from reaching its 150% target zoom.
+  if (kind === 'subtitle') return 235
   return 300
 }
 
@@ -4297,16 +4322,17 @@ export default function App() {
         const frameCenterY = frameY + size.height / 2
         const targetScreenX = viewportWidth / 2
         if (viewportMoved) {
-          // Zoom toward the frame when it dodged overlaps, or zoom out when
-          // the current zoom cannot fit frame + panel inside the viewport.
+          // Creating a frame always lands at the kind's target zoom (capped
+          // so frame + panel fit the viewport) — zooming in from a far view
+          // as well as out from a too-close one.
           const fitZoom = fittedGeneratorZoom(
             kind,
             size,
             viewportWidth,
             viewportHeight,
-            wasOverlapping ? generatorCreateZoomFor(kind) : curZoom
+            generatorCreateZoomFor(kind)
           )
-          if (wasOverlapping || curZoom > fitZoom + 0.01) {
+          if (wasOverlapping || Math.abs(curZoom - fitZoom) > 0.01) {
             targetZoom = fitZoom
             shouldAnimate = true
           }
@@ -4567,6 +4593,12 @@ export default function App() {
               aspectRatio: savedForm.aspectRatio,
               quality: savedForm.quality,
               imageSize: savedForm.imageSize,
+              ...(imageFamilyForModel(savedForm.imageModel)?.id === 'midjourney'
+                ? { midjourney: { mode: savedForm.mjMode, speed: savedForm.mjSpeed, version: savedForm.mjVersion } }
+                : {}),
+              ...(imageFamilyForModel(savedForm.imageModel)?.id === 'ideogram-4' && savedForm.ideogramStyle !== 'auto'
+                ? { ideogramStyle: savedForm.ideogramStyle }
+                : {}),
               referenceImagePaths: normalizeAssetList(savedForm.imageReferences)
                 .filter((asset) => asset.kind !== 'video')
                 .map((asset) => asset.path)
@@ -5896,8 +5928,116 @@ export default function App() {
               ) : null}
             </div>
             <div className="lovart-ai-right">
-              {activeFrameKind === 'image' ? (
+              {activeFrameKind === 'image' && activeImageFamily?.id === 'midjourney' ? (
+                <div className="lovart-menu-wrap">
+                  <button
+                    type="button"
+                    className={`lovart-pill${openMenu === 'mj-settings' ? ' tooltip-hidden' : ''}`}
+                    data-lovart-trigger="mj-settings"
+                    data-lovart-tooltip="画像設定"
+                    onClick={() => setOpenMenu((current) => (current === 'mj-settings' ? null : 'mj-settings'))}
+                  >
+                    <span>{`${frameForm.mjMode === 'draft' ? 'ドラフト' : '通常'}・${frameForm.mjVersion}・${frameForm.mjSpeed === 'turbo' ? 'ターボ' : '高速'}・${frameForm.aspectRatio}`}</span>
+                    <ChevronIcon />
+                  </button>
+                  {openMenu === 'mj-settings' ? (
+                    <div className="lovart-menu wide lovart-video-settings lovart-utility-settings" data-lovart-menu="mj-settings">
+                      <div className="lovart-setting-row">
+                        <div className="lovart-menu-header">モード</div>
+                      </div>
+                      <div className="lovart-choice-row">
+                        {[['standard', '通常'], ['draft', 'ドラフト']].map(([value, label]) => (
+                          <button
+                            type="button"
+                            key={value}
+                            className={frameForm.mjMode === value ? 'is-selected' : ''}
+                            onClick={() => updateFrameForm('mjMode', value)}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="lovart-setting-row">
+                        <div className="lovart-menu-header">レンダリング速度</div>
+                      </div>
+                      <div className="lovart-choice-row">
+                        {[['fast', '高速'], ['turbo', 'ターボ']].map(([value, label]) => (
+                          <button
+                            type="button"
+                            key={value}
+                            className={frameForm.mjSpeed === value ? 'is-selected' : ''}
+                            onClick={() => updateFrameForm('mjSpeed', value)}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="lovart-setting-row">
+                        <div className="lovart-menu-header">アスペクト比</div>
+                      </div>
+                      <div className="lovart-menu-grid compact">
+                        {MIDJOURNEY_ASPECT_RATIO_OPTIONS.map((ratio) => (
+                          <button
+                            type="button"
+                            key={ratio}
+                            className={frameForm.aspectRatio === ratio ? 'is-selected' : ''}
+                            onClick={() => updateFrameForm('aspectRatio', ratio)}
+                          >
+                            <span>{ratio}</span>
+                          </button>
+                        ))}
+                      </div>
+                      <div className="lovart-setting-row">
+                        <div className="lovart-menu-header">モデル</div>
+                      </div>
+                      <div className="lovart-choice-row">
+                        {['v7', 'niji', 'niji7'].map((version) => (
+                          <button
+                            type="button"
+                            key={version}
+                            className={frameForm.mjVersion === version ? 'is-selected' : ''}
+                            onClick={() => updateFrameForm('mjVersion', version)}
+                          >
+                            {version}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : activeFrameKind === 'image' ? (
                 <>
+                  {activeImageFamily?.id === 'ideogram-4' ? (
+                    <div className="lovart-menu-wrap">
+                      <button
+                        type="button"
+                        className={`lovart-pill${openMenu === 'ideogram-style' ? ' tooltip-hidden' : ''}`}
+                        data-lovart-tooltip="スタイル"
+                        onClick={() => setOpenMenu((current) => (current === 'ideogram-style' ? null : 'ideogram-style'))}
+                      >
+                        <span>{{ auto: '自動', general: '一般', realistic: 'リアル', design: 'デザイン' }[frameForm.ideogramStyle] ?? '自動'}</span>
+                        <ChevronIcon />
+                      </button>
+                      {openMenu === 'ideogram-style' ? (
+                        <div className="lovart-menu" data-lovart-menu="ideogram-style">
+                          <div className="lovart-menu-header">スタイル</div>
+                          {[['auto', '自動'], ['general', '一般'], ['realistic', 'リアル'], ['design', 'デザイン']].map(([value, label]) => (
+                            <button
+                              type="button"
+                              key={value}
+                              onClick={() => {
+                                updateFrameForm('ideogramStyle', value)
+                                setOpenMenu(null)
+                              }}
+                            >
+                              <span>{label}</span>
+                              {frameForm.ideogramStyle === value ? <span className="menu-check">✓</span> : null}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {usesImageQualitySelection(frameForm.imageModel) || getAvailableImageSizes(frameForm.imageModel).length > 1 ? (
                   <div className="lovart-menu-wrap">
                     <button

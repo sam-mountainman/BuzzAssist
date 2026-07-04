@@ -1659,3 +1659,24 @@ body {
   font-size: 10px;
   line-height: 1.4;
 }
+
+/* Route menu sizing + key row overflow (the key section used to wrap
+   vertically outside the narrow menu) */
+.lovart-menu[data-lovart-menu='route'] {
+  width: 260px;
+}
+
+.lovart-menu[data-lovart-menu='route'] .lovart-key-form {
+  min-width: 0;
+  border-top: 1px solid #eceef1;
+  margin-top: 6px;
+  padding-top: 8px;
+}
+
+.lovart-key-status > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
