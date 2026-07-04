@@ -5354,18 +5354,6 @@ export default function App() {
               {img.pixelWidth > 0 && img.pixelHeight > 0 && img.width >= 90 ? (
                 <div className="lovart-image-header-size">{img.pixelWidth} × {img.pixelHeight}</div>
               ) : null}
-              {img.assetUrl && img.width >= 60 ? (
-                <a
-                  className="lovart-image-header-download"
-                  href={`${img.assetUrl}?download=1`}
-                  download
-                  title="ダウンロード"
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  <DownloadIcon size={12} />
-                </a>
-              ) : null}
             </div>
           </div>
         )

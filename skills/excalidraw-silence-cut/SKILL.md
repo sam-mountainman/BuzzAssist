@@ -12,6 +12,10 @@ Use this skill when the user wants silences removed from a video and the result 
 - `ffmpeg` and `ffprobe` must be available on PATH (or set `FFMPEG_PATH` / `FFPROBE_PATH`).
 - Runs fully locally — no BuzzAssist login needed.
 
+## 生成前の確認（必須）
+
+`silence_cut_excalidraw_video` は `confirmedSettings: true` なしの本実行を拒否します（`dryRun: true` のカットプラン確認は例外で常に可）。ユーザーのメッセージで全設定が明示されていない限り、本実行前に AskUserQuestion を1回だけ出して確認してください: モデル（ffmpeg-local ジェットカット / elevenlabs-scribe-v2 AIクリーンアップ）と、scribe の場合はフィラー・咳・言い直しの削除強度（0-100）。推奨デフォルト: ffmpeg-local。確認できたら `confirmedSettings: true` を付けて呼び出します。
+
 ## Workflow
 
 1. Call the MCP `silence_cut_excalidraw_video` tool:

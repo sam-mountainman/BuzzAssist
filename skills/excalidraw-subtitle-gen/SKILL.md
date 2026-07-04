@@ -13,6 +13,10 @@ Use this skill when the user wants SRT subtitles generated from audio and placed
 - BuzzAssist login is required. Check with the MCP `buzzassist_auth_status` tool; sign in with `buzzassist_login` (opens a browser).
 - `ffprobe` is used to probe audio duration when `durationSeconds` is not given.
 
+## 生成前の確認（必須）
+
+`generate_excalidraw_subtitles` は `confirmedSettings: true` なしの呼び出しを拒否します。ユーザーのメッセージで全設定が明示されていない限り、生成前に AskUserQuestion を1回だけ出して確認してください: モード（台本あり=scripted / 台本なし=scriptless）・行数（1 or 2）・最大文字数。推奨デフォルト: 台本があるなら scripted・2行・30字。確認できたら `confirmedSettings: true` を付けて呼び出します（two-step LLM フローの2回目の呼び出しにも付ける）。
+
 ## Workflow
 
 1. Confirm auth with `buzzassist_auth_status`. If not logged in, run `buzzassist_login` and ask the user to finish sign-in in the browser.

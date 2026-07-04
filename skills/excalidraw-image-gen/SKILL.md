@@ -25,6 +25,17 @@ AI holders are rectangle elements with:
 }
 ```
 
+## 生成前の確認（必須）
+
+`generate_excalidraw_image` / `generate_excalidraw_images_batch` は `confirmedSettings: true` なしの呼び出しを拒否します（`payloadPreview` を除く）。ユーザーのメッセージで全設定が明示されていない限り、生成前に AskUserQuestion を1回だけ出して確認してください:
+
+- モデル（GPT-Image-2.0 / Grok Imagine / NanoBanana 2 / Seedream v5 Lite / Midjourney …）
+- 実行先（同じモデルが複数の実行先を持つ場合。例: GPT Image 2 → Codex / BuzzAssist / Lovart、Grok Imagine → Hermes / BuzzAssist）
+- アスペクト比（1:1 / 16:9 / 9:16 …）と品質（Auto / Low / Medium / High）
+- 推奨デフォルト: GPT-Image-2.0 (Codex)・1:1・Auto — 選択肢には（推奨）を付ける
+
+確認できたら `confirmedSettings: true` を付けて呼び出します。
+
 ## Workflow
 
 1. Read the selection:

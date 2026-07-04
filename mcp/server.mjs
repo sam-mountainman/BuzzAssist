@@ -56,13 +56,13 @@ const MEDIA_GENERATION_AGENT_INSTRUCTIONS = [
   "Use generate_excalidraw_subtitles to create Japanese SRT subtitles from an audio file (scripted mode aligns a provided script, scriptless mode transcribes) and place an SRT card on the canvas.",
   "Use silence_cut_excalidraw_video to remove silences from a local video with ffmpeg (jet-cut) and insert the cut video into the canvas with cut statistics.",
   "Use generate_excalidraw_images_batch/generate_excalidraw_videos_batch when the user asks for many images, many videos, storyboard scenes, or batch media; prepare one jobs item per requested output and let the tool lay results out as a grid.",
-  "Before invoking image or video generation, if the user did not specify settings that materially affect the output, ask the user via the host's AskUserQuestion/request_user_input mechanism instead of guessing.",
-  "Required image settings to confirm when missing: model, aspect ratio, and quality. Defaults to offer as Recommended are GPT-Image-2.0(Codex), 1:1, and Auto.",
-  "Required video settings to confirm when missing: model, aspect ratio, duration, and resolution. Defaults to offer as Recommended are Grok Imagine(Hermes), 16:9, 5 seconds, and 720p.",
+  "Generation tools REQUIRE confirmedSettings: true and reject the call otherwise (payloadPreview and silence-cut dryRun excepted). Before setting it, confirm the settings with the user via the host's AskUserQuestion/request_user_input mechanism — exactly like the BuzzAssist app — unless the user's own message already specified every one of them.",
+  "Required image settings to confirm when missing: model, 実行先 (execution route) when the model can run on more than one of Codex(local)/Hermes(local)/BuzzAssist API/Lovart, aspect ratio, and quality. Defaults to offer as Recommended are GPT-Image-2.0(Codex), 1:1, and Auto.",
+  "Required video settings to confirm when missing: model, 実行先 (execution route) when the model can run on more than one of Hermes(local)/BuzzAssist API/Lovart, aspect ratio, duration, and resolution. Defaults to offer as Recommended are Grok Imagine(Hermes), 16:9, 5 seconds, and 720p.",
   "Before generating subtitles, confirm when missing: mode (scripted needs the script text; scriptless transcribes), lineCount (1 or 2), and maxCharsPerLine. Defaults to offer as Recommended are scriptless, 2 lines, 30 chars.",
   "Before silence-cutting, confirm when missing: model (ffmpeg-local jet-cut, or elevenlabs-scribe-v2 for AI cleanup of fillers/coughs/retakes) and for scribe the removal intensities (0/25/50/80, defaults 50/50/0). Default model to offer as Recommended is ffmpeg-local.",
   "The project-common 用語辞書 (canvas/subtitle-glossary.json, editable from the SRT panel's 用語 pill) is merged into every subtitle/scribe transcription automatically.",
-  "Canvas tools auto-start the local canvas server when it is not running. In Claude Code, open the canvas in the HOST'S IN-APP BROWSER instead of an external one: call the preview tools (preview_start with the 'canvas' config from .claude/launch.json, or open http://127.0.0.1:43219 in the built-in preview). Outside Claude Code the server opens a browser window once when no tab is connected (EXCALIDRAW_NO_AUTO_OPEN=1 disables).",
+  "Canvas tools auto-start the local canvas server when it is not running. In Claude Code, open the canvas in the HOST'S IN-APP BROWSER instead of an external one: call preview_start with the 'canvas' config from .claude/launch.json. If preview_start reports the port is in use by another chat's server, do NOT take it over or edit ports — start the next config instead ('canvas-2', 'canvas-3', 'canvas-4'; ports 43219-43222). Every config serves the same shared project canvas, so each session gets its own in-app preview with identical content. Outside Claude Code the server opens a browser window once when no tab is connected (EXCALIDRAW_NO_AUTO_OPEN=1 disables).",
   "When an attached or selected image/video could be used in more than one way, ask one disambiguation question before generation. For video, distinguish start frame/image-to-video from style reference; do not silently put the same media into multiple payload fields.",
   "For choice questions, keep options short and mark the default with (Recommended) in English or （推奨） in Japanese. Do not ask when only one value is valid.",
 ].join(" ");
@@ -220,7 +220,39 @@ async function ensureCanvasVisible(args = {}) {
 function canvasHintText() {
   const port = Number(process.env.EXCALIDRAW_PORT ?? 43219);
   const baseUrl = nonEmptyString(process.env.EXCALIDRAW_CANVAS_URL) || `http://127.0.0.1:${port}`;
-  return ` Canvas: ${baseUrl} — show it to the user now (in Claude Code, open it in the built-in preview via the 'canvas' config in .claude/launch.json; do not open an external browser).`;
+  return ` Canvas: ${baseUrl} — show it to the user now (in Claude Code, open it in the built-in preview via the 'canvas' config in .claude/launch.json; if that port is held by another session, use 'canvas-2'…'canvas-4' — every config serves the same shared canvas. Do not open an external browser).`;
+}
+
+// AskUserQuestion enforcement: generation tools refuse to run until the agent
+// attests (confirmedSettings: true) that the settings were confirmed with the
+// user — mirroring how the BuzzAssist app always asks before generating.
+const SETTINGS_CONFIRMATION_TOOLS = new Map([
+  [TOOL_GENERATE_IMAGE, "image"],
+  [TOOL_GENERATE_IMAGES_BATCH, "image"],
+  [TOOL_GENERATE_VIDEO, "video"],
+  [TOOL_GENERATE_VIDEOS_BATCH, "video"],
+  [TOOL_GENERATE_SUBTITLES, "subtitle"],
+  [TOOL_SILENCE_CUT_VIDEO, "silenceCut"],
+]);
+
+const SETTINGS_QUESTION_GUIDES = {
+  image:
+    "model (GPT-Image-2.0 / Grok Imagine / NanoBanana 2 / Seedream v5 Lite / Midjourney …), 実行先 (execution route) whenever the chosen model can run on more than one of Codex(local) / Hermes(local) / BuzzAssist API / Lovart (e.g. GPT Image 2 → Codex or BuzzAssist or Lovart; Grok Imagine → Hermes or BuzzAssist), aspect ratio (1:1 / 16:9 / 9:16 …), and quality (Auto / Low / Medium / High). Recommended defaults: GPT-Image-2.0 (Codex), 1:1, Auto.",
+  video:
+    "model (Grok Imagine / Seedance 2 / Kling v3 / Veo 3.1 …), 実行先 (execution route) whenever the chosen model can run on more than one of Hermes(local) / BuzzAssist API / Lovart (e.g. Grok Imagine → Hermes or BuzzAssist; Kling → BuzzAssist or Lovart), aspect ratio (16:9 / 9:16 / 1:1), duration (e.g. 5s / 10s), and resolution (480p / 720p). Recommended defaults: Grok Imagine (Hermes), 16:9, 5s, 720p.",
+  subtitle:
+    "mode (scripted aligns a provided script / scriptless transcribes), lineCount (1 or 2), and maxCharsPerLine. Recommended defaults: scripted when a script exists (otherwise scriptless), 2 lines, 30 chars.",
+  silenceCut:
+    "model (ffmpeg-local jet-cut, or elevenlabs-scribe-v2 for AI cleanup of fillers/coughs/retakes) and, for scribe, the filler/cough/retake removal intensities (0-100). Recommended default: ffmpeg-local.",
+};
+
+function settingsConfirmationErrorText(kind) {
+  return (
+    "Settings not confirmed — call rejected. Like the BuzzAssist app, confirm the generation settings with the user BEFORE generating: " +
+    `ask ONE AskUserQuestion covering ${SETTINGS_QUESTION_GUIDES[kind]} ` +
+    "Mark the default option with (Recommended) / （推奨）. Skip asking ONLY when the user's own message already specified every one of these settings. " +
+    "Then call this tool again with confirmedSettings: true and the chosen values."
+  );
 }
 
 const JsonRpcError = {
@@ -1180,7 +1212,7 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE_IMAGE,
       title: "Generate Excalidraw Image",
-      description: "Generate an image with GPT-Image-2.0(Codex) or Grok Imagine(Hermes), insert it into the canvas, and save the scene. BEFORE calling: if the user did not explicitly choose the model, aspect ratio, or quality, ask them first with the AskUserQuestion tool (mark defaults as Recommended: GPT-Image-2.0(Codex), 1:1, Auto) — do not silently pick defaults. AFTER completing, show the user the canvas: in Claude Code open http://127.0.0.1:43219 in the built-in preview (launch config 'canvas'); otherwise share the URL.",
+      description: "Generate an image with GPT-Image-2.0(Codex) or Grok Imagine(Hermes), insert it into the canvas, and save the scene. REQUIRED: confirm the settings with the user FIRST via one AskUserQuestion — model, 実行先 route when the model has several (e.g. GPT Image 2 → Codex/BuzzAssist/Lovart; Grok Imagine → Hermes/BuzzAssist), aspect ratio, and quality (Recommended: GPT-Image-2.0(Codex), 1:1, Auto). Skip asking only when the user's request already specified them. Calls without confirmedSettings=true are rejected (payloadPreview excepted; dryRun still runs the model, so it also needs confirmation). AFTER completing, show the user the canvas in Claude Code's built-in preview: launch config 'canvas' (use 'canvas-2'…'canvas-4' when the port is held by another session); otherwise share the URL.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1210,6 +1242,7 @@ function toolDefinitions() {
           displayWidth: { type: "number" },
           displayHeight: { type: "number" },
           customData: { type: "object" },
+          confirmedSettings: { type: "boolean", description: "Attestation that the generation settings were confirmed with the user — via one AskUserQuestion, or already explicit in the user's request. Required; calls without it are rejected (payloadPreview and silence-cut dryRun excepted)." },
           dryRun: { type: "boolean" },
         },
         required: ["prompt"],
@@ -1225,7 +1258,7 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE_VIDEO,
       title: "Generate Excalidraw Video",
-      description: "Generate a video with Grok Imagine(Hermes), insert a Youtube-AGI-style video media element into the canvas, and save the scene. BEFORE calling: if the user did not explicitly choose the model, aspect ratio, duration, or resolution, ask them first with the AskUserQuestion tool (mark defaults as Recommended: Grok Imagine(Hermes), 16:9, 5s, 720p) — do not silently pick defaults. AFTER completing, show the user the canvas: in Claude Code open http://127.0.0.1:43219 in the built-in preview (launch config 'canvas'); otherwise share the URL.",
+      description: "Generate a video with Grok Imagine(Hermes), insert a Youtube-AGI-style video media element into the canvas, and save the scene. REQUIRED: confirm the settings with the user FIRST via one AskUserQuestion — model, 実行先 route when the model has several (e.g. Grok Imagine → Hermes/BuzzAssist; Kling → BuzzAssist/Lovart), aspect ratio, duration, and resolution (Recommended: Grok Imagine(Hermes), 16:9, 5s, 720p). Skip asking only when the user's request already specified them. Calls without confirmedSettings=true are rejected (payloadPreview excepted; dryRun still runs the model, so it also needs confirmation). AFTER completing, show the user the canvas in Claude Code's built-in preview: launch config 'canvas' (use 'canvas-2'…'canvas-4' when the port is held by another session); otherwise share the URL.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1269,6 +1302,7 @@ function toolDefinitions() {
           displayWidth: { type: "number" },
           displayHeight: { type: "number" },
           customData: { type: "object" },
+          confirmedSettings: { type: "boolean", description: "Attestation that the generation settings were confirmed with the user — via one AskUserQuestion, or already explicit in the user's request. Required; calls without it are rejected (payloadPreview and silence-cut dryRun excepted)." },
           dryRun: { type: "boolean" },
         },
         required: ["prompt"],
@@ -1284,7 +1318,7 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE_IMAGES_BATCH,
       title: "Generate Excalidraw Images (Batch)",
-      description: "Create Youtube-AGI-style image generator frames first, then generate many images with GPT-Image-2.0(Codex) or Grok Imagine(Hermes) and replace each frame as its result finishes. BEFORE calling: if the user did not explicitly choose the model, aspect ratio, or quality for the batch, ask once with the AskUserQuestion tool. AFTER completing, show the user the canvas: in Claude Code open http://127.0.0.1:43219 in the built-in preview (launch config 'canvas').",
+      description: "Create Youtube-AGI-style image generator frames first, then generate many images with GPT-Image-2.0(Codex) or Grok Imagine(Hermes) and replace each frame as its result finishes. REQUIRED: confirm the batch settings with the user FIRST via one AskUserQuestion — model, 実行先 route when the model has several, aspect ratio, and quality. Calls without confirmedSettings=true are rejected (payloadPreview excepted; dryRun still runs the model, so it also needs confirmation). AFTER completing, show the user the canvas in Claude Code's built-in preview: launch config 'canvas' (use 'canvas-2'…'canvas-4' when the port is held by another session).",
       inputSchema: {
         type: "object",
         properties: {
@@ -1318,6 +1352,7 @@ function toolDefinitions() {
           canvasDir: { type: "string", description: "Absolute canvas directory. Overrides projectDir." },
           selectCreated: { type: "boolean", description: "Select the inserted elements after saving." },
           focusCreated: { type: "boolean", description: "Focus the canvas viewport on the newly created generator-frame grid. Defaults to true." },
+          confirmedSettings: { type: "boolean", description: "Attestation that the generation settings were confirmed with the user — via one AskUserQuestion, or already explicit in the user's request. Required; calls without it are rejected (payloadPreview and silence-cut dryRun excepted)." },
           dryRun: { type: "boolean", description: "Generate without copying or saving." },
         },
         required: ["jobs"],
@@ -1333,7 +1368,7 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE_VIDEOS_BATCH,
       title: "Generate Excalidraw Videos (Batch)",
-      description: "Create Youtube-AGI-style video generator frames first, then generate many videos with Grok Imagine(Hermes) and replace each frame as its result finishes. BEFORE calling: if the user did not explicitly choose the model, aspect ratio, duration, or resolution for the batch, ask once with the AskUserQuestion tool. AFTER completing, show the user the canvas: in Claude Code open http://127.0.0.1:43219 in the built-in preview (launch config 'canvas').",
+      description: "Create Youtube-AGI-style video generator frames first, then generate many videos with Grok Imagine(Hermes) and replace each frame as its result finishes. REQUIRED: confirm the batch settings with the user FIRST via one AskUserQuestion — model, 実行先 route when the model has several, aspect ratio, duration, and resolution. Calls without confirmedSettings=true are rejected (payloadPreview excepted; dryRun still runs the model, so it also needs confirmation). AFTER completing, show the user the canvas in Claude Code's built-in preview: launch config 'canvas' (use 'canvas-2'…'canvas-4' when the port is held by another session).",
       inputSchema: {
         type: "object",
         properties: {
@@ -1368,6 +1403,7 @@ function toolDefinitions() {
           canvasDir: { type: "string", description: "Absolute canvas directory. Overrides projectDir." },
           selectCreated: { type: "boolean", description: "Select the inserted elements after saving." },
           focusCreated: { type: "boolean", description: "Focus the canvas viewport on the newly created generator-frame grid. Defaults to true." },
+          confirmedSettings: { type: "boolean", description: "Attestation that the generation settings were confirmed with the user — via one AskUserQuestion, or already explicit in the user's request. Required; calls without it are rejected (payloadPreview and silence-cut dryRun excepted)." },
           dryRun: { type: "boolean", description: "Generate without copying or saving." },
         },
         required: ["jobs"],
@@ -1383,7 +1419,7 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE_SUBTITLES,
       title: "Generate Excalidraw Subtitles",
-      description: "Generate Japanese SRT subtitles from an audio file via BuzzAssist cloud (ElevenLabs forced alignment when a script is given, Scribe v2 otherwise), save the SRT under canvas/assets, and place an SRT card on the canvas. Requires buzzassist_login. BEFORE calling: if the user did not explicitly choose the mode (scripted vs scriptless), line count, or max chars per line, ask them first with the AskUserQuestion tool — do not silently pick defaults. For best line breaks use the two-step LLM flow: call once with returnWordsOnly=true to get timed words, decide semantic line breaks yourself (respect maxCharsPerLine and 1-2 lines per cue), then call again with subtitleLines to render and place the SRT without a second cloud call. AFTER completing, show the user the canvas: in Claude Code open it in the built-in preview (launch config 'canvas').",
+      description: "Generate Japanese SRT subtitles from an audio file via BuzzAssist cloud (ElevenLabs forced alignment when a script is given, Scribe v2 otherwise), save the SRT under canvas/assets, and place an SRT card on the canvas. Requires buzzassist_login. REQUIRED: confirm the settings with the user FIRST via one AskUserQuestion — mode (scripted vs scriptless), line count, and max chars per line. Calls without confirmedSettings=true are rejected (payloadPreview excepted; dryRun still runs the model, so it also needs confirmation). For best line breaks use the two-step LLM flow: call once with returnWordsOnly=true to get timed words, decide semantic line breaks yourself (respect maxCharsPerLine and 1-2 lines per cue), then call again with subtitleLines to render and place the SRT without a second cloud call. AFTER completing, show the user the canvas in Claude Code's built-in preview: launch config 'canvas' (or 'canvas-2'…'canvas-4').",
       inputSchema: {
         type: "object",
         properties: {
@@ -1420,6 +1456,7 @@ function toolDefinitions() {
           anchorElementId: { type: "string", description: "Existing Excalidraw element id to place beside." },
           placement: { type: "string", enum: ["right", "left", "below", "replace", "inside"] },
           margin: { type: "number" },
+          confirmedSettings: { type: "boolean", description: "Attestation that the generation settings were confirmed with the user — via one AskUserQuestion, or already explicit in the user's request. Required; calls without it are rejected (payloadPreview and silence-cut dryRun excepted)." },
           dryRun: { type: "boolean", description: "Generate the SRT without saving it to the canvas." },
         },
         additionalProperties: false,
@@ -1434,7 +1471,7 @@ function toolDefinitions() {
     {
       name: TOOL_SILENCE_CUT_VIDEO,
       title: "Silence Cut Excalidraw Video",
-      description: "Remove silences from a local video (jet cut), then insert the cut video into the canvas with cut statistics. model=ffmpeg-local runs fully offline; model=elevenlabs-scribe-v2 transcribes via BuzzAssist (requires buzzassist_login, ~1 credit/min) and additionally removes fillers, coughs, and retakes from word timestamps. BEFORE calling: if the user did not explicitly choose the model or the AI removal intensities (filler/cough/retake), ask them first with the AskUserQuestion tool — do not silently pick defaults. Use dryRun first to preview the cut plan without rendering. AFTER completing, show the user the canvas: in Claude Code open it in the built-in preview (launch config 'canvas').",
+      description: "Remove silences from a local video (jet cut), then insert the cut video into the canvas with cut statistics. model=ffmpeg-local runs fully offline; model=elevenlabs-scribe-v2 transcribes via BuzzAssist (requires buzzassist_login, ~1 credit/min) and additionally removes fillers, coughs, and retakes from word timestamps. REQUIRED: confirm the settings with the user FIRST via one AskUserQuestion — model and, for scribe, the filler/cough/retake removal intensities. Calls without confirmedSettings=true are rejected (payloadPreview and dryRun cut-plan previews excepted). AFTER completing, show the user the canvas in Claude Code's built-in preview: launch config 'canvas' (or 'canvas-2'…'canvas-4').",
       inputSchema: {
         type: "object",
         properties: {
@@ -1459,6 +1496,7 @@ function toolDefinitions() {
           margin: { type: "number" },
           displayWidth: { type: "number" },
           displayHeight: { type: "number" },
+          confirmedSettings: { type: "boolean", description: "Attestation that the generation settings were confirmed with the user — via one AskUserQuestion, or already explicit in the user's request. Required; calls without it are rejected (payloadPreview and silence-cut dryRun excepted)." },
           dryRun: { type: "boolean", description: "Preview only: return the cut plan (ranges, candidates, durations) without rendering or touching the canvas." },
         },
         required: ["videoPath"],
@@ -1783,6 +1821,24 @@ const CANVAS_AUTO_OPEN_TOOLS = new Set([
 ]);
 
 async function handleToolCall(id, params) {
+  const settingsGateKind = SETTINGS_CONFIRMATION_TOOLS.get(params?.name);
+  if (settingsGateKind) {
+    const gateArgs = params.arguments ?? {};
+    // payloadPreview never generates; silence-cut dryRun is a cheap local cut
+    // plan. Every other call (including generate/subtitle dryRun, which DO
+    // run the model) needs the user-confirmed settings attestation.
+    const gateExempt =
+      gateArgs.payloadPreview === true ||
+      (settingsGateKind === "silenceCut" && gateArgs.dryRun === true);
+    if (!gateArgs.confirmedSettings && !gateExempt) {
+      sendResult(id, {
+        content: [{ type: "text", text: settingsConfirmationErrorText(settingsGateKind) }],
+        isError: true,
+      });
+      return;
+    }
+    delete gateArgs.confirmedSettings;
+  }
   if (CANVAS_AUTO_OPEN_TOOLS.has(params?.name)) {
     await ensureCanvasVisible(params.arguments ?? {});
   }
