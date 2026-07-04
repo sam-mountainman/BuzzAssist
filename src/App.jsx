@@ -91,10 +91,6 @@ const DEFAULT_FRAME_FORM = {
   duration: '5',
   resolution: '720p',
   imageReferences: [],
-  mjMode: 'standard',
-  mjSpeed: 'fast',
-  mjVersion: 'v7',
-  ideogramStyle: 'auto',
   videoTab: 'keyframe',
   videoStartFrame: null,
   videoEndFrame: null,
@@ -203,44 +199,26 @@ const VIDEO_ASPECTS = {
   '21:9': { width: 378, height: 162 }
 }
 
-// Lovart-routed models reuse the settings gating of the same family's
-// BuzzAssist/local variant. Lovart-only models that behave like a known
-// family alias to it; the rest keep their own id and get explicit cases in
-// the gating helpers below.
-const LOVART_GATING_ALIASES = {
-  'lovart-nano-banana-pro': 'nano-banana-2',
-  'lovart-nano-banana-2-lite': 'nano-banana-2',
-  'lovart-nano-banana': 'nano-banana-2',
-  'lovart-gpt-image-1-5': 'gpt-image-2',
-  'lovart-seedream-v4-5': 'seedream-v5-lite',
-  'lovart-seedream-v4': 'seedream-v5-lite',
-  'lovart-kling-omni-v1': 'kling-v3',
-  'lovart-seedance-2-mini': 'seedance-2',
-  'lovart-seedance-pro-1-5': 'seedance-2'
-}
-
+// Lovart-routed models: only what the API actually controls gets a
+// settings UI. Shared families reuse their BuzzAssist/local variant's
+// gating; Lovart-only models fall back to the generic baseline (aspect +
+// duration) because Lovart's OpenAPI takes tool selection + prompt text
+// only — model-specific knobs beyond that are not API-controllable.
 function resolveGatingImageModel(model) {
   if (!String(model || '').startsWith('lovart-')) return model
-  if (LOVART_GATING_ALIASES[model]) return LOVART_GATING_ALIASES[model]
   const family = imageFamilyForModel(model)
   return family?.routes?.buzzassist ?? family?.routes?.codex ?? family?.routes?.hermes ?? model
 }
 
 function resolveGatingVideoModel(model) {
   if (!String(model || '').startsWith('lovart-')) return model
-  if (LOVART_GATING_ALIASES[model]) return LOVART_GATING_ALIASES[model]
   const family = videoFamilyForModel(model)
   return family?.routes?.buzzassist ?? family?.routes?.hermes ?? model
 }
 
 // Models with a fixed duration menu (buttons) instead of the free slider.
 const VIDEO_DURATION_CHOICES = {
-  'kling-v2-6': ['5', '10'],
-  'lovart-veo-3-1': ['4', '6', '8'],
-  'lovart-veo-3-1-fast': ['4', '6', '8'],
-  'lovart-veo-3': ['4', '6', '8'],
-  'lovart-hailuo-2-3': ['6', '10'],
-  'lovart-vidu-q2': ['4', '8']
+  'kling-v2-6': ['5', '10']
 }
 
 function getVideoDurationChoices(model) {
@@ -282,11 +260,7 @@ const IMAGE_MODEL_SIZES = {
   'grok-imagine-image-hermes': ['1K', '2K'],
   'grok-imagine-image-api': ['1K', '2K'],
   'nano-banana-2': ['0.5K', '1K', '2K', '4K'],
-  'seedream-v5-lite': ['1K', '2K', '4K'],
-  'lovart-flux-2-max': ['1K', '2K'],
-  'lovart-flux-2-pro': ['1K', '2K'],
-  'lovart-luma-uni-1': ['1K', '2K'],
-  'lovart-luma-uni-1-max': ['1K', '2K']
+  'seedream-v5-lite': ['1K', '2K', '4K']
 }
 const GROK_IMAGE_QUALITY_OPTIONS = [
   ['auto', 'Auto'],
@@ -333,17 +307,12 @@ function supportsResolutionSelection(model) {
 }
 
 function supportsGenerateAudio(model) {
-  if (isSeedanceModel(model)) return true
-  // Veo generates audio natively; Lovart's UI exposes an on/off switch.
-  return /^lovart-veo/.test(resolveGatingVideoModel(model))
+  return isSeedanceModel(model)
 }
 
 function getVideoAspectRatioOptions(model) {
   if (isSeedanceModel(model)) return SEEDANCE_VIDEO_ASPECT_RATIO_OPTIONS
   if (isGrokVideoModel(model)) return GROK_VIDEO_ASPECT_RATIO_OPTIONS
-  const gating = resolveGatingVideoModel(model)
-  if (/^lovart-veo/.test(gating)) return ['16:9', '9:16']
-  if (gating === 'lovart-hailuo-2-3') return ['16:9', '9:16', '1:1']
   return VIDEO_ASPECT_RATIO_OPTIONS
 }
 
@@ -364,7 +333,6 @@ function getVideoDurationRange(model) {
   if (isSeedanceModel(model)) return { min: 4, max: 15, step: 1 }
   if (isGrokVideoModel(model)) return { min: 1, max: 15, step: 1 }
   if (model === 'kling-v2-6') return { min: 5, max: 10, step: 5 }
-  if (model === 'lovart-wan-2-6') return { min: 5, max: 15, step: 5 }
   return { min: 3, max: 15, step: 1 }
 }
 
@@ -1736,12 +1704,6 @@ function frameFormFromElement(element) {
     aspectRatio: customData.generatorAspectRatio || customData.codexGenerationAspectRatio || DEFAULT_FRAME_FORM.aspectRatio,
     videoAspectRatio: customData.videoAspectRatio || customData.codexGenerationAspectRatio || DEFAULT_FRAME_FORM.videoAspectRatio,
     quality: customData.generatorImageQuality || customData.codexGenerationQuality || DEFAULT_FRAME_FORM.quality,
-    mjMode: customData.generatorMjMode === 'draft' ? 'draft' : DEFAULT_FRAME_FORM.mjMode,
-    mjSpeed: customData.generatorMjSpeed === 'turbo' ? 'turbo' : DEFAULT_FRAME_FORM.mjSpeed,
-    mjVersion: ['v7', 'niji', 'niji7'].includes(customData.generatorMjVersion) ? customData.generatorMjVersion : DEFAULT_FRAME_FORM.mjVersion,
-    ideogramStyle: ['auto', 'general', 'realistic', 'design'].includes(customData.generatorIdeogramStyle)
-      ? customData.generatorIdeogramStyle
-      : DEFAULT_FRAME_FORM.ideogramStyle,
     duration: customData.videoDuration || customData.codexGenerationDuration || DEFAULT_FRAME_FORM.duration,
     resolution: customData.videoResolution || customData.codexGenerationResolution || DEFAULT_FRAME_FORM.resolution,
     imageReferences,
@@ -1853,10 +1815,6 @@ function frameCustomDataFromForm(kind, form) {
         generatorModel: form.imageModel,
         generatorAspectRatio: form.aspectRatio,
         generatorImageQuality: form.quality,
-        generatorMjMode: form.mjMode,
-        generatorMjSpeed: form.mjSpeed,
-        generatorMjVersion: form.mjVersion,
-        generatorIdeogramStyle: form.ideogramStyle,
         generatorImageSize: '1K',
         generatorReferenceImages: normalizeAssetList(form.imageReferences)
       }
@@ -4593,12 +4551,6 @@ export default function App() {
               aspectRatio: savedForm.aspectRatio,
               quality: savedForm.quality,
               imageSize: savedForm.imageSize,
-              ...(imageFamilyForModel(savedForm.imageModel)?.id === 'midjourney'
-                ? { midjourney: { mode: savedForm.mjMode, speed: savedForm.mjSpeed, version: savedForm.mjVersion } }
-                : {}),
-              ...(imageFamilyForModel(savedForm.imageModel)?.id === 'ideogram-4' && savedForm.ideogramStyle !== 'auto'
-                ? { ideogramStyle: savedForm.ideogramStyle }
-                : {}),
               referenceImagePaths: normalizeAssetList(savedForm.imageReferences)
                 .filter((asset) => asset.kind !== 'video')
                 .map((asset) => asset.path)
@@ -5928,116 +5880,8 @@ export default function App() {
               ) : null}
             </div>
             <div className="lovart-ai-right">
-              {activeFrameKind === 'image' && activeImageFamily?.id === 'midjourney' ? (
-                <div className="lovart-menu-wrap">
-                  <button
-                    type="button"
-                    className={`lovart-pill${openMenu === 'mj-settings' ? ' tooltip-hidden' : ''}`}
-                    data-lovart-trigger="mj-settings"
-                    data-lovart-tooltip="画像設定"
-                    onClick={() => setOpenMenu((current) => (current === 'mj-settings' ? null : 'mj-settings'))}
-                  >
-                    <span>{`${frameForm.mjMode === 'draft' ? 'ドラフト' : '通常'}・${frameForm.mjVersion}・${frameForm.mjSpeed === 'turbo' ? 'ターボ' : '高速'}・${frameForm.aspectRatio}`}</span>
-                    <ChevronIcon />
-                  </button>
-                  {openMenu === 'mj-settings' ? (
-                    <div className="lovart-menu wide lovart-video-settings lovart-utility-settings" data-lovart-menu="mj-settings">
-                      <div className="lovart-setting-row">
-                        <div className="lovart-menu-header">モード</div>
-                      </div>
-                      <div className="lovart-choice-row">
-                        {[['standard', '通常'], ['draft', 'ドラフト']].map(([value, label]) => (
-                          <button
-                            type="button"
-                            key={value}
-                            className={frameForm.mjMode === value ? 'is-selected' : ''}
-                            onClick={() => updateFrameForm('mjMode', value)}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="lovart-setting-row">
-                        <div className="lovart-menu-header">レンダリング速度</div>
-                      </div>
-                      <div className="lovart-choice-row">
-                        {[['fast', '高速'], ['turbo', 'ターボ']].map(([value, label]) => (
-                          <button
-                            type="button"
-                            key={value}
-                            className={frameForm.mjSpeed === value ? 'is-selected' : ''}
-                            onClick={() => updateFrameForm('mjSpeed', value)}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="lovart-setting-row">
-                        <div className="lovart-menu-header">アスペクト比</div>
-                      </div>
-                      <div className="lovart-menu-grid compact">
-                        {MIDJOURNEY_ASPECT_RATIO_OPTIONS.map((ratio) => (
-                          <button
-                            type="button"
-                            key={ratio}
-                            className={frameForm.aspectRatio === ratio ? 'is-selected' : ''}
-                            onClick={() => updateFrameForm('aspectRatio', ratio)}
-                          >
-                            <span>{ratio}</span>
-                          </button>
-                        ))}
-                      </div>
-                      <div className="lovart-setting-row">
-                        <div className="lovart-menu-header">モデル</div>
-                      </div>
-                      <div className="lovart-choice-row">
-                        {['v7', 'niji', 'niji7'].map((version) => (
-                          <button
-                            type="button"
-                            key={version}
-                            className={frameForm.mjVersion === version ? 'is-selected' : ''}
-                            onClick={() => updateFrameForm('mjVersion', version)}
-                          >
-                            {version}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              ) : activeFrameKind === 'image' ? (
+              {activeFrameKind === 'image' ? (
                 <>
-                  {activeImageFamily?.id === 'ideogram-4' ? (
-                    <div className="lovart-menu-wrap">
-                      <button
-                        type="button"
-                        className={`lovart-pill${openMenu === 'ideogram-style' ? ' tooltip-hidden' : ''}`}
-                        data-lovart-tooltip="スタイル"
-                        onClick={() => setOpenMenu((current) => (current === 'ideogram-style' ? null : 'ideogram-style'))}
-                      >
-                        <span>{{ auto: '自動', general: '一般', realistic: 'リアル', design: 'デザイン' }[frameForm.ideogramStyle] ?? '自動'}</span>
-                        <ChevronIcon />
-                      </button>
-                      {openMenu === 'ideogram-style' ? (
-                        <div className="lovart-menu" data-lovart-menu="ideogram-style">
-                          <div className="lovart-menu-header">スタイル</div>
-                          {[['auto', '自動'], ['general', '一般'], ['realistic', 'リアル'], ['design', 'デザイン']].map(([value, label]) => (
-                            <button
-                              type="button"
-                              key={value}
-                              onClick={() => {
-                                updateFrameForm('ideogramStyle', value)
-                                setOpenMenu(null)
-                              }}
-                            >
-                              <span>{label}</span>
-                              {frameForm.ideogramStyle === value ? <span className="menu-check">✓</span> : null}
-                            </button>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
                   {usesImageQualitySelection(frameForm.imageModel) || getAvailableImageSizes(frameForm.imageModel).length > 1 ? (
                   <div className="lovart-menu-wrap">
                     <button
