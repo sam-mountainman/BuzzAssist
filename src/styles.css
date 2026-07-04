@@ -2148,6 +2148,13 @@ body {
   width: 46px;
 }
 
+/* Selected 自動/手動 uses the same purple accent as the other controls */
+.lovart-menu .lovart-threshold-mode button.is-selected {
+  color: #7c3aed;
+  background: #f3f0ff;
+  border-color: #7c3aed;
+}
+
 .lovart-threshold-auto-hint {
   margin-top: 4px;
   color: #80868b;
