@@ -2139,6 +2139,37 @@ body {
   border-color: #7c3aed;
 }
 
+/* 自動 / 手動 segmented toggle (reuses .lovart-video-tabs base) */
+.lovart-menu .lovart-threshold-mode {
+  flex: 0 0 auto;
+}
+
+.lovart-menu .lovart-threshold-mode button {
+  width: 46px;
+}
+
+.lovart-threshold-auto-hint {
+  margin-top: 4px;
+  color: #80868b;
+  font: 400 11px/1.4 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+}
+
+.lovart-threshold-manual-row {
+  margin-top: 6px;
+}
+
+.lovart-threshold-manual-label {
+  color: #9aa0a6;
+  font-size: 11px;
+}
+
+.lovart-threshold-manual-value {
+  color: #666666;
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .lovart-menu-section {
   margin-top: 12px;
   padding-top: 10px;

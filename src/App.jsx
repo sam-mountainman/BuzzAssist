@@ -466,7 +466,10 @@ function triggerAssetDownload(assetUrl, fileName = '') {
 function filePickerTypesForName(fileName) {
   const rawName = String(fileName || '')
   const dot = rawName.lastIndexOf('.')
-  const ext = dot >= 0 ? rawName.slice(dot).toLowerCase() : '.bin'
+  const ext = dot >= 0 ? rawName.slice(dot).toLowerCase() : ''
+  // No recognizable extension → don't constrain the picker (returning a
+  // ".bin"/octet-stream type made every such download save as .bin).
+  if (!ext) return []
   const mime =
     ext === '.zip' ? 'application/zip' :
       ext === '.srt' ? 'application/x-subrip' :
@@ -477,6 +480,18 @@ function filePickerTypesForName(fileName) {
                 ext === '.webm' ? 'video/webm' :
                   'application/octet-stream'
   return [{ description: 'Download', accept: { [mime]: [ext] } }]
+}
+
+// The extension downloadable media should carry when its asset URL has none
+// (e.g. a freshly generated image not yet externalized).
+const DOWNLOAD_EXT_BY_ASSET_TYPE = { image: 'png', video: 'mp4', srt: 'srt' }
+
+function downloadNameForMedia(media) {
+  const fromUrl = assetFileNameFromUrl(media?.assetUrl)
+  if (fromUrl && /\.[a-z0-9]+$/i.test(fromUrl)) return fromUrl
+  const base = String(media?.fileName || fromUrl || 'download').replace(/\.[^.]+$/, '') || 'download'
+  const ext = DOWNLOAD_EXT_BY_ASSET_TYPE[media?.assetType] || 'png'
+  return `${base}.${ext}`
 }
 
 async function saveUrlWithPicker(url, fileName = 'download', fallbackUrl = url) {
@@ -651,11 +666,66 @@ function LovartGeneratorToolIcon() {
   )
 }
 
+const PROVIDER_FAVICON_DOMAINS = {
+  midjourney: 'midjourney.com',
+  'nano-banana': 'deepmind.google',
+  openai: 'openai.com',
+  luma: 'lumalabs.ai',
+  flux: 'bfl.ai',
+  seedream: 'seed.bytedance.com',
+  seedance: 'seed.bytedance.com',
+  kling: 'klingai.com',
+  ideogram: 'ideogram.ai',
+  veo: 'deepmind.google',
+  gemini: 'gemini.google.com',
+  hailuo: 'hailuoai.video',
+  wan: 'wan.video',
+  vidu: 'vidu.com',
+  grok: 'x.ai',
+  codex: 'openai.com',
+  lovart: 'lovart.ai',
+  buzzassist: 'buzzassist.ai'
+}
+
+// Favicons loaded from Google resolve are cached module-side so each provider
+// icon only ever fetches once per session (across every menu re-open).
+const providerFaviconState = new Map()
+
 function ModelProviderIcon({ provider, size = 16 }) {
-  // Render the inline SVG glyph directly. The old path fetched a Google
-  // favicon per provider over the network, so icons appeared with a lag (and
-  // failed offline); the local glyph is instant and dependency-free.
-  return <ModelProviderGlyph provider={provider} size={size} />
+  const domain = PROVIDER_FAVICON_DOMAINS[provider]
+  const [ready, setReady] = useState(() => providerFaviconState.get(domain) === 'ok')
+  const [failed, setFailed] = useState(() => providerFaviconState.get(domain) === 'fail')
+
+  useEffect(() => {
+    if (!domain) return undefined
+    const cached = providerFaviconState.get(domain)
+    if (cached === 'ok') { setReady(true); setFailed(false); return undefined }
+    if (cached === 'fail') { setFailed(true); return undefined }
+    // Preload once; the visible <img> then hits the browser cache instantly.
+    const img = new Image()
+    let alive = true
+    img.onload = () => { providerFaviconState.set(domain, 'ok'); if (alive) setReady(true) }
+    img.onerror = () => { providerFaviconState.set(domain, 'fail'); if (alive) setFailed(true) }
+    img.src = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`
+    return () => { alive = false }
+  }, [domain])
+
+  // The inline glyph shows immediately (no lag, works offline); the brand
+  // favicon swaps in only once it has actually loaded.
+  if (!domain || failed || !ready) {
+    return <ModelProviderGlyph provider={provider} size={size} />
+  }
+  return (
+    <img
+      src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`}
+      width={size}
+      height={size}
+      alt=""
+      decoding="async"
+      draggable={false}
+      style={{ borderRadius: 4, display: 'block' }}
+    />
+  )
 }
 
 function ModelProviderGlyph({ provider, size = 16 }) {
@@ -5739,7 +5809,7 @@ export default function App() {
                 onClick={(event) => {
                   event.stopPropagation()
                   const target = selectedMedia[0]
-                  saveAssetWithPicker(target.assetUrl, target.fileName || assetFileNameFromUrl(target.assetUrl) || 'download')
+                  saveAssetWithPicker(target.assetUrl, downloadNameForMedia(target))
                 }}
               >
                 <DownloadIcon size={15} />
@@ -6553,16 +6623,20 @@ export default function App() {
           Boolean(primaryAsset) ||
           (!isSilencePanel && frameForm.subtitleMode === 'scripted' && hasScriptFile)
         const primaryTarget = isSilencePanel ? 'silenceCutVideo' : 'subtitleAudio'
-        const openPrimaryPicker = () => {
+        const openPrimaryPicker = (acceptOverride) => {
           setOpenMenu(null)
           rememberGeneratorUploadFrame()
           videoFrameUploadTargetRef.current = primaryTarget
           if (videoFrameUploadInputRef.current) {
-            videoFrameUploadInputRef.current.accept = getUploadTargetAccept(primaryTarget)
+            videoFrameUploadInputRef.current.accept = acceptOverride || getUploadTargetAccept(primaryTarget)
             videoFrameUploadInputRef.current.multiple = false
             videoFrameUploadInputRef.current.click()
           }
         }
+        // Silence cut takes ONE source but shows two slots (動画 / XML) for
+        // clarity — attaching to either replaces the source.
+        const silenceVideoAsset = isSilencePanel && primaryAsset && !primaryIsXml ? primaryAsset : null
+        const silenceXmlAsset = isSilencePanel && primaryIsXml ? primaryAsset : null
         const openScriptPicker = () => {
           if (scriptSlotDisabled) return
           setOpenMenu(null)
@@ -6636,110 +6710,161 @@ export default function App() {
               onMouseEnter={() => setUtilityTrayHovered(true)}
               onMouseLeave={() => setUtilityTrayHovered(false)}
             >
-              <div className="lovart-utility-slot primary">
-                {primaryAsset ? (
-                  <div className="lovart-utility-card-wrap">
-                    <button
-                      type="button"
-                      data-lovart-trigger={isSilencePanel ? 'silence-cut-video' : 'subtitle-audio'}
-                      className={`lovart-utility-asset-card${primaryIsXml ? ' script' : isSilencePanel ? ' video' : ' audio'}`}
-                      title={primaryAsset.name || (isSilencePanel ? 'XMLか動画を添付' : '音声・動画を添付')}
-                      onClick={openPrimaryPicker}
-                    >
-                      {primaryIsXml ? (
-                        <>
-                          <ScriptFileIcon size={22} />
-                          <span className="lovart-utility-card-label">XML</span>
-                        </>
-                      ) : isSilencePanel ? (
-                        <>
-                          {isRenderableVideoPosterDataURL(primaryAsset.thumbnail) ? (
-                            <img className="lovart-utility-card-thumb" src={primaryAsset.thumbnail} alt={primaryAsset.name || 'video'} />
+              {isSilencePanel ? (
+                <>
+                  {/* 動画スロット */}
+                  <div className="lovart-utility-slot primary">
+                    {silenceVideoAsset ? (
+                      <div className="lovart-utility-card-wrap">
+                        <button
+                          type="button"
+                          data-lovart-trigger="silence-cut-video"
+                          className="lovart-utility-asset-card video"
+                          title={silenceVideoAsset.name || '動画を添付'}
+                          onClick={() => openPrimaryPicker('video/*')}
+                        >
+                          {isRenderableVideoPosterDataURL(silenceVideoAsset.thumbnail) ? (
+                            <img className="lovart-utility-card-thumb" src={silenceVideoAsset.thumbnail} alt={silenceVideoAsset.name || 'video'} />
                           ) : (
                             <span className="lovart-utility-card-thumb placeholder" />
                           )}
-                          <span className="lovart-utility-card-play">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M8 5.14v13.72a1 1 0 001.5.86l11.04-6.86a1 1 0 000-1.72L9.5 4.28a1 1 0 00-1.5.86z" fill="#fff" /></svg>
-                          </span>
-                        </>
-                      ) : (
-                        <>
+                          <span className="lovart-utility-card-play"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M8 5.14v13.72a1 1 0 001.5.86l11.04-6.86a1 1 0 000-1.72L9.5 4.28a1 1 0 00-1.5.86z" fill="#fff" /></svg></span>
+                        </button>
+                        <button
+                          type="button"
+                          className="lovart-frame-del"
+                          onClick={(event) => { event.stopPropagation(); patchFrameForm({ silenceCutVideo: null }) }}
+                        >
+                          <CloseIcon />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        data-lovart-trigger="silence-cut-video"
+                        className="lovart-utility-tilt-card primary"
+                        title="動画を添付"
+                        onClick={() => openPrimaryPicker('video/*')}
+                      >
+                        <span className="lovart-add-plus">+</span>
+                        {trayOpen ? <span className="lovart-utility-card-hint">動画</span> : null}
+                      </button>
+                    )}
+                  </div>
+                  {/* XMLスロット（Premiere Pro） */}
+                  <div className="lovart-utility-slot script">
+                    {silenceXmlAsset ? (
+                      <div className="lovart-utility-card-wrap">
+                        <button
+                          type="button"
+                          className="lovart-utility-asset-card script"
+                          title={silenceXmlAsset.name || 'Premiere XMLを添付'}
+                          onClick={() => openPrimaryPicker('.xml,application/xml,text/xml')}
+                        >
+                          <ScriptFileIcon size={24} />
+                          <span className="lovart-utility-card-label">XML</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="lovart-frame-del"
+                          onClick={(event) => { event.stopPropagation(); patchFrameForm({ silenceCutVideo: null }) }}
+                        >
+                          <CloseIcon />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className="lovart-utility-tilt-card script"
+                        title="Premiere XMLを添付"
+                        onClick={() => openPrimaryPicker('.xml,application/xml,text/xml')}
+                      >
+                        <span className="lovart-add-plus">+</span>
+                        {trayOpen ? <span className="lovart-utility-card-hint">XML</span> : null}
+                      </button>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="lovart-utility-slot primary">
+                    {primaryAsset ? (
+                      <div className="lovart-utility-card-wrap">
+                        <button
+                          type="button"
+                          data-lovart-trigger="subtitle-audio"
+                          className="lovart-utility-asset-card audio"
+                          title={primaryAsset.name || '音声・動画を添付'}
+                          onClick={() => openPrimaryPicker()}
+                        >
                           <AudioWaveIcon size={18} />
                           <span className="lovart-utility-card-label">音声</span>
-                        </>
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      className="lovart-frame-del"
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        patchFrameForm(isSilencePanel ? { silenceCutVideo: null } : { subtitleAudio: null })
-                      }}
-                    >
-                      <CloseIcon />
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    data-lovart-trigger={isSilencePanel ? 'silence-cut-video' : 'subtitle-audio'}
-                    className="lovart-utility-tilt-card primary"
-                    title={isSilencePanel ? 'XMLか動画を添付' : '音声・動画を添付'}
-                    onClick={openPrimaryPicker}
-                  >
-                    <span className="lovart-add-plus">+</span>
-                    {trayOpen ? <span className="lovart-utility-card-hint">{isSilencePanel ? 'XML/動画' : '音声'}</span> : null}
-                  </button>
-                )}
-              </div>
-              {!isSilencePanel ? (
-                <div className="lovart-utility-slot script">
-                  {scriptSlotDisabled ? (
-                    <button
-                      type="button"
-                      className="lovart-utility-tilt-card script is-disabled"
-                      disabled
-                      title="台本なしでは台本を使いません"
-                    >
-                      <span className="lovart-add-plus">+</span>
-                      {trayOpen ? <span className="lovart-utility-card-hint">台本</span> : null}
-                    </button>
-                  ) : hasScriptFile ? (
-                    <div className="lovart-utility-card-wrap">
+                        </button>
+                        <button
+                          type="button"
+                          className="lovart-frame-del"
+                          onClick={(event) => { event.stopPropagation(); patchFrameForm({ subtitleAudio: null }) }}
+                        >
+                          <CloseIcon />
+                        </button>
+                      </div>
+                    ) : (
                       <button
                         type="button"
-                        className="lovart-utility-asset-card script"
-                        title={frameForm.subtitleScriptName || '台本を添付'}
+                        data-lovart-trigger="subtitle-audio"
+                        className="lovart-utility-tilt-card primary"
+                        title="音声・動画を添付"
+                        onClick={() => openPrimaryPicker()}
+                      >
+                        <span className="lovart-add-plus">+</span>
+                        {trayOpen ? <span className="lovart-utility-card-hint">音声</span> : null}
+                      </button>
+                    )}
+                  </div>
+                  <div className="lovart-utility-slot script">
+                    {scriptSlotDisabled ? (
+                      <button
+                        type="button"
+                        className="lovart-utility-tilt-card script is-disabled"
+                        disabled
+                        title="台本なしでは台本を使いません"
+                      >
+                        <span className="lovart-add-plus">+</span>
+                        {trayOpen ? <span className="lovart-utility-card-hint">台本</span> : null}
+                      </button>
+                    ) : hasScriptFile ? (
+                      <div className="lovart-utility-card-wrap">
+                        <button
+                          type="button"
+                          className="lovart-utility-asset-card script"
+                          title={frameForm.subtitleScriptName || '台本を添付'}
+                          onClick={openScriptPicker}
+                        >
+                          <ScriptFileIcon size={24} />
+                          <span className="lovart-utility-card-label">台本</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="lovart-frame-del"
+                          onClick={(event) => { event.stopPropagation(); patchFrameForm({ subtitleScriptText: '', subtitleScriptName: '' }) }}
+                        >
+                          <CloseIcon />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className="lovart-utility-tilt-card script"
+                        title="台本を添付"
                         onClick={openScriptPicker}
                       >
-                        <ScriptFileIcon size={24} />
-                        <span className="lovart-utility-card-label">台本</span>
+                        <span className="lovart-add-plus">+</span>
+                        {trayOpen ? <span className="lovart-utility-card-hint">台本</span> : null}
                       </button>
-                      <button
-                        type="button"
-                        className="lovart-frame-del"
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          patchFrameForm({ subtitleScriptText: '', subtitleScriptName: '' })
-                        }}
-                      >
-                        <CloseIcon />
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      className="lovart-utility-tilt-card script"
-                      title="台本を添付"
-                      onClick={openScriptPicker}
-                    >
-                      <span className="lovart-add-plus">+</span>
-                      {trayOpen ? <span className="lovart-utility-card-hint">台本</span> : null}
-                    </button>
-                  )}
-                </div>
-              ) : null}
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           </div>
           {generationError ? <div className="lovart-error">{generationError}</div> : null}
@@ -7008,23 +7133,32 @@ export default function App() {
                   <div className="lovart-menu wide lovart-video-settings lovart-utility-settings lovart-utility-pop" data-lovart-menu="silence-cut-settings">
                     <div className="lovart-menu-section-title">プリセット</div>
                     <div className="lovart-choice-row silence-presets">
-                      {SILENCE_CUT_PRESETS.map(([label, preset]) => (
-                        <button
-                          type="button"
-                          key={label}
-                          onClick={() =>
-                            patchFrameForm({
-                              silenceCutDetectSeconds: preset.detect,
-                              silenceCutKeepSeconds: preset.keep,
-                              silenceCutPreMarginSeconds: preset.pre,
-                              silenceCutPostMarginSeconds: preset.post,
-                              silenceCutThresholdAuto: true
-                            })
-                          }
-                        >
-                          {label}
-                        </button>
-                      ))}
+                      {SILENCE_CUT_PRESETS.map(([label, preset]) => {
+                        const near = (a, b) => Math.abs(Number(a) - Number(b)) < 0.001
+                        const isActive =
+                          near(frameForm.silenceCutDetectSeconds, preset.detect) &&
+                          near(frameForm.silenceCutKeepSeconds, preset.keep) &&
+                          near(frameForm.silenceCutPreMarginSeconds, preset.pre) &&
+                          near(frameForm.silenceCutPostMarginSeconds, preset.post)
+                        return (
+                          <button
+                            type="button"
+                            key={label}
+                            className={isActive ? 'is-selected' : ''}
+                            onClick={() =>
+                              patchFrameForm({
+                                silenceCutDetectSeconds: preset.detect,
+                                silenceCutKeepSeconds: preset.keep,
+                                silenceCutPreMarginSeconds: preset.pre,
+                                silenceCutPostMarginSeconds: preset.post,
+                                silenceCutThresholdAuto: true
+                              })
+                            }
+                          >
+                            {label}
+                          </button>
+                        )
+                      })}
                     </div>
                     <div className="lovart-menu-section-title">カットの強さ</div>
                     <div className="lovart-setting-row">
@@ -7108,10 +7242,10 @@ export default function App() {
                         <>
                           <div className="lovart-setting-row">
                             <div className="lovart-setting-label">
-                              <div className="lovart-menu-header">無音判定の音量</div>
-                              <span className="lovart-info-icon" data-lovart-tooltip="マイクや部屋に合わせる校正値です。喋りの途中で切れるときは下げ、無音が残るときは上げてください。">i</span>
+                              <div className="lovart-menu-header">無音とみなす音量</div>
+                              <span className="lovart-info-icon" data-lovart-tooltip="この音量より静かな部分を「無音」と判断します。自動＝動画のノイズに合わせて最適な値をアプリが決めます。手動＝喋りの途中で切れるなら小さく、無音が残るなら大きく。">i</span>
                             </div>
-                            <div className="lovart-threshold-value">
+                            <div className="lovart-video-tabs lovart-threshold-mode">
                               <button
                                 type="button"
                                 className={frameForm.silenceCutThresholdAuto ? 'is-selected' : ''}
@@ -7119,24 +7253,36 @@ export default function App() {
                               >
                                 自動
                               </button>
-                              <span>{frameForm.silenceCutThresholdAuto ? 'ノイズ床+6dB' : `${Math.round(frameForm.silenceCutThresholdDb)}dB`}</span>
+                              <button
+                                type="button"
+                                className={!frameForm.silenceCutThresholdAuto ? 'is-selected' : ''}
+                                onClick={() => updateFrameForm('silenceCutThresholdAuto', false)}
+                              >
+                                手動
+                              </button>
                             </div>
                           </div>
-                          <input
-                            type="range"
-                            min="-60"
-                            max="-20"
-                            step="1"
-                            className="lovart-duration-slider"
-                            value={frameForm.silenceCutThresholdDb}
-                            style={sliderTrackStyle(frameForm.silenceCutThresholdDb, -60, -20)}
-                            onChange={(event) =>
-                              patchFrameForm({
-                                silenceCutThresholdDb: Number(event.target.value),
-                                silenceCutThresholdAuto: false
-                              })
-                            }
-                          />
+                          {frameForm.silenceCutThresholdAuto ? (
+                            <div className="lovart-threshold-auto-hint">動画のノイズに合わせて自動で調整します。</div>
+                          ) : (
+                            <>
+                              <div className="lovart-setting-row lovart-threshold-manual-row">
+                                <span className="lovart-threshold-manual-label">静か</span>
+                                <span className="lovart-threshold-manual-value">{Math.round(frameForm.silenceCutThresholdDb)}dB</span>
+                                <span className="lovart-threshold-manual-label">大きい</span>
+                              </div>
+                              <input
+                                type="range"
+                                min="-60"
+                                max="-20"
+                                step="1"
+                                className="lovart-duration-slider"
+                                value={frameForm.silenceCutThresholdDb}
+                                style={sliderTrackStyle(frameForm.silenceCutThresholdDb, -60, -20)}
+                                onChange={(event) => updateFrameForm('silenceCutThresholdDb', Number(event.target.value))}
+                              />
+                            </>
+                          )}
                           {renderSilenceStepper('カット前の余白', 'silenceCutPreMarginSeconds', 0.05, 0.3, 0.01)}
                           {renderSilenceStepper('カット後の余白', 'silenceCutPostMarginSeconds', 0.05, 0.3, 0.01)}
                         </>
