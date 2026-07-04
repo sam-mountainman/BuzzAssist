@@ -18,6 +18,7 @@ import {
   videoFamilyForModel
 } from '../lib/modelCatalog.mjs'
 import { estimateCreditsForJob } from '../lib/mediaCredits.mjs'
+import { providerIconDataUri } from './providerIcons.js'
 
 const CANVAS_ENDPOINT = '/api/canvas'
 const CANVAS_EVENTS_ENDPOINT = '/api/canvas-events'
@@ -666,62 +667,20 @@ function LovartGeneratorToolIcon() {
   )
 }
 
-const PROVIDER_FAVICON_DOMAINS = {
-  midjourney: 'midjourney.com',
-  'nano-banana': 'deepmind.google',
-  openai: 'openai.com',
-  luma: 'lumalabs.ai',
-  flux: 'bfl.ai',
-  seedream: 'seed.bytedance.com',
-  seedance: 'seed.bytedance.com',
-  kling: 'klingai.com',
-  ideogram: 'ideogram.ai',
-  veo: 'deepmind.google',
-  gemini: 'gemini.google.com',
-  hailuo: 'hailuoai.video',
-  wan: 'wan.video',
-  vidu: 'vidu.com',
-  grok: 'x.ai',
-  codex: 'openai.com',
-  lovart: 'lovart.ai',
-  buzzassist: 'buzzassist.ai'
-}
-
-// Favicons loaded from Google resolve are cached module-side so each provider
-// icon only ever fetches once per session (across every menu re-open).
-const providerFaviconState = new Map()
-
 function ModelProviderIcon({ provider, size = 16 }) {
-  const domain = PROVIDER_FAVICON_DOMAINS[provider]
-  const [ready, setReady] = useState(() => providerFaviconState.get(domain) === 'ok')
-  const [failed, setFailed] = useState(() => providerFaviconState.get(domain) === 'fail')
-
-  useEffect(() => {
-    if (!domain) return undefined
-    const cached = providerFaviconState.get(domain)
-    if (cached === 'ok') { setReady(true); setFailed(false); return undefined }
-    if (cached === 'fail') { setFailed(true); return undefined }
-    // Preload once; the visible <img> then hits the browser cache instantly.
-    const img = new Image()
-    let alive = true
-    img.onload = () => { providerFaviconState.set(domain, 'ok'); if (alive) setReady(true) }
-    img.onerror = () => { providerFaviconState.set(domain, 'fail'); if (alive) setFailed(true) }
-    img.src = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`
-    return () => { alive = false }
-  }, [domain])
-
-  // The inline glyph shows immediately (no lag, works offline); the brand
-  // favicon swaps in only once it has actually loaded.
-  if (!domain || failed || !ready) {
+  // Real brand icon embedded at build time (src/providerIcons.js) → it paints
+  // instantly on the first frame, no network, no glyph placeholder. Only
+  // providers without an embedded icon fall back to the inline glyph.
+  const dataUri = providerIconDataUri(provider)
+  if (!dataUri) {
     return <ModelProviderGlyph provider={provider} size={size} />
   }
   return (
     <img
-      src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`}
+      src={dataUri}
       width={size}
       height={size}
       alt=""
-      decoding="async"
       draggable={false}
       style={{ borderRadius: 4, display: 'block' }}
     />
