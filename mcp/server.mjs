@@ -2219,10 +2219,10 @@ async function handleRequest(message) {
   }
 }
 
-// Startup housekeeping: migrate legacy inline file records, sweep stale .tmp
-// files, and trash orphaned assets. Fire-and-forget — stdout is reserved for
-// JSON-RPC, so results go to stderr.
-performCanvasMaintenance({})
+// Startup housekeeping (safe-only): migrate legacy inline file records and
+// sweep stale .tmp files. Never moves subtitle cards or trashes assets on its
+// own. Fire-and-forget — stdout is reserved for JSON-RPC, so results go to stderr.
+performCanvasMaintenance({ safeOnly: true })
   .then((results) => {
     const summary = JSON.stringify(results);
     if (summary !== "{}") process.stderr.write(`[canvas-maintenance] ${summary}\n`);

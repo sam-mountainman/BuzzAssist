@@ -655,7 +655,9 @@ function canvasStoragePlugin() {
   return {
     name: 'codex-excalidraw-storage',
     configureServer(server) {
-      performCanvasMaintenance({ canvasDir })
+      // safeOnly: never move subtitle cards or trash assets on startup — only
+      // the invisible health tasks (which are no-ops in a healthy scene).
+      performCanvasMaintenance({ canvasDir, safeOnly: true })
         .then((results) => {
           const { migration, tmpCleanup, orphans } = results
           if (migration?.migrated || migration?.dropped || tmpCleanup?.removed || orphans?.trashed) {
