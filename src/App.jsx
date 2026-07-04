@@ -4572,10 +4572,24 @@ export default function App() {
       )?.requiresBuzzAssist === true
     if (requiresBuzzAssist && !(await ensureBuzzAssistLoggedIn())) return
 
+    // Regenerating from a selected result works like the desktop app: keep the
+    // original untouched and spawn a fresh generator frame (viewport center,
+    // or stacked under the previous frame) that receives the new result.
+    let generationAnchorId = anchorElementId
+    let generationAnchorElement = anchorElement
+    let retryFrameId = ''
+    if (isRegeneratingResult) {
+      const created = insertGeneratorFrame(kind, savedForm, { selectFrame: false, openPanel: false })
+      if (!created?.frame) return
+      retryFrameId = created.frame.id
+      generationAnchorId = retryFrameId
+      generationAnchorElement = created.frame
+    }
+
     if (!isRegeneratingResult) updateActiveFrameElement(savedForm)
     setOpenMenu(null)
     setGenerationError('')
-    setGeneratingFrameIds((current) => new Set(current).add(anchorElementId))
+    setGeneratingFrameIds((current) => new Set(current).add(generationAnchorId))
     setPendingPanelFrame(null)
     setSelectedGeneratedResult(null)
     activeFrameIdRef.current = ''
@@ -4621,12 +4635,12 @@ export default function App() {
               motionOrientation: savedForm.videoTab === 'motion' ? 'image' : undefined,
               generateAudio: savedForm.videoGenerateAudio !== false,
               selectCreated: true,
-              anchorElementId,
+              anchorElementId: generationAnchorId,
               placement: 'replace',
               replaceAnchor: true,
               matchAnchor: true,
-              displayWidth: anchorElement.width,
-              displayHeight: anchorElement.height,
+              displayWidth: generationAnchorElement.width,
+              displayHeight: generationAnchorElement.height,
               customData: frameCustomDataFromForm(kind, savedForm)
             }
           : {
@@ -4654,12 +4668,12 @@ export default function App() {
                 .map((asset) => asset.url || asset.dataURL)
                 .filter(Boolean),
               selectCreated: true,
-              anchorElementId,
+              anchorElementId: generationAnchorId,
               placement: 'replace',
               replaceAnchor: true,
               matchAnchor: true,
-              displayWidth: anchorElement.width,
-              displayHeight: anchorElement.height,
+              displayWidth: generationAnchorElement.width,
+              displayHeight: generationAnchorElement.height,
               customData: frameCustomDataFromForm(kind, savedForm)
             }
 
@@ -4686,6 +4700,13 @@ export default function App() {
         let nextElements = currentElements
         let selectedElementIds = {}
         if (isRegeneratingResult && selectedResult?.elementId) {
+          // Desktop parity: a failed retry removes the freshly created frame
+          // and re-selects the original result.
+          if (retryFrameId) {
+            nextElements = currentElements.map((element) =>
+              element.id === retryFrameId ? { ...element, isDeleted: true } : element
+            )
+          }
           selectedElementIds = { [selectedResult.elementId]: true }
           activeFrameIdRef.current = ''
           selectedGeneratedResultRef.current = selectedResult
@@ -4718,7 +4739,7 @@ export default function App() {
     } finally {
       setGeneratingFrameIds((current) => {
         const next = new Set(current)
-        next.delete(anchorElementId)
+        next.delete(generationAnchorId)
         return next
       })
     }
