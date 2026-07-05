@@ -1,6 +1,7 @@
 # BuzzAssist Setup
 
-This repository is intended to work from a GitHub URL plus "セットアップして".
+This repository is intended to work from only a GitHub URL plus "セットアップして".
+No manual plugin ID or host-specific setup instruction should be required.
 
 ```text
 https://github.com/taiyuhiga/BuzzAssist
@@ -22,10 +23,11 @@ What the script does:
 - installs `buzzassist@buzzassist` into Codex
 - installs `buzzassist@buzzassist` into Claude Code
 - starts the local canvas service and prints `BUZZASSIST_CANVAS_URL=...`
+- checks the browser canvas and prints `BUZZASSIST_CANVAS_CHECK=ok`
 
 If the setup is triggered from Claude Code, Codex is still configured. If it is triggered from Codex, Claude Code is still configured.
 
-After setup, open the printed URL in the host in-app browser. If browser control is unavailable, use the URL from:
+After setup, open the printed URL in the host in-app browser. If browser control is unavailable, use the URL from the discovery file and treat `BUZZASSIST_CANVAS_CHECK=ok` as the setup completion signal:
 
 ```text
 canvas/.server.json

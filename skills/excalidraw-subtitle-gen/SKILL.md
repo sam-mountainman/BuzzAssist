@@ -10,7 +10,7 @@ Use this skill when the user wants SRT subtitles generated from audio and placed
 ## Preconditions
 
 - The Excalidraw canvas service should be running; read `canvas/.server.json` if the default port was busy.
-- BuzzAssist login is required. Check with the MCP `buzzassist_auth_status` tool; sign in with `buzzassist_login` (opens a browser).
+- BuzzAssist login is required. Check with the plugin `buzzassist_auth_status` tool; sign in with `buzzassist_login` (opens a browser).
 - `ffprobe` is used to probe audio duration when `durationSeconds` is not given.
 
 ## 生成前の確認（必須）
@@ -23,7 +23,7 @@ Use this skill when the user wants SRT subtitles generated from audio and placed
 2. Ask which mode when unclear:
    - 台本あり (scripted): pass `scriptText` or `scriptPath` — uses ElevenLabs Forced Alignment.
    - 台本なし (scriptless): audio only — uses ElevenLabs Scribe v2.
-3. Call the MCP `generate_excalidraw_subtitles` tool:
+3. Call the plugin `generate_excalidraw_subtitles` tool:
 
 ```json
 {
@@ -42,11 +42,11 @@ Use this skill when the user wants SRT subtitles generated from audio and placed
 
 ## Higher-Quality Line Breaks (LLM Flow)
 
-For the best quality, use the two-step flow instead of one call — step 2 is BOTH proofreading and line breaking:
+For the best quality, use the two-step flow instead of one call. Step 2 only decides subtitle line breaks:
 
 1. Call `generate_excalidraw_subtitles` with `returnWordsOnly: true` — you get the transcript and timed `words`.
-2. **Proofread the transcript first**: fix homophones（機会/機械、以外/意外）, conversion mistakes, dropped characters, and unify spelling variants（引越し/引っ越し）. Change notation ONLY — never what was said — and prefer the project glossary's spellings. Then decide cue boundaries: natural Japanese bunsetsu boundaries (never right after a particle, never mid compound verb), 1-2 lines per cue, respect `maxCharsPerLine`, and use `\n` for the second line.
-3. Call the tool again with `subtitleLines: [{text, start, end}, ...]` using the corrected text — it renders the SRT and places the card without a second cloud call (no extra credits). Keep each cue's start/end from the word timings.
+2. Decide cue boundaries from the timed words: natural Japanese bunsetsu boundaries (never right after a particle, never mid compound verb), 1-2 lines per cue, respect `maxCharsPerLine`, and use `\n` for the second line.
+3. Call the tool again with `subtitleLines: [{text, start, end}, ...]` — it renders the SRT and places the card without a second cloud call (no extra credits). Keep each cue's start/end from the word timings.
 
 ## 無音カットと併用するときの順序
 
@@ -56,7 +56,6 @@ For the best quality, use the two-step flow instead of one call — step 2 is BO
 
 - `audioPath` は動画ファイル（mp4/mov/webm/mkv…）も可 — 音声トラックを自動抽出して転写
 - `glossary: [{from, to}]` — 固有名詞の表記補正（用語辞書）。文字起こし直後に適用され、カタカナ/ひらがなの表記ゆれにも自動でマッチ
-- `glossarySuggestions: [{from, to}]` — 校正で直した表記を渡すと**プロジェクトの用語辞書に自動追記**され、次回から認識段階で正しくなる（学習ループ）
 - `normalizeAudio` (default true) — 常にラウドネス正規化＋低域ノイズ除去（highpass 80Hz）をかけてから転写。認識精度と時刻精度が上がる
 - 品質検証: 行長超過・重複・極短キュー・読速超過（10.5字/秒超）を自動検出し、違反があれば文字数を詰めて一度だけ再分割した良い方を採用。さらに音声エネルギーと照合して「無音区間の字幕」「字幕のない発話区間」も警告（結果の `quality.issues` で確認可能）
 

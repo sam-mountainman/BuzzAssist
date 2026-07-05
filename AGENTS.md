@@ -18,7 +18,7 @@ When the user gives this repository URL and asks to set it up, do the setup end 
 1. Clone or open this repository.
 2. Run `node scripts/setup-agents.mjs --project-dir <active-user-project-dir>` from the repository root. If there is no separate active project, use this repository root as the project dir.
 3. The script must configure both Codex and Claude Code. Do not stop after installing only the host currently running you.
-4. After the script prints `BUZZASSIST_CANVAS_URL=...`, open that URL in the current host's in-app browser. In Codex, use the in-app Browser tool when available. If browser control is unavailable, report the URL and say that setup still completed.
+4. After the script prints `BUZZASSIST_CANVAS_URL=...` and `BUZZASSIST_CANVAS_CHECK=ok`, open that URL in the current host's in-app browser. In Codex, use the in-app Browser tool when available. If browser control is unavailable, report the URL and say that setup still completed because the canvas check passed.
 
 Manual fallback:
 

@@ -38,4 +38,4 @@ If browser control is unavailable, treat the service start as successful and giv
 
 ## Notes
 
-This design intentionally mirrors Cowart's local-service shape: the browser edits a project-local canvas file, and Codex uses MCP tools for stable state reads/writes.
+This design intentionally mirrors Cowart's local-service shape: the browser edits a project-local canvas file, and Codex uses plugin tools for stable state reads/writes.

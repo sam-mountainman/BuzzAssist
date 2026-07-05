@@ -1,7 +1,7 @@
 {
   "name": "buzzassist",
-  "version": "0.1.0",
-  "description": "BuzzAssist MCP canvas and media tools for Codex.",
+  "version": "0.1.1",
+  "description": "BuzzAssist canvas and media plugin for Codex.",
   "author": {
     "name": "higataiyu"
   },
@@ -18,9 +18,9 @@
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
-    "displayName": "BuzzAssist MCP",
-    "shortDescription": "Use BuzzAssist MCP canvas and media tools from Codex.",
-    "longDescription": "BuzzAssist bundles a project-local Excalidraw browser canvas, stdio MCP tools, and an optional token-protected local HTTP MCP endpoint discovered through canvas/.server.json. Tool calls update the same browser canvas and can draw diagrams, read selections, insert assets, and run image, video, subtitle, and silence-cut workflows.",
+    "displayName": "BuzzAssist",
+    "shortDescription": "Use the BuzzAssist canvas and media generation plugin from Codex.",
+    "longDescription": "BuzzAssist is a Codex plugin that bundles a project-local Excalidraw browser canvas, MCP-backed plugin tools, and an optional token-protected local HTTP MCP endpoint discovered through canvas/.server.json. Tool calls update the same browser canvas and can draw diagrams, read selections, insert assets, and run image, video, subtitle, and silence-cut workflows.",
     "developerName": "BuzzAssist",
     "category": "Productivity",
     "brandColor": "#ff6a4d",
@@ -29,12 +29,12 @@
     "capabilities": [
       "Interactive BuzzAssist canvas",
       "Official Excalidraw MCP App",
-      "Local stdio MCP tools",
+      "Local plugin tools",
       "Token-protected HTTP MCP endpoint",
       "Project-local persistence",
-      "MCP selection reading",
-      "MCP image generation",
-      "MCP video generation"
+      "Canvas selection reading",
+      "Image generation",
+      "Video generation"
     ],
     "defaultPrompt": [
       "Open the BuzzAssist canvas for this project.",

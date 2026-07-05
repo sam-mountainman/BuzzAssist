@@ -16,6 +16,8 @@ const managedPluginDir = join(homeDir, "plugins", pluginName);
 const managedPluginRoot = join(managedPluginDir, "plugin");
 const personalMarketplacePath = join(homeDir, ".agents", "plugins", "marketplace.json");
 const argv = process.argv.slice(2);
+const packageManifest = JSON.parse(await readFile(join(repoRoot, "package.json"), "utf8"));
+const pluginVersion = packageManifest.version;
 
 function usage() {
   return `Usage: node scripts/setup-agents.mjs [options]
@@ -174,6 +176,19 @@ function includesConfiguredMarketplace(output) {
   return output.includes(marketplaceName) || output.includes(repoRoot);
 }
 
+function installedPluginVersion(output, selector) {
+  const index = output.indexOf(selector);
+  if (index < 0) return null;
+  const nextBlock = output.indexOf("\n\n", index);
+  const block = output.slice(index, nextBlock >= 0 ? nextBlock : output.length);
+  return block.match(/Version:\s*([^\s]+)/)?.[1] ?? "";
+}
+
+function pluginNeedsRefresh(output, selector) {
+  const installedVersion = installedPluginVersion(output, selector);
+  return installedVersion !== null && installedVersion !== pluginVersion;
+}
+
 async function ensureDependencies() {
   if (skipInstall) {
     console.log("Skipping npm install.");
@@ -247,17 +262,17 @@ async function refreshManagedPluginSource() {
   await writeJson(join(tmpDir, ".claude-plugin", "marketplace.json"), {
     $schema: "https://anthropic.com/claude-code/marketplace.schema.json",
     name: marketplaceName,
-    description: "BuzzAssist MCP canvas and media plugin for Claude Code and Codex.",
+    description: "BuzzAssist canvas and media plugin for Claude Code and Codex.",
     owner: { name: "higataiyu" },
     metadata: {
-      description: "A project-local Excalidraw canvas, shared skills, and MCP tools for visual media workflows.",
+      description: "A project-local Excalidraw canvas, shared skills, and MCP-backed plugin tools for visual media workflows.",
     },
     plugins: [
       {
         name: pluginName,
-        version: "0.1.0",
+        version: pluginVersion,
         source: "./plugin",
-        description: "BuzzAssist MCP canvas and media tools for Claude Code and Codex.",
+        description: "BuzzAssist canvas and media plugin tools for Claude Code and Codex.",
         author: { name: "higataiyu" },
         category: "productivity",
       },
@@ -269,7 +284,7 @@ async function refreshManagedPluginSource() {
   await rm(join(tmpPluginRoot, ".claude-plugin", "marketplace.json"), { force: true });
   await writeJson(join(tmpDir, ".agents", "plugins", "marketplace.json"), {
     name: marketplaceName,
-    interface: { displayName: "BuzzAssist MCP" },
+    interface: { displayName: "BuzzAssist" },
     plugins: [
       {
         name: pluginName,
@@ -326,12 +341,12 @@ async function setupCodexMarketplace(codex) {
   const localMarketplacePath = join(managedPluginDir, ".agents", "plugins", "marketplace.json");
   const marketplace = await readJson(localMarketplacePath, {
     name: marketplaceName,
-    interface: { displayName: "BuzzAssist MCP" },
+    interface: { displayName: "BuzzAssist" },
     plugins: [],
   });
   marketplace.name = marketplaceName;
-  marketplace.interface ||= { displayName: "BuzzAssist MCP" };
-  marketplace.interface.displayName = "BuzzAssist MCP";
+  marketplace.interface ||= { displayName: "BuzzAssist" };
+  marketplace.interface.displayName = "BuzzAssist";
   marketplace.plugins = Array.isArray(marketplace.plugins) ? marketplace.plugins : [];
 
   const index = marketplace.plugins.findIndex((plugin) => plugin?.name === pluginName);
@@ -376,6 +391,11 @@ async function setupCodex(pluginDir) {
   await cleanupLegacyCodex(codex);
   await setupCodexMarketplace(codex);
 
+  const current = await run(codex, ["plugin", "list"], { allowFailure: true, log: false, silent: true });
+  if (pluginNeedsRefresh(current.stdout, `${pluginName}@${marketplaceName}`)) {
+    await run(codex, ["plugin", "remove", `${pluginName}@${marketplaceName}`], { allowFailure: true });
+  }
+
   const installed = await run(codex, ["plugin", "add", `${pluginName}@${marketplaceName}`], { allowFailure: true });
   if (!installed.ok) {
     console.warn("Codex plugin install did not complete. Check the Codex CLI output above.");
@@ -415,6 +435,14 @@ async function setupClaude(pluginDir) {
     console.warn("Claude Code marketplace add did not complete. Continuing to plugin install in case it is already configured.");
   }
 
+  const current = await run(claude, ["plugin", "list"], { allowFailure: true, log: false, silent: true });
+  if (pluginNeedsRefresh(current.stdout, `${pluginName}@${marketplaceName}`)) {
+    await run(claude, ["plugin", "uninstall", `${pluginName}@${marketplaceName}`, "--scope", "user", "-y"], {
+      allowFailure: true,
+      timeoutMs: 180000,
+    });
+  }
+
   const installed = await run(claude, ["plugin", "install", `${pluginName}@${marketplaceName}`, "--scope", "user"], {
     allowFailure: true,
     timeoutMs: 180000,
@@ -447,6 +475,17 @@ async function isReachable(url) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function verifyCanvasDiscovery(discovery) {
+  if (!discovery?.url) return { ok: false, checks: [] };
+  const checks = [
+    { name: "canvas", url: discovery.url, ok: await isReachable(discovery.url) },
+  ];
+  if (discovery.mcpUrl) {
+    checks.push({ name: "mcp", url: discovery.mcpUrl, ok: await isReachable(discovery.mcpUrl) });
+  }
+  return { ok: checks.every((check) => check.ok), checks };
 }
 
 async function launchCanvasServer() {
@@ -510,12 +549,15 @@ async function main() {
   const codex = await setupCodex(pluginDir);
   const claude = await setupClaude(pluginDir);
   const discovery = launchCanvas ? await launchCanvasServer() : null;
+  const canvasCheck = discovery ? await verifyCanvasDiscovery(discovery) : null;
 
   logStep("Setup summary");
   console.log(`Codex: ${codex.ok ? "configured" : codex.skipped ? "skipped" : "needs attention"}`);
   console.log(`Claude Code: ${claude.ok ? "configured" : claude.skipped ? "skipped" : "needs attention"}`);
   if (discovery?.url) {
     console.log(`BUZZASSIST_CANVAS_URL=${discovery.url}`);
+    console.log(`BUZZASSIST_CANVAS_CHECK=${canvasCheck?.ok ? "ok" : "needs-attention"}`);
+    console.log(`BUZZASSIST_CANVAS_DISCOVERY=${join(canvasDir, ".server.json")}`);
     console.log("Open BUZZASSIST_CANVAS_URL in the current host's in-app browser now.");
   }
 }

@@ -24,7 +24,7 @@ Use this skill when the user wants a silence-cut edit plan. The output is **Prem
 
 ## Workflow
 
-1. Call the MCP `silence_cut_excalidraw_video` tool:
+1. Call the plugin `silence_cut_excalidraw_video` tool:
 
 ```json
 {

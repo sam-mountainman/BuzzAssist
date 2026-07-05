@@ -1,17 +1,18 @@
 # BuzzAssist
 
-BuzzAssist MCP is a local Excalidraw canvas and media plugin for Codex and Claude Code, modeled after Cowart's architecture:
+BuzzAssist is a local Excalidraw canvas and media plugin for Codex and Claude Code, modeled after Cowart's architecture:
 
 - official Excalidraw MCP App access through `https://mcp.excalidraw.com/mcp`
 - a local static React canvas service
 - project-local canvas persistence under `canvas/`
-- MCP tools for Codex to read selection state, insert assets, and generate images/videos
+- plugin-provided tools for Codex and Claude Code to read selection state, insert assets, and generate images/videos
 - Codex and Claude Code plugin manifests with shared skills
 
 ## Agent URL Setup
 
 Paste this GitHub URL into Codex or Claude Code and ask "セットアップして".
-The agent should clone/open the repo and run:
+That URL plus that instruction is the intended setup contract; no manual
+plugin IDs are needed. The agent should clone/open the repo and run:
 
 ```text
 https://github.com/taiyuhiga/BuzzAssist
@@ -30,11 +31,13 @@ and prints:
 
 ```text
 BUZZASSIST_CANVAS_URL=http://127.0.0.1:<port>/
+BUZZASSIST_CANVAS_CHECK=ok
 ```
 
 After that, the current host agent should open the printed URL in its in-app
 browser. If browser control is unavailable, use the URL from
-`canvas/.server.json`.
+`canvas/.server.json`; setup is considered complete when
+`BUZZASSIST_CANVAS_CHECK=ok` is printed.
 
 ## Run The Canvas
 
@@ -72,14 +75,14 @@ canvas/excalidraw-view-state.json
 canvas/assets/
 ```
 
-## MCP Tools
+## Plugin Tools
 
-This plugin includes two Excalidraw MCP entries:
+This plugin installs the user-facing BuzzAssist plugin and includes two MCP-backed Excalidraw entries internally:
 
 - `excalidraw_official`: the official open-source Excalidraw MCP App hosted by Excalidraw, useful for prompt-to-diagram generation and MCP App rendering
 - `excalidraw_mcp`: this repository's local project-bound stdio MCP server. It auto-starts the browser canvas when needed.
 
-The local stdio MCP runs on `@modelcontextprotocol/sdk`, so initialization,
+The local plugin tool server runs on `@modelcontextprotocol/sdk`, so initialization,
 tool listing/calling, protocol negotiation, and `notifications/progress` are
 handled by the SDK rather than a hand-written JSON-RPC loop.
 
@@ -102,7 +105,7 @@ The local MCP is configured in `.mcp.json` as:
 }
 ```
 
-The stdio MCP starts the canvas automatically for canvas-writing tools. To open
+The local tool server starts the canvas automatically for canvas-writing tools. To open
 the canvas manually:
 
 ```bash
@@ -113,7 +116,7 @@ The local HTTP MCP endpoint is still served by the browser canvas process at
 `/mcp`, but it is token-protected. Read `canvas/.server.json` for the current
 `mcpUrl` and bearer `token`.
 
-For clients that need a direct stdio command:
+For plugin hosts or clients that need a direct stdio command:
 
 ```bash
 ./scripts/start-mcp.sh
@@ -166,12 +169,12 @@ npm pack --dry-run
 
 ## Batch Generation
 
-Generate many images or videos in one call. The MCP batch tools first place Youtube-AGI-style generator frames as a grid below existing canvas content, keep the user's current canvas view in place by default, then run jobs with bounded concurrency and replace each frame as its media result finishes.
+Generate many images or videos in one call. The plugin batch tools first place Youtube-AGI-style generator frames as 10-item chunks below existing canvas content, keep the user's current canvas view in place by default, then run each chunk with bounded concurrency and replace each frame as its media result finishes. For example, 18 jobs run as 10 items in a 2x5 grid, then 8 items in the next grid.
 
-MCP tools:
+Plugin tools:
 
-- `generate_excalidraw_images_batch`: `{ jobs: [{ prompt, model?, aspectRatio?, imageSize?, quality?, referenceImagePaths?, fileName? }], columns?=4, gap?=24, concurrency?=3, focusCreated?=false, projectDir?, canvasDir?, dryRun? }`
-- `generate_excalidraw_videos_batch`: `{ jobs: [{ prompt, model?, aspectRatio?, duration?, resolution?, generateAudio?, referenceImagePaths?, fileName? }], columns?=3, gap?=24, concurrency?=1, focusCreated?=false, projectDir?, canvasDir?, dryRun? }`
+- `generate_excalidraw_images_batch`: `{ jobs: [{ prompt, model?, aspectRatio?, imageSize?, quality?, referenceImagePaths?, fileName? }], columns?=5, gap?=24, concurrency?=10, focusCreated?=false, projectDir?, canvasDir?, dryRun? }`
+- `generate_excalidraw_videos_batch`: `{ jobs: [{ prompt, model?, aspectRatio?, duration?, resolution?, generateAudio?, referenceImagePaths?, fileName? }], columns?=5, gap?=24, concurrency?=10, focusCreated?=false, projectDir?, canvasDir?, dryRun? }`
 
 Both return `{ ok, total, succeeded, failed, results: [{ prompt, elementId, fileId, bounds, error? }] }`.
 
@@ -182,11 +185,11 @@ POST /api/generate/images/batch   { jobs, columns, gap, concurrency }
 POST /api/generate/videos/batch   { jobs, columns, gap, concurrency }
 ```
 
-Each endpoint runs the batch, saves the scene once, broadcasts a single live-canvas update, and responds with the per-job results array.
+Each endpoint runs the batch in 10-item chunks, saves and broadcasts after each inserted chunk, and responds with the per-job results array.
 
-## Codex Agent Clarifications
+## Agent Clarifications
 
-When a Codex agent uses the Excalidraw MCP media tools, the MCP server instructions tell it to ask before generating if required media settings are missing instead of silently guessing defaults. Use the host AskUserQuestion/request_user_input flow for those questions.
+When a Codex or Claude Code agent uses the BuzzAssist plugin media tools, the tool instructions tell it to ask before generating if required media settings are missing instead of silently guessing defaults. Use the host AskUserQuestion/request_user_input flow for those questions.
 
 The server also enforces this gate. Generation, subtitle, and paid silence-cut
 tools reject calls without `confirmedSettings: true`, except for payload
@@ -198,9 +201,9 @@ previews and offline ffmpeg-local dry runs.
 
 ## Media Generation Providers
 
-The canvas UI and MCP tools use the same generation backend. Supported model IDs are aligned with the Youtube-AGI (BuzzAssist) Excalidraw bridge.
+The canvas UI and plugin tools use the same generation backend. Supported model IDs are aligned with the Youtube-AGI (BuzzAssist) Excalidraw bridge.
 
-In the canvas UI, models appear once by canonical name (`lib/modelCatalog.mjs`) and the execution route — Codex / Hermes / BuzzAssist / Lovart — is picked per model from the 実行先 pill in the panel's settings row. The ⚡ generate button shows the pre-generation credit estimate for the selected route (0 for local routes, — for Lovart whose rates are external). The concrete backend model IDs below are what frames store and what MCP tools accept.
+In the canvas UI, models appear once by canonical name (`lib/modelCatalog.mjs`) and the execution route — Codex / Hermes / BuzzAssist / Lovart — is picked per model from the 実行先 pill in the panel's settings row. The ⚡ generate button shows the pre-generation credit estimate for the selected route (0 for local routes, — for Lovart whose rates are external). The concrete backend model IDs below are what frames store and what plugin tools accept.
 
 Local models (no BuzzAssist account needed):
 
@@ -234,7 +237,7 @@ Auth: set `LOVART_ACCESS_KEY` / `LOVART_SECRET_KEY`, or put `access_key` / `secr
 
 Cloud models, cloud subtitles, and their credits use your BuzzAssist account:
 
-- MCP: run the `buzzassist_login` tool (opens the browser, loopback callback), check with `buzzassist_auth_status`
+- Plugin: run the `buzzassist_login` tool (opens the browser, loopback callback), check with `buzzassist_auth_status`
 - HTTP: `GET/POST <canvas-url>/api/buzzassist/login`, status at `/api/buzzassist/auth-status`
 - CI/headless: set `BUZZASSIST_MEDIA_TOKEN` with a desktop auth token
 
@@ -258,7 +261,7 @@ Same model as the Youtube-AGI (BuzzAssist) folder canvas: a canvas belongs to on
   canvas/assets-trash/              # orphaned assets moved here by startup maintenance (recoverable)
 ```
 
-Bind the canvas to a project with `./scripts/start-canvas.sh /path/to/project` (macOS/Linux), `node scripts/start-canvas.mjs /path/to/project` (any OS), or `EXCALIDRAW_PROJECT_DIR`. MCP tools take `projectDir` per call, so different projects keep separate canvases and assets.
+Bind the canvas to a project with `./scripts/start-canvas.sh /path/to/project` (macOS/Linux), `node scripts/start-canvas.mjs /path/to/project` (any OS), or `EXCALIDRAW_PROJECT_DIR`. Plugin tools take `projectDir` per call, so different projects keep separate canvases and assets.
 
 Downloads: every media header has a ⬇ button (`/excalidraw-assets/<name>?download=1`); selecting two or more media shows a ZIP chip backed by `POST /api/assets/archive` (STORE-method ZIP, `lib/zipStore.mjs`). Select-all + chip = bulk export.
 
@@ -266,7 +269,7 @@ Maintenance: both servers run `performCanvasMaintenance` at startup (`lib/canvas
 
 ## Claude Code
 
-The same repo works as-is in Claude Code: `.claude-plugin/plugin.json` and `.mcp.json` register the shared skills and MCP server. Start the canvas with `./scripts/start-canvas.sh`, then use the same MCP tools from Claude Code sessions.
+The same repo works as-is in Claude Code: `.claude-plugin/plugin.json` registers the shared skills and `.mcp.json` registers the plugin's internal tool server. Start the canvas with `./scripts/start-canvas.sh`, then use the same BuzzAssist plugin tools from Claude Code sessions.
 
 `grok-imagine-image-hermes` and `grok-imagine-video-hermes` use the local Hermes Agent xAI OAuth flow:
 

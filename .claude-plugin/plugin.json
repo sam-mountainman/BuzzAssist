@@ -1,7 +1,7 @@
 {
   "name": "buzzassist",
-  "version": "0.1.0",
-  "description": "BuzzAssist MCP canvas and media tools for Claude Code.",
+  "version": "0.1.1",
+  "description": "BuzzAssist canvas and media plugin for Claude Code.",
   "author": {
     "name": "higataiyu"
   },

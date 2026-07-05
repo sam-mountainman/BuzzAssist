@@ -1,6 +1,6 @@
 ---
 name: excalidraw-image-gen
-description: Generate or insert a bitmap into the local BuzzAssist canvas. Use when the user asks to create, fill, replace, or place an AI-generated image on the Excalidraw canvas using GPT Image 2(Codex), Grok Imagine(Hermes), or BuzzAssist cloud models (Nano Banana 2, GPT Image 2 API, Seedream 5.0 Lite, Grok Imagine API — require the buzzassist_login MCP tool), or Lovart models (Midjourney, Flux.2 Max, Nano Banana Pro, Ideogram 4 — require LOVART_ACCESS_KEY/SECRET_KEY or ~/.lovart/credentials.json).
+description: Generate or insert a bitmap into the local BuzzAssist canvas. Use when the user asks to create, fill, replace, or place an AI-generated image on the Excalidraw canvas using GPT Image 2(Codex), Grok Imagine(Hermes), or BuzzAssist cloud models (Nano Banana 2, GPT Image 2 API, Seedream 5.0 Lite, Grok Imagine API — require the buzzassist_login plugin tool), or Lovart models (Midjourney, Flux.2 Max, Nano Banana Pro, Ideogram 4 — require LOVART_ACCESS_KEY/SECRET_KEY or ~/.lovart/credentials.json).
 ---
 
 # Excalidraw Image Gen
@@ -41,11 +41,11 @@ AI holders are rectangle elements with:
 
 ## Workflow
 
-1. Read the selection with the MCP `get_excalidraw_selection` tool.
+1. Read the selection with the plugin `get_excalidraw_selection` tool.
 
 2. If exactly one selected element is an AI holder, use its `width` and `height` as the target generation and display size.
 
-3. Prefer the MCP `generate_excalidraw_image` tool when available:
+3. Prefer the plugin `generate_excalidraw_image` tool when available:
 
 ```json
 {
@@ -62,7 +62,7 @@ AI holders are rectangle elements with:
 
 Use `"model": "grok-imagine-image-hermes"` when the user requests Grok Imagine(Hermes).
 
-4. If the user supplies an existing image path, insert it with the MCP `insert_excalidraw_image` tool:
+4. If the user supplies an existing image path, insert it with the plugin `insert_excalidraw_image` tool:
 
 ```json
 {
@@ -83,5 +83,5 @@ Use `"model": "grok-imagine-image-hermes"` when the user requests Grok Imagine(H
 ## Guardrails
 
 - Do not overwrite existing asset files without an explicit replacement request.
-- Do not hand-write Excalidraw image records if the MCP tool is available.
+- Do not hand-write Excalidraw image records if the plugin tool is available.
 - Confirm the returned `elementId`, dimensions, and asset path after insertion.

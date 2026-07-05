@@ -508,18 +508,6 @@ function filePickerTypesForName(fileName) {
   return [{ description: 'Download', accept: { [mime]: [ext] } }]
 }
 
-// The extension downloadable media should carry when its asset URL has none
-// (e.g. a freshly generated image not yet externalized).
-const DOWNLOAD_EXT_BY_ASSET_TYPE = { image: 'png', video: 'mp4', srt: 'srt' }
-
-function downloadNameForMedia(media) {
-  const fromUrl = assetFileNameFromUrl(media?.assetUrl)
-  if (fromUrl && /\.[a-z0-9]+$/i.test(fromUrl)) return fromUrl
-  const base = String(media?.fileName || fromUrl || 'download').replace(/\.[^.]+$/, '') || 'download'
-  const ext = DOWNLOAD_EXT_BY_ASSET_TYPE[media?.assetType] || 'png'
-  return `${base}.${ext}`
-}
-
 async function saveUrlWithPicker(url, fileName = 'download', fallbackUrl = url) {
   if (!url || typeof window === 'undefined') return false
   const suggestedName = fileName || assetFileNameFromUrl(url) || 'download'
@@ -553,10 +541,6 @@ function saveAssetWithPicker(assetUrl, fileName = '') {
   return saveUrlWithPicker(assetUrl, suggestedName, downloadUrlWithAttachment(assetUrl))
 }
 
-function saveArchiveWithPicker(archiveUrl, fileName = 'excalidraw-assets.zip') {
-  return saveUrlWithPicker(archiveUrl, fileName, archiveUrl)
-}
-
 function assetFileNameFromUrl(assetUrl) {
   if (!assetUrl) return ''
   try {
@@ -568,14 +552,6 @@ function assetFileNameFromUrl(assetUrl) {
     if (!clean.startsWith(CANVAS_ASSETS_ROUTE)) return ''
     return decodeURIComponent(clean.slice(CANVAS_ASSETS_ROUTE.length))
   }
-}
-
-function archiveUrlForAssets(assets) {
-  const names = Array.from(new Set(assets.map((asset) => assetFileNameFromUrl(asset.assetUrl)).filter(Boolean)))
-  if (names.length === 0) return ''
-  const params = new URLSearchParams()
-  names.forEach((name) => params.append('file', name))
-  return `/api/assets/archive?${params.toString()}`
 }
 
 function getCanvasPickTargetFromEventTarget(target) {
@@ -1679,7 +1655,7 @@ function isCanvasAttachableElement(element) {
 }
 
 function isPanelMediaTargetElement(element) {
-  return Boolean(!element?.isDeleted && (isGeneratedResult(element) || isCanvasImageElement(element) || isCanvasVideoElement(element)))
+  return Boolean(!element?.isDeleted && isGeneratedResult(element))
 }
 
 function panelMediaKindFromElement(element) {
@@ -1750,27 +1726,6 @@ function normalizeCanvasAssetUrl(value) {
   }
 }
 
-function isFrameVisuallyCoveredByLaterAsset(frame, elements) {
-  const frameBounds = getElementGeometry(frame)
-  const frameArea = frameBounds.width * frameBounds.height
-  const frameIndex = elements.findIndex((element) => element.id === frame.id)
-  if (frameIndex < 0 || frameArea <= 0) return false
-  const frameCenter = {
-    x: frameBounds.x + frameBounds.width / 2,
-    y: frameBounds.y + frameBounds.height / 2
-  }
-  return elements.slice(frameIndex + 1).some((element) => {
-    if (!isCanvasAttachableElement(element)) return false
-    const bounds = getElementGeometry(element)
-    const coversCenter =
-      frameCenter.x >= bounds.x &&
-      frameCenter.x <= bounds.x + bounds.width &&
-      frameCenter.y >= bounds.y &&
-      frameCenter.y <= bounds.y + bounds.height
-    return coversCenter || overlapArea(frameBounds, bounds) / frameArea > 0.45
-  })
-}
-
 function isElementAfterInScene(element, reference, elements) {
   if (!element || !reference) return false
   const elementIndex = typeof element.index === 'string' ? element.index : ''
@@ -1783,7 +1738,32 @@ function isElementAfterInScene(element, reference, elements) {
   return referencePosition >= 0 && elementPosition > referencePosition
 }
 
-function isFrameHeaderCoveredByLaterAsset(frame, elements, appState, placement, metrics) {
+function isCanvasStackingCoverElement(element) {
+  return isCanvasAttachableElement(element) || isGeneratorFrame(element)
+}
+
+function isElementVisuallyCoveredByLaterElement(reference, elements) {
+  const referenceBounds = getElementGeometry(reference)
+  const referenceArea = referenceBounds.width * referenceBounds.height
+  const referenceIndex = elements.findIndex((element) => element.id === reference.id)
+  if (referenceIndex < 0 || referenceArea <= 0) return false
+  const referenceCenter = {
+    x: referenceBounds.x + referenceBounds.width / 2,
+    y: referenceBounds.y + referenceBounds.height / 2
+  }
+  return elements.slice(referenceIndex + 1).some((element) => {
+    if (!isCanvasStackingCoverElement(element)) return false
+    const bounds = getElementGeometry(element)
+    const coversCenter =
+      referenceCenter.x >= bounds.x &&
+      referenceCenter.x <= bounds.x + bounds.width &&
+      referenceCenter.y >= bounds.y &&
+      referenceCenter.y <= bounds.y + bounds.height
+    return coversCenter || overlapArea(referenceBounds, bounds) / referenceArea > 0.45
+  })
+}
+
+function isHeaderCoveredByLaterElement(reference, elements, appState, placement, metrics) {
   if (!metrics?.showHeader) return false
   const headerHeight = Math.max(14, Number(metrics.headerFontSize) + 8)
   const headerBounds = {
@@ -1793,7 +1773,7 @@ function isFrameHeaderCoveredByLaterAsset(frame, elements, appState, placement, 
     height: headerHeight
   }
   return elements.some((element) => {
-    if (!isElementAfterInScene(element, frame, elements) || !isCanvasAttachableElement(element)) return false
+    if (!isElementAfterInScene(element, reference, elements) || !isCanvasStackingCoverElement(element)) return false
     const assetPlacement = getFrameViewportPlacement(getElementGeometry(element), appState)
     const assetBounds = {
       x: assetPlacement.left,
@@ -1890,14 +1870,6 @@ function svgToDataURL(svg) {
   return encoded ? `data:image/svg+xml;base64,${encoded}` : `data:image/svg+xml,${encodeURIComponent(svg)}`
 }
 
-function attachmentKindLabel(kind) {
-  if (kind === 'audio') return 'AUDIO'
-  if (kind === 'xml') return 'XML'
-  if (kind === 'srt') return 'SRT'
-  if (kind === 'script') return 'SCRIPT'
-  return 'FILE'
-}
-
 function attachmentKindTitle(kind) {
   if (kind === 'audio') return '音声'
   if (kind === 'xml') return 'Premiere XML'
@@ -1906,23 +1878,42 @@ function attachmentKindTitle(kind) {
   return 'ファイル'
 }
 
-function assetHeaderIcon(kind) {
-  if (kind === 'image') return '🖼'
-  if (kind === 'video') return '🎬'
-  if (kind === 'audio') return '♪'
-  if (kind === 'xml') return '<>'
-  if (kind === 'srt' || kind === 'script') return '📝'
-  return '📎'
+function attachmentKindIconMarkup(kind, color) {
+  if (kind === 'audio') {
+    return `
+  <g fill="${color}">
+    <rect x="42" y="50" width="4" height="24" rx="2"/>
+    <rect x="50" y="42" width="4" height="40" rx="2"/>
+    <rect x="58" y="56" width="4" height="12" rx="2"/>
+    <rect x="66" y="36" width="4" height="52" rx="2"/>
+    <rect x="74" y="48" width="4" height="28" rx="2"/>
+  </g>`
+  }
+  if (kind === 'xml') {
+    return `
+  <g fill="none" stroke="${color}" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M54 48l-14 13 14 13"/>
+    <path d="M72 48l14 13-14 13"/>
+    <path d="M66 43l-8 38"/>
+  </g>`
+  }
+  return `
+  <g fill="none" stroke="${color}" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M44 32h29l13 13v43H44z"/>
+    <path d="M73 32v13h13"/>
+    <path d="M54 56h20"/>
+    <path d="M54 67h26"/>
+    <path d="M54 78h18"/>
+  </g>`
 }
 
 function createAttachmentPreviewDataURL(asset) {
   const kind = asset?.kind || 'file'
-  const label = attachmentKindLabel(kind)
-  const title = escapeSvgText(attachmentKindTitle(kind))
-  const name = escapeSvgText(truncateMiddle(asset?.name || 'asset', 38))
+  const title = escapeSvgText(truncateMiddle(asset?.name || attachmentKindTitle(kind), 42))
   const detail = kind === 'audio' && Number(asset?.duration) > 0
     ? `${formatAssetDuration(asset.duration)}`
-    : String(asset?.mimeType || '').split(';')[0] || label
+    : String(asset?.mimeType || '').split(';')[0] || attachmentKindTitle(kind)
+  const subline = escapeSvgText(detail)
   const color = kind === 'audio'
     ? '#2563eb'
     : kind === 'xml'
@@ -1935,10 +1926,9 @@ function createAttachmentPreviewDataURL(asset) {
   <rect width="100%" height="100%" rx="14" fill="#ffffff"/>
   <rect x="0.5" y="0.5" width="${ATTACHMENT_CARD_WIDTH - 1}" height="${ATTACHMENT_CARD_HEIGHT - 1}" rx="13.5" fill="none" stroke="#d7dce5"/>
   <rect x="22" y="24" width="74" height="74" rx="18" fill="${color}" opacity="0.12"/>
-  <text x="59" y="69" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="800" fill="${color}">${label}</text>
-  <text x="116" y="52" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="700" fill="#1f2937">${title}</text>
-  <text x="116" y="82" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="600" fill="#4b5563">${name}</text>
-  <text x="116" y="112" font-family="Inter, Arial, sans-serif" font-size="13" fill="#8a94a6">${escapeSvgText(detail)}</text>
+  ${attachmentKindIconMarkup(kind, color)}
+  <text x="116" y="62" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="700" fill="#1f2937">${title}</text>
+  <text x="116" y="94" font-family="Inter, Arial, sans-serif" font-size="13" fill="#8a94a6">${subline}</text>
   <path d="M24 ${ATTACHMENT_CARD_HEIGHT - 32}H${ATTACHMENT_CARD_WIDTH - 24}" stroke="#edf0f5" stroke-width="2"/>
 </svg>`
   return svgToDataURL(svg)
@@ -2381,8 +2371,8 @@ function buildFrameOverlays(scene) {
         // MCP/batch jobs mark their placeholder frames so the browser shows
         // the Generating... overlay for work it did not start itself.
         remoteGenerating: element.customData?.codexGenerating === true,
-        isCoveredByLaterAsset: isFrameVisuallyCoveredByLaterAsset(element, scene.elements),
-        isHeaderCoveredByLaterAsset: isFrameHeaderCoveredByLaterAsset(element, scene.elements, appState, placement, overlayMetrics),
+        isCoveredByLaterElement: isElementVisuallyCoveredByLaterElement(element, scene.elements),
+        isHeaderCoveredByLaterElement: isHeaderCoveredByLaterElement(element, scene.elements, appState, placement, overlayMetrics),
         left: placement.left,
         top: placement.top,
         width: placement.width,
@@ -2453,6 +2443,7 @@ function buildSelectedImageOverlays(scene) {
         (isCanvasAssetUrl(file?.dataURL) ? file.dataURL : '')
       )
       const assetType = canvasAssetKindFromElement(element)
+      const headerMetrics = getMediaHeaderMetrics(placement.width)
       return {
         id: element.id,
         assetType,
@@ -2466,7 +2457,8 @@ function buildSelectedImageOverlays(scene) {
         height: placement.height,
         angle: Number(element.angle) || 0,
         pixelWidth: pixelSize.width,
-        pixelHeight: pixelSize.height
+        pixelHeight: pixelSize.height,
+        isHeaderCoveredByLaterElement: isHeaderCoveredByLaterElement(element, scene.elements, appState, placement, headerMetrics)
       }
     })
     .filter((overlay) => overlay.isSelected || isViewportPlacementNearViewport(overlay, appState))
@@ -2492,10 +2484,11 @@ function buildVideoPlaybackOverlays(scene) {
         height: placement.height,
         angle: Number(element.angle) || 0,
         isSelected: selectedIds.has(element.id),
-        duration: Number(element.customData?.codexVideoDuration) || 0
+        duration: Number(element.customData?.codexVideoDuration) || 0,
+        isCoveredByLaterElement: isElementVisuallyCoveredByLaterElement(element, scene.elements)
       }
     })
-    .filter((overlay) => overlay && (overlay.isSelected || isViewportPlacementNearViewport(overlay, appState)))
+    .filter((overlay) => overlay && !overlay.isCoveredByLaterElement && (overlay.isSelected || isViewportPlacementNearViewport(overlay, appState)))
 }
 
 function buildSubtitlePreviewOverlays(scene) {
@@ -2772,7 +2765,6 @@ function SubtitleCanvasOverlay({ overlay, scrollOffset }) {
           }}
         >
           <div className="lovart-image-header-name">
-            <span style={{ fontSize: '0.9em' }}>📝</span>
             <span className="lovart-image-header-name-text">{overlay.fileName}</span>
           </div>
           {overlay.width >= 90 ? <div className="lovart-image-header-size">{lineCountLabel}</div> : null}
@@ -5950,7 +5942,7 @@ export default function App() {
         const isGenerating = generatingFrameIds.has(overlay.id) || overlay.remoteGenerating
         const isVideo = overlay.kind === 'video'
         const isUtilityFrame = overlay.kind === 'subtitle' || overlay.kind === 'silenceCut'
-        if (overlay.isCoveredByLaterAsset && !overlay.isSelected && !isGenerating) return null
+        if (overlay.isCoveredByLaterElement && !isGenerating) return null
         const overlayTitle =
           overlay.kind === 'video'
             ? 'Video Generator'
@@ -5962,7 +5954,7 @@ export default function App() {
                   ? 'Lovart Generator'
                   : 'Image Generator'
         const overlayMetrics = getFrameOverlayMetrics(overlay.width, overlay.height)
-        const showFrameHeader = overlayMetrics.showHeader && !overlay.isHeaderCoveredByLaterAsset
+        const showFrameHeader = overlayMetrics.showHeader && !overlay.isHeaderCoveredByLaterElement
         return (
           <div
             key={overlay.id}
@@ -6065,9 +6057,7 @@ export default function App() {
               </div>
             ) : null}
             <div className="lovart-frame-inner">
-              {/* Utility frames (SRT / silence cut) keep their normal look while
-                  working — only the Generating... pill shows. */}
-              {isGenerating && !isUtilityFrame ? <div className={`lovart-frame-generating-bg${isVideo ? ' video' : ''}`} /> : null}
+              {isGenerating ? <div className={`lovart-frame-generating-bg${isVideo ? ' video' : ''}`} /> : null}
               <div className="lovart-frame-center">
                 {overlay.kind === 'subtitle' ? (
                   <SrtCenterIcon size={overlayMetrics.iconSize} />
@@ -6116,7 +6106,7 @@ export default function App() {
 
       {selectedImageOverlays.map((img) => {
         const { headerFontSize, headerOffset } = getMediaHeaderMetrics(img.width)
-        if (img.width < 28) return null
+        if (img.width < 28 || img.isHeaderCoveredByLaterElement) return null
         return (
           <div
             key={img.id}
@@ -6133,7 +6123,6 @@ export default function App() {
             >
               <div className="lovart-image-header" style={{ top: `-${headerOffset}px`, fontSize: `${headerFontSize}px` }}>
                 <div className="lovart-image-header-name">
-                  <span className="lovart-image-header-kind" aria-hidden="true">{assetHeaderIcon(img.assetType)}</span>
                   <span className="lovart-image-header-name-text">{img.fileName}</span>
                 </div>
               {img.pixelWidth > 0 && img.pixelHeight > 0 && img.width >= 90 ? (
@@ -6143,165 +6132,6 @@ export default function App() {
           </div>
         )
       })}
-      {(() => {
-        // BuzzAssist keeps canvas media selection chrome to the file-name
-        // header only; chat/file actions live outside this canvas overlay.
-        return null
-        // Lovart-style selection toolbar: click or marquee-select any media
-        // (image / video / SRT card / silence-cut XML output) and a floating
-        // toolbar appears above the selection bounds with a download button.
-        // Multiple assets download as one streaming ZIP instead of firing many
-        // slow browser downloads.
-        const selectedXmlOutputs = frameOverlays
-          .filter((overlay) => overlay.isSelected && overlay.kind === 'silenceCut' && overlay.outputAsset?.url)
-          .map((overlay) => ({
-            ...overlay,
-            assetType: 'xml',
-            assetPath: overlay.outputAsset.path || '',
-            assetUrl: overlay.outputAsset.url,
-            fileName: overlay.outputAsset.name || assetFileNameFromUrl(overlay.outputAsset.url) || 'jetcut.xml'
-          }))
-        const selectedCanvasAssetIds = new Set(selectedImageOverlays.filter((overlay) => overlay.isSelected && overlay.assetUrl).map((overlay) => overlay.id))
-        const selectedMedia = [
-          ...selectedImageOverlays.filter((overlay) => overlay.isSelected && overlay.assetUrl),
-          ...subtitlePreviewOverlays
-            .filter((overlay) => overlay.isSelected && overlay.assetUrl && !selectedCanvasAssetIds.has(overlay.id))
-            .map((overlay) => ({ ...overlay, assetType: 'srt' })),
-          ...selectedXmlOutputs
-        ]
-        if (selectedMedia.length === 0) return null
-        const boundsLeft = Math.min(...selectedMedia.map((overlay) => overlay.left))
-        const boundsRight = Math.max(...selectedMedia.map((overlay) => overlay.left + overlay.width))
-        const boundsTop = Math.min(...selectedMedia.map(getMediaToolbarTop))
-        const boundsBottom = Math.max(...selectedMedia.map((overlay) => overlay.top + overlay.height))
-        const toolbarPlacement = getFloatingToolbarPlacement({
-          left: boundsLeft,
-          right: boundsRight,
-          top: boundsTop,
-          bottom: boundsBottom
-        })
-        const single = selectedMedia.length === 1
-        const archiveUrl = single ? '' : archiveUrlForAssets(selectedMedia)
-        const downloadSelectedMedia = async () => {
-          if (!archiveUrl) return
-          setBulkDownloading(true)
-          try {
-            await saveArchiveWithPicker(archiveUrl, 'excalidraw-assets.zip')
-          } finally {
-            setBulkDownloading(false)
-          }
-        }
-        return (
-          <div
-            className="lovart-selection-toolbar"
-            style={{ left: `${toolbarPlacement.left}px`, top: `${toolbarPlacement.top}px` }}
-            onPointerDown={(event) => event.stopPropagation()}
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            {single && selectedMedia[0].assetType === 'srt' ? (
-              <button
-                type="button"
-                className="lovart-selection-toolbar-btn"
-                title="AIエージェントで校正（チャットに貼るプロンプトをコピー）"
-                onClick={() => {
-                  const target = selectedMedia[0]
-                  const assetName = target.assetUrl.split('/').pop().split('?')[0]
-                  const prompt = [
-                    'キャンバスで選択中のSRT字幕を校正して置き換えて。',
-                    `対象: canvas/assets/${assetName}（要素ID: ${target.id}）`,
-                    '手順:',
-                    '1. SRTファイルを読み、時刻はそのままにテキストだけ校正する（同音異義語・変換ミス・脱字・表記ゆれを修正。発言内容は変えない。canvas/subtitle-glossary.json の用語辞書の表記を優先）',
-                    `2. excalidraw MCP の generate_excalidraw_subtitles を subtitleLines（各cueの text/start/end）+ anchorElementId "${target.id}" + replaceAnchor: true + confirmedSettings: true で呼んでカードを置き換える`,
-                    '3. 固有名詞などの繰り返し直した表記があれば、同じ呼び出しに glossarySuggestions: [{from, to}] を付けて用語辞書に学習させる'
-                  ].join('\n')
-                  navigator.clipboard?.writeText(prompt).catch(() => {})
-                  setProofreadCopied(true)
-                  window.setTimeout(() => setProofreadCopied(false), 2000)
-                }}
-              >
-                <span className="lovart-selection-toolbar-count">{proofreadCopied ? 'コピー済み' : '校正'}</span>
-              </button>
-            ) : null}
-            <div className="lovart-selection-chat-wrap">
-              <button
-                type="button"
-                className="lovart-selection-toolbar-btn"
-                title="Claude Code / Codex のチャットに添付して送信"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  setChatSendMenuOpen((current) => !current)
-                }}
-              >
-                <span className="lovart-selection-toolbar-count">
-                  {chatSendStatus === 'sending'
-                    ? '添付中…'
-                    : chatSendStatus === 'sent'
-                      ? '送信済み'
-                      : chatSendStatus === 'attached'
-                        ? '添付済み'
-                        : chatSendStatus === 'copied' || chatSendStatus === 'copied-fallback'
-                          ? 'コピー済み ⌘V'
-                          : chatSendStatus === 'error'
-                            ? '失敗'
-                            : 'チャットへ'}
-                </span>
-              </button>
-              {chatSendMenuOpen ? (
-                <div className="lovart-menu lovart-selection-chat-menu">
-                  {[['claude', 'Claude Code に添付'], ['codex', 'Codex に添付'], ['', 'パスをコピーのみ']].map(([app, label]) => (
-                    <button
-                      type="button"
-                      key={app || 'copy'}
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        setChatSendMenuOpen(false)
-                        sendToChatApp({
-                          app,
-                          text: '',
-                          assetUrls: selectedMedia.map((item) => item.assetUrl),
-                          assetItems: selectedMedia.map((item) => ({
-                            url: item.assetUrl,
-                            path: item.assetPath,
-                            kind: item.assetType,
-                            name: item.fileName
-                          }))
-                        })
-                      }}
-                    >
-                      <span>{label}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-            {single ? (
-              <button
-                type="button"
-                className="lovart-selection-toolbar-btn"
-                title="ダウンロード"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  const target = selectedMedia[0]
-                  saveAssetWithPicker(target.assetUrl, downloadNameForMedia(target))
-                }}
-              >
-                <DownloadIcon size={15} />
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="lovart-selection-toolbar-btn"
-                disabled={bulkDownloading || !archiveUrl}
-                title={bulkDownloading ? '開始中…' : `${selectedMedia.length}件をZIPでダウンロード`}
-                onClick={downloadSelectedMedia}
-              >
-                <DownloadIcon size={15} />
-                <span className="lovart-selection-toolbar-count">{bulkDownloading ? '…' : selectedMedia.length}</span>
-              </button>
-            )}
-          </div>
-        )
-      })()}
       <div ref={hoverOverlayRef} className="lovart-hover-border" style={{ display: 'none' }} />
 
       {expandedVideoPlayback ? (
@@ -7245,7 +7075,7 @@ export default function App() {
                           onChange={(event) => { setOpenMenu(null); onVideoFrameUploadChange(event) }}
                         >
                           <ScriptFileIcon size={24} />
-                          <span className="lovart-utility-card-label">XML</span>
+                          <span className="lovart-utility-card-label">{truncateMiddle(silenceXmlAsset.name || 'Premiere XML', 12)}</span>
                         </FileUploadLabel>
                         <button
                           type="button"
@@ -7282,7 +7112,7 @@ export default function App() {
                           onClick={() => setOpenMenu((c) => (c === 'subtitle-audio-source' ? null : 'subtitle-audio-source'))}
                         >
                           <AudioWaveIcon size={18} />
-                          <span className="lovart-utility-card-label">音声</span>
+                          <span className="lovart-utility-card-label">{truncateMiddle(primaryAsset.name || '音声・動画', 12)}</span>
                         </button>
                         <button
                           type="button"
@@ -7342,7 +7172,7 @@ export default function App() {
                           onChange={handleScriptFileChange}
                         >
                           <ScriptFileIcon size={24} />
-                          <span className="lovart-utility-card-label">台本</span>
+                          <span className="lovart-utility-card-label">{truncateMiddle(frameForm.subtitleScriptName || '台本', 12)}</span>
                         </FileUploadLabel>
                         <button
                           type="button"
@@ -7509,33 +7339,10 @@ export default function App() {
                         </button>
                       ))
                     ) : (
-                      <>
-                        <button type="button" onClick={() => setOpenMenu(null)}>
-                          <span>{frameForm.subtitleMode === 'scripted' ? 'ElevenLabs Forced Alignment' : 'ElevenLabs Scribe v2'}</span>
-                          <span className="menu-check">✓</span>
-                        </button>
-                        <div className="lovart-menu-header">高精度生成（AIエージェント）</div>
-                        {[['claude', 'Claude Code に依頼'], ['codex', 'Codex に依頼']].map(([app, label]) => (
-                          <button
-                            type="button"
-                            key={`agent-${app}`}
-                            onClick={() => {
-                              setOpenMenu(null)
-                              if (!frameForm.subtitleAudio?.path) {
-                                setGenerationError('先に音声（または動画）を添付してください。')
-                                return
-                              }
-                              sendToChatApp({
-                                app,
-                                autoSend: true,
-                                text: buildAgentSubtitlePrompt(frameForm, activeFrameId)
-                              })
-                            }}
-                          >
-                            <span>{label}</span>
-                          </button>
-                        ))}
-                      </>
+                      <button type="button" onClick={() => setOpenMenu(null)}>
+                        <span>{frameForm.subtitleMode === 'scripted' ? 'ElevenLabs Forced Alignment' : 'ElevenLabs Scribe v2'}</span>
+                        <span className="menu-check">✓</span>
+                      </button>
                     )}
                   </div>
                 ) : null}

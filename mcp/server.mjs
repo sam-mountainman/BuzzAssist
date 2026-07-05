@@ -7,7 +7,19 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { generateKeyBetween } from "fractional-indexing";
-import { IMAGE_MODELS, VIDEO_MODELS, generateImageMedia, generateVideoMedia, getHermesStatus, runWithConcurrency, setupHermesGrok } from "../lib/mediaGeneration.mjs";
+import {
+  DEFAULT_MEDIA_BATCH_CHUNK_SIZE,
+  IMAGE_MODELS,
+  VIDEO_MODELS,
+  chunkMediaBatchJobs,
+  generateImageMedia,
+  generateVideoMedia,
+  getHermesStatus,
+  normalizeMediaBatchColumns,
+  normalizeMediaBatchConcurrency,
+  runWithConcurrency,
+  setupHermesGrok,
+} from "../lib/mediaGeneration.mjs";
 import { getBuzzAssistAuthStatus, loginBuzzAssistViaBrowser } from "../lib/buzzassistApi.mjs";
 import {
   OFFICIAL_EXCALIDRAW_README,
@@ -27,8 +39,8 @@ import { startChatBridgeWorker } from "../lib/chatBridge.mjs";
 import { readServerDiscovery } from "../lib/canvasServerRuntime.mjs";
 import { tmpdir } from "node:os";
 
-const SERVER_NAME = "BuzzAssist Excalidraw MCP";
-const SERVER_VERSION = "0.1.0";
+const SERVER_NAME = "BuzzAssist Excalidraw Plugin Tools";
+const SERVER_VERSION = "0.1.1";
 const TOOL_READ_ME = "read_me";
 const TOOL_CREATE_VIEW = "create_view";
 const TOOL_GET_SELECTION = "get_excalidraw_selection";
@@ -53,7 +65,7 @@ const AI_HOLDER_KEY = "codexAiImageHolder";
 const MEDIA_GENERATION_AGENT_INSTRUCTIONS = [
   "Project-local Excalidraw canvas tools. Use read_me/create_view for diagrams, get_excalidraw_selection before acting on selected items, and insert_* for local assets.",
   "Generation/subtitle/silence-cut tools require confirmedSettings=true unless the user's request already specified all relevant settings; use payloadPreview or read_me for workflow details.",
-  "Canvas tools auto-start the local static canvas server and write canvas/.server.json with the dynamic URL and HTTP MCP bearer token.",
+  "Canvas tools auto-start the local static canvas server and write canvas/.server.json with the dynamic URL and HTTP tool endpoint bearer token.",
 ].join(" ");
 
 // Project-common 用語辞書 (canvas/subtitle-glossary.json) merges into every
@@ -63,31 +75,6 @@ async function mergedProjectGlossary(args = {}) {
   const projectTerms = (Array.isArray(stored?.terms) ? stored.terms : []).filter((term) => nonEmptyString(term?.from));
   const requestTerms = Array.isArray(args.glossary) ? args.glossary : [];
   return [...projectTerms, ...requestTerms];
-}
-
-// Glossary learning loop: notation fixes the agent made while proofreading
-// are merged into the project 用語辞書 so future transcriptions get them
-// right at the source.
-async function addGlossarySuggestions(args, suggestions) {
-  const list = (Array.isArray(suggestions) ? suggestions : [])
-    .map((term) => ({ from: String(term?.from ?? "").trim(), to: String(term?.to ?? "").trim() }))
-    .filter((term) => term.from && term.to && term.from !== term.to);
-  if (list.length === 0) return 0;
-  const filePath = join(resolveCanvasDir(args), "subtitle-glossary.json");
-  const stored = await readJsonIfExists(filePath, { terms: [] });
-  const terms = Array.isArray(stored?.terms) ? stored.terms : [];
-  const existing = new Set(terms.map((term) => String(term?.from ?? "").trim()).filter(Boolean));
-  let added = 0;
-  for (const term of list) {
-    if (existing.has(term.from)) continue;
-    existing.add(term.from);
-    terms.push({ id: globalThis.crypto.randomUUID(), from: term.from, to: term.to });
-    added += 1;
-  }
-  if (added > 0) {
-    await writeFile(filePath, `${JSON.stringify({ terms }, null, 2)}\n`);
-  }
-  return added;
 }
 
 // Auto-open: when a canvas tool runs and no browser tab is connected, start
@@ -927,102 +914,122 @@ async function generateExcalidrawImagesBatch(args = {}) {
     if (!nonEmptyString(job?.prompt)) throw new Error("Each image job requires a prompt.");
   }
 
-  const columns = finiteNumber(Number(args.columns), 4);
+  const columns = normalizeMediaBatchColumns(args.columns);
   const gap = finiteNumber(Number(args.gap), 24);
-  const concurrency = finiteNumber(Number(args.concurrency), 3);
+  const concurrency = normalizeMediaBatchConcurrency(args.concurrency);
   const dryRun = Boolean(args.dryRun);
+  const results = new Array(jobs.length);
+  const chunks = [];
 
-  const frames = dryRun
-    ? []
-    : await insertGeneratorFrameBatch({
-        projectDir: args.projectDir,
-        canvasDir: args.canvasDir,
-        frames: jobs.map((job) => ({
-          kind: "image",
-          prompt: job.prompt,
-          model: job.model ?? "gpt-image-2-codex",
-          aspectRatio: job.aspectRatio ?? job.aspect_ratio ?? "1:1",
-          quality: job.quality ?? "auto",
-          imageSize: job.imageSize ?? job.size ?? "1K",
-          customData: job.customData,
-        })),
-        columns,
-        gap,
-        selectCreated: args.selectCreated !== false,
-        focusCreated: args.focusCreated === true,
-      });
+  for (const [chunkIndex, chunk] of chunkMediaBatchJobs(jobs, DEFAULT_MEDIA_BATCH_CHUNK_SIZE).entries()) {
+    const chunkJobs = chunk.jobs;
+    const frames = dryRun
+      ? []
+      : await insertGeneratorFrameBatch({
+          projectDir: args.projectDir,
+          canvasDir: args.canvasDir,
+          frames: chunkJobs.map((job) => ({
+            kind: "image",
+            prompt: job.prompt,
+            model: job.model ?? "gpt-image-2-codex",
+            aspectRatio: job.aspectRatio ?? job.aspect_ratio ?? "1:1",
+            quality: job.quality ?? "auto",
+            imageSize: job.imageSize ?? job.size ?? "1K",
+            customData: job.customData,
+          })),
+          columns,
+          gap,
+          selectCreated: args.selectCreated !== false,
+          focusCreated: args.focusCreated === true,
+        });
 
-  let writeQueue = Promise.resolve();
-  const enqueueWrite = (fn) => {
-    const next = writeQueue.then(fn, fn);
-    writeQueue = next.catch(() => {});
-    return next;
-  };
-
-  const generated = await runWithConcurrency(jobs, concurrency, async (job, index) => {
-    const media = await generateImageMedia({
-      ...job,
-      aspectRatio: job.aspectRatio ?? job.aspect_ratio,
-      imageSize: job.imageSize ?? job.size,
-      fileName: job.fileName ?? job.imageName ?? job.image_name,
-      referenceImagePaths: job.referenceImagePaths ?? job.reference_image_paths,
-    });
-    if (dryRun) {
-      return { media, placement: null, frame: null };
-    }
-    const frame = frames[index];
-    const placement = await enqueueWrite(() =>
-      insertExcalidrawImageMedia({
-        projectDir: args.projectDir,
-        canvasDir: args.canvasDir,
-        mediaBuffer: media.buffer,
-        mimeType: media.mimeType,
-        fileName: job.fileName ?? job.imageName ?? job.image_name ?? media.fileName,
-        anchorElementId: frame?.elementId,
-        replaceAnchor: Boolean(frame?.elementId),
-        matchAnchor: true,
-        selectCreated: false,
-        customData: {
-          codexGeneratedImage: true,
-          codexGenerationModel: media.model,
-          codexGenerationPrompt: job.prompt,
-          codexGenerationAspectRatio: job.aspectRatio ?? job.aspect_ratio,
-          codexGenerationQuality: job.quality,
-          generatorPrompt: job.prompt,
-          generatorModel: job.model,
-          generatorAspectRatio: job.aspectRatio ?? job.aspect_ratio,
-          generatorImageQuality: job.quality,
-          generatorImageSize: job.imageSize ?? job.size ?? "1K",
-          codexGenerationSource: media.source,
-          sourceFrameId: frame?.elementId,
-          ...(job.customData && typeof job.customData === "object" ? job.customData : {}),
-        },
-      }),
-    );
-    return { media, placement, frame };
-  });
-
-  const results = jobs.map((job, i) => {
-    const outcome = generated[i];
-    if (!outcome.ok) return { prompt: job.prompt, error: outcome.error, frameElementId: frames[i]?.elementId };
-    const { media, placement, frame } = outcome.value;
-    return {
-      prompt: job.prompt,
-      model: media.model,
-      frameElementId: frame?.elementId,
-      elementId: placement?.elementId,
-      fileId: placement?.fileId,
-      bounds: placement?.bounds,
-      assetFile: placement?.assetFile,
-      assetUrl: placement?.assetUrl,
+    let writeQueue = Promise.resolve();
+    const enqueueWrite = (fn) => {
+      const next = writeQueue.then(fn, fn);
+      writeQueue = next.catch(() => {});
+      return next;
     };
-  });
 
-  if (!dryRun) {
-    const failedFrameIds = results.filter((result) => result.error).map((result) => result.frameElementId);
-    if (failedFrameIds.length > 0) {
-      await enqueueWrite(() => clearFrameGeneratingFlags({ projectDir: args.projectDir, canvasDir: args.canvasDir }, failedFrameIds));
+    const generated = await runWithConcurrency(chunkJobs, concurrency, async (job, index) => {
+      const media = await generateImageMedia({
+        ...job,
+        aspectRatio: job.aspectRatio ?? job.aspect_ratio,
+        imageSize: job.imageSize ?? job.size,
+        fileName: job.fileName ?? job.imageName ?? job.image_name,
+        referenceImagePaths: job.referenceImagePaths ?? job.reference_image_paths,
+      });
+      if (dryRun) {
+        return { media, placement: null, frame: null };
+      }
+      const frame = frames[index];
+      const placement = await enqueueWrite(() =>
+        insertExcalidrawImageMedia({
+          projectDir: args.projectDir,
+          canvasDir: args.canvasDir,
+          mediaBuffer: media.buffer,
+          mimeType: media.mimeType,
+          fileName: job.fileName ?? job.imageName ?? job.image_name ?? media.fileName,
+          anchorElementId: frame?.elementId,
+          replaceAnchor: Boolean(frame?.elementId),
+          matchAnchor: true,
+          selectCreated: false,
+          customData: {
+            codexGeneratedImage: true,
+            codexGenerationModel: media.model,
+            codexGenerationPrompt: job.prompt,
+            codexGenerationAspectRatio: job.aspectRatio ?? job.aspect_ratio,
+            codexGenerationQuality: job.quality,
+            generatorPrompt: job.prompt,
+            generatorModel: job.model,
+            generatorAspectRatio: job.aspectRatio ?? job.aspect_ratio,
+            generatorImageQuality: job.quality,
+            generatorImageSize: job.imageSize ?? job.size ?? "1K",
+            codexGenerationSource: media.source,
+            sourceFrameId: frame?.elementId,
+            ...(job.customData && typeof job.customData === "object" ? job.customData : {}),
+          },
+        }),
+      );
+      return { media, placement, frame };
+    });
+
+    const chunkResults = chunkJobs.map((job, i) => {
+      const outcome = generated[i];
+      if (!outcome.ok) return { prompt: job.prompt, error: outcome.error, frameElementId: frames[i]?.elementId };
+      const { media, placement, frame } = outcome.value;
+      return {
+        prompt: job.prompt,
+        model: media.model,
+        frameElementId: frame?.elementId,
+        elementId: placement?.elementId,
+        fileId: placement?.fileId,
+        bounds: placement?.bounds,
+        assetFile: placement?.assetFile,
+        assetUrl: placement?.assetUrl,
+      };
+    });
+
+    for (const [i, result] of chunkResults.entries()) {
+      results[chunk.start + i] = result;
     }
+
+    if (!dryRun) {
+      const failedFrameIds = chunkResults.filter((result) => result.error).map((result) => result.frameElementId);
+      if (failedFrameIds.length > 0) {
+        await enqueueWrite(() => clearFrameGeneratingFlags({ projectDir: args.projectDir, canvasDir: args.canvasDir }, failedFrameIds));
+      }
+    }
+
+    const chunkSucceeded = chunkResults.filter((result) => !result.error).length;
+    chunks.push({
+      index: chunkIndex + 1,
+      start: chunk.start,
+      total: chunkJobs.length,
+      succeeded: chunkSucceeded,
+      failed: chunkJobs.length - chunkSucceeded,
+      columns,
+      concurrency,
+    });
   }
 
   const succeeded = results.filter((result) => !result.error).length;
@@ -1032,6 +1039,10 @@ async function generateExcalidrawImagesBatch(args = {}) {
     succeeded,
     failed: jobs.length - succeeded,
     dryRun,
+    columns,
+    concurrency,
+    chunkSize: DEFAULT_MEDIA_BATCH_CHUNK_SIZE,
+    chunks,
     results,
   };
 }
@@ -1043,113 +1054,133 @@ async function generateExcalidrawVideosBatch(args = {}) {
     if (!nonEmptyString(job?.prompt)) throw new Error("Each video job requires a prompt.");
   }
 
-  const columns = finiteNumber(Number(args.columns), 3);
+  const columns = normalizeMediaBatchColumns(args.columns);
   const gap = finiteNumber(Number(args.gap), 24);
-  const concurrency = finiteNumber(Number(args.concurrency), 1);
+  const concurrency = normalizeMediaBatchConcurrency(args.concurrency);
   const dryRun = Boolean(args.dryRun);
+  const results = new Array(jobs.length);
+  const chunks = [];
 
-  const frames = dryRun
-    ? []
-    : await insertGeneratorFrameBatch({
-        projectDir: args.projectDir,
-        canvasDir: args.canvasDir,
-        frames: jobs.map((job) => ({
-          kind: "video",
-          prompt: job.prompt,
-          model: job.model ?? "grok-imagine-video-hermes",
-          aspectRatio: job.aspectRatio ?? job.aspect_ratio ?? "16:9",
-          duration: job.duration ?? "5",
-          resolution: job.resolution ?? "720p",
-          generateAudio: job.generateAudio ?? job.generate_audio ?? true,
-          customData: job.customData,
-        })),
-        columns,
-        gap,
-        selectCreated: args.selectCreated !== false,
-        focusCreated: args.focusCreated === true,
-      });
+  for (const [chunkIndex, chunk] of chunkMediaBatchJobs(jobs, DEFAULT_MEDIA_BATCH_CHUNK_SIZE).entries()) {
+    const chunkJobs = chunk.jobs;
+    const frames = dryRun
+      ? []
+      : await insertGeneratorFrameBatch({
+          projectDir: args.projectDir,
+          canvasDir: args.canvasDir,
+          frames: chunkJobs.map((job) => ({
+            kind: "video",
+            prompt: job.prompt,
+            model: job.model ?? "grok-imagine-video-hermes",
+            aspectRatio: job.aspectRatio ?? job.aspect_ratio ?? "16:9",
+            duration: job.duration ?? "5",
+            resolution: job.resolution ?? "720p",
+            generateAudio: job.generateAudio ?? job.generate_audio ?? true,
+            customData: job.customData,
+          })),
+          columns,
+          gap,
+          selectCreated: args.selectCreated !== false,
+          focusCreated: args.focusCreated === true,
+        });
 
-  let writeQueue = Promise.resolve();
-  const enqueueWrite = (fn) => {
-    const next = writeQueue.then(fn, fn);
-    writeQueue = next.catch(() => {});
-    return next;
-  };
+    let writeQueue = Promise.resolve();
+    const enqueueWrite = (fn) => {
+      const next = writeQueue.then(fn, fn);
+      writeQueue = next.catch(() => {});
+      return next;
+    };
 
-  const generated = await runWithConcurrency(jobs, concurrency, async (job, index) => {
-    const media = await generateVideoMedia({
-      ...job,
-      aspectRatio: job.aspectRatio ?? job.aspect_ratio,
-      duration: job.duration,
-      fileName: job.fileName ?? job.videoName ?? job.video_name,
-      generateAudio: job.generateAudio ?? job.generate_audio,
-      startFramePath: job.startFramePath ?? job.start_frame_path,
-      referenceImagePaths: job.referenceImagePaths ?? job.reference_image_paths,
-      referenceVideoPaths: job.referenceVideoPaths ?? job.reference_video_paths,
-      referenceVideos: job.referenceVideos ?? job.reference_videos,
-    });
-    if (dryRun) {
-      return { media, placement: null, frame: null };
-    }
-    const frame = frames[index];
-    const placement = await enqueueWrite(() =>
-      insertExcalidrawVideoMedia({
-        projectDir: args.projectDir,
-        canvasDir: args.canvasDir,
-        mediaBuffer: media.buffer,
-        mimeType: media.mimeType,
-        fileName: job.fileName ?? job.videoName ?? job.video_name ?? media.fileName,
-        anchorElementId: frame?.elementId,
-        replaceAnchor: Boolean(frame?.elementId),
-        matchAnchor: true,
-        selectCreated: false,
+    const generated = await runWithConcurrency(chunkJobs, concurrency, async (job, index) => {
+      const media = await generateVideoMedia({
+        ...job,
         aspectRatio: job.aspectRatio ?? job.aspect_ratio,
         duration: job.duration,
+        fileName: job.fileName ?? job.videoName ?? job.video_name,
+        generateAudio: job.generateAudio ?? job.generate_audio,
+        startFramePath: job.startFramePath ?? job.start_frame_path,
+        referenceImagePaths: job.referenceImagePaths ?? job.reference_image_paths,
+        referenceVideoPaths: job.referenceVideoPaths ?? job.reference_video_paths,
+        referenceVideos: job.referenceVideos ?? job.reference_videos,
+      });
+      if (dryRun) {
+        return { media, placement: null, frame: null };
+      }
+      const frame = frames[index];
+      const placement = await enqueueWrite(() =>
+        insertExcalidrawVideoMedia({
+          projectDir: args.projectDir,
+          canvasDir: args.canvasDir,
+          mediaBuffer: media.buffer,
+          mimeType: media.mimeType,
+          fileName: job.fileName ?? job.videoName ?? job.video_name ?? media.fileName,
+          anchorElementId: frame?.elementId,
+          replaceAnchor: Boolean(frame?.elementId),
+          matchAnchor: true,
+          selectCreated: false,
+          aspectRatio: job.aspectRatio ?? job.aspect_ratio,
+          duration: job.duration,
+          prompt: job.prompt,
+          model: media.model,
+          customData: {
+            codexGeneratedVideo: true,
+            codexGenerationModel: media.model,
+            codexGenerationPrompt: job.prompt,
+            codexGenerationAspectRatio: job.aspectRatio ?? job.aspect_ratio,
+            codexGenerationDuration: job.duration,
+            codexGenerationResolution: job.resolution,
+            videoPrompt: job.prompt,
+            videoModel: job.model,
+            videoAspectRatio: job.aspectRatio ?? job.aspect_ratio,
+            videoDuration: job.duration,
+            videoResolution: job.resolution,
+            videoGenerateAudio: job.generateAudio ?? job.generate_audio,
+            codexGenerationSource: media.source,
+            sourceFrameId: frame?.elementId,
+            ...(job.customData && typeof job.customData === "object" ? job.customData : {}),
+          },
+        }),
+      );
+      return { media, placement, frame };
+    });
+
+    const chunkResults = chunkJobs.map((job, i) => {
+      const outcome = generated[i];
+      if (!outcome.ok) return { prompt: job.prompt, error: outcome.error, frameElementId: frames[i]?.elementId };
+      const { media, placement, frame } = outcome.value;
+      return {
         prompt: job.prompt,
         model: media.model,
-        customData: {
-          codexGeneratedVideo: true,
-          codexGenerationModel: media.model,
-          codexGenerationPrompt: job.prompt,
-          codexGenerationAspectRatio: job.aspectRatio ?? job.aspect_ratio,
-          codexGenerationDuration: job.duration,
-          codexGenerationResolution: job.resolution,
-          videoPrompt: job.prompt,
-          videoModel: job.model,
-          videoAspectRatio: job.aspectRatio ?? job.aspect_ratio,
-          videoDuration: job.duration,
-          videoResolution: job.resolution,
-          videoGenerateAudio: job.generateAudio ?? job.generate_audio,
-          codexGenerationSource: media.source,
-          sourceFrameId: frame?.elementId,
-          ...(job.customData && typeof job.customData === "object" ? job.customData : {}),
-        },
-      }),
-    );
-    return { media, placement, frame };
-  });
+        frameElementId: frame?.elementId,
+        elementId: placement?.elementId,
+        fileId: placement?.fileId,
+        bounds: placement?.bounds,
+        assetFile: placement?.assetFile,
+        assetUrl: placement?.assetUrl,
+      };
+    });
 
-  const results = jobs.map((job, i) => {
-    const outcome = generated[i];
-    if (!outcome.ok) return { prompt: job.prompt, error: outcome.error, frameElementId: frames[i]?.elementId };
-    const { media, placement, frame } = outcome.value;
-    return {
-      prompt: job.prompt,
-      model: media.model,
-      frameElementId: frame?.elementId,
-      elementId: placement?.elementId,
-      fileId: placement?.fileId,
-      bounds: placement?.bounds,
-      assetFile: placement?.assetFile,
-      assetUrl: placement?.assetUrl,
-    };
-  });
-
-  if (!dryRun) {
-    const failedFrameIds = results.filter((result) => result.error).map((result) => result.frameElementId);
-    if (failedFrameIds.length > 0) {
-      await enqueueWrite(() => clearFrameGeneratingFlags({ projectDir: args.projectDir, canvasDir: args.canvasDir }, failedFrameIds));
+    for (const [i, result] of chunkResults.entries()) {
+      results[chunk.start + i] = result;
     }
+
+    if (!dryRun) {
+      const failedFrameIds = chunkResults.filter((result) => result.error).map((result) => result.frameElementId);
+      if (failedFrameIds.length > 0) {
+        await enqueueWrite(() => clearFrameGeneratingFlags({ projectDir: args.projectDir, canvasDir: args.canvasDir }, failedFrameIds));
+      }
+    }
+
+    const chunkSucceeded = chunkResults.filter((result) => !result.error).length;
+    chunks.push({
+      index: chunkIndex + 1,
+      start: chunk.start,
+      total: chunkJobs.length,
+      succeeded: chunkSucceeded,
+      failed: chunkJobs.length - chunkSucceeded,
+      columns,
+      concurrency,
+    });
   }
 
   const succeeded = results.filter((result) => !result.error).length;
@@ -1159,6 +1190,10 @@ async function generateExcalidrawVideosBatch(args = {}) {
     succeeded,
     failed: jobs.length - succeeded,
     dryRun,
+    columns,
+    concurrency,
+    chunkSize: DEFAULT_MEDIA_BATCH_CHUNK_SIZE,
+    chunks,
     results,
   };
 }
@@ -1400,7 +1435,7 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE_IMAGES_BATCH,
       title: "Generate Excalidraw Images (Batch)",
-      description: "Create image generator frames, run many image jobs, and replace each frame as results finish. Requires confirmedSettings=true unless using payloadPreview.",
+      description: "Create image generator frames, run image jobs in chunks of 10, and replace each frame as results finish. Requires confirmedSettings=true unless using payloadPreview.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1427,9 +1462,9 @@ function toolDefinitions() {
               additionalProperties: true,
             },
           },
-          columns: { type: "number", description: "Grid columns. Defaults to 4." },
+          columns: { type: "number", description: "Grid columns. Defaults to 5." },
           gap: { type: "number", description: "Canvas units between grid cells. Defaults to 24." },
-          concurrency: { type: "number", description: "Parallel generations. Defaults to 3." },
+          concurrency: { type: "number", description: "Parallel generations per chunk. Defaults to 10 and is capped at 10." },
           projectDir: { type: "string", description: "Absolute project directory containing canvas/." },
           canvasDir: { type: "string", description: "Absolute canvas directory. Overrides projectDir." },
           selectCreated: { type: "boolean", description: "Select the inserted elements after saving." },
@@ -1450,7 +1485,7 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE_VIDEOS_BATCH,
       title: "Generate Excalidraw Videos (Batch)",
-      description: "Create video generator frames, run many video jobs, and replace each frame as results finish. Requires confirmedSettings=true unless using payloadPreview.",
+      description: "Create video generator frames, run video jobs in chunks of 10, and replace each frame as results finish. Requires confirmedSettings=true unless using payloadPreview.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1478,9 +1513,9 @@ function toolDefinitions() {
               additionalProperties: true,
             },
           },
-          columns: { type: "number", description: "Grid columns. Defaults to 3." },
+          columns: { type: "number", description: "Grid columns. Defaults to 5." },
           gap: { type: "number", description: "Canvas units between grid cells. Defaults to 24." },
-          concurrency: { type: "number", description: "Parallel generations. Defaults to 1 because video is heavy." },
+          concurrency: { type: "number", description: "Parallel generations per chunk. Defaults to 10 and is capped at 10." },
           projectDir: { type: "string", description: "Absolute project directory containing canvas/." },
           canvasDir: { type: "string", description: "Absolute canvas directory. Overrides projectDir." },
           selectCreated: { type: "boolean", description: "Select the inserted elements after saving." },
@@ -1531,7 +1566,6 @@ function toolDefinitions() {
           fillerMode: { type: "string", enum: ["keep", "safe", "contextual"] },
           glossary: { type: "array", items: { type: "object", properties: { from: { type: "string" }, to: { type: "string" } }, required: ["from", "to"], additionalProperties: false }, description: "Term corrections applied to the transcription before segmentation (用語辞書)." },
           normalizeAudio: { type: "boolean", description: "Loudness-normalize quiet audio before transcription. Defaults to true." },
-          glossarySuggestions: { type: "array", items: { type: "object", properties: { from: { type: "string" }, to: { type: "string" } }, required: ["from", "to"], additionalProperties: false }, description: "Notation fixes you made while proofreading (e.g. バズアシ→BuzzAssist). Merged into the project 用語辞書 (canvas/subtitle-glossary.json) so future transcriptions learn them." },
           durationSeconds: { type: "number", description: "Audio duration in seconds. Probed with ffprobe when omitted." },
           fileName: { type: "string", description: "Destination SRT filename under canvas/assets/." },
           projectDir: { type: "string", description: "Absolute project directory containing canvas/." },
@@ -1732,7 +1766,6 @@ function normalizeProvidedSubtitleLines(rawLines) {
 }
 
 async function generateExcalidrawSubtitles(args = {}) {
-  const glossaryTermsAdded = await addGlossarySuggestions(args, args.glossarySuggestions);
   if (Array.isArray(args.subtitleLines) && args.subtitleLines.length > 0) {
     const holdSeconds = normalizeSubtitleHoldSeconds(args.holdSeconds);
     const lines = normalizeProvidedSubtitleLines(args.subtitleLines).map((line, index, all) => {
@@ -1760,7 +1793,6 @@ async function generateExcalidrawSubtitles(args = {}) {
       mode: args.mode ?? "llm",
       model: args.model ?? "host-llm-segmented",
       cueCount: lines.length,
-      glossaryTermsAdded,
       srtPreview: srtText.split("\n").slice(0, 12).join("\n"),
       ...(placement
         ? { elementId: placement.elementId, groupId: placement.groupId, assetFile: placement.assetFile, assetUrl: placement.assetUrl, bounds: placement.bounds }
@@ -1803,7 +1835,7 @@ async function generateExcalidrawSubtitles(args = {}) {
       credits: generated.credits,
       estimatedCostYen: generated.estimatedCostYen,
       requestId: generated.requestId,
-      hint: "Step 2 is BOTH proofreading and line breaking. First PROOFREAD the transcript: fix homophones (機会/機械, 以外/意外), conversion mistakes, dropped characters, and unify spelling variants (引越し/引っ越し) — change notation ONLY, never what was said, and prefer the project glossary's spellings. Then decide semantic line breaks from the timed words (respect maxCharsPerLine, 1-2 lines per cue, break only at natural Japanese bunsetsu boundaries — never right after a particle or mid compound verb). Finally call this tool again with subtitleLines using the corrected text; keep each cue's start/end from the word timings.",
+      hint: "Step 2 is line breaking. Decide semantic cue boundaries from the timed words (respect maxCharsPerLine, 1-2 lines per cue, break only at natural Japanese bunsetsu boundaries — never right after a particle or mid compound verb). Then call this tool again with subtitleLines; keep each cue's start/end from the word timings.",
     };
   }
 
@@ -1839,7 +1871,6 @@ async function generateExcalidrawSubtitles(args = {}) {
     durationSeconds: generated.durationSeconds,
     credits: generated.credits,
     estimatedCostYen: generated.estimatedCostYen,
-    glossaryTermsAdded,
     quality: generated.quality,
     srtPreview: generated.srtText.split("\n").slice(0, 12).join("\n"),
     ...(placement
@@ -1952,13 +1983,12 @@ async function handleToolCall(params, progress = () => {}) {
   if (params?.name === TOOL_GENERATE_SUBTITLES) {
     progress(0, 2, "Generating subtitles");
     const result = await generateExcalidrawSubtitles(params.arguments ?? {});
-    const extras = result.glossaryTermsAdded ? `+${result.glossaryTermsAdded} term(s) → 用語辞書` : "";
     progress(2, 2, "Subtitles complete");
     return {
       content: [
         {
           type: "text",
-          text: `Generated ${result.cueCount} subtitle cue(s) with ${result.model} (${result.mode})${extras ? ` [${extras}]` : ""}${result.dryRun ? " [dry run]" : ""}.${result.dryRun ? "" : canvasHintText()}`,
+          text: `Generated ${result.cueCount} subtitle cue(s) with ${result.model} (${result.mode})${result.dryRun ? " [dry run]" : ""}.${result.dryRun ? "" : canvasHintText()}`,
         },
       ],
       structuredContent: result,

@@ -5,7 +5,17 @@ import { spawn } from 'node:child_process'
 import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path'
 import { Readable } from 'node:stream'
-import { generateImageMedia, generateVideoMedia, getGenerationCapabilities, getHermesStatus, runWithConcurrency } from './lib/mediaGeneration.mjs'
+import {
+  DEFAULT_MEDIA_BATCH_CHUNK_SIZE,
+  chunkMediaBatchJobs,
+  generateImageMedia,
+  generateVideoMedia,
+  getGenerationCapabilities,
+  getHermesStatus,
+  normalizeMediaBatchColumns,
+  normalizeMediaBatchConcurrency,
+  runWithConcurrency
+} from './lib/mediaGeneration.mjs'
 import { getBuzzAssistAuthStatus, loginBuzzAssistViaBrowser } from './lib/buzzassistApi.mjs'
 import { OFFICIAL_EXCALIDRAW_README, createExcalidrawView, insertExcalidrawImage, insertExcalidrawSubtitle, insertExcalidrawVideo, insertExcalidrawMediaBatch, performCanvasMaintenance, stripAssetBackedFileDataURLs } from './lib/canvasScene.mjs'
 import { streamZipStore } from './lib/zipStore.mjs'
@@ -1195,61 +1205,85 @@ function configureCanvasServer(server) {
             return
           }
 
-          const generated = await runWithConcurrency(jobs, Number(body.concurrency) || 3, (job) => generateImageMedia(job))
-          const items = []
-          const itemJobIndexes = []
-          jobs.forEach((job, i) => {
-            const outcome = generated[i]
-            if (!outcome.ok) return
-            const media = outcome.value
-            items.push({
-              kind: 'image',
-              mediaBuffer: media.buffer,
-              mimeType: media.mimeType,
-              fileName: job.fileName,
-              customData: {
-                codexGeneratedImage: true,
-                codexGenerationModel: media.model,
-                codexGenerationPrompt: job.prompt,
-                codexGenerationAspectRatio: job.aspectRatio ?? job.aspect_ratio,
-                codexGenerationQuality: job.quality,
-                generatorPrompt: job.prompt,
-                generatorModel: job.model,
-                generatorAspectRatio: job.aspectRatio ?? job.aspect_ratio,
-                generatorImageQuality: job.quality,
-                generatorImageSize: job.imageSize ?? job.size ?? '1K',
-                codexGenerationSource: media.source,
-                ...(job.customData && typeof job.customData === 'object' ? job.customData : {})
+          const columns = normalizeMediaBatchColumns(body.columns)
+          const gap = Number.isFinite(Number(body.gap)) ? Number(body.gap) : 24
+          const concurrency = normalizeMediaBatchConcurrency(body.concurrency)
+          const results = new Array(jobs.length)
+          const chunks = []
+
+          for (const [chunkIndex, chunk] of chunkMediaBatchJobs(jobs, DEFAULT_MEDIA_BATCH_CHUNK_SIZE).entries()) {
+            const generated = await runWithConcurrency(chunk.jobs, concurrency, (job) => generateImageMedia(job))
+            const items = []
+            const itemJobIndexes = []
+            chunk.jobs.forEach((job, i) => {
+              const outcome = generated[i]
+              if (!outcome.ok) return
+              const media = outcome.value
+              items.push({
+                kind: 'image',
+                mediaBuffer: media.buffer,
+                mimeType: media.mimeType,
+                fileName: job.fileName,
+                customData: {
+                  codexGeneratedImage: true,
+                  codexGenerationModel: media.model,
+                  codexGenerationPrompt: job.prompt,
+                  codexGenerationAspectRatio: job.aspectRatio ?? job.aspect_ratio,
+                  codexGenerationQuality: job.quality,
+                  generatorPrompt: job.prompt,
+                  generatorModel: job.model,
+                  generatorAspectRatio: job.aspectRatio ?? job.aspect_ratio,
+                  generatorImageQuality: job.quality,
+                  generatorImageSize: job.imageSize ?? job.size ?? '1K',
+                  codexGenerationSource: media.source,
+                  ...(job.customData && typeof job.customData === 'object' ? job.customData : {})
+                }
+              })
+              itemJobIndexes.push(chunk.start + i)
+            })
+
+            let chunkInserted = []
+            if (items.length > 0) {
+              chunkInserted = await insertExcalidrawMediaBatch({
+                canvasDir,
+                items,
+                columns,
+                gap,
+                selectCreated: body.selectCreated
+              })
+              broadcastCanvasChanged([canvasFile, ...chunkInserted.map((placement) => placement.assetFile)])
+            }
+
+            chunk.jobs.forEach((job, i) => {
+              const outcome = generated[i]
+              const jobIndex = chunk.start + i
+              if (!outcome.ok) {
+                results[jobIndex] = { prompt: job.prompt, error: outcome.error }
+                return
+              }
+              const placement = chunkInserted[itemJobIndexes.indexOf(jobIndex)]
+              results[jobIndex] = {
+                prompt: job.prompt,
+                model: outcome.value.model,
+                elementId: placement?.elementId,
+                fileId: placement?.fileId,
+                bounds: placement?.bounds,
+                assetFile: placement?.assetFile,
+                assetUrl: placement?.assetUrl
               }
             })
-            itemJobIndexes.push(i)
-          })
 
-          let inserted = []
-          if (items.length > 0) {
-            inserted = await insertExcalidrawMediaBatch({
-              canvasDir,
-              items,
-              columns: Number(body.columns) || 4,
-              gap: Number(body.gap) || 24,
-              selectCreated: body.selectCreated
+            const chunkSucceeded = chunk.jobs.filter((_, i) => generated[i]?.ok).length
+            chunks.push({
+              index: chunkIndex + 1,
+              start: chunk.start,
+              total: chunk.jobs.length,
+              succeeded: chunkSucceeded,
+              failed: chunk.jobs.length - chunkSucceeded,
+              columns,
+              concurrency
             })
           }
-
-          const results = jobs.map((job, i) => {
-            const outcome = generated[i]
-            if (!outcome.ok) return { prompt: job.prompt, error: outcome.error }
-            const placement = inserted[itemJobIndexes.indexOf(i)]
-            return {
-              prompt: job.prompt,
-              model: outcome.value.model,
-              elementId: placement?.elementId,
-              fileId: placement?.fileId,
-              bounds: placement?.bounds,
-              assetFile: placement?.assetFile,
-              assetUrl: placement?.assetUrl
-            }
-          })
           const succeeded = results.filter((result) => !result.error).length
 
           sendJson(res, 200, {
@@ -1258,9 +1292,12 @@ function configureCanvasServer(server) {
             total: jobs.length,
             succeeded,
             failed: jobs.length - succeeded,
+            columns,
+            concurrency,
+            chunkSize: DEFAULT_MEDIA_BATCH_CHUNK_SIZE,
+            chunks,
             results
           })
-          broadcastCanvasChanged([canvasFile, ...inserted.map((placement) => placement.assetFile)])
         } catch (error) {
           sendJson(res, 500, { error: error.message })
         }
@@ -1286,65 +1323,89 @@ function configureCanvasServer(server) {
             return
           }
 
-          const generated = await runWithConcurrency(jobs, Number(body.concurrency) || 1, (job) => generateVideoMedia(job))
-          const items = []
-          const itemJobIndexes = []
-          jobs.forEach((job, i) => {
-            const outcome = generated[i]
-            if (!outcome.ok) return
-            const media = outcome.value
-            items.push({
-              kind: 'video',
-              mediaBuffer: media.buffer,
-              mimeType: media.mimeType,
-              fileName: job.fileName || job.videoName,
-              aspectRatio: job.aspectRatio ?? job.aspect_ratio,
-              duration: job.duration,
-              customData: {
-                codexGeneratedVideo: true,
-                codexGenerationModel: media.model,
-                codexGenerationPrompt: job.prompt,
-                codexGenerationAspectRatio: job.aspectRatio ?? job.aspect_ratio,
-                codexGenerationDuration: job.duration,
-                codexGenerationResolution: job.resolution,
-                videoPrompt: job.prompt,
-                videoModel: job.model,
-                videoAspectRatio: job.aspectRatio ?? job.aspect_ratio,
-                videoDuration: job.duration,
-                videoResolution: job.resolution,
-                videoGenerateAudio: job.generateAudio ?? job.generate_audio,
-                codexGenerationSource: media.source,
-                ...(job.customData && typeof job.customData === 'object' ? job.customData : {})
+          const columns = normalizeMediaBatchColumns(body.columns)
+          const gap = Number.isFinite(Number(body.gap)) ? Number(body.gap) : 24
+          const concurrency = normalizeMediaBatchConcurrency(body.concurrency)
+          const results = new Array(jobs.length)
+          const chunks = []
+
+          for (const [chunkIndex, chunk] of chunkMediaBatchJobs(jobs, DEFAULT_MEDIA_BATCH_CHUNK_SIZE).entries()) {
+            const generated = await runWithConcurrency(chunk.jobs, concurrency, (job) => generateVideoMedia(job))
+            const items = []
+            const itemJobIndexes = []
+            chunk.jobs.forEach((job, i) => {
+              const outcome = generated[i]
+              if (!outcome.ok) return
+              const media = outcome.value
+              items.push({
+                kind: 'video',
+                mediaBuffer: media.buffer,
+                mimeType: media.mimeType,
+                fileName: job.fileName || job.videoName,
+                aspectRatio: job.aspectRatio ?? job.aspect_ratio,
+                duration: job.duration,
+                customData: {
+                  codexGeneratedVideo: true,
+                  codexGenerationModel: media.model,
+                  codexGenerationPrompt: job.prompt,
+                  codexGenerationAspectRatio: job.aspectRatio ?? job.aspect_ratio,
+                  codexGenerationDuration: job.duration,
+                  codexGenerationResolution: job.resolution,
+                  videoPrompt: job.prompt,
+                  videoModel: job.model,
+                  videoAspectRatio: job.aspectRatio ?? job.aspect_ratio,
+                  videoDuration: job.duration,
+                  videoResolution: job.resolution,
+                  videoGenerateAudio: job.generateAudio ?? job.generate_audio,
+                  codexGenerationSource: media.source,
+                  ...(job.customData && typeof job.customData === 'object' ? job.customData : {})
+                }
+              })
+              itemJobIndexes.push(chunk.start + i)
+            })
+
+            let chunkInserted = []
+            if (items.length > 0) {
+              chunkInserted = await insertExcalidrawMediaBatch({
+                canvasDir,
+                items,
+                columns,
+                gap,
+                selectCreated: body.selectCreated
+              })
+              broadcastCanvasChanged([canvasFile, ...chunkInserted.map((placement) => placement.assetFile)])
+            }
+
+            chunk.jobs.forEach((job, i) => {
+              const outcome = generated[i]
+              const jobIndex = chunk.start + i
+              if (!outcome.ok) {
+                results[jobIndex] = { prompt: job.prompt, error: outcome.error }
+                return
+              }
+              const placement = chunkInserted[itemJobIndexes.indexOf(jobIndex)]
+              results[jobIndex] = {
+                prompt: job.prompt,
+                model: outcome.value.model,
+                elementId: placement?.elementId,
+                fileId: placement?.fileId,
+                bounds: placement?.bounds,
+                assetFile: placement?.assetFile,
+                assetUrl: placement?.assetUrl
               }
             })
-            itemJobIndexes.push(i)
-          })
 
-          let inserted = []
-          if (items.length > 0) {
-            inserted = await insertExcalidrawMediaBatch({
-              canvasDir,
-              items,
-              columns: Number(body.columns) || 3,
-              gap: Number(body.gap) || 24,
-              selectCreated: body.selectCreated
+            const chunkSucceeded = chunk.jobs.filter((_, i) => generated[i]?.ok).length
+            chunks.push({
+              index: chunkIndex + 1,
+              start: chunk.start,
+              total: chunk.jobs.length,
+              succeeded: chunkSucceeded,
+              failed: chunk.jobs.length - chunkSucceeded,
+              columns,
+              concurrency
             })
           }
-
-          const results = jobs.map((job, i) => {
-            const outcome = generated[i]
-            if (!outcome.ok) return { prompt: job.prompt, error: outcome.error }
-            const placement = inserted[itemJobIndexes.indexOf(i)]
-            return {
-              prompt: job.prompt,
-              model: outcome.value.model,
-              elementId: placement?.elementId,
-              fileId: placement?.fileId,
-              bounds: placement?.bounds,
-              assetFile: placement?.assetFile,
-              assetUrl: placement?.assetUrl
-            }
-          })
           const succeeded = results.filter((result) => !result.error).length
 
           sendJson(res, 200, {
@@ -1353,9 +1414,12 @@ function configureCanvasServer(server) {
             total: jobs.length,
             succeeded,
             failed: jobs.length - succeeded,
+            columns,
+            concurrency,
+            chunkSize: DEFAULT_MEDIA_BATCH_CHUNK_SIZE,
+            chunks,
             results
           })
-          broadcastCanvasChanged([canvasFile, ...inserted.map((placement) => placement.assetFile)])
         } catch (error) {
           sendJson(res, 500, { error: error.message })
         }

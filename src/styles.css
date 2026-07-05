@@ -26,6 +26,12 @@ body {
 }
 
 .lovart-ai-root .excalidraw .layer-ui__wrapper,
+.lovart-ai-root .excalidraw .FixedSideContainer,
+.lovart-ai-root .excalidraw .FixedSideContainer_side_top,
+.lovart-ai-root .excalidraw .App-top-bar,
+.lovart-ai-root .excalidraw .App-top-bar .Island,
+.lovart-ai-root .excalidraw .App-toolbar-container,
+.lovart-ai-root .excalidraw .App-toolbar,
 .lovart-ai-root .excalidraw .App-menu,
 .lovart-ai-root .excalidraw .dropdown-menu,
 .lovart-ai-root .excalidraw [class*="popover"] {
@@ -41,8 +47,8 @@ body {
   top: 50%;
   left: 14px;
 
-  /* Desktop-app parity: the rail sits BELOW Excalidraw's UI islands (z 40) so
-     open menus/popovers cover it, and above canvas overlays (z 1-4). */
+  /* BuzzAssist parity: keep the rail below native Excalidraw popovers and
+     above canvas-anchored media overlays. */
   z-index: 12;
   display: flex;
   flex-direction: column;
@@ -100,10 +106,9 @@ body {
   white-space: nowrap;
 }
 
-/* Canvas-anchored overlays live in the 1-3 z-index band so they paint above
-   the Excalidraw canvases (z 1-2) but always below the Excalidraw UI islands
-   (.App-top-bar / .App-bottom-bar at z 4). Floating UI (rail, panels, menus,
-   modals) stays above the toolbar with z >= 12. */
+/* Canvas-anchored overlays live in the 1-3 z-index band so file headers and
+   frame labels stay below the BuzzAssist-style prompt UI. Native Excalidraw
+   UI is promoted separately to z 40. */
 .lovart-frame-overlay {
   position: absolute;
   z-index: 3;
@@ -176,15 +181,6 @@ body {
   overflow: hidden;
 }
 
-.lovart-image-header-kind {
-  flex: 0 0 auto;
-  color: #667085;
-  font-size: 0.9em;
-  font-weight: 700;
-  letter-spacing: 0;
-  line-height: 1;
-}
-
 .lovart-image-header-name-text {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -209,7 +205,7 @@ body {
 .lovart-menu-backdrop {
   position: absolute;
   inset: 0;
-  z-index: 20;
+  z-index: 9;
   width: 100%;
   height: 100%;
   padding: 0;
@@ -389,7 +385,7 @@ body {
   position: absolute;
   bottom: 12px;
   left: 50%;
-  z-index: 30;
+  z-index: 10;
   box-sizing: border-box;
   width: min(92vw, 500px);
   padding: 12px 14px 10px;
@@ -449,7 +445,7 @@ body {
 }
 
 .lovart-prompt-wrap.has-video-menu {
-  z-index: 40;
+  z-index: 13;
   pointer-events: auto;
 }
 
@@ -459,7 +455,7 @@ body {
 }
 
 .lovart-prompt-wrap.has-video-menu .lovart-video-frame-tray {
-  z-index: 80;
+  z-index: 14;
   overflow: visible;
 }
 
@@ -640,7 +636,7 @@ body {
 }
 
 .lovart-menu.lovart-slot-menu {
-  z-index: 100 !important;
+  z-index: 13 !important;
   bottom: calc(100% + 8px);
   left: 0;
   padding: 8px;
@@ -655,7 +651,7 @@ body {
 
 .lovart-slot-menu button {
   position: relative;
-  z-index: 101;
+  z-index: 14;
   padding: 8px 12px;
   color: #333333;
   pointer-events: auto !important;
@@ -856,7 +852,7 @@ body {
 
 .lovart-menu-wrap {
   position: relative;
-  z-index: 30;
+  z-index: 13;
 }
 
 .lovart-pill {
@@ -936,7 +932,7 @@ body {
   position: absolute;
   bottom: calc(100% + 8px);
   left: 0;
-  z-index: 40;
+  z-index: 13;
   min-width: 120px;
   padding: 6px;
   background: #ffffff;
@@ -1098,7 +1094,7 @@ body {
 .lovart-video-settings {
   right: -16px;
   left: auto;
-  z-index: 100;
+  z-index: 13;
   box-sizing: border-box;
   min-width: 312px;
   padding: 10px 12px;
@@ -1677,7 +1673,7 @@ body {
   position: absolute;
   bottom: calc(100% + 8px);
   left: 50%;
-  z-index: 30;
+  z-index: 14;
   width: max-content;
   max-width: 230px;
   padding: 8px 10px;
@@ -1697,7 +1693,7 @@ body {
   position: absolute;
   bottom: calc(100% + 2px);
   left: 50%;
-  z-index: 30;
+  z-index: 14;
   content: "";
   pointer-events: none;
   border: 5px solid transparent;
@@ -2018,9 +2014,13 @@ body {
 }
 
 .lovart-utility-card-label {
+  max-width: 48px;
+  overflow: hidden;
   color: #555555;
   font-size: 10px;
   font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .lovart-utility-card-thumb {
@@ -2124,7 +2124,7 @@ body {
   right: -16px;
   bottom: calc(100% + 6px);
   left: auto;
-  z-index: 100;
+  z-index: 13;
   min-width: 304px;
   padding: 10px 12px;
   border: 0;
@@ -2288,38 +2288,6 @@ body {
   margin-top: 8px;
 }
 
-/* Lovart-style floating selection toolbar: appears above the selection bounds
-   of any clicked or marquee-selected media and offers download (single file
-   direct, multiple as ZIP). Sits in the canvas-overlay band (above headers at
-   z 3, below floating panels at z >= 12). */
-.lovart-selection-toolbar {
-  position: absolute;
-  z-index: 4;
-  display: inline-flex;
-  gap: 2px;
-  align-items: center;
-  padding: 4px;
-  background: #ffffff;
-  border: 1px solid #ececf1;
-  border-radius: 12px;
-  box-shadow: 0 6px 20px rgb(17 24 39 / 0.14);
-  transform: translateX(-50%);
-}
-
-.lovart-selection-chat-wrap {
-  position: relative;
-  display: inline-flex;
-}
-
-/* Opens downward from the floating toolbar (which sits above the selection). */
-.lovart-selection-chat-menu {
-  top: calc(100% + 6px);
-  bottom: auto;
-  left: 50%;
-  min-width: 180px;
-  transform: translateX(-50%);
-}
-
 .lovart-key-send-row {
   display: flex;
   gap: 6px;
@@ -2327,35 +2295,4 @@ body {
 
 .lovart-key-send-row .lovart-key-save {
   flex: 1;
-}
-
-.lovart-selection-toolbar-btn {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  justify-content: center;
-  min-width: 30px;
-  height: 30px;
-  padding: 0 6px;
-  color: #374151;
-  text-decoration: none;
-  cursor: pointer;
-  background: transparent;
-  border: 0;
-  border-radius: 9px;
-}
-
-.lovart-selection-toolbar-btn:hover:not(:disabled) {
-  color: #7c3aed;
-  background: #f3f0ff;
-}
-
-.lovart-selection-toolbar-btn:disabled {
-  color: #9ca3af;
-  cursor: default;
-}
-
-.lovart-selection-toolbar-count {
-  font-size: 12px;
-  font-weight: 600;
 }

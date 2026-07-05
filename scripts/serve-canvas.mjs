@@ -182,7 +182,7 @@ server.listen(port, host, async () => {
   const actual = server.address();
   const actualPort = typeof actual === "object" && actual ? actual.port : port;
   console.log(`BuzzAssist canvas: http://${host}:${actualPort}/`);
-  console.log(`BuzzAssist Excalidraw MCP: http://${host}:${actualPort}/mcp`);
+  console.log(`BuzzAssist plugin HTTP MCP endpoint: http://${host}:${actualPort}/mcp`);
   console.log(`BuzzAssist canvas data: ${join(canvasDir, "excalidraw-canvas.json")}`);
   console.log(`BuzzAssist canvas server: ${join(canvasDir, ".server.json")}`);
 });
