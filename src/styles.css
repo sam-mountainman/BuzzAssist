@@ -989,11 +989,6 @@ body {
   white-space: nowrap;
 }
 
-.lovart-slot-menu .lovart-upload-label {
-  padding: 8px 12px;
-  color: #333333;
-}
-
 .lovart-menu .lovart-upload-label:hover,
 .lovart-slot-menu .lovart-upload-label:hover {
   background: #f1f3f4;

@@ -1890,7 +1890,11 @@ function frameFormFromElement(element) {
     isVideoGeneratorFrame(element) ||
     isGeneratedVideoResult(element) ||
     customData.codexMediaKind === 'video'
-  const prompt = isVideoElement
+  // Lovart frames store their prompt under lovartPrompt only — without this
+  // branch the prompt silently resets every time the frame is re-selected.
+  const prompt = isLovartGeneratorFrame(element) && typeof customData.lovartPrompt === 'string'
+    ? customData.lovartPrompt
+    : isVideoElement
     ? (
         typeof customData.videoPrompt === 'string'
           ? customData.videoPrompt
@@ -2063,6 +2067,17 @@ function frameCustomDataFromForm(kind, form) {
         generatorImageSize: '1K',
         generatorReferenceImages: normalizeAssetList(form.imageReferences)
       }
+}
+
+function mergeAssetIntoForm(form, target, asset) {
+  if (target === 'imageReferences') return { ...form, imageReferences: [...normalizeAssetList(form.imageReferences), asset].slice(-3) }
+  if (target === 'videoStartFrame') return { ...form, videoStartFrame: asset }
+  if (target === 'videoEndFrame') return { ...form, videoEndFrame: asset }
+  if (target === 'videoReferenceVideos') return { ...form, videoReferenceVideos: [...normalizeAssetList(form.videoReferenceVideos), asset].slice(-3) }
+  if (target === 'videoReferenceAudios') return { ...form, videoReferenceAudios: [...normalizeAssetList(form.videoReferenceAudios), asset].slice(-3) }
+  if (target === 'subtitleAudio') return { ...form, subtitleAudio: asset }
+  if (target === 'silenceCutVideo') return { ...form, silenceCutVideo: asset }
+  return { ...form, videoReferenceImages: [...normalizeAssetList(form.videoReferenceImages), asset].slice(-3) }
 }
 
 function buildFrameOverlays(scene) {
@@ -3577,6 +3592,10 @@ export default function App() {
       const newY = Math.round(copiedY)
       const copiedKind = getGeneratorKind(copiedFrame)
       const copiedForm = frameFormFromElement(copiedFrame)
+      // No job targets the new id — inheriting codexGenerating would leave the
+      // pasted frame stuck on the Generating... overlay forever.
+      const pastedCustomData = { ...(copiedFrame.customData ?? {}) }
+      delete pastedCustomData.codexGenerating
       const newFrame = {
         ...copiedFrame,
         id: crypto.randomUUID(),
@@ -3587,7 +3606,7 @@ export default function App() {
         versionNonce: Math.floor(Math.random() * 2 ** 31),
         seed: Math.floor(Math.random() * 2 ** 31),
         updated: pasteTime,
-        customData: { ...(copiedFrame.customData ?? {}) }
+        customData: pastedCustomData
       }
       lastGeneratorPasteRef.current = { time: pasteTime, sourceId: copiedFrame.id, frameId: newFrame.id }
       activeFrameIdRef.current = newFrame.id
@@ -4120,36 +4139,30 @@ export default function App() {
   }, [])
 
   const addAssetToFrame = useCallback(
-    (target, asset) => {
-      if (!asset) return
-      let nextForm = null
-      setFrameForm((current) => {
-        let next = current
-        if (target === 'imageReferences') {
-          next = { ...current, imageReferences: [...normalizeAssetList(current.imageReferences), asset].slice(-3) }
-        } else if (target === 'videoStartFrame') {
-          next = { ...current, videoStartFrame: asset }
-        } else if (target === 'videoEndFrame') {
-          next = { ...current, videoEndFrame: asset }
-        } else if (target === 'videoReferenceVideos') {
-          next = { ...current, videoReferenceVideos: [...normalizeAssetList(current.videoReferenceVideos), asset].slice(-3) }
-        } else if (target === 'videoReferenceAudios') {
-          next = { ...current, videoReferenceAudios: [...normalizeAssetList(current.videoReferenceAudios), asset].slice(-3) }
-        } else if (target === 'subtitleAudio') {
-          next = { ...current, subtitleAudio: asset }
-        } else if (target === 'silenceCutVideo') {
-          next = { ...current, silenceCutVideo: asset }
-        } else {
-          next = { ...current, videoReferenceImages: [...normalizeAssetList(current.videoReferenceImages), asset].slice(-3) }
-        }
-        nextForm = next
-        return next
-      })
-      window.setTimeout(() => {
-        if (nextForm) updateActiveFrameElement(nextForm)
-      }, 0)
+    (target, assetOrAssets, frameIdOverride) => {
+      const assets = (Array.isArray(assetOrAssets) ? assetOrAssets : [assetOrAssets]).filter(Boolean)
+      if (assets.length === 0) return
+      const frameId = frameIdOverride || activeFrameIdRef.current
+      if (!frameId || frameId === activeFrameIdRef.current) {
+        let nextForm = null
+        setFrameForm((current) => {
+          nextForm = assets.reduce((form, asset) => mergeAssetIntoForm(form, target, asset), current)
+          return nextForm
+        })
+        window.setTimeout(() => {
+          if (nextForm) updateActiveFrameElement(nextForm, frameId || undefined)
+        }, 0)
+        return
+      }
+      // The upload outlived the user's attention — they switched frames while
+      // it ran. Attach to the frame that requested it, straight on its
+      // element, without touching the live panel form.
+      const element = api?.getSceneElementsIncludingDeleted?.().find((el) => el.id === frameId)
+      if (!element || !isGeneratorFrame(element)) return
+      const merged = assets.reduce((form, asset) => mergeAssetIntoForm(form, target, asset), frameFormFromElement(element))
+      updateActiveFrameElement(merged, frameId)
     },
-    [updateActiveFrameElement]
+    [api, updateActiveFrameElement]
   )
 
   const openCanvasPicker = useCallback((target) => {
@@ -4238,7 +4251,7 @@ export default function App() {
       const restoreFrameId = picker.frameId || canvasPickerFrameIdRef.current || ''
       const applyPickedAsset = (pickedAsset) => {
         if (restoreFrameId) activeFrameIdRef.current = restoreFrameId
-        addAssetToFrame(picker.target, pickedAsset)
+        addAssetToFrame(picker.target, pickedAsset, restoreFrameId || undefined)
         closeCanvasPicker()
         if (api && restoreFrameId) {
           suppressNextChangeRef.current = true
@@ -4271,26 +4284,18 @@ export default function App() {
     const files = Array.from(event.target.files || [])
     event.target.value = ''
     if (files.length === 0) return
-    restoreGeneratorUploadFrame()
+    const uploadFrameId = restoreGeneratorUploadFrame() || activeFrameIdRef.current
     try {
       const assets = await Promise.all(
         files
           .filter((file) => file.type.startsWith('image/'))
           .map(uploadAssetFile)
       )
-      let nextForm = null
-      setFrameForm((current) => {
-        const next = { ...current, imageReferences: [...normalizeAssetList(current.imageReferences), ...assets].slice(-3) }
-        nextForm = next
-        return next
-      })
-      window.setTimeout(() => {
-        if (nextForm) updateActiveFrameElement(nextForm)
-      }, 0)
+      addAssetToFrame('imageReferences', assets, uploadFrameId)
     } catch (error) {
       setGenerationError(error.message)
     }
-  }, [restoreGeneratorUploadFrame, updateActiveFrameElement, uploadAssetFile])
+  }, [addAssetToFrame, restoreGeneratorUploadFrame, uploadAssetFile])
 
   const onVideoFrameUploadChange = useCallback(async (event) => {
     const files = Array.from(event.target.files || [])
@@ -4298,7 +4303,9 @@ export default function App() {
     if (files.length === 0) return
     const target = videoFrameUploadTargetRef.current
     const expectedKind = getUploadTargetKind(target)
-    restoreGeneratorUploadFrame()
+    // Pin the destination now: large files upload for a long time and the
+    // user may click other frames meanwhile — the asset must still land here.
+    const uploadFrameId = restoreGeneratorUploadFrame() || activeFrameIdRef.current
     setGenerationError('')
     try {
       const uploaded = await Promise.all(files.map(uploadAssetFile))
@@ -4315,9 +4322,7 @@ export default function App() {
         setGenerationError(`この枠には${need}ファイルを追加してください。`)
         return
       }
-      for (const asset of assets) {
-        addAssetToFrame(target, asset)
-      }
+      addAssetToFrame(target, assets, uploadFrameId)
     } catch (error) {
       setGenerationError(error.message || 'アップロードに失敗しました。')
     }
@@ -5647,7 +5652,9 @@ export default function App() {
               </div>
             ) : null}
             <div className="lovart-frame-inner">
-              {isGenerating ? <div className={`lovart-frame-generating-bg${isVideo ? ' video' : ''}`} /> : null}
+              {/* Utility frames (SRT / silence cut) keep their normal look while
+                  working — only the Generating... pill shows. */}
+              {isGenerating && !isUtilityFrame ? <div className={`lovart-frame-generating-bg${isVideo ? ' video' : ''}`} /> : null}
               <div className="lovart-frame-center">
                 {overlay.kind === 'subtitle' ? (
                   <SrtCenterIcon size={overlayMetrics.iconSize} />
