@@ -1883,7 +1883,15 @@ body {
   gap: 0;
   align-items: flex-end;
   overflow: visible;
-  transition: bottom 0.15s ease, gap 0.15s ease;
+  transition: bottom 0.15s ease, gap 0.15s ease, opacity 0.12s ease;
+}
+
+/* The bottom-row dropdowns (モデル/設定/用語) open across the slot tray, and
+   the rotated tilt-cards paint above them (transformed static elements ignore
+   z-index) — fade the tray out while one of those menus is open. */
+.lovart-utility-panel.menu-over-tray .lovart-utility-asset-tray {
+  pointer-events: none;
+  opacity: 0;
 }
 
 .lovart-utility-tray-wrap.is-open .lovart-utility-asset-tray {

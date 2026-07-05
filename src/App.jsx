@@ -2069,6 +2069,29 @@ function frameCustomDataFromForm(kind, form) {
       }
 }
 
+// High-precision SRT via an AI agent chat (Claude Code / Codex): the agent
+// runs the normal cloud transcription through MCP, then proofreads the text
+// against the script + glossary and re-breaks lines semantically — the part
+// a plain speech-to-text pass cannot do.
+function buildAgentSubtitlePrompt(form, anchorElementId) {
+  const lines = [
+    'キャンバスのSRTジェネレーターの「高精度生成」をお願いします。',
+    `音声ファイル: ${form.subtitleAudio?.path || ''}`,
+    form.subtitleMode === 'scripted' && form.subtitleScriptText.trim()
+      ? `台本（${form.subtitleScriptName || 'script'}）:\n---\n${form.subtitleScriptText.trim()}\n---`
+      : '台本なし（音声からの文字起こし）',
+    `設定: ${form.subtitleLineCount}行 / 1行最大${form.subtitleMaxChars}字 / 句読点 ${form.subtitlePunctuationMode} / フィラー ${form.subtitleFillerMode} / 間の保持 ${form.subtitleHoldSeconds}秒`,
+    '',
+    '手順:',
+    `1. excalidraw MCP の generate_excalidraw_subtitles を audioPath と上記設定、anchorElementId "${anchorElementId}"、replaceAnchor: true、confirmedSettings: true で実行し、まず標準のSRTカードを生成する`,
+    '2. 生成されたSRTを読み、台本と用語辞書 (canvas/subtitle-glossary.json) に照らしてテキストだけ校正する（同音異義語・誤変換・脱字・表記ゆれを修正。時刻は変えない。発言内容は変えない）',
+    `3. 意味の切れ目で自然な改行に整える（1行${form.subtitleMaxChars}字以内・${form.subtitleLineCount}行まで）`,
+    '4. 修正があれば generate_excalidraw_subtitles を subtitleLines（各cueの text/start/end）+ 同じ anchorElementId + replaceAnchor: true + confirmedSettings: true で再実行してカードを置き換える',
+    '5. 繰り返し直した固有名詞などは同じ呼び出しの glossarySuggestions: [{from, to}] で用語辞書に学習させる'
+  ]
+  return lines.filter((line) => line !== null && line !== undefined).join('\n')
+}
+
 function mergeAssetIntoForm(form, target, asset) {
   if (target === 'imageReferences') return { ...form, imageReferences: [...normalizeAssetList(form.imageReferences), asset].slice(-3) }
   if (target === 'videoStartFrame') return { ...form, videoStartFrame: asset }
@@ -2790,11 +2813,12 @@ export default function App() {
   const [chatSendMenuOpen, setChatSendMenuOpen] = useState(false)
   const [chatSendStatus, setChatSendStatus] = useState('')
 
-  // Bridge to the local Claude Code / Codex app. The clipboard must be
-  // written from the browser (the dev server can live outside the user's
-  // pasteboard session); the server then activates the app and pastes+sends
-  // via System Events.
-  const sendToChatApp = useCallback(async ({ app, text, assetUrls }) => {
+  // Bridge to the local Claude Code / Codex app. Files attach natively via
+  // `open -a` (same route as drag & drop — no macOS permissions); text
+  // prompts ride the same channel as a small request file. The message is
+  // also written to the user-session clipboard from the browser so a manual
+  // ⌘V always works (Codex can't accept media files via open).
+  const sendToChatApp = useCallback(async ({ app, text, assetUrls, autoSend = false }) => {
     setChatSendStatus('sending')
     try {
       // Step 1: resolve asset URLs to absolute paths server-side.
@@ -2807,28 +2831,28 @@ export default function App() {
       if (!resolveResponse.ok) throw new Error(resolved.error || `送信に失敗しました (${resolveResponse.status})`)
       const message = resolved.message || text
       // Step 2: put the message on the user-session clipboard from the page.
-      let clipboardReady = false
       try {
         await navigator.clipboard.writeText(message)
-        clipboardReady = true
       } catch {
-        // Fall back to the server's AppleScript clipboard attempt.
+        // Clipboard unavailable — the attach route may still succeed.
       }
       if (!app) {
         setChatSendStatus('copied')
         window.setTimeout(() => setChatSendStatus(''), 2600)
         return
       }
-      // Step 3: activate the chat app and paste + Enter.
+      // Step 3: attach into the chat app (open -a) / activate it.
       const response = await fetch('/api/chat/send', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ app, text: message, clipboardReady })
+        body: JSON.stringify({ app, text, assetUrls, autoSend })
       })
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(payload.error || `送信に失敗しました (${response.status})`)
       if (payload.sent) {
         setChatSendStatus('sent')
+      } else if (payload.attached) {
+        setChatSendStatus('attached')
       } else if (payload.copied) {
         setChatSendStatus(payload.error ? 'copied-fallback' : 'copied')
       } else {
@@ -2839,7 +2863,7 @@ export default function App() {
       console.warn('chat send failed:', error)
       setChatSendStatus('error')
     }
-    window.setTimeout(() => setChatSendStatus(''), 2600)
+    window.setTimeout(() => setChatSendStatus(''), 3200)
   }, [])
   const [silenceCutNotice, setSilenceCutNotice] = useState('')
   // Project-common 用語辞書 (canvas/subtitle-glossary.json), edited from the
@@ -5864,19 +5888,21 @@ export default function App() {
               >
                 <span className="lovart-selection-toolbar-count">
                   {chatSendStatus === 'sending'
-                    ? '送信中…'
+                    ? '添付中…'
                     : chatSendStatus === 'sent'
                       ? '送信済み'
-                      : chatSendStatus === 'copied' || chatSendStatus === 'copied-fallback'
-                        ? 'コピー済み'
-                        : chatSendStatus === 'error'
-                          ? '失敗'
-                          : 'チャットへ'}
+                      : chatSendStatus === 'attached'
+                        ? '添付済み'
+                        : chatSendStatus === 'copied' || chatSendStatus === 'copied-fallback'
+                          ? 'コピー済み ⌘V'
+                          : chatSendStatus === 'error'
+                            ? '失敗'
+                            : 'チャットへ'}
                 </span>
               </button>
               {chatSendMenuOpen ? (
                 <div className="lovart-menu lovart-selection-chat-menu">
-                  {[['claude', 'Claude Code に送信'], ['codex', 'Codex に送信'], ['', 'パスをコピーのみ']].map(([app, label]) => (
+                  {[['claude', 'Claude Code に添付'], ['codex', 'Codex へ（コピー+起動）'], ['', 'パスをコピーのみ']].map(([app, label]) => (
                     <button
                       type="button"
                       key={app || 'copy'}
@@ -5885,7 +5911,7 @@ export default function App() {
                         setChatSendMenuOpen(false)
                         sendToChatApp({
                           app,
-                          text: 'キャンバスで選択したファイルを添付します。',
+                          text: '',
                           assetUrls: selectedMedia.map((item) => item.assetUrl)
                         })
                       }}
@@ -6399,6 +6425,7 @@ export default function App() {
                               onClick={() => {
                                 sendToChatApp({
                                   app,
+                                  autoSend: true,
                                   text: 'Hermes Agent で Grok Imagine を使えるようにセットアップして。excalidraw MCP の setup_hermes_grok ツールを実行して、必要なら hermes auth add xai-oauth のブラウザOAuthを完了させて。'
                                 })
                               }}
@@ -6410,11 +6437,13 @@ export default function App() {
                         <div className="lovart-key-hint">
                           {chatSendStatus === 'sent'
                             ? '送信しました — チャット側でセットアップが始まります'
-                            : chatSendStatus === 'copied-fallback'
-                              ? '自動送信できなかったのでコピーしました。チャットに貼り付けてください'
-                              : chatSendStatus === 'sending'
-                                ? '送信中…'
-                                : 'ワンクリックでチャットに依頼文を送信して setup_hermes_grok を実行させます'}
+                            : chatSendStatus === 'attached'
+                              ? 'チャットに依頼を添付しました — Enterで送信してください'
+                              : chatSendStatus === 'copied' || chatSendStatus === 'copied-fallback'
+                                ? '依頼文をコピーしました — チャットに⌘Vで貼り付けて送信してください'
+                                : chatSendStatus === 'sending'
+                                  ? '送信中…'
+                                  : 'ワンクリックでチャットに依頼を送って setup_hermes_grok を実行させます'}
                         </div>
                       </div>
                     ) : null}
@@ -6760,7 +6789,7 @@ export default function App() {
         }
         return (
         <section
-          className={`lovart-ai-panel lovart-utility-panel${openMenuBlocksPrompt ? ' has-open-menu' : ''}`}
+          className={`lovart-ai-panel lovart-utility-panel${openMenuBlocksPrompt ? ' has-open-menu' : ''}${['utility-model', 'utility-settings', 'glossary'].includes(openMenu) ? ' menu-over-tray' : ''}`}
           style={panelStyle}
           aria-label={isSilencePanel ? 'Silence Cut Generator' : 'SRT Generator'}
           onPointerDown={(event) => {
@@ -7128,10 +7157,33 @@ export default function App() {
                         </button>
                       ))
                     ) : (
-                      <button type="button" onClick={() => setOpenMenu(null)}>
-                        <span>{frameForm.subtitleMode === 'scripted' ? 'ElevenLabs Forced Alignment' : 'ElevenLabs Scribe v2'}</span>
-                        <span className="menu-check">✓</span>
-                      </button>
+                      <>
+                        <button type="button" onClick={() => setOpenMenu(null)}>
+                          <span>{frameForm.subtitleMode === 'scripted' ? 'ElevenLabs Forced Alignment' : 'ElevenLabs Scribe v2'}</span>
+                          <span className="menu-check">✓</span>
+                        </button>
+                        <div className="lovart-menu-header">高精度生成（AIエージェント）</div>
+                        {[['claude', 'Claude Code に依頼'], ['codex', 'Codex に依頼']].map(([app, label]) => (
+                          <button
+                            type="button"
+                            key={`agent-${app}`}
+                            onClick={() => {
+                              setOpenMenu(null)
+                              if (!frameForm.subtitleAudio?.path) {
+                                setGenerationError('先に音声（または動画）を添付してください。')
+                                return
+                              }
+                              sendToChatApp({
+                                app,
+                                autoSend: true,
+                                text: buildAgentSubtitlePrompt(frameForm, activeFrameId)
+                              })
+                            }}
+                          >
+                            <span>{label}</span>
+                          </button>
+                        ))}
+                      </>
                     )}
                   </div>
                 ) : null}

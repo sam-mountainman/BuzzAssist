@@ -12,6 +12,7 @@ import { streamZipStore } from './lib/zipStore.mjs'
 import { generateSubtitleSrt } from './lib/subtitleGeneration.mjs'
 import { silenceCutVideo } from './lib/tempoCut.mjs'
 import { getLovartAuthStatus, getLovartModelCosts, saveLovartCredentials } from './lib/lovartMediaGeneration.mjs'
+import { bridgeWorkerAlive, canDriveGui, pasteIntoChatApp, sendChatMessage } from './lib/chatBridge.mjs'
 import { tmpdir } from 'node:os'
 
 const projectDir = resolve(process.env.EXCALIDRAW_PROJECT_DIR ?? process.cwd())
@@ -1336,9 +1337,14 @@ function canvasStoragePlugin() {
         })
         try {
           if (req.method === 'GET') {
-            // Bridge health: can this server drive the user's GUI session?
+            // Bridge health: can this server drive the user's GUI session
+            // directly, and is an MCP-side bridge worker alive as fallback?
             const probe = await runOsascript('tell application "System Events" to count processes', 3000)
-            sendJson(res, 200, { automation: probe.ok, error: probe.ok ? undefined : probe.error })
+            sendJson(res, 200, {
+              automation: probe.ok,
+              bridgeWorker: await bridgeWorkerAlive(canvasDir),
+              error: probe.ok ? undefined : probe.error
+            })
             return
           }
           if (req.method !== 'POST') {
@@ -1365,39 +1371,89 @@ function canvasStoragePlugin() {
             sendJson(res, 400, { error: '送る内容がありません。' })
             return
           }
-
-          // The browser writes the user-session clipboard before calling us
-          // (this process may live outside that pasteboard session, so a
-          // server-side pbcopy is unreliable). AppleScript `set the clipboard`
-          // goes through the Apple Events pboard server, so try it as a
-          // belt-and-braces fallback; ignore its failure.
-          const quoted = message.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\r?\n/g, '\\n')
-          if (body.clipboardReady !== true) {
-            await runOsascript(`set the clipboard to "${quoted}"`, 3000)
-          }
           if (!appName) {
+            // Copy-only: the browser already wrote the user-session clipboard
+            // (this process may live outside that pasteboard session).
             sendJson(res, 200, { copied: true, sent: false, message })
             return
           }
 
-          const autoSend = body.autoSend !== false
-          const script = [
-            `tell application "${appName}" to activate`,
-            'delay 0.5',
-            'tell application "System Events" to keystroke "v" using command down',
-            ...(autoSend ? ['delay 0.3', 'tell application "System Events" to key code 36'] : [])
-          ].join('\n')
-          const osaResult = await runOsascript(script)
-          if (!osaResult.ok) {
-            sendJson(res, 200, {
-              copied: true,
-              sent: false,
-              message,
-              error: `自動送信できませんでした（メッセージはコピー済み — チャットに⌘Vで貼り付けてください）。初回はシステム設定 > プライバシーとセキュリティ > アクセシビリティ/オートメーション の許可が必要な場合があります: ${osaResult.error}`
-            })
+          const runOpen = (args) => new Promise((resolveOpen) => {
+            const child = spawn('open', args)
+            let stderr = ''
+            let settled = false
+            const finish = (result) => {
+              if (settled) return
+              settled = true
+              clearTimeout(timer)
+              resolveOpen(result)
+            }
+            const timer = setTimeout(() => { child.kill('SIGKILL'); finish({ ok: false, error: 'open timed out' }) }, 8000)
+            child.stderr.on('data', (chunk) => { stderr += chunk })
+            child.on('error', (error) => finish({ ok: false, error: error.message }))
+            child.on('close', (code) => finish(code === 0 ? { ok: true } : { ok: false, error: stderr.trim() }))
+          })
+
+          // Text-only auto-send (e.g. Hermes setup requests): paste + Enter
+          // via keystrokes — directly when this process can drive the GUI, or
+          // through the MCP-side bridge worker (lib/chatBridge.mjs), which
+          // runs in the user session where the preview jail cannot.
+          const bridgeApp = body.app === 'codex' ? 'codex' : 'claude'
+          if (body.autoSend === true && assetPaths.length === 0) {
+            const result = await sendChatMessage({ canvasDir, app: bridgeApp, message, autoSend: true })
+            if (result.sent) {
+              sendJson(res, 200, { copied: true, sent: true, via: result.via, app: appName, message })
+              return
+            }
+          }
+
+          // Claude's composer accepts any file (public.data Viewer) via the
+          // open-file event — the same route as drag & drop, no permissions
+          // needed. Text prompts become a small .md request file so they ride
+          // the same channel.
+          const attachViaOpen = appName === 'Claude'
+          let attachFiles = [...assetPaths]
+          if (attachViaOpen && note && assetPaths.length === 0) {
+            const requestsDir = join(canvasAssetsDir, 'chat-requests')
+            await mkdir(requestsDir, { recursive: true })
+            const requestPath = join(requestsDir, `request-${Date.now()}.md`)
+            await writeFile(requestPath, `${note}\n`, 'utf8')
+            attachFiles = [requestPath]
+          }
+
+          if (attachViaOpen && attachFiles.length > 0) {
+            const opened = await runOpen(['-a', appName, ...attachFiles])
+            if (!opened.ok) {
+              sendJson(res, 200, { copied: true, sent: false, message, error: `添付できませんでした: ${opened.error}` })
+              return
+            }
+            // Auto-send (Enter) is best-effort: it needs Accessibility and an
+            // unsandboxed context; when unavailable the files are attached and
+            // the user just presses Enter.
+            let sent = false
+            if (body.autoSend === true) {
+              const pressed = await runOsascript(
+                [`tell application "${appName}" to activate`, 'delay 0.6', 'tell application "System Events" to key code 36'].join('\n'),
+                5000
+              )
+              sent = pressed.ok
+            }
+            sendJson(res, 200, { copied: true, attached: true, sent, app: appName, message })
             return
           }
-          sendJson(res, 200, { copied: true, sent: true, app: appName, autoSend, message })
+
+          // Codex: no open-file route into the composer, so paste the message
+          // into the input box (no Enter unless autoSend) via keystrokes —
+          // direct or through the bridge worker.
+          const pasted = await sendChatMessage({ canvasDir, app: bridgeApp, message, autoSend: body.autoSend === true })
+          if (pasted.sent) {
+            sendJson(res, 200, { copied: true, attached: true, sent: body.autoSend === true, via: pasted.via, app: appName, message })
+            return
+          }
+          // Nothing can type for us: bring the app forward; the message is on
+          // the clipboard for a ⌘V.
+          await runOpen(['-a', appName])
+          sendJson(res, 200, { copied: true, attached: false, sent: false, needsPaste: true, app: appName, message, error: pasted.error })
         } catch (error) {
           sendJson(res, 400, { error: error.message })
         }
