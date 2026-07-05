@@ -26,12 +26,6 @@ body {
 }
 
 .lovart-ai-root .excalidraw .layer-ui__wrapper,
-.lovart-ai-root .excalidraw .FixedSideContainer,
-.lovart-ai-root .excalidraw .FixedSideContainer_side_top,
-.lovart-ai-root .excalidraw .App-top-bar,
-.lovart-ai-root .excalidraw .App-top-bar .Island,
-.lovart-ai-root .excalidraw .App-toolbar-container,
-.lovart-ai-root .excalidraw .App-toolbar,
 .lovart-ai-root .excalidraw .App-menu,
 .lovart-ai-root .excalidraw .dropdown-menu,
 .lovart-ai-root .excalidraw [class*="popover"] {
@@ -205,7 +199,7 @@ body {
 .lovart-menu-backdrop {
   position: absolute;
   inset: 0;
-  z-index: 9;
+  z-index: 20;
   width: 100%;
   height: 100%;
   padding: 0;
@@ -385,7 +379,7 @@ body {
   position: absolute;
   bottom: 12px;
   left: 50%;
-  z-index: 10;
+  z-index: 30;
   box-sizing: border-box;
   width: min(92vw, 500px);
   padding: 12px 14px 10px;
@@ -445,7 +439,7 @@ body {
 }
 
 .lovart-prompt-wrap.has-video-menu {
-  z-index: 13;
+  z-index: 40;
   pointer-events: auto;
 }
 
@@ -455,7 +449,7 @@ body {
 }
 
 .lovart-prompt-wrap.has-video-menu .lovart-video-frame-tray {
-  z-index: 14;
+  z-index: 80;
   overflow: visible;
 }
 
@@ -636,7 +630,7 @@ body {
 }
 
 .lovart-menu.lovart-slot-menu {
-  z-index: 13 !important;
+  z-index: 100 !important;
   bottom: calc(100% + 8px);
   left: 0;
   padding: 8px;
@@ -651,7 +645,7 @@ body {
 
 .lovart-slot-menu button {
   position: relative;
-  z-index: 14;
+  z-index: 101;
   padding: 8px 12px;
   color: #333333;
   pointer-events: auto !important;
@@ -852,7 +846,7 @@ body {
 
 .lovart-menu-wrap {
   position: relative;
-  z-index: 13;
+  z-index: 30;
 }
 
 .lovart-pill {
@@ -932,7 +926,7 @@ body {
   position: absolute;
   bottom: calc(100% + 8px);
   left: 0;
-  z-index: 13;
+  z-index: 40;
   min-width: 120px;
   padding: 6px;
   background: #ffffff;
@@ -1094,7 +1088,7 @@ body {
 .lovart-video-settings {
   right: -16px;
   left: auto;
-  z-index: 13;
+  z-index: 100;
   box-sizing: border-box;
   min-width: 312px;
   padding: 10px 12px;
@@ -1673,7 +1667,7 @@ body {
   position: absolute;
   bottom: calc(100% + 8px);
   left: 50%;
-  z-index: 14;
+  z-index: 30;
   width: max-content;
   max-width: 230px;
   padding: 8px 10px;
@@ -1693,7 +1687,7 @@ body {
   position: absolute;
   bottom: calc(100% + 2px);
   left: 50%;
-  z-index: 14;
+  z-index: 30;
   content: "";
   pointer-events: none;
   border: 5px solid transparent;
@@ -2124,7 +2118,7 @@ body {
   right: -16px;
   bottom: calc(100% + 6px);
   left: auto;
-  z-index: 13;
+  z-index: 100;
   min-width: 304px;
   padding: 10px 12px;
   border: 0;

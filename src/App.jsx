@@ -57,6 +57,9 @@ const COLLAPSED_FREEDRAW_MAX_DIMENSION = 1
 const TEXT_ATTACHMENT_EXTENSIONS = new Set(['txt', 'md', 'markdown'])
 const VIDEO_POSTER_FALLBACK_DATA_URL =
   'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjgwIDcyMCI+PHJlY3Qgd2lkdGg9IjEyODAiIGhlaWdodD0iNzIwIiBmaWxsPSIjMTExODI3Ii8+PHBhdGggZD0iTTU2MCAyNTB2MjIwbDE5MC0xMTB6IiBmaWxsPSIjZmZmIiBvcGFjaXR5PSIuOSIvPjwvc3ZnPg=='
+const VIDEO_POSTER_CAPTURE_MAX_WIDTH = 960
+const VIDEO_POSTER_SCORE_SAMPLE_SIZE = 48
+const VIDEO_POSTER_GOOD_SCORE = 42
 
 if (typeof window !== 'undefined' && !window.__lovartClipboardShortcutInstalled) {
   window.__lovartClipboardShortcutInstalled = true
@@ -1696,14 +1699,6 @@ function rectsOverlap(a, b, padding = 0) {
   )
 }
 
-function overlapArea(a, b) {
-  const x1 = Math.max(a.x, b.x)
-  const y1 = Math.max(a.y, b.y)
-  const x2 = Math.min(a.x + a.width, b.x + b.width)
-  const y2 = Math.min(a.y + a.height, b.y + b.height)
-  return Math.max(0, x2 - x1) * Math.max(0, y2 - y1)
-}
-
 function isCanvasAssetUrl(value) {
   if (typeof value !== 'string' || !value) return false
   try {
@@ -1742,25 +1737,22 @@ function isCanvasStackingCoverElement(element) {
   return isCanvasAttachableElement(element) || isGeneratorFrame(element)
 }
 
+function getLaterCanvasStackingElements(reference, elements) {
+  return elements.filter((element) =>
+    element?.id !== reference?.id &&
+    isElementAfterInScene(element, reference, elements) &&
+    isCanvasStackingCoverElement(element)
+  )
+}
+
 function isElementVisuallyCoveredByLaterElement(reference, elements) {
   const referenceBounds = getElementGeometry(reference)
   const referenceArea = referenceBounds.width * referenceBounds.height
-  const referenceIndex = elements.findIndex((element) => element.id === reference.id)
+  const referenceIndex = elements.findIndex((element) => element.id === reference?.id)
   if (referenceIndex < 0 || referenceArea <= 0) return false
-  const referenceCenter = {
-    x: referenceBounds.x + referenceBounds.width / 2,
-    y: referenceBounds.y + referenceBounds.height / 2
-  }
-  return elements.slice(referenceIndex + 1).some((element) => {
-    if (!isCanvasStackingCoverElement(element)) return false
-    const bounds = getElementGeometry(element)
-    const coversCenter =
-      referenceCenter.x >= bounds.x &&
-      referenceCenter.x <= bounds.x + bounds.width &&
-      referenceCenter.y >= bounds.y &&
-      referenceCenter.y <= bounds.y + bounds.height
-    return coversCenter || overlapArea(referenceBounds, bounds) / referenceArea > 0.45
-  })
+  return getLaterCanvasStackingElements(reference, elements).some((element) =>
+    rectsOverlap(referenceBounds, getElementGeometry(element), 0)
+  )
 }
 
 function isHeaderCoveredByLaterElement(reference, elements, appState, placement, metrics) {
@@ -1772,8 +1764,7 @@ function isHeaderCoveredByLaterElement(reference, elements, appState, placement,
     width: Math.max(1, Number(placement?.width) || 1),
     height: headerHeight
   }
-  return elements.some((element) => {
-    if (!isElementAfterInScene(element, reference, elements) || !isCanvasStackingCoverElement(element)) return false
+  return getLaterCanvasStackingElements(reference, elements).some((element) => {
     const assetPlacement = getFrameViewportPlacement(getElementGeometry(element), appState)
     const assetBounds = {
       x: assetPlacement.left,
@@ -1934,6 +1925,116 @@ function createAttachmentPreviewDataURL(asset) {
   return svgToDataURL(svg)
 }
 
+function waitForMediaEvent(element, eventName, timeoutMs = 700) {
+  return new Promise((resolve) => {
+    let settled = false
+    const cleanup = () => {
+      element.removeEventListener(eventName, onDone)
+      element.removeEventListener('error', onDone)
+      window.clearTimeout(timer)
+    }
+    const onDone = (event) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve(event?.type === eventName)
+    }
+    const timer = window.setTimeout(onDone, timeoutMs)
+    element.addEventListener(eventName, onDone, { once: true })
+    element.addEventListener('error', onDone, { once: true })
+  })
+}
+
+function videoPosterCandidateTimes(duration) {
+  const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 0
+  if (!safeDuration) return [0]
+  const maxTime = Math.max(0, safeDuration - 0.05)
+  const raw = [
+    0.12,
+    0.5,
+    1.2,
+    safeDuration * 0.18,
+    safeDuration * 0.38,
+    safeDuration * 0.62
+  ]
+  const seen = new Set()
+  return raw
+    .map((time) => Math.max(0, Math.min(maxTime, Number(time) || 0)))
+    .map((time) => Math.round(time * 100) / 100)
+    .filter((time) => {
+      const key = time.toFixed(2)
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+}
+
+function videoFrameScore(video) {
+  const sourceWidth = Math.max(1, video.videoWidth || 1)
+  const sourceHeight = Math.max(1, video.videoHeight || 1)
+  const width = Math.max(1, Math.min(VIDEO_POSTER_SCORE_SAMPLE_SIZE, sourceWidth))
+  const height = Math.max(1, Math.round(width * (sourceHeight / sourceWidth)))
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const context = canvas.getContext('2d', { willReadFrequently: true })
+  if (!context) return 0
+  context.drawImage(video, 0, 0, width, height)
+  const { data } = context.getImageData(0, 0, width, height)
+  let lumaTotal = 0
+  let lumaSquaredTotal = 0
+  let saturationTotal = 0
+  let sampleCount = 0
+  for (let index = 0; index < data.length; index += 4) {
+    const red = data[index]
+    const green = data[index + 1]
+    const blue = data[index + 2]
+    const max = Math.max(red, green, blue)
+    const min = Math.min(red, green, blue)
+    const luma = red * 0.2126 + green * 0.7152 + blue * 0.0722
+    lumaTotal += luma
+    lumaSquaredTotal += luma * luma
+    saturationTotal += max - min
+    sampleCount += 1
+  }
+  if (sampleCount === 0) return 0
+  const mean = lumaTotal / sampleCount
+  const variance = Math.max(0, lumaSquaredTotal / sampleCount - mean * mean)
+  const contrast = Math.sqrt(variance)
+  const saturation = saturationTotal / sampleCount
+  return mean + contrast * 1.8 + saturation * 0.7
+}
+
+function captureVideoPosterDataURL(video) {
+  const sourceWidth = Math.max(1, video.videoWidth || 1280)
+  const sourceHeight = Math.max(1, video.videoHeight || 720)
+  const scale = Math.min(1, VIDEO_POSTER_CAPTURE_MAX_WIDTH / sourceWidth)
+  const width = Math.max(1, Math.round(sourceWidth * scale))
+  const height = Math.max(1, Math.round(sourceHeight * scale))
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const context = canvas.getContext('2d')
+  if (!context) return { posterDataURL: '', width: sourceWidth, height: sourceHeight }
+  context.drawImage(video, 0, 0, width, height)
+  return {
+    posterDataURL: canvas.toDataURL('image/jpeg', 0.82),
+    width: sourceWidth,
+    height: sourceHeight
+  }
+}
+
+async function seekVideoForPoster(video, time) {
+  if (!Number.isFinite(time) || time <= 0) return true
+  try {
+    if (Math.abs((Number(video.currentTime) || 0) - time) < 0.03 && video.readyState >= 2) return true
+    video.currentTime = time
+    return await waitForMediaEvent(video, 'seeked', 800)
+  } catch {
+    return false
+  }
+}
+
 function readVideoPoster(file) {
   return new Promise((resolve) => {
     const objectURL = typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function' ? URL.createObjectURL(file) : ''
@@ -1946,47 +2047,53 @@ function readVideoPoster(file) {
     const finish = (result) => {
       if (settled) return
       settled = true
+      window.clearTimeout(timeout)
       video.removeAttribute('src')
       video.load()
       resolve(result)
     }
     const fallback = () => finish({ objectURL, posterDataURL: '', width: 1280, height: 720, duration: 0 })
-    const capture = () => {
+    const timeout = window.setTimeout(fallback, 4200)
+    const choosePoster = async () => {
       try {
-        const width = Math.max(1, video.videoWidth || 1280)
-        const height = Math.max(1, video.videoHeight || 720)
-        const canvas = document.createElement('canvas')
-        canvas.width = width
-        canvas.height = height
-        const context = canvas.getContext('2d')
-        if (context) context.drawImage(video, 0, 0, width, height)
+        const metadataReady = await waitForMediaEvent(video, 'loadedmetadata', 1200)
+        if (!metadataReady && video.readyState < 1) {
+          fallback()
+          return
+        }
+        const duration = Number.isFinite(video.duration) ? video.duration : 0
+        let bestTime = 0
+        let bestScore = -1
+        for (const time of videoPosterCandidateTimes(duration)) {
+          const seeked = await seekVideoForPoster(video, time)
+          if (!seeked && video.readyState < 2) continue
+          if (video.readyState < 2) await waitForMediaEvent(video, 'loadeddata', 500)
+          const score = videoFrameScore(video)
+          if (score > bestScore) {
+            bestScore = score
+            bestTime = time
+          }
+          if (score >= VIDEO_POSTER_GOOD_SCORE && time >= 0.5) break
+        }
+        await seekVideoForPoster(video, bestTime)
+        const captured = captureVideoPosterDataURL(video)
         finish({
           objectURL,
-          posterDataURL: context ? canvas.toDataURL('image/jpeg', 0.78) : '',
-          width,
-          height,
-          duration: Number(video.duration) || 0
+          posterDataURL: captured.posterDataURL,
+          width: captured.width,
+          height: captured.height,
+          duration
         })
       } catch {
         fallback()
       }
     }
-    const onLoadedMetadata = () => {
-      if (Number.isFinite(video.duration) && video.duration > 0) {
-        video.currentTime = Math.min(0.1, Math.max(0, video.duration / 20))
-      } else {
-        capture()
-      }
-    }
     video.muted = true
     video.playsInline = true
-    video.preload = 'metadata'
-    video.addEventListener('loadedmetadata', onLoadedMetadata, { once: true })
-    video.addEventListener('seeked', capture, { once: true })
-    video.addEventListener('loadeddata', capture, { once: true })
+    video.preload = 'auto'
     video.addEventListener('error', fallback, { once: true })
-    window.setTimeout(fallback, 1600)
     video.src = objectURL
+    void choosePoster()
   })
 }
 
@@ -2501,6 +2608,7 @@ function buildSubtitlePreviewOverlays(scene) {
       const assetUrl = element.customData?.codexAssetUrl || ''
       if (!assetUrl) return null
       const placement = getFrameViewportPlacement(getElementGeometry(element), appState)
+      const headerMetrics = getMediaHeaderMetrics(placement.width)
       return {
         id: element.id,
         assetUrl,
@@ -2512,10 +2620,12 @@ function buildSubtitlePreviewOverlays(scene) {
         height: placement.height,
         angle: Number(element.angle) || 0,
         zoom,
-        isSelected: selectedIds.has(element.id)
+        isSelected: selectedIds.has(element.id),
+        isCoveredByLaterElement: isElementVisuallyCoveredByLaterElement(element, scene.elements),
+        isHeaderCoveredByLaterElement: isHeaderCoveredByLaterElement(element, scene.elements, appState, placement, headerMetrics)
       }
     })
-    .filter((overlay) => overlay && (overlay.isSelected || isViewportPlacementNearViewport(overlay, appState)))
+    .filter((overlay) => overlay && !overlay.isCoveredByLaterElement && (overlay.isSelected || isViewportPlacementNearViewport(overlay, appState)))
 }
 
 // Fetched SRT text, split into raw lines, cached per asset URL. The lines map
@@ -2756,7 +2866,7 @@ function SubtitleCanvasOverlay({ overlay, scrollOffset }) {
           </div>
         </div>
       </div>
-      {overlay.width >= 28 ? (
+      {overlay.width >= 28 && !overlay.isHeaderCoveredByLaterElement ? (
         <div
           className="lovart-image-header"
           style={{
@@ -5942,7 +6052,7 @@ export default function App() {
         const isGenerating = generatingFrameIds.has(overlay.id) || overlay.remoteGenerating
         const isVideo = overlay.kind === 'video'
         const isUtilityFrame = overlay.kind === 'subtitle' || overlay.kind === 'silenceCut'
-        if (overlay.isCoveredByLaterElement && !isGenerating) return null
+        if (overlay.isCoveredByLaterElement) return null
         const overlayTitle =
           overlay.kind === 'video'
             ? 'Video Generator'
