@@ -18,11 +18,21 @@ const personalMarketplacePath = join(homeDir, ".agents", "plugins", "marketplace
 const argv = process.argv.slice(2);
 const packageManifest = JSON.parse(await readFile(join(repoRoot, "package.json"), "utf8"));
 const pluginVersion = packageManifest.version;
+const supportedAgents = ["codex", "claude", "cursor", "antigravity"];
+const agentLabels = {
+  codex: "Codex",
+  claude: "Claude Code",
+  cursor: "Cursor",
+  antigravity: "Antigravity",
+};
 
 function usage() {
   return `Usage: node scripts/setup-agents.mjs [options]
 
 Options:
+  --agent <name>         Configure one host: codex, claude, cursor, antigravity.
+  --host <name>          Alias for --agent.
+  --all-agents           Configure all supported hosts. Not used by default.
   --project-dir <path>   Project whose canvas/ directory should store state.
   --canvas-dir <path>    Override canvas data directory.
   --dry-run              Print commands without changing host config.
@@ -43,6 +53,47 @@ function hasArg(name) {
   return argv.includes(name);
 }
 
+function normalizeAgentName(value) {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[_\s]+/g, "-");
+  if (!normalized || normalized === "auto" || normalized === "current") return null;
+  if (["claude-code", "claude"].includes(normalized)) return "claude";
+  if (["google-antigravity", "gemini", "antigravity"].includes(normalized)) return "antigravity";
+  if (["cursor", "cursor-ide"].includes(normalized)) return "cursor";
+  if (normalized === "codex") return "codex";
+  throw new Error(`Unsupported agent "${value}". Use one of: ${supportedAgents.join(", ")}.`);
+}
+
+function detectCurrentAgent() {
+  const hints = [
+    process.env.BUZZASSIST_SETUP_AGENT,
+    process.env.BUZZASSIST_AGENT,
+    process.env.BUZZASSIST_HOST,
+    process.env.CURSOR_TRACE_ID,
+    process.env.CURSOR_AGENT,
+    process.env.ANTIGRAVITY,
+    process.env.GEMINI_CLI,
+    process.env.CLAUDE_CODE,
+    process.env.CLAUDECODE,
+    process.env.CODEX,
+    process.env.TERM_PROGRAM,
+    process.env.npm_config_user_agent,
+    process.env._,
+    process.argv.join(" "),
+  ].filter(Boolean).join(" ").toLowerCase();
+
+  if (hints.includes("cursor")) return "cursor";
+  if (hints.includes("antigravity") || hints.includes("gemini")) return "antigravity";
+  if (hints.includes("claude")) return "claude";
+  if (hints.includes("codex")) return "codex";
+  return "codex";
+}
+
+function resolveTargetAgents() {
+  if (hasArg("--all-agents")) return [...supportedAgents];
+  const explicit = readArg("--agent", readArg("--host", null));
+  return [normalizeAgentName(explicit) || detectCurrentAgent()];
+}
+
 if (hasArg("--help") || hasArg("-h")) {
   console.log(usage());
   process.exit(0);
@@ -53,6 +104,7 @@ const skipInstall = hasArg("--skip-install");
 const skipBuild = hasArg("--skip-build");
 const skipPluginSource = hasArg("--skip-plugin-source");
 const launchCanvas = !hasArg("--no-launch");
+const targetAgents = resolveTargetAgents();
 const projectDir = resolve(
   readArg("--project-dir", process.env.BUZZASSIST_PROJECT_DIR || process.env.EXCALIDRAW_PROJECT_DIR || process.cwd()),
 );
@@ -242,7 +294,19 @@ async function refreshManagedPluginSource() {
   await rm(tmpDir, { recursive: true, force: true });
   await mkdir(tmpPluginRoot, { recursive: true });
 
-  for (const dirName of ["assets", "dist", "lib", "mcp", "scripts", "skills", ".codex-plugin", ".claude-plugin"]) {
+  for (const dirName of [
+    "assets",
+    "dist",
+    "lib",
+    "mcp",
+    "scripts",
+    "skills",
+    ".codex-plugin",
+    ".claude-plugin",
+    ".antigravity-plugin",
+    ".cursor",
+    ".agents",
+  ]) {
     await copyIfExists(join(repoRoot, dirName), join(tmpPluginRoot, dirName));
   }
 
@@ -250,6 +314,7 @@ async function refreshManagedPluginSource() {
     ".mcp.json",
     "AGENTS.md",
     "CLAUDE.md",
+    "GEMINI.md",
     "README.md",
     "SETUP.md",
     "package.json",
@@ -262,7 +327,7 @@ async function refreshManagedPluginSource() {
   await writeJson(join(tmpDir, ".claude-plugin", "marketplace.json"), {
     $schema: "https://anthropic.com/claude-code/marketplace.schema.json",
     name: marketplaceName,
-    description: "BuzzAssist canvas and media plugin for Claude Code and Codex.",
+    description: "BuzzAssist canvas and media plugin for AI coding agents.",
     owner: { name: "higataiyu" },
     metadata: {
       description: "A project-local Excalidraw canvas, shared skills, and MCP-backed plugin tools for visual media workflows.",
@@ -272,7 +337,7 @@ async function refreshManagedPluginSource() {
         name: pluginName,
         version: pluginVersion,
         source: "./plugin",
-        description: "BuzzAssist canvas and media plugin tools for Claude Code and Codex.",
+        description: "BuzzAssist canvas and media plugin tools.",
         author: { name: "higataiyu" },
         category: "productivity",
       },
@@ -455,6 +520,131 @@ async function setupClaude(pluginDir) {
   return { ok: installed.ok };
 }
 
+function localMcpServerConfig(pluginDir, { cursor = false } = {}) {
+  const config = {
+    command: process.execPath,
+    args: [join(pluginDir, "mcp", "server.mjs")],
+    env: {
+      EXCALIDRAW_PROJECT_DIR: projectDir,
+      EXCALIDRAW_CANVAS_DIR: canvasDir,
+    },
+  };
+  if (cursor) config.type = "stdio";
+  return config;
+}
+
+function cursorRuleContent() {
+  return `---
+description: BuzzAssist setup and canvas usage
+alwaysApply: true
+---
+
+# BuzzAssist
+
+When the user gives this repository URL and asks to set it up, clone or open the repository and run:
+
+\`\`\`bash
+node scripts/setup-agents.mjs --agent cursor --project-dir <active-user-project-dir>
+\`\`\`
+
+Configure Cursor only. Do not configure Codex, Claude Code, or Antigravity unless the user explicitly asks for those hosts too.
+
+After the script prints \`BUZZASSIST_CANVAS_URL=...\` and \`BUZZASSIST_CANVAS_CHECK=ok\`, open that URL in Cursor's in-app browser or browser preview if available. If browser control is unavailable, report the URL and say setup completed because the canvas check passed.
+`;
+}
+
+function antigravityRuleBlock() {
+  return `# BuzzAssist Agent Setup
+
+When the user gives this repository URL and asks to set it up, do the setup end to end for Antigravity only.
+
+1. Clone or open this repository.
+2. Run \`node scripts/setup-agents.mjs --agent antigravity --project-dir <active-user-project-dir>\` from the repository root. If there is no separate active project, use this repository root as the project dir.
+3. The script must configure Antigravity only. Do not configure Codex, Claude Code, or Cursor unless the user explicitly asks for those hosts too.
+4. After the script prints \`BUZZASSIST_CANVAS_URL=...\` and \`BUZZASSIST_CANVAS_CHECK=ok\`, open that URL in Antigravity's in-app browser if available. If browser control is unavailable, report the URL and say that setup still completed because the canvas check passed.
+
+Manual fallback:
+
+\`\`\`bash
+node scripts/setup-agents.mjs --agent antigravity --project-dir <active-user-project-dir> --no-launch
+node scripts/serve-canvas.mjs <active-user-project-dir>
+\`\`\`
+
+Use the live URL from \`canvas/.server.json\` when a requested port is busy.
+`;
+}
+
+async function upsertManagedBlock(path, marker, body) {
+  const start = `<!-- ${marker}:START -->`;
+  const end = `<!-- ${marker}:END -->`;
+  const block = `${start}\n${body.trim()}\n${end}\n`;
+
+  if (dryRun) {
+    console.log(`Would update ${path}`);
+    return;
+  }
+
+  let current = "";
+  if (await pathExists(path)) current = await readFile(path, "utf8");
+
+  const startIndex = current.indexOf(start);
+  const endIndex = current.indexOf(end);
+  let next;
+  if (startIndex >= 0 && endIndex > startIndex) {
+    next = `${current.slice(0, startIndex)}${block}${current.slice(endIndex + end.length).replace(/^\n/, "")}`;
+  } else {
+    const prefix = current.trimEnd();
+    next = `${prefix}${prefix ? "\n\n" : ""}${block}`;
+  }
+
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, next);
+}
+
+async function setupCursor(pluginDir) {
+  logStep("Configuring Cursor");
+  const configPath = join(projectDir, ".cursor", "mcp.json");
+  const config = await readJson(configPath, {});
+  config.mcpServers = config.mcpServers && typeof config.mcpServers === "object" ? config.mcpServers : {};
+  config.mcpServers[pluginName] = localMcpServerConfig(pluginDir, { cursor: true });
+
+  if (dryRun) console.log(`Would write ${configPath}`);
+  else await writeJson(configPath, config);
+
+  const rulePath = join(projectDir, ".cursor", "rules", "buzzassist.mdc");
+  if (dryRun) console.log(`Would write ${rulePath}`);
+  else {
+    await mkdir(dirname(rulePath), { recursive: true });
+    await writeFile(rulePath, cursorRuleContent());
+  }
+
+  return { ok: true, configPath, rulePath };
+}
+
+async function setupAntigravity(pluginDir) {
+  logStep("Configuring Antigravity");
+  const configPath = join(projectDir, ".agents", "mcp_config.json");
+  const config = await readJson(configPath, {});
+  config.mcpServers = config.mcpServers && typeof config.mcpServers === "object" ? config.mcpServers : {};
+  config.mcpServers[pluginName] = localMcpServerConfig(pluginDir);
+
+  if (dryRun) console.log(`Would write ${configPath}`);
+  else await writeJson(configPath, config);
+
+  const rulePath = join(projectDir, "GEMINI.md");
+  await upsertManagedBlock(rulePath, "BUZZASSIST", antigravityRuleBlock());
+
+  return { ok: true, configPath, rulePath };
+}
+
+async function setupAgent(agent, pluginDir) {
+  if (agent === "codex") return setupCodex(pluginDir);
+  if (agent === "claude") return setupClaude(pluginDir);
+  if (agent === "cursor") return setupCursor(pluginDir);
+  if (agent === "antigravity") return setupAntigravity(pluginDir);
+  throw new Error(`Unsupported agent "${agent}".`);
+}
+
 async function readDiscovery() {
   try {
     return JSON.parse(await readFile(join(canvasDir, ".server.json"), "utf8"));
@@ -541,19 +731,33 @@ async function main() {
   console.log(`Project dir: ${projectDir}`);
   console.log(`Canvas dir: ${canvasDir}`);
   console.log(`Plugin source: ${managedPluginDir}`);
+  console.log(`Agent target: ${targetAgents.map((agent) => agentLabels[agent]).join(", ")}`);
 
   await ensureDependencies();
   await ensureBuild();
   const pluginDir = await refreshManagedPluginSource();
 
-  const codex = await setupCodex(pluginDir);
-  const claude = await setupClaude(pluginDir);
+  const results = {};
+  for (const agent of targetAgents) {
+    results[agent] = await setupAgent(agent, pluginDir);
+  }
+
   const discovery = launchCanvas ? await launchCanvasServer() : null;
   const canvasCheck = discovery ? await verifyCanvasDiscovery(discovery) : null;
 
   logStep("Setup summary");
-  console.log(`Codex: ${codex.ok ? "configured" : codex.skipped ? "skipped" : "needs attention"}`);
-  console.log(`Claude Code: ${claude.ok ? "configured" : claude.skipped ? "skipped" : "needs attention"}`);
+  for (const agent of supportedAgents) {
+    const result = results[agent];
+    const label = agentLabels[agent];
+    if (!result) {
+      console.log(`${label}: not touched`);
+      continue;
+    }
+    console.log(`${label}: ${result.ok ? "configured" : result.skipped ? "skipped" : "needs attention"}`);
+  }
+  if (!hasArg("--all-agents")) {
+    console.log("Other agents were intentionally left untouched. Use --all-agents only when the user explicitly asks for every host.");
+  }
   if (discovery?.url) {
     console.log(`BUZZASSIST_CANVAS_URL=${discovery.url}`);
     console.log(`BUZZASSIST_CANVAS_CHECK=${canvasCheck?.ok ? "ok" : "needs-attention"}`);

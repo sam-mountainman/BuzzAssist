@@ -1614,6 +1614,9 @@ function configureCanvasServer(server) {
               sendJson(res, 200, { copied: true, sent: false, message, error: `添付できませんでした: ${opened.error}` })
               return
             }
+            if (note) {
+              await sendChatMessage({ canvasDir, app: bridgeApp, message: note, autoSend: false })
+            }
             // Auto-send (Enter) is best-effort: it needs Accessibility and an
             // unsandboxed context; when unavailable the files are attached and
             // the user just presses Enter.
@@ -1627,6 +1630,20 @@ function configureCanvasServer(server) {
             }
             sendJson(res, 200, { copied: true, attached: true, sent, app: appName, message })
             return
+          }
+
+          if (!attachViaOpen && assetPaths.length > 0) {
+            const attached = await sendChatMessage({
+              canvasDir,
+              app: bridgeApp,
+              message: note,
+              filePaths: assetPaths,
+              autoSend: body.autoSend === true
+            })
+            if (attached.sent) {
+              sendJson(res, 200, { copied: true, attached: true, sent: body.autoSend === true, via: attached.via, app: appName, message })
+              return
+            }
           }
 
           // Codex: no open-file route into the composer, so paste the message

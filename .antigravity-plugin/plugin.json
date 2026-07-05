@@ -1,0 +1,16 @@
+{
+  "name": "buzzassist",
+  "version": "0.1.2",
+  "displayName": "BuzzAssist",
+  "description": "BuzzAssist canvas and media plugin for Antigravity.",
+  "author": {
+    "name": "higataiyu"
+  },
+  "repository": "https://github.com/taiyuhiga/BuzzAssist.git",
+  "icon": "./assets/icon.png",
+  "skills": "./skills/",
+  "rules": [
+    "./GEMINI.md"
+  ],
+  "mcpServers": "./.agents/mcp_config.json"
+}

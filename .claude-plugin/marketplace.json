@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "buzzassist",
-  "description": "BuzzAssist canvas and media plugin for Claude Code and Codex.",
+  "description": "BuzzAssist canvas and media plugin for AI coding agents.",
   "owner": {
     "name": "higataiyu"
   },
@@ -11,9 +11,9 @@
   "plugins": [
     {
       "name": "buzzassist",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "source": "./",
-      "description": "BuzzAssist canvas and media plugin tools for Claude Code and Codex.",
+      "description": "BuzzAssist canvas and media plugin tools.",
       "author": {
         "name": "higataiyu"
       },

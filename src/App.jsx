@@ -1869,6 +1869,28 @@ function attachmentKindTitle(kind) {
   return 'ファイル'
 }
 
+function createAudioAttachmentPreviewDataURL(asset) {
+  const title = escapeSvgText(attachmentKindTitle('audio'))
+  const name = escapeSvgText(truncateMiddle(asset?.name || 'audio', 38))
+  const detail = Number(asset?.duration) > 0
+    ? formatAssetDuration(asset.duration)
+    : String(asset?.mimeType || '').split(';')[0] || 'audio'
+  const subline = escapeSvgText(detail)
+  const color = '#2563eb'
+  const svg = `
+<svg xmlns="http://www.w3.org/2000/svg" width="${ATTACHMENT_CARD_WIDTH}" height="${ATTACHMENT_CARD_HEIGHT}" viewBox="0 0 ${ATTACHMENT_CARD_WIDTH} ${ATTACHMENT_CARD_HEIGHT}">
+  <rect width="100%" height="100%" rx="14" fill="#ffffff"/>
+  <rect x="0.5" y="0.5" width="${ATTACHMENT_CARD_WIDTH - 1}" height="${ATTACHMENT_CARD_HEIGHT - 1}" rx="13.5" fill="none" stroke="#d7dce5"/>
+  <rect x="22" y="24" width="74" height="74" rx="18" fill="${color}" opacity="0.12"/>
+  <text x="59" y="69" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="800" fill="${color}">AUDIO</text>
+  <text x="116" y="52" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="700" fill="#1f2937">${title}</text>
+  <text x="116" y="82" font-family="Inter, Arial, sans-serif" font-size="13" fill="#6b7280">${name}</text>
+  <text x="116" y="112" font-family="Inter, Arial, sans-serif" font-size="13" fill="#8a94a6">${subline}</text>
+  <path d="M24 ${ATTACHMENT_CARD_HEIGHT - 32}H${ATTACHMENT_CARD_WIDTH - 24}" stroke="#edf0f5" stroke-width="2"/>
+</svg>`
+  return svgToDataURL(svg)
+}
+
 function attachmentKindIconMarkup(kind, color) {
   if (kind === 'audio') {
     return `
@@ -1900,10 +1922,9 @@ function attachmentKindIconMarkup(kind, color) {
 
 function createAttachmentPreviewDataURL(asset) {
   const kind = asset?.kind || 'file'
+  if (kind === 'audio') return createAudioAttachmentPreviewDataURL(asset)
   const title = escapeSvgText(truncateMiddle(asset?.name || attachmentKindTitle(kind), 42))
-  const detail = kind === 'audio' && Number(asset?.duration) > 0
-    ? `${formatAssetDuration(asset.duration)}`
-    : String(asset?.mimeType || '').split(';')[0] || attachmentKindTitle(kind)
+  const detail = String(asset?.mimeType || '').split(';')[0] || attachmentKindTitle(kind)
   const subline = escapeSvgText(detail)
   const color = kind === 'audio'
     ? '#2563eb'
@@ -2569,6 +2590,37 @@ function buildSelectedImageOverlays(scene) {
       }
     })
     .filter((overlay) => overlay.isSelected || isViewportPlacementNearViewport(overlay, appState))
+}
+
+function collectSelectedChatAttachmentItems(overlays) {
+  const seen = new Set()
+  const items = []
+  for (const overlay of overlays) {
+    if (!overlay?.isSelected) continue
+    const path = overlay.assetPath || ''
+    const url = overlay.assetUrl || ''
+    const key = path || url
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    items.push({
+      id: overlay.id,
+      kind: overlay.assetType || 'file',
+      name: overlay.fileName || 'asset',
+      path,
+      url
+    })
+  }
+  return items
+}
+
+function getSelectedChatAttachmentAnchor(overlays) {
+  const selected = overlays.filter((overlay) => overlay?.isSelected && (overlay.assetPath || overlay.assetUrl))
+  if (selected.length === 0) return null
+  const left = Math.min(...selected.map((overlay) => overlay.left))
+  const top = Math.min(...selected.map((overlay) => overlay.top))
+  const right = Math.max(...selected.map((overlay) => overlay.left + overlay.width))
+  const bottom = Math.max(...selected.map((overlay) => overlay.top + overlay.height))
+  return { left, top, width: right - left, height: bottom - top }
 }
 
 function buildVideoPlaybackOverlays(scene) {
@@ -5953,6 +6005,32 @@ export default function App() {
     }
     setOpenMenu(null)
   }
+  const selectedChatAttachmentItems = collectSelectedChatAttachmentItems(selectedImageOverlays)
+  const selectedChatAttachmentAnchor = getSelectedChatAttachmentAnchor(selectedImageOverlays)
+  const selectedChatAttachmentStyle = selectedChatAttachmentAnchor
+    ? (() => {
+        const viewportWidth = typeof window === 'undefined' ? 1440 : window.innerWidth
+        const viewportHeight = typeof window === 'undefined' ? 900 : window.innerHeight
+        const centerX = selectedChatAttachmentAnchor.left + selectedChatAttachmentAnchor.width / 2
+        const left = Math.max(148, Math.min(viewportWidth - 148, centerX))
+        const below = selectedChatAttachmentAnchor.top + selectedChatAttachmentAnchor.height + 10
+        const top = below <= viewportHeight - 74
+          ? below
+          : Math.max(74, selectedChatAttachmentAnchor.top - 48)
+        return { left: `${Math.round(left)}px`, top: `${Math.round(top)}px` }
+      })()
+    : null
+  const selectedChatAttachmentText = selectedChatAttachmentItems.length > 0
+    ? `キャンバスで選択した${selectedChatAttachmentItems.length}件のファイルです。内容を確認してください。`
+    : ''
+  const sendSelectedChatAttachments = (app) => {
+    if (selectedChatAttachmentItems.length === 0) return
+    sendToChatApp({
+      app,
+      text: selectedChatAttachmentText,
+      assetItems: selectedChatAttachmentItems
+    })
+  }
 
   return (
     <main
@@ -6242,6 +6320,28 @@ export default function App() {
           </div>
         )
       })}
+      {selectedChatAttachmentItems.length > 0 && selectedChatAttachmentStyle ? (
+        <div
+          className="lovart-chat-attach-bar"
+          style={selectedChatAttachmentStyle}
+          onPointerDown={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+          }}
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+          }}
+        >
+          <span>{selectedChatAttachmentItems.length}件をチャットへ</span>
+          <button type="button" onClick={() => sendSelectedChatAttachments('claude')}>
+            Claude
+          </button>
+          <button type="button" onClick={() => sendSelectedChatAttachments('codex')}>
+            Codex
+          </button>
+        </div>
+      ) : null}
       <div ref={hoverOverlayRef} className="lovart-hover-border" style={{ display: 'none' }} />
 
       {expandedVideoPlayback ? (
@@ -7222,7 +7322,9 @@ export default function App() {
                           onClick={() => setOpenMenu((c) => (c === 'subtitle-audio-source' ? null : 'subtitle-audio-source'))}
                         >
                           <AudioWaveIcon size={18} />
-                          <span className="lovart-utility-card-label">{truncateMiddle(primaryAsset.name || '音声・動画', 12)}</span>
+                          <span className="lovart-utility-card-label">
+                            {primaryAsset.kind === 'audio' ? '音声' : truncateMiddle(primaryAsset.name || '音声・動画', 12)}
+                          </span>
                         </button>
                         <button
                           type="button"

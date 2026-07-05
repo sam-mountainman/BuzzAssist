@@ -1,0 +1,16 @@
+---
+description: BuzzAssist setup and canvas usage
+alwaysApply: true
+---
+
+# BuzzAssist
+
+When the user gives this repository URL and asks to set it up, clone or open the repository and run:
+
+```bash
+node scripts/setup-agents.mjs --agent cursor --project-dir <active-user-project-dir>
+```
+
+Configure Cursor only. Do not configure Codex, Claude Code, or Antigravity unless the user explicitly asks for those hosts too.
+
+After the script prints `BUZZASSIST_CANVAS_URL=...` and `BUZZASSIST_CANVAS_CHECK=ok`, open that URL in Cursor's in-app browser or browser preview if available. If browser control is unavailable, report the URL and say setup completed because the canvas check passed.

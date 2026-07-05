@@ -186,6 +186,47 @@ body {
   color: #808996;
 }
 
+.lovart-chat-attach-bar {
+  position: absolute;
+  z-index: 30;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  max-width: min(320px, calc(100vw - 32px));
+  padding: 6px;
+  color: #2e3440;
+  pointer-events: auto;
+  background: #ffffff;
+  border: 1px solid #d9dee7;
+  border-radius: 10px;
+  box-shadow: 0 12px 26px rgb(31 41 55 / 0.16);
+  transform: translateX(-50%);
+  font: 600 12px/1 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+}
+
+.lovart-chat-attach-bar span {
+  padding: 0 6px 0 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lovart-chat-attach-bar button {
+  height: 28px;
+  padding: 0 10px;
+  color: #343a40;
+  cursor: pointer;
+  background: #f4f5f8;
+  border: 0;
+  border-radius: 8px;
+  font: inherit;
+}
+
+.lovart-chat-attach-bar button:hover {
+  background: #e8ddf5;
+}
+
 .lovart-hover-border {
   position: absolute;
   z-index: 3;

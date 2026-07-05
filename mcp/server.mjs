@@ -40,7 +40,7 @@ import { readServerDiscovery } from "../lib/canvasServerRuntime.mjs";
 import { tmpdir } from "node:os";
 
 const SERVER_NAME = "BuzzAssist Excalidraw Plugin Tools";
-const SERVER_VERSION = "0.1.1";
+const SERVER_VERSION = "0.1.2";
 const TOOL_READ_ME = "read_me";
 const TOOL_CREATE_VIEW = "create_view";
 const TOOL_GET_SELECTION = "get_excalidraw_selection";

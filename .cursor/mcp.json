@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "buzzassist": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "${workspaceFolder}/mcp/server.mjs"
+      ],
+      "env": {
+        "EXCALIDRAW_PROJECT_DIR": "${workspaceFolder}",
+        "EXCALIDRAW_CANVAS_DIR": "${workspaceFolder}/canvas"
+      }
+    }
+  }
+}

@@ -1,33 +1,34 @@
 # BuzzAssist
 
-BuzzAssist is a local Excalidraw canvas and media plugin for Codex and Claude Code, modeled after Cowart's architecture:
+BuzzAssist is a local Excalidraw canvas and media plugin for Codex, Claude Code, Cursor, and Antigravity, modeled after Cowart's architecture:
 
 - official Excalidraw MCP App access through `https://mcp.excalidraw.com/mcp`
 - a local static React canvas service
 - project-local canvas persistence under `canvas/`
-- plugin-provided tools for Codex and Claude Code to read selection state, insert assets, and generate images/videos
-- Codex and Claude Code plugin manifests with shared skills
+- plugin-provided tools for supported agents to read selection state, insert assets, and generate images/videos
+- host manifests and MCP config templates with shared skills
 
 ## Agent URL Setup
 
-Paste this GitHub URL into Codex or Claude Code and ask "セットアップして".
+Paste this GitHub URL into Codex, Claude Code, Cursor, or Antigravity and ask "セットアップして".
 That URL plus that instruction is the intended setup contract; no manual
-plugin IDs are needed. The agent should clone/open the repo and run:
+plugin IDs are needed. The agent should clone/open the repo and run the setup for itself only:
 
 ```text
 https://github.com/taiyuhiga/BuzzAssist
 ```
 
 ```bash
-node scripts/setup-agents.mjs --project-dir /path/to/active/project
+node scripts/setup-agents.mjs --agent codex --project-dir /path/to/active/project
+node scripts/setup-agents.mjs --agent claude --project-dir /path/to/active/project
+node scripts/setup-agents.mjs --agent cursor --project-dir /path/to/active/project
+node scripts/setup-agents.mjs --agent antigravity --project-dir /path/to/active/project
 ```
 
 The setup script installs dependencies when needed, builds the canvas UI when
 needed, refreshes a lightweight local marketplace at `~/plugins/buzzassist`
-with the plugin root at `~/plugins/buzzassist/plugin`, installs
-`buzzassist@buzzassist` into Codex, installs
-`buzzassist@buzzassist` into Claude Code, starts the local canvas server,
-and prints:
+with the plugin root at `~/plugins/buzzassist/plugin`, configures only the
+requested host, starts the local canvas server, and prints:
 
 ```text
 BUZZASSIST_CANVAS_URL=http://127.0.0.1:<port>/
@@ -38,6 +39,9 @@ After that, the current host agent should open the printed URL in its in-app
 browser. If browser control is unavailable, use the URL from
 `canvas/.server.json`; setup is considered complete when
 `BUZZASSIST_CANVAS_CHECK=ok` is printed.
+
+The script intentionally leaves other agents untouched. Use `--all-agents` only
+when the user explicitly asks to configure every supported host.
 
 ## Run The Canvas
 
@@ -147,12 +151,15 @@ Generation extras:
 ## Plugin Packaging
 
 Codex uses `.codex-plugin/plugin.json`; Claude Code uses
-`.claude-plugin/plugin.json`. Both manifests point at the shared `skills/`
-folder and `.mcp.json`, so skills and MCP config are no longer duplicated under
-tool-specific folders.
+`.claude-plugin/plugin.json`; Cursor uses `.cursor/mcp.json` plus
+`.cursor/rules/buzzassist.mdc`; Antigravity uses
+`.antigravity-plugin/plugin.json`, `.agents/mcp_config.json`, and `GEMINI.md`.
+All hosts point at the shared `skills/` folder and local MCP server.
 
 For Codex local testing, `.agents/plugins/marketplace.json` exposes this repo
-as `buzzassist`. For npm packaging, `package.json` provides:
+as `buzzassist`. For Cursor and Antigravity, the setup script writes project-local
+config files because those hosts discover MCP servers from workspace config.
+For npm packaging, `package.json` provides:
 
 ```bash
 npx buzzassist-canvas-mcp   # stdio MCP server
@@ -189,7 +196,7 @@ Each endpoint runs the batch in 10-item chunks, saves and broadcasts after each 
 
 ## Agent Clarifications
 
-When a Codex or Claude Code agent uses the BuzzAssist plugin media tools, the tool instructions tell it to ask before generating if required media settings are missing instead of silently guessing defaults. Use the host AskUserQuestion/request_user_input flow for those questions.
+When an agent uses the BuzzAssist plugin media tools, the tool instructions tell it to ask before generating if required media settings are missing instead of silently guessing defaults. Use the host AskUserQuestion/request_user_input flow for those questions.
 
 The server also enforces this gate. Generation, subtitle, and paid silence-cut
 tools reject calls without `confirmedSettings: true`, except for payload
@@ -267,9 +274,14 @@ Downloads: every media header has a ⬇ button (`/excalidraw-assets/<name>?downl
 
 Maintenance: both servers run `performCanvasMaintenance` at startup (`lib/canvasScene.mjs`) — legacy inline base64 file records migrate to `canvas/assets/`, stale atomic-write `.tmp` files are removed, and assets referenced nowhere move to `canvas/assets-trash/`. `node scripts/cleanup-canvas.mjs [--dry-run]` removes empty generator frames (backs up the canvas first).
 
-## Claude Code
+## Host Integrations
 
-The same repo works as-is in Claude Code: `.claude-plugin/plugin.json` registers the shared skills and `.mcp.json` registers the plugin's internal tool server. Start the canvas with `./scripts/start-canvas.sh`, then use the same BuzzAssist plugin tools from Claude Code sessions.
+- Codex: `.codex-plugin/plugin.json` registers shared skills and `.mcp.json`; `node scripts/setup-agents.mjs --agent codex ...` installs `buzzassist@buzzassist`.
+- Claude Code: `.claude-plugin/plugin.json` registers shared skills and `.mcp.json`; `node scripts/setup-agents.mjs --agent claude ...` installs `buzzassist@buzzassist`.
+- Cursor: `.cursor/mcp.json` registers the local stdio MCP server, and `.cursor/rules/buzzassist.mdc` tells Cursor to run `--agent cursor` when asked to set up from the repository URL.
+- Antigravity: `.agents/mcp_config.json` registers the local MCP server, and `GEMINI.md` tells Antigravity to run `--agent antigravity` when asked to set up from the repository URL.
+
+Start the canvas with `./scripts/start-canvas.sh`, then use the same BuzzAssist plugin tools from supported agent sessions.
 
 `grok-imagine-image-hermes` and `grok-imagine-video-hermes` use the local Hermes Agent xAI OAuth flow:
 
@@ -308,12 +320,18 @@ EXCALIDRAW_GROK_IMAGE_HERMES_COMMAND="node /path/to/grok-image-bridge.mjs"
 EXCALIDRAW_GROK_VIDEO_HERMES_COMMAND="node /path/to/grok-video-bridge.mjs"
 ```
 
-## Codex Plugin Shape
+## Plugin Shape
 
-The plugin metadata is in:
+The host metadata is in:
 
 ```text
 .codex-plugin/plugin.json
+.claude-plugin/plugin.json
+.cursor/mcp.json
+.cursor/rules/buzzassist.mdc
+.antigravity-plugin/plugin.json
+.agents/mcp_config.json
+GEMINI.md
 .mcp.json
 skills/
 ```

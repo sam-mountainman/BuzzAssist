@@ -53,9 +53,11 @@ test("generator chrome stays below native Excalidraw toolbar and above backdrop"
   const videoFrameTray = zIndexForSelector(css, ".lovart-prompt-wrap.has-video-menu .lovart-video-frame-tray");
   const videoSettings = zIndexForSelector(css, ".lovart-video-settings");
   const utilityMenu = zIndexForSelector(css, ".lovart-menu.lovart-utility-pop");
+  const chatAttachBar = zIndexForSelector(css, ".lovart-chat-attach-bar");
 
   assert.equal(backdrop, 20);
   assert.equal(panel, 30);
+  assert.equal(chatAttachBar, 30);
   assert.equal(menu, 40);
   assert.equal(menuWrap, 30);
   assert.equal(videoMenuWrap, 40);
@@ -65,6 +67,7 @@ test("generator chrome stays below native Excalidraw toolbar and above backdrop"
   assert.equal(utilityMenu, 100);
   assert.equal(slotButton, 101);
   assert.ok(backdrop < panel);
+  assert.ok(chatAttachBar < menu);
   assert.ok(panel < menu);
   assert.ok(menu < slotMenu);
   assert.ok(slotMenu < slotButton);
