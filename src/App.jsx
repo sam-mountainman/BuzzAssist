@@ -677,7 +677,9 @@ function FileUploadLabel({ accept, multiple = false, className = '', title, onOp
     <label
       className={className}
       title={title}
-      style={{ position: 'relative' }}
+      // border-box: <label> defaults to content-box (buttons are border-box),
+      // so width:100% + padding would overflow the menu without this.
+      style={{ position: 'relative', boxSizing: 'border-box', overflow: 'hidden' }}
       onPointerDown={(event) => { event.stopPropagation(); onOpen?.() }}
     >
       {/* The input overlays the label, so a tap IS a native file-input click —
