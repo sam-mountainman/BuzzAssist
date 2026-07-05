@@ -12,9 +12,8 @@ const marketplaceName = "buzzassist-local";
 const personalMarketplaceName = "personal";
 const homeDir = homedir();
 const managedPluginDir = join(homeDir, "plugins", pluginName);
+const managedPluginRoot = join(managedPluginDir, "plugin");
 const personalMarketplacePath = join(homeDir, ".agents", "plugins", "marketplace.json");
-const claudeInstalledPluginsPath = join(homeDir, ".claude", "plugins", "installed_plugins.json");
-const claudeSettingsPath = join(homeDir, ".claude", "settings.json");
 const argv = process.argv.slice(2);
 
 function usage() {
@@ -110,6 +109,7 @@ async function run(command, args, options = {}) {
     env = process.env,
     inherit = false,
     allowFailure = false,
+    timeoutMs = 0,
   } = options;
 
   if (dryRun) {
@@ -127,6 +127,11 @@ async function run(command, args, options = {}) {
     });
     let stdout = "";
     let stderr = "";
+    let timedOut = false;
+    const timeout = timeoutMs > 0 ? setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGTERM");
+    }, timeoutMs) : null;
 
     if (!inherit) {
       child.stdout.on("data", (chunk) => {
@@ -138,18 +143,20 @@ async function run(command, args, options = {}) {
     }
 
     child.on("error", (error) => {
+      if (timeout) clearTimeout(timeout);
       const result = { ok: false, code: null, stdout, stderr, error };
       if (allowFailure) resolveRun(result);
       else rejectRun(error);
     });
 
     child.on("close", (code) => {
+      if (timeout) clearTimeout(timeout);
       const ok = code === 0;
       if (!inherit && stdout.trim()) console.log(stdout.trim());
       if (!inherit && stderr.trim()) console.error(stderr.trim());
-      const result = { ok, code, stdout, stderr };
+      const result = { ok, code, stdout, stderr, timedOut };
       if (ok || allowFailure) resolveRun(result);
-      else rejectRun(new Error(`${formatCommand(command, args)} exited with ${code}`));
+      else rejectRun(new Error(timedOut ? `${formatCommand(command, args)} timed out` : `${formatCommand(command, args)} exited with ${code}`));
     });
   });
 }
@@ -203,21 +210,22 @@ async function copyIfExists(source, target) {
 async function refreshManagedPluginSource() {
   if (skipPluginSource) {
     console.log(`Skipping managed plugin source refresh: ${managedPluginDir}`);
-    return managedPluginDir;
+    return managedPluginRoot;
   }
 
   logStep("Refreshing local plugin source");
   if (dryRun) {
-    console.log(`Would refresh ${managedPluginDir} from ${repoRoot}`);
-    return managedPluginDir;
+    console.log(`Would refresh ${managedPluginRoot} from ${repoRoot}`);
+    return managedPluginRoot;
   }
 
   const tmpDir = `${managedPluginDir}.tmp-${process.pid}`;
+  const tmpPluginRoot = join(tmpDir, "plugin");
   await rm(tmpDir, { recursive: true, force: true });
-  await mkdir(tmpDir, { recursive: true });
+  await mkdir(tmpPluginRoot, { recursive: true });
 
   for (const dirName of ["assets", "dist", "lib", "mcp", "scripts", "skills", ".codex-plugin", ".claude-plugin"]) {
-    await copyIfExists(join(repoRoot, dirName), join(tmpDir, dirName));
+    await copyIfExists(join(repoRoot, dirName), join(tmpPluginRoot, dirName));
   }
 
   for (const fileName of [
@@ -230,15 +238,51 @@ async function refreshManagedPluginSource() {
     "package-lock.json",
     "vite.config.js",
   ]) {
-    await copyIfExists(join(repoRoot, fileName), join(tmpDir, fileName));
+    await copyIfExists(join(repoRoot, fileName), join(tmpPluginRoot, fileName));
   }
 
-  await rm(join(tmpDir, "node_modules"), { recursive: true, force: true });
-  await rm(join(tmpDir, "canvas"), { recursive: true, force: true });
+  await writeJson(join(tmpDir, ".claude-plugin", "marketplace.json"), {
+    $schema: "https://anthropic.com/claude-code/marketplace.schema.json",
+    name: marketplaceName,
+    description: "BuzzAssist canvas and media MCP plugin for Claude Code and Codex.",
+    owner: { name: "higataiyu" },
+    metadata: {
+      description: "A project-local Excalidraw canvas, shared skills, and MCP tools for visual media workflows.",
+    },
+    plugins: [
+      {
+        name: pluginName,
+        version: "0.1.0",
+        source: "./plugin",
+        description: "BuzzAssist canvas and media MCP tools for Claude Code and Codex.",
+        author: { name: "higataiyu" },
+        category: "productivity",
+      },
+    ],
+  });
+  // The marketplace lives at ~/plugins/buzzassist; the plugin root should only
+  // contain plugin metadata so Claude Code installs it as a plugin, not as a
+  // nested marketplace.
+  await rm(join(tmpPluginRoot, ".claude-plugin", "marketplace.json"), { force: true });
+  await writeJson(join(tmpDir, ".agents", "plugins", "marketplace.json"), {
+    name: marketplaceName,
+    interface: { displayName: "BuzzAssist Local" },
+    plugins: [
+      {
+        name: pluginName,
+        source: { source: "local", path: "./plugin" },
+        policy: { installation: "AVAILABLE", authentication: "ON_INSTALL" },
+        category: "Productivity",
+      },
+    ],
+  });
+
+  await rm(join(tmpPluginRoot, "node_modules"), { recursive: true, force: true });
+  await rm(join(tmpPluginRoot, "canvas"), { recursive: true, force: true });
   await rm(managedPluginDir, { recursive: true, force: true });
   await mkdir(dirname(managedPluginDir), { recursive: true });
   await rename(tmpDir, managedPluginDir);
-  return managedPluginDir;
+  return managedPluginRoot;
 }
 
 async function ensureCodexPersonalMarketplace(pluginDir) {
@@ -247,7 +291,7 @@ async function ensureCodexPersonalMarketplace(pluginDir) {
     name: pluginName,
     source: {
       source: "local",
-      path: `./plugins/${pluginName}`,
+      path: `./plugins/${pluginName}/plugin`,
     },
     policy: {
       installation: "AVAILABLE",
@@ -301,57 +345,26 @@ async function setupClaude(pluginDir) {
   const claude = commandName("claude");
   if (!(await commandAvailable(claude))) {
     console.warn("Claude Code CLI was not found. Run these commands after installing Claude Code:");
-    console.warn(`  ${formatCommand("claude", ["plugin", "marketplace", "add", pluginDir, "--scope", "user"])}`);
+    console.warn(`  ${formatCommand("claude", ["plugin", "marketplace", "add", managedPluginDir, "--scope", "user"])}`);
     console.warn(`  ${formatCommand("claude", ["plugin", "install", `${pluginName}@${marketplaceName}`, "--scope", "user"])}`);
     return { ok: false, skipped: true };
   }
 
-  const added = await run(claude, ["plugin", "marketplace", "add", pluginDir, "--scope", "user"], { allowFailure: true });
+  const added = await run(claude, ["plugin", "marketplace", "add", managedPluginDir, "--scope", "user"], { allowFailure: true });
   if (!added.ok) {
     console.warn("Claude Code marketplace add did not complete. Continuing to plugin install in case it is already configured.");
   }
 
-  await installClaudePluginDirect(pluginDir);
-  return { ok: true };
-}
-
-async function installClaudePluginDirect(pluginDir) {
-  logStep("Installing Claude Code plugin non-interactively");
-  const selector = `${pluginName}@${marketplaceName}`;
-  const version = JSON.parse(await readFile(join(pluginDir, ".claude-plugin", "plugin.json"), "utf8")).version || "0.1.0";
-  const installPath = join(homeDir, ".claude", "plugins", "cache", marketplaceName, pluginName, version);
-
-  if (dryRun) {
-    console.log(`Would copy ${pluginDir} to ${installPath}`);
-    console.log(`Would update ${claudeInstalledPluginsPath}`);
-    console.log(`Would enable ${selector} in ${claudeSettingsPath}`);
-    return;
+  const installed = await run(claude, ["plugin", "install", `${pluginName}@${marketplaceName}`, "--scope", "user"], {
+    allowFailure: true,
+    timeoutMs: 180000,
+  });
+  if (!installed.ok) {
+    console.warn(installed.timedOut
+      ? "Claude Code plugin install timed out. Check the Claude Code CLI output above."
+      : "Claude Code plugin install did not complete. Check the Claude Code CLI output above.");
   }
-
-  await rm(installPath, { recursive: true, force: true });
-  await mkdir(dirname(installPath), { recursive: true });
-  await cp(pluginDir, installPath, { recursive: true, force: true, dereference: false });
-
-  const now = new Date().toISOString();
-  const installed = await readJson(claudeInstalledPluginsPath, { version: 2, plugins: {} });
-  installed.version = 2;
-  installed.plugins ||= {};
-  const existing = Array.isArray(installed.plugins[selector]) ? installed.plugins[selector].find((entry) => entry?.scope === "user") : null;
-  installed.plugins[selector] = [
-    {
-      scope: "user",
-      installPath,
-      version,
-      installedAt: existing?.installedAt || now,
-      lastUpdated: now,
-    },
-  ];
-  await writeJson(claudeInstalledPluginsPath, installed);
-
-  const settings = await readJson(claudeSettingsPath, {});
-  settings.enabledPlugins ||= {};
-  settings.enabledPlugins[selector] = true;
-  await writeJson(claudeSettingsPath, settings);
+  return { ok: installed.ok };
 }
 
 async function readDiscovery() {

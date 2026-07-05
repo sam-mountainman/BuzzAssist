@@ -10,8 +10,8 @@ BuzzAssist is a local Excalidraw canvas and media MCP plugin for Codex and Claud
 
 ## Agent URL Setup
 
-This repo is designed so a user can pass the GitHub URL to Codex or Claude Code
-and say "set it up." The agent should clone/open the repo and run:
+Paste this GitHub URL into Codex or Claude Code and ask "セットアップして".
+The agent should clone/open the repo and run:
 
 ```text
 https://github.com/taiyuhiga/BuzzAssist
@@ -22,8 +22,9 @@ node scripts/setup-agents.mjs --project-dir /path/to/active/project
 ```
 
 The setup script installs dependencies when needed, builds the canvas UI when
-needed, refreshes a lightweight local plugin source at `~/plugins/buzzassist`,
-installs `buzzassist@personal` into Codex, installs
+needed, refreshes a lightweight local marketplace at `~/plugins/buzzassist`
+with the plugin root at `~/plugins/buzzassist/plugin`, installs
+`buzzassist@personal` into Codex, installs
 `buzzassist@buzzassist-local` into Claude Code, starts the local canvas server,
 and prints:
 

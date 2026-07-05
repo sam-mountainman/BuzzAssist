@@ -10,10 +10,10 @@ When the user gives this repository URL and asks to set it up, do the setup end 
 Manual fallback:
 
 ```bash
-claude plugin marketplace add . --scope user
+node scripts/setup-agents.mjs --project-dir <active-user-project-dir> --no-launch
+claude plugin marketplace add ~/plugins/buzzassist --scope user
 claude plugin install buzzassist@buzzassist-local --scope user
-codex plugin marketplace add .
-codex plugin add buzzassist@buzzassist-local
+codex plugin add buzzassist@personal
 node scripts/serve-canvas.mjs <active-user-project-dir>
 ```
 

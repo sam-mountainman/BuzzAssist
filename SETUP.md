@@ -1,6 +1,6 @@
 # BuzzAssist Setup
 
-This repository is intended to work from a GitHub URL plus a setup request.
+This repository is intended to work from a GitHub URL plus "セットアップして".
 
 ```text
 https://github.com/taiyuhiga/BuzzAssist
@@ -16,7 +16,8 @@ What the script does:
 
 - installs npm dependencies when needed
 - builds the static canvas UI when needed
-- refreshes a lightweight local plugin source at `~/plugins/buzzassist`
+- refreshes a lightweight local marketplace at `~/plugins/buzzassist`
+- stores the actual plugin root at `~/plugins/buzzassist/plugin`
 - installs `buzzassist@personal` into Codex
 - registers `~/plugins/buzzassist` as the `buzzassist-local` marketplace for Claude Code
 - installs `buzzassist@buzzassist-local` into Claude Code

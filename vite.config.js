@@ -643,12 +643,13 @@ async function handleMcpMessage(message) {
   return mcpError(id, -32601, `Method not found: ${method}`)
 }
 
-async function serveMcp(req, res) {
+async function serveMcp(req, res, options = {}) {
   const url = new URL(req.url, 'http://127.0.0.1')
   if (url.pathname !== '/mcp') return false
+  const originPort = options.port ?? defaultPort
 
-  if (rejectDisallowedOrigin(req, res, { port: defaultPort })) return true
-  setLocalCorsHeaders(req, res, { port: defaultPort })
+  if (rejectDisallowedOrigin(req, res, { port: originPort })) return true
+  setLocalCorsHeaders(req, res, { port: originPort })
 
   if (req.method === 'OPTIONS') {
     res.statusCode = 204
@@ -661,7 +662,7 @@ async function serveMcp(req, res) {
       name: MCP_SERVER_NAME,
       version: MCP_SERVER_VERSION,
       endpoint: '/mcp',
-      canvasUrl: `http://127.0.0.1:${defaultPort}/`,
+      canvasUrl: `http://127.0.0.1:${originPort}/`,
       auth: { type: 'bearer', env: 'EXCALIDRAW_MCP_TOKEN', discovery: `${canvasDir}/.server.json` },
       tools: mcpToolDefinitions().map((tool) => tool.name)
     })
@@ -725,7 +726,16 @@ async function writeCurrentServerDiscovery(server) {
 }
 
 function configureCanvasServer(server) {
+  let activePort = defaultPort
+  const currentOriginPort = () => {
+    const address = server.httpServer?.address?.()
+    if (typeof address === 'object' && address?.port) {
+      activePort = address.port
+    }
+    return activePort
+  }
   server.httpServer?.once?.('listening', () => {
+    currentOriginPort()
     writeCurrentServerDiscovery(server).catch((error) => console.warn('[server-discovery] failed:', error.message))
   })
   // safeOnly: never move subtitle cards or trash assets on startup — only
@@ -743,14 +753,24 @@ function configureCanvasServer(server) {
     })
     .catch((error) => console.warn('[canvas-maintenance] failed:', error.message))
   server.middlewares.use((req, res, next) => {
-    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(String(req.method || '').toUpperCase())) {
-      if (rejectDisallowedOrigin(req, res, { port: defaultPort })) return
+    const method = String(req.method || '').toUpperCase()
+    const pathname = new URL(req.url || '/', 'http://127.0.0.1').pathname
+    const shouldCheckOrigin = pathname === '/mcp' || pathname.startsWith('/api/') || ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)
+    if (shouldCheckOrigin) {
+      const originPort = currentOriginPort()
+      if (rejectDisallowedOrigin(req, res, { port: originPort })) return
+      setLocalCorsHeaders(req, res, { port: originPort })
+      if (method === 'OPTIONS') {
+        res.statusCode = 204
+        res.end()
+        return
+      }
     }
     next()
   })
   server.middlewares.use(async (req, res, next) => {
     try {
-      if (await serveMcp(req, res)) return
+      if (await serveMcp(req, res, { port: currentOriginPort() })) return
       next()
     } catch (error) {
       sendJson(res, 500, { error: error.message })
