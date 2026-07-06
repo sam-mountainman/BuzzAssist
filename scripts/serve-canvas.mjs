@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 import { createReadStream } from "node:fs";
-import { access, readFile, stat } from "node:fs/promises";
+import { access, readFile, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import net from "node:net";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  createRemoteCanvasRelayClient,
+  createRemoteCanvasSession,
+} from "../lib/remoteCanvasRelayClient.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const argv = process.argv.slice(2);
@@ -22,10 +26,33 @@ function hasArg(name) {
 const host = readArg("--host", process.env.EXCALIDRAW_HOST || "127.0.0.1");
 const requestedPort = Number(readArg("--port", process.env.EXCALIDRAW_PORT || "43219"));
 const strictPort = hasArg("--strict-port") || /^(1|true|yes)$/i.test(String(process.env.EXCALIDRAW_STRICT_PORT || ""));
-const projectArg = argv.find((arg, index) => !arg.startsWith("--") && argv[index - 1] !== "--port" && argv[index - 1] !== "--host");
+const valueArgs = new Set([
+  "--port",
+  "--host",
+  "--remote-canvas-url",
+  "--remote-canvas-session",
+  "--remote-canvas-token",
+  "--remote-canvas-title",
+  "--remote-canvas-mode",
+  "--remote-canvas-expires-hours",
+]);
+const projectArg = argv.find((arg, index) => !arg.startsWith("--") && !valueArgs.has(argv[index - 1]));
 const projectDir = resolve(process.env.EXCALIDRAW_PROJECT_DIR || projectArg || process.cwd());
 const canvasDir = resolve(process.env.EXCALIDRAW_CANVAS_DIR || join(projectDir, "canvas"));
 const distDir = resolve(process.env.EXCALIDRAW_DIST_DIR || join(repoRoot, "dist"));
+const remoteCanvasRequested =
+  hasArg("--remote-canvas") ||
+  /^(1|true|yes)$/i.test(String(process.env.BUZZASSIST_REMOTE_CANVAS || "")) ||
+  Boolean(process.env.BUZZASSIST_REMOTE_CANVAS_SESSION_ID && process.env.BUZZASSIST_REMOTE_CANVAS_DESKTOP_TOKEN);
+const remoteCanvasBaseUrl = readArg(
+  "--remote-canvas-url",
+  process.env.BUZZASSIST_REMOTE_CANVAS_BASE_URL || process.env.BUZZASSIST_REMOTE_CANVAS_URL || ""
+);
+const remoteCanvasSessionArg = readArg("--remote-canvas-session", process.env.BUZZASSIST_REMOTE_CANVAS_SESSION_ID || "");
+const remoteCanvasTokenArg = readArg("--remote-canvas-token", process.env.BUZZASSIST_REMOTE_CANVAS_DESKTOP_TOKEN || "");
+const remoteCanvasTitle = readArg("--remote-canvas-title", process.env.BUZZASSIST_REMOTE_CANVAS_TITLE || "BuzzAssist Remote Canvas");
+const remoteCanvasMode = readArg("--remote-canvas-mode", process.env.BUZZASSIST_REMOTE_CANVAS_MODE || "generate");
+const remoteCanvasExpiresHours = Number(readArg("--remote-canvas-expires-hours", process.env.BUZZASSIST_REMOTE_CANVAS_EXPIRES_HOURS || "24"));
 
 function canListen(port) {
   return new Promise((resolveCanListen) => {
@@ -178,6 +205,58 @@ const watcher = { add() {}, on() {} };
 
 canvasStoragePlugin().configureServer({ middlewares, watcher, httpServer: server });
 
+async function patchServerDiscovery(patch) {
+  const discoveryPath = join(canvasDir, ".server.json");
+  try {
+    const existing = JSON.parse(await readFile(discoveryPath, "utf8"));
+    await writeFile(discoveryPath, `${JSON.stringify({ ...existing, ...patch, updatedAt: new Date().toISOString() }, null, 2)}\n`, { mode: 0o600 });
+  } catch {
+    // Discovery is best-effort; the Vite plugin writes the base file.
+  }
+}
+
+async function startRemoteCanvasRelay({ actualPort }) {
+  if (!remoteCanvasRequested) return null;
+  let sessionId = String(remoteCanvasSessionArg || "").trim();
+  let desktopToken = String(remoteCanvasTokenArg || "").trim();
+  let viewerUrl = "";
+  let relayBaseUrl = remoteCanvasBaseUrl;
+
+  if (!sessionId || !desktopToken) {
+    const created = await createRemoteCanvasSession({
+      relayBaseUrl: remoteCanvasBaseUrl,
+      title: remoteCanvasTitle,
+      mode: remoteCanvasMode === "view" ? "view" : "generate",
+      expiresInHours: remoteCanvasExpiresHours,
+    });
+    sessionId = created.sessionId;
+    desktopToken = created.desktopToken;
+    viewerUrl = created.viewerUrl;
+    relayBaseUrl = created.relayBaseUrl || relayBaseUrl;
+  }
+
+  const localBaseUrl = `http://${host}:${actualPort}`;
+  const client = createRemoteCanvasRelayClient({
+    relayBaseUrl,
+    sessionId,
+    desktopToken,
+    canvasDir,
+    localBaseUrl,
+  });
+  await patchServerDiscovery({
+    remoteCanvas: {
+      enabled: true,
+      relayBaseUrl: client.relayBaseUrl,
+      sessionId,
+      viewerUrl: viewerUrl || null,
+      startedAt: new Date().toISOString(),
+    },
+  });
+  console.log(`BuzzAssist remote canvas session: ${sessionId}`);
+  if (viewerUrl) console.log(`BuzzAssist remote canvas viewer: ${viewerUrl}`);
+  return client;
+}
+
 server.listen(port, host, async () => {
   const actual = server.address();
   const actualPort = typeof actual === "object" && actual ? actual.port : port;
@@ -185,4 +264,7 @@ server.listen(port, host, async () => {
   console.log(`BuzzAssist plugin HTTP MCP endpoint: http://${host}:${actualPort}/mcp`);
   console.log(`BuzzAssist canvas data: ${join(canvasDir, "excalidraw-canvas.json")}`);
   console.log(`BuzzAssist canvas server: ${join(canvasDir, ".server.json")}`);
+  startRemoteCanvasRelay({ actualPort }).catch((error) => {
+    console.warn(`[remote-canvas] disabled: ${error instanceof Error ? error.message : String(error)}`);
+  });
 });

@@ -79,6 +79,40 @@ canvas/excalidraw-view-state.json
 canvas/assets/
 ```
 
+## Remote Canvas
+
+The final remote/mobile design is **BuzzAssist Cloud Relay**, not one ngrok or
+Cloudflare Tunnel per user/session. The local Mac remains the execution
+environment; `https://buzzassist.ai/s/{sessionId}` is the mobile URL that
+relays authenticated viewer and generation requests to the local desktop client
+over an outbound Cloud connection.
+
+Start a remote mobile session from a signed-in local machine:
+
+```bash
+npm run serve -- --remote-canvas
+```
+
+Use a view-only mobile URL when you only want to share progress:
+
+```bash
+npm run serve -- --remote-canvas --remote-canvas-mode view
+```
+
+Or attach the local canvas to an existing Cloud session:
+
+```bash
+npm run serve -- \
+  --remote-canvas-url https://buzzassist.ai \
+  --remote-canvas-session rc_xxx \
+  --remote-canvas-token <desktopToken>
+```
+
+The mobile UI defaults image and video batches to 10 concurrent generations in
+5 columns; 18 requested prompts are processed as 10, then 8.
+
+See [docs/remote-canvas-relay-architecture.md](docs/remote-canvas-relay-architecture.md).
+
 ## Plugin Tools
 
 This plugin installs the user-facing BuzzAssist plugin and includes two MCP-backed Excalidraw entries internally:
