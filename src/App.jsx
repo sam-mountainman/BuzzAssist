@@ -3893,9 +3893,10 @@ export default function App() {
   }, [api, addHydratedAssetFile])
 
   // Hydrate disk-backed file records once the Excalidraw API is ready. The
-  // scene renders immediately; visible images hydrate first, then the rest
-  // warms in the background on local sessions. Tunnel sessions only hydrate
-  // the viewport so ngrok bandwidth is not burned by offscreen images.
+  // scene renders immediately; visible images hydrate first, then the whole
+  // canvas warms in the background — including over the tunnel, since the
+  // Cloudflare tunnel has no bandwidth cap (the old ngrok viewport-only limit
+  // left offscreen images stuck as gray placeholders on phones).
   useEffect(() => {
     if (!api || !initialScene) return
     let cancelled = false
@@ -3908,7 +3909,6 @@ export default function App() {
         await hydrateAssetBackedFiles(initialScene.files, addIfLive, { onlyFileIds: visibleFileIds })
         if (cancelled) return
       }
-      if (isTunnelCanvasRuntime()) return
       await hydrateAssetBackedFiles(initialScene.files, addIfLive)
     }
     run()
