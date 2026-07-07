@@ -1402,6 +1402,36 @@ body {
   .lovart-ai-panel {
     left: 50%;
     width: min(96vw, 520px);
+    max-width: calc(100vw - 16px);
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* The model/settings pills must never spill past the panel on a phone: let
+     the bottom bar wrap and let long pill labels ellipsis instead of pushing
+     the row wider than the screen. */
+  .lovart-ai-bottom {
+    flex-wrap: wrap;
+    row-gap: 8px;
+    overflow: hidden;
+  }
+
+  .lovart-ai-left,
+  .lovart-ai-right {
+    min-width: 0;
+    flex-shrink: 1;
+    max-width: 100%;
+  }
+
+  .lovart-pill {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .lovart-pill > span:not(.menu-check) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
   }
 }
 
