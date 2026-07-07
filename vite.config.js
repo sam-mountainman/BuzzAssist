@@ -23,7 +23,7 @@ import { generateSubtitleSrt } from './lib/subtitleGeneration.mjs'
 import { silenceCutVideo } from './lib/tempoCut.mjs'
 import { getLovartAuthStatus, getLovartModelCosts, saveLovartCredentials } from './lib/lovartMediaGeneration.mjs'
 import { bridgeWorkerAlive, canDriveGui, pasteIntoChatApp, sendChatMessage } from './lib/chatBridge.mjs'
-import { getOrCreateMcpToken, isLocalHostHeader, rejectDisallowedOrigin, rejectRemoteOperator, rejectMissingBearer, setLocalCorsHeaders, writeServerDiscovery } from './lib/canvasServerRuntime.mjs'
+import { getOrCreateMcpToken, rejectDisallowedOrigin, rejectRemoteOperator, rejectMissingBearer, setLocalCorsHeaders, writeServerDiscovery } from './lib/canvasServerRuntime.mjs'
 import { tmpdir } from 'node:os'
 
 const projectDir = resolve(process.env.EXCALIDRAW_PROJECT_DIR ?? process.cwd())
@@ -394,73 +394,6 @@ async function resolveAssetPreview(filePath, fileStat, width) {
   } catch {
     return null // fall back to the original on any generation failure
   }
-}
-
-// Tiny inline LQIP thumbnail (data URI) so an asset-backed image shows
-// instantly over the tunnel — like an embedded video poster — then the client
-// hydrates the full-res version. Cached in-memory keyed by name+mtime.
-const assetThumbnailCache = new Map()
-async function resolveAssetThumbnailDataURL(filePath, fileStat) {
-  if (!PREVIEWABLE_IMAGE_EXTENSIONS.has(extname(filePath).toLowerCase())) return null
-  const cacheKey = `${filePath}:${Math.round(fileStat.mtimeMs)}`
-  if (assetThumbnailCache.has(cacheKey)) return assetThumbnailCache.get(cacheKey)
-  const promise = (async () => {
-    const previewsDir = join(canvasDir, '.asset-previews')
-    await mkdir(previewsDir, { recursive: true })
-    const tmpPath = join(previewsDir, `${basename(filePath)}.${Math.round(fileStat.mtimeMs)}.lqip.webp`)
-    await new Promise((resolveThumb, rejectThumb) => {
-      const child = spawn('ffmpeg', [
-        '-y', '-v', 'error', '-i', filePath,
-        '-vf', "scale='min(48,iw)':-2", '-c:v', 'libwebp', '-quality', '40',
-        tmpPath,
-      ])
-      const timer = setTimeout(() => { child.kill('SIGKILL'); rejectThumb(new Error('thumbnail timed out')) }, 15_000)
-      child.on('error', (error) => { clearTimeout(timer); rejectThumb(error) })
-      child.on('close', (code) => { clearTimeout(timer); code === 0 ? resolveThumb() : rejectThumb(new Error(`ffmpeg ${code}`)) })
-    })
-    const bytes = await readFile(tmpPath)
-    return `data:image/webp;base64,${bytes.toString('base64')}`
-  })().catch(() => null)
-  assetThumbnailCache.set(cacheKey, promise)
-  return promise
-}
-
-// For tunnel viewers, embed an LQIP thumbnail into each asset-backed image
-// file record so images paint instantly (blurry) instead of staying gray while
-// each downloads. codexAssetBacked/codexAssetUrl are preserved so the client
-// still hydrates full-res, and only files whose element carries the asset
-// backing are touched, so a save round-trip restores the original (never bakes
-// in the thumbnail).
-async function injectImageThumbnails(scene) {
-  const files = scene?.files
-  if (!files || typeof files !== 'object' || !Array.isArray(scene?.elements)) return scene
-  const backingByFileId = new Map()
-  for (const element of scene.elements) {
-    const cd = element?.customData
-    if (!element?.fileId || element.type !== 'image') continue
-    if (cd?.codexMediaKind === 'video') continue
-    if (typeof cd?.codexAssetPath === 'string' && cd.codexAssetPath && typeof cd?.codexAssetUrl === 'string' && cd.codexAssetUrl.startsWith(canvasAssetsRoute)) {
-      backingByFileId.set(element.fileId, cd.codexAssetPath)
-    }
-  }
-  await Promise.all(Object.entries(files).map(async ([fileId, file]) => {
-    if (!file || typeof file !== 'object') return
-    const assetUrl = typeof file.dataURL === 'string' && file.dataURL.startsWith(canvasAssetsRoute)
-      ? file.dataURL
-      : (typeof file.codexAssetUrl === 'string' && file.codexAssetUrl.startsWith(canvasAssetsRoute) ? file.codexAssetUrl : '')
-    const assetPath = backingByFileId.get(fileId)
-    if (!assetUrl || !assetPath) return
-    try {
-      const fileStat = await stat(assetPath)
-      if (!fileStat.isFile() || fileStat.size <= 96 * 1024) return
-      const thumb = await resolveAssetThumbnailDataURL(assetPath, fileStat)
-      if (!thumb) return
-      files[fileId] = { ...file, dataURL: thumb, codexAssetBacked: true, codexAssetUrl: assetUrl }
-    } catch {
-      // Leave the record untouched; the client hydrates it normally.
-    }
-  }))
-  return scene
 }
 
 async function serveCanvasAsset(req, res, next) {
@@ -1199,14 +1132,8 @@ function configureCanvasServer(server) {
         try {
           if (req.method === 'GET') {
             try {
-              const scene = normalizeScene(await readJsonFile(canvasFile))
-              // Tunnel viewers get inline LQIP thumbnails so images paint
-              // instantly; local sessions keep the on-disk asset URLs.
-              if (!isLocalHostHeader(req.headers.host)) {
-                await injectImageThumbnails(scene)
-              }
               sendJson(res, 200, {
-                scene,
+                scene: normalizeScene(await readJsonFile(canvasFile)),
                 path: canvasFile,
                 storage: 'single-file',
                 assetsDir: canvasAssetsDir,
