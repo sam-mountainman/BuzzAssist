@@ -62,7 +62,7 @@ test("setup CLI can include Canvas Tunnel output when --tunnel is used", async (
   const stdout = await runSetupWithTunnel("codex");
   assert.match(stdout, /Starting the BuzzAssist Canvas Tunnel/);
   assert.match(stdout, /BUZZASSIST_TUNNEL_URL=https:\/\/example\.ngrok-free\.dev/);
-  assert.match(stdout, /BUZZASSIST_TUNNEL_USER=buzzassist/);
-  assert.match(stdout, /BUZZASSIST_TUNNEL_PASSWORD=<generated>/);
+  assert.match(stdout, /BUZZASSIST_TUNNEL_ACCESS_URL=https:\/\/example\.ngrok-free\.dev\/\?t=<generated>/);
   assert.match(stdout, /BUZZASSIST_TUNNEL_CHECK=ok/);
+  assert.doesNotMatch(stdout, /BUZZASSIST_TUNNEL_PASSWORD=/);
 });

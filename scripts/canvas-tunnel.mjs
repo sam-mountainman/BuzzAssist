@@ -18,6 +18,7 @@ const valueArgs = new Set([
   "--canvas-dir",
   "--local-url",
   "--ngrok-authtoken",
+  "--access-token",
   "--user",
   "--password",
   "--session-name",
@@ -37,6 +38,8 @@ Options:
   --canvas-dir <path>          Canvas data directory. Defaults to <projectDir>/canvas.
   --local-url <url>            Existing local canvas URL. Defaults to canvas/.server.json.
   --ngrok-authtoken <token>    Configure ngrok before starting. Also reads BUZZASSIST_NGROK_AUTHTOKEN or NGROK_AUTHTOKEN.
+  --access-token <token>       URL token for tunnel access. Defaults to a generated token.
+  --basic-auth                 Also enable ngrok Basic Auth. Off by default because some in-app browsers do not show the auth prompt.
   --user <name>                Basic Auth user. Defaults to buzzassist.
   --password <password>        Basic Auth password. Defaults to a generated password.
   --reuse-local                Reuse canvas/.server.json instead of starting a tunnel-ready canvas server.
@@ -132,6 +135,8 @@ function resolveConfig() {
     canvasDir,
     localUrl: readArg("--local-url") || process.env.BUZZASSIST_TUNNEL_LOCAL_URL || "",
     ngrokAuthtoken: readArg("--ngrok-authtoken") || process.env.BUZZASSIST_NGROK_AUTHTOKEN || process.env.NGROK_AUTHTOKEN || "",
+    accessToken: readArg("--access-token") || process.env.BUZZASSIST_TUNNEL_ACCESS_TOKEN || randomBytes(16).toString("hex"),
+    basicAuth: hasArg("--basic-auth") || /^(1|true|yes)$/i.test(String(process.env.BUZZASSIST_TUNNEL_BASIC_AUTH || "")),
     user: readArg("--user") || process.env.BUZZASSIST_TUNNEL_USER || "buzzassist",
     password: readArg("--password") || process.env.BUZZASSIST_TUNNEL_PASSWORD || randomBytes(6).toString("hex"),
     sessionName: readArg("--session-name") || process.env.BUZZASSIST_TUNNEL_TMUX_SESSION || DEFAULT_TUNNEL_SESSION,
@@ -241,6 +246,7 @@ function buildCanvasCommand(config, paths, { port, allowedOrigin } = {}) {
   return [
     `cd ${shellQuote(repoRoot)}`,
     originExport,
+    `export EXCALIDRAW_TUNNEL_ACCESS_TOKEN=${shellQuote(config.accessToken)}`,
     `export EXCALIDRAW_PROJECT_DIR=${shellQuote(config.projectDir)}`,
     `export EXCALIDRAW_CANVAS_DIR=${shellQuote(config.canvasDir)}`,
     `exec ${shellQuote(process.execPath)} ${shellQuote(join(repoRoot, "scripts", "serve-canvas.mjs"))} ${shellQuote(config.projectDir)}${portArgs} >> ${shellQuote(paths.serverLogFile)} 2>&1`,
@@ -334,8 +340,11 @@ function printStatus(status, { active }) {
   }
   console.log(`Canvas tunnel: ${active ? "running" : "not running"}`);
   console.log(`URL: ${status.publicUrl}`);
-  console.log(`Basic Auth User: ${status.user}`);
-  console.log(`Basic Auth Password: ${status.password}`);
+  if (status.accessUrl) console.log(`Access URL: ${status.accessUrl}`);
+  if (status.basicAuth) {
+    console.log(`Basic Auth User: ${status.user}`);
+    console.log(`Basic Auth Password: ${status.password}`);
+  }
   console.log(`Local canvas: ${status.localBaseUrl}`);
   console.log(`Status file: ${status.statusFile}`);
   console.log(`Log file: ${status.logFile}`);
@@ -379,8 +388,7 @@ async function start() {
     [
       "exec ngrok http",
       config.compression ? "--compression" : "",
-      `--basic-auth ${shellQuote(`${config.user}:${config.password}`)}`,
-      "--host-header=rewrite",
+      config.basicAuth ? `--basic-auth ${shellQuote(`${config.user}:${config.password}`)}` : "",
       `--log=${shellQuote(paths.logFile)}`,
       "--log-format=json",
       shellQuote(localBaseUrl),
@@ -389,6 +397,7 @@ async function start() {
   await tmuxNewSession(config.sessionName, tunnelCommand);
 
   const publicUrl = await waitForPublicUrl(paths);
+  const accessUrl = `${publicUrl.replace(/\/+$/, "")}/?t=${encodeURIComponent(config.accessToken)}`;
 
   // Now that the public URL exists, lock the managed canvas server's CORS
   // allow-list to exactly that origin (replacing the local-only default) so
@@ -410,7 +419,10 @@ async function start() {
     sessionName: config.sessionName,
     canvasSessionName: config.canvasSessionName,
     publicUrl,
+    accessUrl,
     localBaseUrl,
+    accessToken: config.accessToken,
+    basicAuth: config.basicAuth,
     user: config.user,
     password: config.password,
     compression: config.compression,

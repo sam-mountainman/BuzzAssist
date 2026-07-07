@@ -40,7 +40,7 @@ import { readServerDiscovery } from "../lib/canvasServerRuntime.mjs";
 import { tmpdir } from "node:os";
 
 const SERVER_NAME = "BuzzAssist Excalidraw Plugin Tools";
-const SERVER_VERSION = "0.1.3";
+const SERVER_VERSION = "0.1.4";
 const TOOL_READ_ME = "read_me";
 const TOOL_CREATE_VIEW = "create_view";
 const TOOL_GET_SELECTION = "get_excalidraw_selection";
@@ -69,7 +69,7 @@ const MEDIA_GENERATION_AGENT_INSTRUCTIONS = [
   "Project-local Excalidraw canvas tools. Use read_me/create_view for diagrams, get_excalidraw_selection before acting on selected items, and insert_* for local assets.",
   "Generation/subtitle/silence-cut tools require confirmedSettings=true unless the user's request already specified all relevant settings; use payloadPreview or read_me for workflow details.",
   "Canvas tools auto-start the local static canvas server and write canvas/.server.json with the dynamic URL and HTTP tool endpoint bearer token.",
-  "For phone/mobile access to the exact same full Excalidraw UI, use buzzassist_canvas_tunnel_start/status/stop. This starts an ngrok Canvas Tunnel with Basic Auth; Remote Canvas is not required for same-UI access.",
+  "For phone/mobile access to the exact same full Excalidraw UI, use buzzassist_canvas_tunnel_start/status/stop. This starts an ngrok Canvas Tunnel with a generated access URL; Remote Canvas is not required for same-UI access.",
 ].join(" ");
 
 // Project-common 用語辞書 (canvas/subtitle-glossary.json) merges into every
@@ -194,6 +194,8 @@ async function runCanvasTunnelCommand(action, args = {}) {
     if (args.reuseLocal === true) commandArgs.push("--reuse-local");
     if (nonEmptyString(args.localUrl)) commandArgs.push("--local-url", nonEmptyString(args.localUrl));
     if (nonEmptyString(args.ngrokAuthtoken)) commandArgs.push("--ngrok-authtoken", nonEmptyString(args.ngrokAuthtoken));
+    if (nonEmptyString(args.accessToken)) commandArgs.push("--access-token", nonEmptyString(args.accessToken));
+    if (args.basicAuth === true) commandArgs.push("--basic-auth");
     if (nonEmptyString(args.user)) commandArgs.push("--user", nonEmptyString(args.user));
     if (nonEmptyString(args.password)) commandArgs.push("--password", nonEmptyString(args.password));
     if (args.compression === false) commandArgs.push("--no-compression");
@@ -1792,15 +1794,17 @@ function toolDefinitions() {
     {
       name: TOOL_CANVAS_TUNNEL_START,
       title: "Start BuzzAssist Canvas Tunnel",
-      description: "Start an ngrok tunnel for the same full local Excalidraw canvas UI, protected by Basic Auth. Use for phone/mobile access when the user wants the exact local canvas UI.",
+      description: "Start an ngrok tunnel for the same full local Excalidraw canvas UI, protected by a generated access URL. Use for phone/mobile access when the user wants the exact local canvas UI.",
       inputSchema: {
         type: "object",
         properties: {
           projectDir: { type: "string", description: "Absolute project directory containing canvas/." },
           canvasDir: { type: "string", description: "Absolute canvas directory. Overrides projectDir." },
           ngrokAuthtoken: { type: "string", description: "Optional personal ngrok authtoken to configure before starting." },
-          user: { type: "string", description: "Basic Auth user. Defaults to buzzassist." },
-          password: { type: "string", description: "Basic Auth password. Defaults to a generated password." },
+          accessToken: { type: "string", description: "Optional URL access token. Defaults to a generated token." },
+          basicAuth: { type: "boolean", description: "Also enable ngrok Basic Auth. Defaults to false because some in-app browsers do not show the auth prompt." },
+          user: { type: "string", description: "Basic Auth user when --basic-auth is enabled. Defaults to buzzassist." },
+          password: { type: "string", description: "Basic Auth password when --basic-auth is enabled. Defaults to a generated password." },
           localUrl: { type: "string", description: "Existing local canvas URL to expose. Usually omitted so the tool starts a tunnel-ready canvas server." },
           reuseLocal: { type: "boolean", description: "Reuse canvas/.server.json instead of starting a tunnel-ready canvas server. Use only when the local server already allows the tunnel origin." },
           restart: { type: "boolean", description: "Restart an existing tunnel. Defaults to false." },
@@ -1818,7 +1822,7 @@ function toolDefinitions() {
     {
       name: TOOL_CANVAS_TUNNEL_STATUS,
       title: "BuzzAssist Canvas Tunnel Status",
-      description: "Return the current ngrok Canvas Tunnel URL, Basic Auth credentials, local canvas URL, and status file path.",
+      description: "Return the current ngrok Canvas Tunnel URL, access URL, optional Basic Auth credentials, local canvas URL, and status file path.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2242,7 +2246,7 @@ async function handleToolCall(params, progress = () => {}) {
     progress(1, 1, "Canvas Tunnel ready");
     const status = result.status || {};
     const text = status.publicUrl
-      ? `Canvas Tunnel is running: ${status.publicUrl} (Basic Auth: ${status.user} / ${status.password}). Local canvas: ${status.localBaseUrl}`
+      ? `Canvas Tunnel is running. Open: ${status.accessUrl || status.publicUrl}. Local canvas: ${status.localBaseUrl}${status.basicAuth ? ` (Basic Auth: ${status.user} / ${status.password})` : ""}`
       : result.stdout || "Canvas Tunnel start completed.";
     return {
       content: [{ type: "text", text }],
@@ -2254,7 +2258,7 @@ async function handleToolCall(params, progress = () => {}) {
     const result = await runCanvasTunnelCommand("status", params.arguments ?? {});
     const status = result.status || {};
     const text = status.publicUrl
-      ? `Canvas Tunnel ${status.ok ? "running" : "stopped"}: ${status.publicUrl} (Basic Auth: ${status.user} / ${status.password}). Local canvas: ${status.localBaseUrl}`
+      ? `Canvas Tunnel ${status.ok ? "running" : "stopped"}. Open: ${status.accessUrl || status.publicUrl}. Local canvas: ${status.localBaseUrl}${status.basicAuth ? ` (Basic Auth: ${status.user} / ${status.password})` : ""}`
       : result.stdout || "Canvas Tunnel is not running.";
     return {
       content: [{ type: "text", text }],

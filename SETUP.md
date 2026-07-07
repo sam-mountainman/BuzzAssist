@@ -32,8 +32,8 @@ What the script does:
 - for Antigravity: writes `.agents/mcp_config.json` and a managed BuzzAssist block in `GEMINI.md` in the active project
 - starts the local canvas service and prints `BUZZASSIST_CANVAS_URL=...`
 - checks the browser canvas and prints `BUZZASSIST_CANVAS_CHECK=ok`
-- with `--tunnel`, starts ngrok and prints `BUZZASSIST_TUNNEL_URL=...`,
-  `BUZZASSIST_TUNNEL_USER=...`, and `BUZZASSIST_TUNNEL_PASSWORD=...`
+- with `--tunnel`, starts ngrok and prints `BUZZASSIST_TUNNEL_URL=...` and
+  `BUZZASSIST_TUNNEL_ACCESS_URL=...`
 
 The script intentionally leaves other agents untouched. Use `--all-agents` only when the user explicitly asks to configure every supported host.
 
@@ -43,6 +43,5 @@ After setup, open the printed URL in the host in-app browser. If browser control
 canvas/.server.json
 ```
 
-For mobile access, open `BUZZASSIST_TUNNEL_URL` on the phone and enter the
-printed Basic Auth credentials. Stop it with `npm run tunnel:stop` or the
-`buzzassist_canvas_tunnel_stop` MCP tool.
+For mobile access, open `BUZZASSIST_TUNNEL_ACCESS_URL` on the phone. Stop it
+with `npm run tunnel:stop` or the `buzzassist_canvas_tunnel_stop` MCP tool.

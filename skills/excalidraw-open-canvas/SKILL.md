@@ -53,7 +53,7 @@ them to run:
 ngrok config add-authtoken <token>
 ```
 
-The tunnel prints an ngrok URL and Basic Auth credentials. Give those to the
+The tunnel prints an ngrok URL and an Access URL. Give the Access URL to the
 user for the phone. Continue to open the local `BUZZASSIST_CANVAS_URL` in the
 current host's in-app browser for desktop work. Do not use the OS/default
 browser unless the user explicitly asks.

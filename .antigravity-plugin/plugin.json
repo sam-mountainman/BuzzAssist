@@ -1,6 +1,6 @@
 {
   "name": "buzzassist",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "displayName": "BuzzAssist",
   "description": "BuzzAssist canvas, media generation, and ngrok Canvas Tunnel plugin for Antigravity.",
   "author": {

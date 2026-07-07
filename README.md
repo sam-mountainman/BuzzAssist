@@ -42,14 +42,13 @@ With `--tunnel`, it also starts ngrok and prints:
 
 ```text
 BUZZASSIST_TUNNEL_URL=https://<slug>.ngrok-free.dev
-BUZZASSIST_TUNNEL_USER=buzzassist
-BUZZASSIST_TUNNEL_PASSWORD=<generated>
+BUZZASSIST_TUNNEL_ACCESS_URL=https://<slug>.ngrok-free.dev/?t=<generated>
 BUZZASSIST_TUNNEL_CHECK=ok
 ```
 
 After that, the current host agent should open `BUZZASSIST_CANVAS_URL` in its
-in-app browser. Use `BUZZASSIST_TUNNEL_URL` from a phone or other device. If
-browser control is unavailable, use the URL from
+in-app browser. Use `BUZZASSIST_TUNNEL_ACCESS_URL` from a phone or other
+device. If browser control is unavailable, use the URL from
 `canvas/.server.json`; setup is considered complete when
 `BUZZASSIST_CANVAS_CHECK=ok` is printed.
 
@@ -115,17 +114,19 @@ npm run tunnel:status
 npm run tunnel:stop
 ```
 
-The tunnel command prints the ngrok URL and Basic Auth credentials. This exposes
-a tunnel-ready local canvas server that shares the same canvas data. Enter the
-Basic Auth credentials in the browser prompt instead of embedding them in the
-URL, and avoid editing heavily from desktop and phone at the same time.
+The tunnel command prints the ngrok URL and an Access URL with a generated
+token. Open the Access URL on the phone; it sets a same-site cookie and then
+loads the same full canvas UI. Avoid editing heavily from desktop and phone at
+the same time.
 
 The tunnel is locked down to that one session: CORS is pinned to the exact ngrok
 URL (no `*.ngrok*` wildcard), and host-only endpoints — desktop chat keystroke
 injection (`/api/chat/send`), the OAuth login browser flow, and outbound probes —
 reject any request that arrives from the tunnel origin, so they stay usable only
-from the local browser. `npm run tunnel:stop` also stops the tunnel-managed
-canvas server it started, not just ngrok.
+from the local browser. The tunnel also requires the generated access token for
+non-local hosts. `npm run tunnel:stop` stops the tunnel-managed canvas server it
+started, not just ngrok. If you explicitly want browser-native Basic Auth too,
+start with `npm run tunnel:start -- --basic-auth`.
 
 The MCP plugin also exposes:
 

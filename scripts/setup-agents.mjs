@@ -560,7 +560,7 @@ Configure Cursor only. Do not configure Codex, Claude Code, or Antigravity unles
 
 After the script prints \`BUZZASSIST_CANVAS_URL=...\` and \`BUZZASSIST_CANVAS_CHECK=ok\`, open that URL in Cursor's in-app browser or browser preview if available. If browser control is unavailable, report the URL and say setup completed because the canvas check passed.
 
-If the user wants phone/mobile access or the exact same Excalidraw UI outside this machine, run setup with \`--tunnel\` or run \`npm run tunnel:start -- --project-dir <active-user-project-dir>\`. If ngrok is not configured, ask for the user's personal ngrok authtoken or tell them to run \`ngrok config add-authtoken <token>\`. Give the printed tunnel URL and Basic Auth credentials for the phone.
+If the user wants phone/mobile access or the exact same Excalidraw UI outside this machine, run setup with \`--tunnel\` or run \`npm run tunnel:start -- --project-dir <active-user-project-dir>\`. If ngrok is not configured, ask for the user's personal ngrok authtoken or tell them to run \`ngrok config add-authtoken <token>\`. Give the printed \`BUZZASSIST_TUNNEL_ACCESS_URL\` for the phone.
 `;
 }
 
@@ -573,7 +573,7 @@ When the user gives this repository URL and asks to set it up, do the setup end 
 2. Run \`node scripts/setup-agents.mjs --agent antigravity --project-dir <active-user-project-dir>\` from the repository root. If there is no separate active project, use this repository root as the project dir.
 3. The script must configure Antigravity only. Do not configure Codex, Claude Code, or Cursor unless the user explicitly asks for those hosts too.
 4. After the script prints \`BUZZASSIST_CANVAS_URL=...\` and \`BUZZASSIST_CANVAS_CHECK=ok\`, open that URL in Antigravity's in-app browser if available. If browser control is unavailable, report the URL and say that setup still completed because the canvas check passed.
-5. If the user wants phone/mobile access or says they want the exact same Excalidraw UI outside the machine, use Canvas Tunnel: run setup with \`--tunnel\` or run \`npm run tunnel:start -- --project-dir <active-user-project-dir>\`. If ngrok is not configured, ask the user for their personal ngrok authtoken or tell them to run \`ngrok config add-authtoken <token>\`. Give the printed tunnel URL and Basic Auth credentials for the phone.
+5. If the user wants phone/mobile access or says they want the exact same Excalidraw UI outside the machine, use Canvas Tunnel: run setup with \`--tunnel\` or run \`npm run tunnel:start -- --project-dir <active-user-project-dir>\`. If ngrok is not configured, ask the user for their personal ngrok authtoken or tell them to run \`ngrok config add-authtoken <token>\`. Give the printed \`BUZZASSIST_TUNNEL_ACCESS_URL\` for the phone.
 
 Manual fallback:
 
@@ -758,6 +758,7 @@ async function launchCanvasTunnel() {
     return {
       ok: true,
       publicUrl: "https://example.ngrok-free.dev",
+      accessUrl: "https://example.ngrok-free.dev/?t=<generated>",
       localBaseUrl: "http://127.0.0.1:43219",
       user: "buzzassist",
       password: "<generated>",
@@ -823,10 +824,13 @@ async function main() {
   }
   if (tunnelStatus?.publicUrl) {
     console.log(`BUZZASSIST_TUNNEL_URL=${tunnelStatus.publicUrl}`);
-    console.log(`BUZZASSIST_TUNNEL_USER=${tunnelStatus.user}`);
-    console.log(`BUZZASSIST_TUNNEL_PASSWORD=${tunnelStatus.password}`);
+    if (tunnelStatus.accessUrl) console.log(`BUZZASSIST_TUNNEL_ACCESS_URL=${tunnelStatus.accessUrl}`);
+    if (tunnelStatus.basicAuth) {
+      console.log(`BUZZASSIST_TUNNEL_USER=${tunnelStatus.user}`);
+      console.log(`BUZZASSIST_TUNNEL_PASSWORD=${tunnelStatus.password}`);
+    }
     console.log(`BUZZASSIST_TUNNEL_CHECK=${tunnelStatus.ok ? "ok" : "needs-attention"}`);
-    console.log("Open BUZZASSIST_TUNNEL_URL on the phone to use the same full Excalidraw canvas UI. Enter the Basic Auth user/password when prompted.");
+    console.log("Open BUZZASSIST_TUNNEL_ACCESS_URL on the phone to use the same full Excalidraw canvas UI. Basic Auth is only needed when the tunnel was started with --basic-auth.");
   }
 }
 
