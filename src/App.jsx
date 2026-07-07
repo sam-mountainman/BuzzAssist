@@ -3980,6 +3980,43 @@ export default function App() {
     }
   }, [api, initialScene, addHydratedAssetFile])
 
+  // Over the tunnel, a service worker keeps a persistent asset cache so repeat
+  // visits paint instantly (even after the HTTP cache is evicted) and offscreen
+  // images can be prefetched. Local sessions skip it so freshly generated
+  // images are never served stale.
+  useEffect(() => {
+    if (!isTunnelCanvasRuntime() || typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
+    navigator.serviceWorker.register('/canvas-sw.js', { updateViaCache: 'none' }).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    if (!isTunnelCanvasRuntime() || !initialScene || typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
+    const previewUrl = (file) => {
+      const base =
+        typeof file.codexAssetUrl === 'string' && file.codexAssetUrl.startsWith(CANVAS_ASSETS_ROUTE)
+          ? file.codexAssetUrl
+          : file.dataURL
+      if (typeof base !== 'string' || !base.startsWith(CANVAS_ASSETS_ROUTE)) return ''
+      return /\.(png|jpe?g|webp)$/i.test(base.split('?')[0]) ? `${base}?w=1600` : base
+    }
+    const urls = [...new Set(
+      Object.values(initialScene.files ?? {})
+        .filter((file) => isAssetBackedFileRecord(file))
+        .map(previewUrl)
+        .filter(Boolean)
+    )]
+    if (urls.length === 0) return
+    let cancelled = false
+    navigator.serviceWorker.ready
+      .then((registration) => {
+        if (!cancelled) registration.active?.postMessage({ type: 'prefetch', urls })
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [initialScene])
+
   const handleChange = useCallback(
     (elements, appState, files) => {
       const shouldSkipChangeEffects = suppressNextChangeRef.current
