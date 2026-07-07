@@ -69,6 +69,77 @@ const VIDEO_POSTER_CAPTURE_MAX_WIDTH = 960
 const VIDEO_POSTER_SCORE_SAMPLE_SIZE = 48
 const VIDEO_POSTER_GOOD_SCORE = 42
 
+function currentTunnelAccessToken() {
+  if (typeof window === 'undefined') return ''
+  try {
+    const params = new URLSearchParams(window.location.search)
+    return params.get('t') || params.get('token') || ''
+  } catch {
+    return ''
+  }
+}
+
+function isLocalCanvasHostname(hostname) {
+  const normalized = String(hostname || '').toLowerCase()
+  return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1' || normalized === '[::1]'
+}
+
+function isTunnelCanvasRuntime() {
+  if (typeof window === 'undefined') return false
+  return !isLocalCanvasHostname(window.location.hostname)
+}
+
+function canvasRequestInfo(input) {
+  if (typeof window === 'undefined' || (typeof input !== 'string' && !(input instanceof URL))) {
+    return { url: input, sameOrigin: false }
+  }
+
+  const raw = String(input)
+  try {
+    const url = new URL(raw, window.location.href)
+    const sameOrigin = url.origin === window.location.origin
+    const localCanvasUrl =
+      (url.protocol === 'http:' || url.protocol === 'https:') &&
+      isLocalCanvasHostname(url.hostname) &&
+      (url.pathname.startsWith('/api/') || url.pathname.startsWith(CANVAS_ASSETS_ROUTE))
+
+    if (!sameOrigin && !localCanvasUrl) return { url: input, sameOrigin: false }
+
+    if (localCanvasUrl && !isLocalCanvasHostname(window.location.hostname)) {
+      url.protocol = window.location.protocol
+      url.host = window.location.host
+    }
+
+    const token = currentTunnelAccessToken()
+    if (token && !url.searchParams.has('t') && !url.searchParams.has('token')) {
+      url.searchParams.set('t', token)
+    }
+
+    const nextUrl = url.origin === window.location.origin
+      ? `${url.pathname}${url.search}${url.hash}`
+      : url.href
+    return { url: nextUrl, sameOrigin: url.origin === window.location.origin }
+  } catch {
+    return { url: input, sameOrigin: false }
+  }
+}
+
+function canvasFetch(input, init) {
+  const request = canvasRequestInfo(input)
+  if (!request.sameOrigin) return window.fetch(request.url, init)
+  return window.fetch(request.url, {
+    ...(init ?? {}),
+    credentials: init?.credentials ?? 'include'
+  })
+}
+
+function createCanvasEventSource(url) {
+  const request = canvasRequestInfo(url)
+  return request.sameOrigin
+    ? new EventSource(request.url, { withCredentials: true })
+    : new EventSource(request.url)
+}
+
 if (typeof window !== 'undefined' && !window.__lovartClipboardShortcutInstalled) {
   window.__lovartClipboardShortcutInstalled = true
   const onEarlyClipboardEvent = (event) => {
@@ -528,7 +599,7 @@ async function saveUrlWithPicker(url, fileName = 'download', fallbackUrl = url) 
         suggestedName,
         types: filePickerTypesForName(suggestedName)
       })
-      const response = await fetch(url)
+      const response = await canvasFetch(url)
       if (!response.ok) throw new Error(`Download failed: ${response.status}`)
       const writable = await handle.createWritable()
       if (response.body?.pipeTo) {
@@ -1092,6 +1163,55 @@ function isAssetBackedFileRecord(file) {
   )
 }
 
+function runtimeCanvasAssetUrl(value) {
+  if (typeof value !== 'string') return value
+  if (value.startsWith(CANVAS_ASSETS_ROUTE)) return canvasRequestInfo(value).url
+  try {
+    const url = new URL(value, window.location.href)
+    if (url.pathname.startsWith(CANVAS_ASSETS_ROUTE)) return canvasRequestInfo(value).url
+  } catch {
+    // Leave non-URL values unchanged.
+  }
+  return value
+}
+
+function persistedCanvasAssetUrl(value) {
+  if (typeof value !== 'string') return value
+  try {
+    const url = new URL(value, window.location.href)
+    if (!url.pathname.startsWith(CANVAS_ASSETS_ROUTE)) return value
+    url.searchParams.delete('t')
+    url.searchParams.delete('token')
+    return `${url.pathname}${url.search}${url.hash}`
+  } catch {
+    return value
+  }
+}
+
+function withRuntimeAssetBackedFiles(files) {
+  if (!files || typeof files !== 'object') return files
+  let changed = false
+  const next = {}
+  for (const [id, file] of Object.entries(files)) {
+    if (!isAssetBackedFileRecord(file)) {
+      next[id] = file
+      continue
+    }
+    const runtimeUrl = runtimeCanvasAssetUrl(file.dataURL || file.codexAssetUrl)
+    if (runtimeUrl && runtimeUrl !== file.dataURL) {
+      next[id] = { ...file, dataURL: runtimeUrl }
+      changed = true
+    } else {
+      next[id] = file
+    }
+  }
+  return changed ? next : files
+}
+
+function withRuntimeAssetBackedScene(scene) {
+  return { ...scene, files: withRuntimeAssetBackedFiles(scene.files) }
+}
+
 function assetBackedFileIds(files) {
   return new Set(
     Object.entries(files ?? {})
@@ -1131,18 +1251,19 @@ function readBlobAsDataURL(blob, url) {
 }
 
 function fetchAssetDataURL(url) {
-  let pending = assetDataURLCache.get(url)
+  const assetUrl = canvasRequestInfo(url).url
+  let pending = assetDataURLCache.get(assetUrl)
   if (pending) return pending
   pending = (async () => {
-    const response = await fetch(url)
-    if (!response.ok) throw new Error(`Failed to load asset ${url}: ${response.status}`)
+    const response = await canvasFetch(assetUrl)
+    if (!response.ok) throw new Error(`Failed to load asset ${assetUrl}: ${response.status}`)
     const blob = await response.blob()
-    return readBlobAsDataURL(blob, url)
+    return readBlobAsDataURL(blob, assetUrl)
   })()
   pending.catch(() => {
-    if (assetDataURLCache.get(url) === pending) assetDataURLCache.delete(url)
+    if (assetDataURLCache.get(assetUrl) === pending) assetDataURLCache.delete(assetUrl)
   })
-  assetDataURLCache.set(url, pending)
+  assetDataURLCache.set(assetUrl, pending)
   return pending
 }
 
@@ -1167,7 +1288,7 @@ async function hydrateAssetBackedFiles(files, onHydrated, options = {}) {
           : file.dataURL
       try {
         const dataURL = await fetchAssetDataURL(url)
-        onHydrated({ ...file, dataURL, codexAssetBacked: true, codexAssetUrl: url })
+        onHydrated({ ...file, dataURL, codexAssetBacked: true, codexAssetUrl: persistedCanvasAssetUrl(url) })
       } catch (error) {
         console.error(error)
       }
@@ -1238,7 +1359,7 @@ function stripAssetBackedFilesForSave(elements, files) {
       typeof customData.codexAssetUrl === 'string' && customData.codexAssetUrl.startsWith(CANVAS_ASSETS_ROUTE) &&
       !assetUrlByFileId.has(element.fileId)
     ) {
-      assetUrlByFileId.set(element.fileId, customData.codexAssetUrl)
+      assetUrlByFileId.set(element.fileId, persistedCanvasAssetUrl(customData.codexAssetUrl))
     }
   }
   let changed = false
@@ -1249,18 +1370,22 @@ function stripAssetBackedFilesForSave(elements, files) {
       file?.codexAssetBacked === true &&
       typeof file.codexAssetUrl === 'string' &&
       file.codexAssetUrl.startsWith(CANVAS_ASSETS_ROUTE)
-        ? file.codexAssetUrl
+        ? persistedCanvasAssetUrl(file.codexAssetUrl)
         : null
-    if ((!inline && !markedUrl) || videoFileIds.has(id) || previewFileIds.has(id)) {
+    const dataAssetUrl =
+      typeof file?.dataURL === 'string' && file.dataURL.startsWith(CANVAS_ASSETS_ROUTE)
+        ? persistedCanvasAssetUrl(file.dataURL)
+        : null
+    if ((!inline && !markedUrl && !dataAssetUrl) || videoFileIds.has(id) || previewFileIds.has(id)) {
       next[id] = file
       continue
     }
-    const assetUrl = markedUrl || assetUrlByFileId.get(id) || null
+    const assetUrl = markedUrl || assetUrlByFileId.get(id) || dataAssetUrl || null
     if (!assetUrl) {
       next[id] = file
       continue
     }
-    next[id] = { ...file, dataURL: assetUrl, codexAssetBacked: true }
+    next[id] = { ...file, dataURL: assetUrl, codexAssetUrl: assetUrl, codexAssetBacked: true }
     changed = true
   }
   return changed ? next : files
@@ -1806,7 +1931,7 @@ function normalizeAssetList(value) {
       const displayURL = url || path || ''
       const rawThumbnail = typeof item.thumbnail === 'string' ? item.thumbnail : ''
       const thumbnail = rawThumbnail.startsWith('data:image/')
-        ? rawThumbnail
+        ? displayURL || rawThumbnail
         : rawThumbnail && !rawThumbnail.startsWith('data:')
         ? item.thumbnail
         : displayURL
@@ -2369,7 +2494,7 @@ function frameCustomDataFromForm(kind, form) {
       subtitleScriptText: form.subtitleScriptText,
       subtitleScriptName: form.subtitleScriptName,
       subtitleGlossary: form.subtitleGlossary,
-      subtitleAudioAsset: form.subtitleAudio || null
+      subtitleAudioAsset: normalizeAssetList(form.subtitleAudio ? [form.subtitleAudio] : [])[0] ?? null
     }
   }
   if (kind === 'silenceCut') {
@@ -2385,8 +2510,8 @@ function frameCustomDataFromForm(kind, form) {
       silenceCutThresholdAuto: form.silenceCutThresholdAuto,
       silenceCutPreMarginSeconds: form.silenceCutPreMarginSeconds,
       silenceCutPostMarginSeconds: form.silenceCutPostMarginSeconds,
-      silenceCutVideoAsset: form.silenceCutVideo || null,
-      silenceCutOutputAsset: form.silenceCutOutput || null
+      silenceCutVideoAsset: normalizeAssetList(form.silenceCutVideo ? [form.silenceCutVideo] : [])[0] ?? null,
+      silenceCutOutputAsset: normalizeAssetList(form.silenceCutOutput ? [form.silenceCutOutput] : [])[0] ?? null
     }
   }
   if (kind === 'lovart') {
@@ -2408,8 +2533,8 @@ function frameCustomDataFromForm(kind, form) {
         videoDuration: form.duration,
         videoResolution: form.resolution,
         videoTab: form.videoTab,
-        videoStartFrameAsset: form.videoStartFrame || null,
-        videoEndFrameAsset: form.videoEndFrame || null,
+        videoStartFrameAsset: normalizeAssetList(form.videoStartFrame ? [form.videoStartFrame] : [])[0] ?? null,
+        videoEndFrameAsset: normalizeAssetList(form.videoEndFrame ? [form.videoEndFrame] : [])[0] ?? null,
         videoReferenceImages: normalizeAssetList(form.videoReferenceImages),
         videoReferenceVideos: normalizeAssetList(form.videoReferenceVideos),
         videoReferenceAudios: normalizeAssetList(form.videoReferenceAudios),
@@ -2675,7 +2800,7 @@ function fetchSrtLines(url) {
   let pending = srtTextCache.get(url)
   if (pending) return pending
   pending = (async () => {
-    const response = await fetch(url)
+    const response = await canvasFetch(url)
     if (!response.ok) throw new Error(`Failed to load subtitles ${url}: ${response.status}`)
     const lines = splitSrtLines(await response.text())
     srtLinesCache.set(url, lines)
@@ -3226,7 +3351,7 @@ export default function App() {
     setChatSendStatus('sending')
     try {
       // Step 1: resolve asset URLs to absolute paths server-side.
-      const resolveResponse = await fetch('/api/chat/send', {
+      const resolveResponse = await canvasFetch('/api/chat/send', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ app: '', text, assetUrls, assetItems })
@@ -3246,7 +3371,7 @@ export default function App() {
         return
       }
       // Step 3: attach into the chat app (open -a) / activate it.
-      const response = await fetch('/api/chat/send', {
+      const response = await canvasFetch('/api/chat/send', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ app, text, assetUrls, assetItems, autoSend })
@@ -3286,7 +3411,7 @@ export default function App() {
   const saveGlossaryTerms = async () => {
     setGlossarySaving(true)
     try {
-      const response = await fetch('/api/subtitle-glossary', {
+      const response = await canvasFetch('/api/subtitle-glossary', {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ terms: glossaryTerms ?? [] })
@@ -3309,11 +3434,11 @@ export default function App() {
   const [selectedGeneratedResult, setSelectedGeneratedResult] = useState(null)
 
   useEffect(() => {
-    fetch('/api/subtitle-glossary')
+    canvasFetch('/api/subtitle-glossary')
       .then((response) => response.json())
       .then((payload) => setGlossaryTerms(Array.isArray(payload.terms) ? payload.terms : []))
       .catch(() => setGlossaryTerms([]))
-    fetch('/api/lovart/auth-status')
+    canvasFetch('/api/lovart/auth-status')
       .then((response) => response.json())
       .then(setLovartAuth)
       .catch(() => setLovartAuth({ configured: false }))
@@ -3361,17 +3486,19 @@ export default function App() {
   const lastSyncedFingerprintRef = useRef('')
   const pendingOverlaySceneRef = useRef(null)
   const overlayRefreshFrameRef = useRef(0)
+  const assetHydrationTimerRef = useRef(0)
 
   useEffect(() => {
     const controller = new AbortController()
 
     async function loadCanvas() {
       try {
-        const response = await fetch(CANVAS_ENDPOINT, { signal: controller.signal })
+        const response = await canvasFetch(CANVAS_ENDPOINT, { signal: controller.signal })
         if (!response.ok) throw new Error(`Failed to load canvas: ${response.status}`)
         const payload = await response.json()
-        const scene = normalizeScene(payload.scene)
-        lastSyncedFingerprintRef.current = sceneFingerprint(scene)
+        const diskScene = normalizeScene(payload.scene)
+        const scene = withRuntimeAssetBackedScene(diskScene)
+        lastSyncedFingerprintRef.current = sceneFingerprint(diskScene)
         latestSceneRef.current = scene
         previousGeneratorFrameIdsRef.current = new Set(scene.elements.filter(isGeneratorFrame).map((element) => element.id))
         setInitialScene(scene)
@@ -3399,7 +3526,7 @@ export default function App() {
 
     async function loadCapabilities() {
       try {
-        const response = await fetch(GENERATION_CAPABILITIES_ENDPOINT, { signal: controller.signal })
+        const response = await canvasFetch(GENERATION_CAPABILITIES_ENDPOINT, { signal: controller.signal })
         if (response.ok) setCapabilities(await response.json())
       } catch (error) {
         if (error.name !== 'AbortError') console.error(error)
@@ -3467,7 +3594,7 @@ export default function App() {
     lastSelectionRef.current = serialized
 
     try {
-      await fetch(SELECTION_ENDPOINT, {
+      await canvasFetch(SELECTION_ENDPOINT, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: serialized
@@ -3503,7 +3630,7 @@ export default function App() {
     const persistedFingerprint = sceneFingerprint(persisted)
     try {
       if (persistedFingerprint !== lastSyncedFingerprintRef.current) {
-        const canvasResponse = await fetch(CANVAS_ENDPOINT, {
+        const canvasResponse = await canvasFetch(CANVAS_ENDPOINT, {
           method: 'PUT',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(persisted)
@@ -3513,7 +3640,7 @@ export default function App() {
         // ignored instead of clobbering newer local edits.
         lastSyncedFingerprintRef.current = persistedFingerprint
       }
-      const viewResponse = await fetch(VIEW_STATE_ENDPOINT, {
+      const viewResponse = await canvasFetch(VIEW_STATE_ENDPOINT, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(getViewState(scene.appState))
@@ -3586,6 +3713,7 @@ export default function App() {
       window.cancelAnimationFrame(overlayRefreshFrameRef.current)
       overlayRefreshFrameRef.current = 0
     }
+    window.clearTimeout(assetHydrationTimerRef.current)
     pendingOverlaySceneRef.current = null
   }, [])
 
@@ -3747,17 +3875,46 @@ export default function App() {
     suppressNextChangeRef.current = true
     api.updateScene({
       elements: restoredElements,
+      files: currentFiles,
       captureUpdate: CaptureUpdateAction.NEVER
     })
     refreshOverlayStates(nextScene)
     if (restoredStatus) scheduleCanvasSave(nextScene)
   }, [api, refreshOverlayStates, scheduleCanvasSave])
 
+  const scheduleVisibleAssetHydration = useCallback((scene) => {
+    if (!api || !scene || !isTunnelCanvasRuntime()) return
+    window.clearTimeout(assetHydrationTimerRef.current)
+    assetHydrationTimerRef.current = window.setTimeout(() => {
+      const visibleFileIds = visibleAssetBackedImageFileIds(scene, 240)
+      if (visibleFileIds.size === 0) return
+      hydrateAssetBackedFiles(scene.files, addHydratedAssetFile, { onlyFileIds: visibleFileIds })
+    }, 250)
+  }, [api, addHydratedAssetFile])
+
   // Hydrate disk-backed file records once the Excalidraw API is ready. The
-  // scene renders immediately; images pop in as each asset finishes loading.
+  // scene renders immediately; visible images hydrate first, then the rest
+  // warms in the background on local sessions. Tunnel sessions only hydrate
+  // the viewport so ngrok bandwidth is not burned by offscreen images.
   useEffect(() => {
     if (!api || !initialScene) return
-    hydrateAssetBackedFiles(initialScene.files, addHydratedAssetFile)
+    let cancelled = false
+    const addIfLive = (file) => {
+      if (!cancelled) addHydratedAssetFile(file)
+    }
+    const visibleFileIds = visibleAssetBackedImageFileIds(initialScene, 120)
+    const run = async () => {
+      if (visibleFileIds.size > 0) {
+        await hydrateAssetBackedFiles(initialScene.files, addIfLive, { onlyFileIds: visibleFileIds })
+        if (cancelled) return
+      }
+      if (isTunnelCanvasRuntime()) return
+      await hydrateAssetBackedFiles(initialScene.files, addIfLive)
+    }
+    run()
+    return () => {
+      cancelled = true
+    }
   }, [api, initialScene, addHydratedAssetFile])
 
   const handleChange = useCallback(
@@ -3866,6 +4023,7 @@ export default function App() {
           setSelectedGeneratedResult(null)
           setOpenMenu(null)
           refreshOverlayStates(nextScene)
+          scheduleVisibleAssetHydration(nextScene)
           scheduleSelectionSave(nextScene)
           scheduleCanvasSave(nextScene)
           window.setTimeout(() => {
@@ -3882,6 +4040,7 @@ export default function App() {
 
       const scene = createScene(workingElements, appState, files)
       latestSceneRef.current = scene
+      scheduleVisibleAssetHydration(scene)
       if (shouldSkipChangeEffects) {
         scheduleOverlayRefresh(scene)
         scheduleSelectionSave(scene)
@@ -3936,7 +4095,7 @@ export default function App() {
         scheduleCanvasSave(scene)
       }
     },
-    [api, refreshOverlayStates, scheduleCanvasSave, scheduleOverlayRefresh, scheduleSelectionSave, syncGeneratorUi]
+    [api, refreshOverlayStates, scheduleCanvasSave, scheduleOverlayRefresh, scheduleSelectionSave, scheduleVisibleAssetHydration, syncGeneratorUi]
   )
 
   const applyRemoteScene = useCallback(
@@ -3946,9 +4105,10 @@ export default function App() {
       window.clearTimeout(saveTimerRef.current)
       saveTimerRef.current = null
       hasLocalChangesRef.current = false
-      const normalized = normalizeScene(scene)
+      const diskNormalized = normalizeScene(scene)
+      const normalized = withRuntimeAssetBackedScene(diskNormalized)
       const remoteApplyVersion = localChangeVersionRef.current
-      lastSyncedFingerprintRef.current = sceneFingerprint(normalized)
+      lastSyncedFingerprintRef.current = sceneFingerprint(diskNormalized)
       latestSceneRef.current = normalized
       previousGeneratorFrameIdsRef.current = new Set(normalized.elements.filter(isGeneratorFrame).map((element) => element.id))
       const currentAppState = api.getAppState?.() ?? {}
@@ -3976,7 +4136,14 @@ export default function App() {
       if (readyFiles.length > 0) api.addFiles(readyFiles)
       // Disk-backed records hydrate asynchronously after the scene applies;
       // images pop in as each asset resolves instead of blocking the update.
-      hydrateAssetBackedFiles(normalized.files, addHydratedAssetFile)
+      if (isTunnelCanvasRuntime()) {
+        const visibleFileIds = visibleAssetBackedImageFileIds(nextScene, 240)
+        if (visibleFileIds.size > 0) {
+          hydrateAssetBackedFiles(normalized.files, addHydratedAssetFile, { onlyFileIds: visibleFileIds })
+        }
+      } else {
+        hydrateAssetBackedFiles(normalized.files, addHydratedAssetFile)
+      }
       window.setTimeout(() => {
         if (localChangeVersionRef.current !== remoteApplyVersion && !options.force) return
         applyingRemoteRef.current = true
@@ -4019,7 +4186,7 @@ export default function App() {
 
     async function loadRemoteCanvas() {
       try {
-        const response = await fetch(CANVAS_ENDPOINT)
+        const response = await canvasFetch(CANVAS_ENDPOINT)
         if (!response.ok) throw new Error(`Failed to refresh canvas: ${response.status}`)
         const payload = await response.json()
         // Ignore the echo of our own save (and the duplicate file-watcher
@@ -4032,7 +4199,7 @@ export default function App() {
       }
     }
 
-    const events = new EventSource(CANVAS_EVENTS_ENDPOINT)
+    const events = createCanvasEventSource(CANVAS_EVENTS_ENDPOINT)
     events.addEventListener('canvas-changed', loadRemoteCanvas)
     events.onerror = (error) => {
       console.warn('Codex Excalidraw live refresh disconnected.', error)
@@ -4616,7 +4783,7 @@ export default function App() {
     const streamUpload = async (uploadFile) => {
       const localPath = typeof uploadFile.path === 'string' && uploadFile.path ? uploadFile.path : ''
       if (localPath) {
-        const response = await fetch(ASSET_UPLOAD_ENDPOINT, {
+        const response = await canvasFetch(ASSET_UPLOAD_ENDPOINT, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ sourcePath: localPath, fileName: uploadFile.name })
@@ -4625,7 +4792,7 @@ export default function App() {
         if (response.ok && !payload.error) return payload
         // Fall through to the streaming path (e.g. path outside this session).
       }
-      const response = await fetch(ASSET_UPLOAD_ENDPOINT, {
+      const response = await canvasFetch(ASSET_UPLOAD_ENDPOINT, {
         method: 'POST',
         headers: {
           'x-upload-filename': encodeURIComponent(uploadFile.name || `asset-${Date.now()}`),
@@ -4704,7 +4871,7 @@ export default function App() {
     }
 
     const dataURL = await fileToDataURL(file)
-    const response = await fetch(ASSET_UPLOAD_ENDPOINT, {
+    const response = await canvasFetch(ASSET_UPLOAD_ENDPOINT, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ fileName: file.name, dataURL })
@@ -4729,7 +4896,7 @@ export default function App() {
     const dataURL = typeof asset?.dataURL === 'string' ? asset.dataURL : ''
     if (!dataURL) return asset
     const fileName = asset.name || (asset.kind === 'video' ? 'canvas-video.mp4' : 'canvas-image.png')
-    const response = await fetch(ASSET_UPLOAD_ENDPOINT, {
+    const response = await canvasFetch(ASSET_UPLOAD_ENDPOINT, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ fileName, dataURL })
@@ -4750,7 +4917,7 @@ export default function App() {
   const readTextAsset = useCallback(async (asset) => {
     const url = asset?.url || ''
     if (!url) throw new Error('台本ファイルを読み込めません。')
-    const response = await fetch(url)
+    const response = await canvasFetch(url)
     if (!response.ok) throw new Error(`台本ファイルを読み込めません: ${response.status}`)
     const text = await response.text()
     return { ...asset, text }
@@ -5551,14 +5718,14 @@ export default function App() {
   // generation continues automatically after sign-in (BuzzAssist behavior).
   const ensureBuzzAssistLoggedIn = useCallback(async () => {
     try {
-      const status = await (await fetch('/api/buzzassist/auth-status')).json()
+      const status = await (await canvasFetch('/api/buzzassist/auth-status')).json()
       if (status?.loggedIn) return true
     } catch {
       // status probe failed — fall through to the login flow
     }
     setGenerationError('BuzzAssistのログイン画面を開きました。ブラウザでサインインすると自動で続行します…')
     try {
-      const response = await fetch('/api/buzzassist/login', { method: 'POST' })
+      const response = await canvasFetch('/api/buzzassist/login', { method: 'POST' })
       const payload = await response.json().catch(() => ({}))
       if (response.ok && payload.ok) {
         setGenerationError('')
@@ -5723,7 +5890,7 @@ export default function App() {
               customData: frameCustomDataFromForm(kind, savedForm)
             }
 
-      const response = await fetch(endpoint, {
+      const response = await canvasFetch(endpoint, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body)
@@ -5732,7 +5899,7 @@ export default function App() {
       if (!response.ok || payload.error) {
         throw new Error(payload.error || `Generation failed: ${response.status}`)
       }
-      const canvasResponse = await fetch(CANVAS_ENDPOINT)
+      const canvasResponse = await canvasFetch(CANVAS_ENDPOINT)
       if (canvasResponse.ok) {
         const canvasPayload = await canvasResponse.json()
         // After generation the server replaces the frame with the result and
@@ -5867,7 +6034,7 @@ export default function App() {
               postMarginSeconds: savedForm.silenceCutPostMarginSeconds
             }
 
-      const response = await fetch(endpoint, {
+      const response = await canvasFetch(endpoint, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body)
@@ -5937,7 +6104,7 @@ export default function App() {
         setFrameForm(nextForm)
         return
       }
-      const canvasResponse = await fetch(CANVAS_ENDPOINT)
+      const canvasResponse = await canvasFetch(CANVAS_ENDPOINT)
       if (canvasResponse.ok) {
         const canvasPayload = await canvasResponse.json()
         let nextScene = normalizeScene(canvasPayload.scene)
@@ -6846,11 +7013,11 @@ export default function App() {
                   onClick={() => {
                     setOpenMenu((current) => (current === 'route' ? null : 'route'))
                     setLovartKeyEditing(false)
-                    fetch('/api/lovart/auth-status')
+                    canvasFetch('/api/lovart/auth-status')
                       .then((response) => response.json())
                       .then(setLovartAuth)
                       .catch(() => {})
-                    fetch('/api/hermes/status')
+                    canvasFetch('/api/hermes/status')
                       .then((response) => response.json())
                       .then(setHermesStatus)
                       .catch(() => {})
@@ -6919,7 +7086,7 @@ export default function App() {
                                 }
                                 setLovartKeySaving(true)
                                 try {
-                                  const response = await fetch('/api/lovart/credentials', {
+                                  const response = await canvasFetch('/api/lovart/credentials', {
                                     method: 'POST',
                                     headers: { 'content-type': 'application/json' },
                                     body: JSON.stringify({ accessKey, secretKey })
@@ -7627,7 +7794,7 @@ export default function App() {
                         // Refresh in the background but never clear what's
                         // already shown — the terms load once at startup, so
                         // opening must not flash to empty on a slow/failed fetch.
-                        fetch('/api/subtitle-glossary')
+                        canvasFetch('/api/subtitle-glossary')
                           .then((response) => response.json())
                           .then((payload) => {
                             if (Array.isArray(payload.terms)) setGlossaryTerms(payload.terms)

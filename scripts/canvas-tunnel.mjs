@@ -217,6 +217,46 @@ async function checkHttp(url, options = {}) {
   }
 }
 
+async function probeTunnelAccessUrl(status, options = {}) {
+  if (!status?.accessUrl) return null;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs || 5000);
+  try {
+    const response = await fetch(status.accessUrl, {
+      method: "GET",
+      redirect: "manual",
+      signal: controller.signal,
+    });
+    const body = await response.text().catch(() => "");
+    const ngrokError = response.headers.get("ngrok-error-code") || body.match(/ERR_NGROK_\d+/)?.[0] || "";
+    if (ngrokError) {
+      return {
+        ok: false,
+        status: response.status,
+        error: `${ngrokError}: ngrok is not serving the canvas. Check the ngrok dashboard, bandwidth limit, or use another ngrok authtoken.`,
+      };
+    }
+    if (!response.ok) {
+      return { ok: false, status: response.status, error: `Tunnel returned HTTP ${response.status}.` };
+    }
+    return { ok: true, status: response.status };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function printTunnelHealth(health) {
+  if (!health) return;
+  if (health.ok) {
+    console.log("Tunnel health: ok");
+    return;
+  }
+  console.log(`Tunnel health: needs-attention${health.status ? ` (HTTP ${health.status})` : ""}`);
+  console.log(`Tunnel error: ${health.error}`);
+}
+
 async function readDiscoveredLocalUrl(paths) {
   const discovery = await readJson(paths.discoveryFile);
   return typeof discovery?.url === "string" ? discovery.url.replace(/\/+$/, "") : "";
@@ -435,6 +475,7 @@ async function start() {
   };
   await writeJson(paths.statusFile, status);
   printStatus(status, { active: await tmuxHasSession(config.sessionName) });
+  printTunnelHealth(await probeTunnelAccessUrl(status));
 }
 
 async function status() {
@@ -443,6 +484,7 @@ async function status() {
   const active = await tmuxHasSession(config.sessionName);
   const current = await readJson(paths.statusFile, null);
   printStatus(current, { active });
+  if (active) printTunnelHealth(await probeTunnelAccessUrl(current));
 }
 
 async function stop() {

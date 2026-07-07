@@ -171,6 +171,64 @@ function restoreAssetBackedImageStatuses(elements, files) {
   return changed ? next : elements
 }
 
+function compactCanvasAssetValue(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+  let changed = false
+  const next = { ...value }
+  const url = typeof next.url === 'string' ? next.url : ''
+  const path = typeof next.path === 'string' ? next.path : ''
+  const fallback = url || path || ''
+  if (typeof next.dataURL === 'string' && next.dataURL.startsWith('data:') && fallback) {
+    next.dataURL = ''
+    changed = true
+  }
+  if (typeof next.thumbnail === 'string' && next.thumbnail.startsWith('data:') && fallback) {
+    next.thumbnail = fallback
+    changed = true
+  }
+  return changed ? next : value
+}
+
+function compactCanvasCustomData(value) {
+  if (Array.isArray(value)) {
+    let changed = false
+    const next = value.map((item) => {
+      const compacted = compactCanvasCustomData(item)
+      if (compacted !== item) changed = true
+      return compacted
+    })
+    return changed ? next : value
+  }
+  if (!value || typeof value !== 'object') return value
+
+  const compactedAsset = compactCanvasAssetValue(value)
+  if (compactedAsset !== value) return compactedAsset
+
+  let changed = false
+  const next = { ...value }
+  for (const [key, item] of Object.entries(value)) {
+    const compacted = compactCanvasCustomData(item)
+    if (compacted !== item) {
+      next[key] = compacted
+      changed = true
+    }
+  }
+  return changed ? next : value
+}
+
+function compactSceneElements(elements) {
+  if (!Array.isArray(elements)) return elements
+  let changed = false
+  const next = elements.map((element) => {
+    if (!element?.customData || typeof element.customData !== 'object') return element
+    const customData = compactCanvasCustomData(element.customData)
+    if (customData === element.customData) return element
+    changed = true
+    return { ...element, customData }
+  })
+  return changed ? next : elements
+}
+
 function normalizeScene(value) {
   if (!isScene(value)) {
     return {
@@ -190,7 +248,7 @@ function normalizeScene(value) {
     type: value.type ?? 'excalidraw',
     version: value.version ?? 2,
     source: value.source ?? 'codex-excalidraw-canvas',
-    elements: restoreAssetBackedImageStatuses(value.elements, files),
+    elements: compactSceneElements(restoreAssetBackedImageStatuses(value.elements, files)),
     appState: value.appState && typeof value.appState === 'object' ? value.appState : {},
     files
   }
