@@ -23,7 +23,7 @@ import { generateSubtitleSrt } from './lib/subtitleGeneration.mjs'
 import { silenceCutVideo } from './lib/tempoCut.mjs'
 import { getLovartAuthStatus, getLovartModelCosts, saveLovartCredentials } from './lib/lovartMediaGeneration.mjs'
 import { bridgeWorkerAlive, canDriveGui, pasteIntoChatApp, sendChatMessage } from './lib/chatBridge.mjs'
-import { getOrCreateMcpToken, rejectDisallowedOrigin, rejectMissingBearer, setLocalCorsHeaders, writeServerDiscovery } from './lib/canvasServerRuntime.mjs'
+import { getOrCreateMcpToken, rejectDisallowedOrigin, rejectRemoteOperator, rejectMissingBearer, setLocalCorsHeaders, writeServerDiscovery } from './lib/canvasServerRuntime.mjs'
 import { tmpdir } from 'node:os'
 
 const projectDir = resolve(process.env.EXCALIDRAW_PROJECT_DIR ?? process.cwd())
@@ -1052,6 +1052,9 @@ function configureCanvasServer(server) {
       })
 
       server.middlewares.use('/api/buzzassist/login', async (req, res) => {
+        // Opens the OAuth browser flow on the host Mac and blocks — a remote
+        // client cannot complete it and would only spawn a desktop window.
+        if (rejectRemoteOperator(req, res)) return
         try {
           if (req.method !== 'GET' && req.method !== 'POST') {
             res.statusCode = 405
@@ -1464,6 +1467,7 @@ function configureCanvasServer(server) {
 
       // TEMP diagnostic: verify this server process can reach fal storage.
       server.middlewares.use('/api/debug/outbound', async (req, res) => {
+        if (rejectRemoteOperator(req, res)) return
         try {
           const { uploadBufferToFalStorage } = await import('./lib/buzzassistApi.mjs')
           const url = new URL(req.url, 'http://127.0.0.1')
@@ -1489,6 +1493,10 @@ function configureCanvasServer(server) {
       // via System Events. If keystrokes are blocked (no Accessibility
       // permission) the text is still on the clipboard for a manual paste.
       server.middlewares.use('/api/chat/send', async (req, res) => {
+        // Desktop keystroke injection is a local-operator action: never allow a
+        // remote/tunnel browser (or a cross-site page) to drive the Mac's chat
+        // apps, even behind Basic Auth.
+        if (rejectRemoteOperator(req, res)) return
         // osascript can hang forever from this context while macOS waits on a
         // consent dialog that never shows — always race against a timeout.
         const runOsascript = (script, timeoutMs = 8000) => new Promise((resolveOsa) => {
