@@ -1277,6 +1277,7 @@ async function hydrateAssetBackedFiles(files, onHydrated, options = {}) {
     return !onlyFileIds || onlyFileIds.has(file.id)
   })
   if (pending.length === 0) return
+  const concurrency = Math.max(1, Math.min(Number(options.concurrency) || ASSET_HYDRATION_CONCURRENCY, ASSET_HYDRATION_CONCURRENCY))
   let cursor = 0
   const worker = async () => {
     while (cursor < pending.length) {
@@ -1300,7 +1301,7 @@ async function hydrateAssetBackedFiles(files, onHydrated, options = {}) {
       }
     }
   }
-  await Promise.all(Array.from({ length: Math.min(ASSET_HYDRATION_CONCURRENCY, pending.length) }, worker))
+  await Promise.all(Array.from({ length: Math.min(concurrency, pending.length) }, worker))
 }
 
 function visibleAssetBackedImageFileIds(scene, padding = 900) {
@@ -3921,24 +3922,32 @@ export default function App() {
     }, 250)
   }, [api, addHydratedAssetFile])
 
-  // Hydrate disk-backed file records once the Excalidraw API is ready. The
-  // scene renders immediately; visible images hydrate first, then the whole
-  // canvas warms in the background — including over the tunnel, since the
-  // Cloudflare tunnel has no bandwidth cap (the old ngrok viewport-only limit
-  // left offscreen images stuck as gray placeholders on phones).
+  // Hydrate disk-backed file records once the Excalidraw API is ready.
+  // Viewport-first: what is on screen hydrates immediately at full speed, then
+  // the rest trickles in behind interactions (brief yield + low concurrency) so
+  // the whole canvas still fills without janking pan/zoom on phones. Whatever
+  // the user pans to is prioritized live by scheduleVisibleAssetHydration.
   useEffect(() => {
     if (!api || !initialScene) return
     let cancelled = false
     const addIfLive = (file) => {
       if (!cancelled) addHydratedAssetFile(file)
     }
-    const visibleFileIds = visibleAssetBackedImageFileIds(initialScene, 120)
     const run = async () => {
+      const visibleFileIds = visibleAssetBackedImageFileIds(initialScene, 200)
       if (visibleFileIds.size > 0) {
         await hydrateAssetBackedFiles(initialScene.files, addIfLive, { onlyFileIds: visibleFileIds })
         if (cancelled) return
       }
-      await hydrateAssetBackedFiles(initialScene.files, addIfLive)
+      const restIds = new Set(
+        Object.values(initialScene.files ?? {})
+          .filter((file) => isAssetBackedFileRecord(file) && !visibleFileIds.has(file.id))
+          .map((file) => file.id)
+      )
+      if (restIds.size === 0) return
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 500))
+      if (cancelled) return
+      await hydrateAssetBackedFiles(initialScene.files, addIfLive, { onlyFileIds: restIds, concurrency: 2 })
     }
     run()
     return () => {
