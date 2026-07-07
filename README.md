@@ -90,14 +90,46 @@ over an outbound Cloud connection.
 Start a remote mobile session from a signed-in local machine:
 
 ```bash
-npm run serve -- --remote-canvas
+npm run remote:start
 ```
 
 Use a view-only mobile URL when you only want to share progress:
 
 ```bash
-npm run serve -- --remote-canvas --remote-canvas-mode view
+npm run remote:start -- --mode view
 ```
+
+Check the active mobile URL, expiry, and relay state:
+
+```bash
+npm run remote:status
+```
+
+Stop the relay and revoke the active mobile URL:
+
+```bash
+npm run remote:stop
+```
+
+Open the full local Excalidraw canvas from a phone through ngrok:
+
+```bash
+npm run tunnel:start
+npm run tunnel:status
+npm run tunnel:stop
+```
+
+The tunnel command prints the ngrok URL and Basic Auth credentials. This exposes
+a tunnel-ready local canvas server that shares the same canvas data. Enter the
+Basic Auth credentials in the browser prompt instead of embedding them in the
+URL, and avoid editing heavily from desktop and phone at the same time.
+
+The tunnel is locked down to that one session: CORS is pinned to the exact ngrok
+URL (no `*.ngrok*` wildcard), and host-only endpoints — desktop chat keystroke
+injection (`/api/chat/send`), the OAuth login browser flow, and outbound probes —
+reject any request that arrives from the tunnel origin, so they stay usable only
+from the local browser. `npm run tunnel:stop` also stops the tunnel-managed
+canvas server it started, not just ngrok.
 
 Or attach the local canvas to an existing Cloud session:
 

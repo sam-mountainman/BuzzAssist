@@ -46,6 +46,12 @@
     "setup:agents": "node scripts/setup-agents.mjs",
     "mcp": "node mcp/server.mjs",
     "preview": "node scripts/serve-canvas.mjs",
+    "remote:start": "node scripts/remote-canvas-relay.mjs start",
+    "remote:status": "node scripts/remote-canvas-relay.mjs status",
+    "remote:stop": "node scripts/remote-canvas-relay.mjs stop",
+    "tunnel:start": "node scripts/canvas-tunnel.mjs start",
+    "tunnel:status": "node scripts/canvas-tunnel.mjs status",
+    "tunnel:stop": "node scripts/canvas-tunnel.mjs stop",
     "test": "node --test test/*.test.mjs && node scripts/test-fal-payloads.mjs",
     "prepack": "npm run build",
     "postinstall": "node scripts/patch-excalidraw.mjs"
