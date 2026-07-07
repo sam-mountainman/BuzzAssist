@@ -423,11 +423,14 @@ function tunnelSpawn(config, paths, localBaseUrl) {
     return { file: "ngrok", args, cwd: repoRoot, env: process.env, logFile: null };
   }
   // Cloudflare: quick tunnel (zero-config) unless a named hostname is set.
+  // Global flags (--no-autoupdate, --loglevel) MUST precede the subcommand; a
+  // named `run` errors out on a trailing global flag. Output is captured via
+  // stdio→logFile (spawnBackground) rather than --logfile, which keeps the
+  // quick-tunnel URL parseable and avoids the same flag-position problem.
   const args = config.cfHostname
-    ? ["tunnel", "--no-autoupdate", "run", "--url", localBaseUrl, config.cfTunnelName]
-    : ["tunnel", "--no-autoupdate", "--url", localBaseUrl];
-  args.push("--logfile", paths.logFile, "--loglevel", "info");
-  return { file: "cloudflared", args, cwd: repoRoot, env: process.env, logFile: null };
+    ? ["--no-autoupdate", "--loglevel", "info", "tunnel", "run", "--url", localBaseUrl, config.cfTunnelName]
+    : ["--no-autoupdate", "--loglevel", "info", "tunnel", "--url", localBaseUrl];
+  return { file: "cloudflared", args, cwd: repoRoot, env: process.env, logFile: paths.logFile };
 }
 
 function portFromUrl(url) {
