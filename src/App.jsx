@@ -3371,10 +3371,10 @@ export default function App() {
         if (!response.ok) throw new Error(`Failed to load canvas: ${response.status}`)
         const payload = await response.json()
         const scene = normalizeScene(payload.scene)
-        const hydratedScene = await hydrateSceneAssetBackedFiles(scene, { onlyVisible: true })
-        latestSceneRef.current = hydratedScene
-        previousGeneratorFrameIdsRef.current = new Set(hydratedScene.elements.filter(isGeneratorFrame).map((element) => element.id))
-        setInitialScene(hydratedScene)
+        lastSyncedFingerprintRef.current = sceneFingerprint(scene)
+        latestSceneRef.current = scene
+        previousGeneratorFrameIdsRef.current = new Set(scene.elements.filter(isGeneratorFrame).map((element) => element.id))
+        setInitialScene(scene)
       } catch (error) {
         if (error.name === 'AbortError') return
         setLoadError(error)
@@ -3500,20 +3500,25 @@ export default function App() {
       appState: persistableAppState(scene.appState),
       files: stripAssetBackedFilesForSave(scene.elements, scene.files)
     }
-    // Remember what we just saved so the SSE echo of this exact content is
-    // ignored instead of clobbering newer local edits.
-    lastSyncedFingerprintRef.current = sceneFingerprint(persisted)
+    const persistedFingerprint = sceneFingerprint(persisted)
     try {
-      await fetch(CANVAS_ENDPOINT, {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(persisted)
-      })
-      await fetch(VIEW_STATE_ENDPOINT, {
+      if (persistedFingerprint !== lastSyncedFingerprintRef.current) {
+        const canvasResponse = await fetch(CANVAS_ENDPOINT, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(persisted)
+        })
+        if (!canvasResponse.ok) throw new Error(`Failed to save canvas: ${canvasResponse.status}`)
+        // Remember what we just saved so the SSE echo of this exact content is
+        // ignored instead of clobbering newer local edits.
+        lastSyncedFingerprintRef.current = persistedFingerprint
+      }
+      const viewResponse = await fetch(VIEW_STATE_ENDPOINT, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(getViewState(scene.appState))
       })
+      if (!viewResponse.ok) throw new Error(`Failed to save view state: ${viewResponse.status}`)
       if (localChangeVersionRef.current === saveVersion) {
         hasLocalChangesRef.current = false
       }
