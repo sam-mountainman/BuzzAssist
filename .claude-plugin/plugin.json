@@ -1,7 +1,7 @@
 {
   "name": "buzzassist",
-  "version": "0.1.2",
-  "description": "BuzzAssist canvas and media plugin for Claude Code.",
+  "version": "0.1.3",
+  "description": "BuzzAssist canvas, media generation, and ngrok Canvas Tunnel plugin for Claude Code.",
   "author": {
     "name": "higataiyu"
   },

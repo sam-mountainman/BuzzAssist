@@ -40,7 +40,7 @@ import { readServerDiscovery } from "../lib/canvasServerRuntime.mjs";
 import { tmpdir } from "node:os";
 
 const SERVER_NAME = "BuzzAssist Excalidraw Plugin Tools";
-const SERVER_VERSION = "0.1.2";
+const SERVER_VERSION = "0.1.3";
 const TOOL_READ_ME = "read_me";
 const TOOL_CREATE_VIEW = "create_view";
 const TOOL_GET_SELECTION = "get_excalidraw_selection";
@@ -56,6 +56,9 @@ const TOOL_SETUP_HERMES = "setup_hermes_grok";
 const TOOL_GENERATE_SUBTITLES = "generate_excalidraw_subtitles";
 const TOOL_GENERATE_SUBTITLES_BATCH = "generate_excalidraw_subtitles_batch";
 const TOOL_SILENCE_CUT_VIDEO = "silence_cut_excalidraw_video";
+const TOOL_CANVAS_TUNNEL_START = "buzzassist_canvas_tunnel_start";
+const TOOL_CANVAS_TUNNEL_STATUS = "buzzassist_canvas_tunnel_status";
+const TOOL_CANVAS_TUNNEL_STOP = "buzzassist_canvas_tunnel_stop";
 const IMAGE_MODEL_IDS = IMAGE_MODELS.map((model) => model.id);
 const VIDEO_MODEL_IDS = VIDEO_MODELS.map((model) => model.id);
 const CANVAS_FILE_NAME = "excalidraw-canvas.json";
@@ -66,6 +69,7 @@ const MEDIA_GENERATION_AGENT_INSTRUCTIONS = [
   "Project-local Excalidraw canvas tools. Use read_me/create_view for diagrams, get_excalidraw_selection before acting on selected items, and insert_* for local assets.",
   "Generation/subtitle/silence-cut tools require confirmedSettings=true unless the user's request already specified all relevant settings; use payloadPreview or read_me for workflow details.",
   "Canvas tools auto-start the local static canvas server and write canvas/.server.json with the dynamic URL and HTTP tool endpoint bearer token.",
+  "For phone/mobile access to the exact same full Excalidraw UI, use buzzassist_canvas_tunnel_start/status/stop. This starts an ngrok Canvas Tunnel with Basic Auth; Remote Canvas is not required for same-UI access.",
 ].join(" ");
 
 // Project-common 用語辞書 (canvas/subtitle-glossary.json) merges into every
@@ -141,6 +145,74 @@ function runQuick(command, commandArgs, timeoutMs = 8000) {
   });
 }
 
+function runCaptured(command, commandArgs, timeoutMs = 8000) {
+  return new Promise((resolveRun, rejectRun) => {
+    const child = spawn(command, commandArgs, { shell: process.platform === "win32" });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      rejectRun(new Error(`${[command, ...commandArgs].join(" ")} timed out`));
+    }, timeoutMs);
+    child.stdout?.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      rejectRun(error);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (code === 0) {
+        resolveRun({ stdout, stderr, code });
+        return;
+      }
+      const message = [stderr.trim(), stdout.trim(), `exit ${code}`].filter(Boolean).join("\n");
+      rejectRun(new Error(message));
+    });
+  });
+}
+
+async function runCanvasTunnelCommand(action, args = {}) {
+  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const projectDir = resolveProjectDir(args);
+  const canvasDir = resolveCanvasDir(args);
+  const commandArgs = [
+    join(repoRoot, "scripts", "canvas-tunnel.mjs"),
+    action,
+    "--project-dir",
+    projectDir,
+    "--canvas-dir",
+    canvasDir,
+  ];
+
+  if (action === "start") {
+    if (args.restart === true) commandArgs.push("--restart");
+    if (args.reuseLocal === true) commandArgs.push("--reuse-local");
+    if (nonEmptyString(args.localUrl)) commandArgs.push("--local-url", nonEmptyString(args.localUrl));
+    if (nonEmptyString(args.ngrokAuthtoken)) commandArgs.push("--ngrok-authtoken", nonEmptyString(args.ngrokAuthtoken));
+    if (nonEmptyString(args.user)) commandArgs.push("--user", nonEmptyString(args.user));
+    if (nonEmptyString(args.password)) commandArgs.push("--password", nonEmptyString(args.password));
+    if (args.compression === false) commandArgs.push("--no-compression");
+  }
+
+  const timeoutMs = action === "start" ? 75_000 : 15_000;
+  const result = await runCaptured(process.execPath, commandArgs, timeoutMs);
+  const statusFile = join(canvasDir, ".canvas-tunnel.json");
+  const status = await readJsonIfExists(statusFile, null);
+  return {
+    ok: action === "status" ? Boolean(status?.ok) : true,
+    action,
+    stdout: result.stdout.trim(),
+    stderr: result.stderr.trim(),
+    statusFile,
+    status,
+  };
+}
+
 async function getMacScreenBounds() {
   try {
     const script = 'tell application "Finder" to get bounds of window of desktop';
@@ -171,9 +243,9 @@ async function getMacScreenBounds() {
 async function openCanvasWindow(baseUrl) {
   const mode = String(process.env.EXCALIDRAW_OPEN_MODE || "app").toLowerCase();
   if (mode === "none") return;
-  // Under Claude Code the host has an in-app browser — the agent opens the
-  // canvas there (see MCP instructions), so never spawn an external window.
-  if (process.env.CLAUDECODE || process.env.CLAUDE_CODE_ENTRYPOINT) return;
+  // Under Codex/Claude Code the host has an in-app browser — the agent opens
+  // the canvas there (see MCP instructions), so never spawn an external window.
+  if (process.env.CLAUDECODE || process.env.CLAUDE_CODE_ENTRYPOINT || process.env.CODEX || process.env.CODEX_HOME) return;
   if (mode !== "browser" && process.platform === "darwin") {
     const bounds = await getMacScreenBounds();
     const width = Math.round(bounds.width / 2);
@@ -1717,6 +1789,70 @@ function toolDefinitions() {
         openWorldHint: false,
       },
     },
+    {
+      name: TOOL_CANVAS_TUNNEL_START,
+      title: "Start BuzzAssist Canvas Tunnel",
+      description: "Start an ngrok tunnel for the same full local Excalidraw canvas UI, protected by Basic Auth. Use for phone/mobile access when the user wants the exact local canvas UI.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          projectDir: { type: "string", description: "Absolute project directory containing canvas/." },
+          canvasDir: { type: "string", description: "Absolute canvas directory. Overrides projectDir." },
+          ngrokAuthtoken: { type: "string", description: "Optional personal ngrok authtoken to configure before starting." },
+          user: { type: "string", description: "Basic Auth user. Defaults to buzzassist." },
+          password: { type: "string", description: "Basic Auth password. Defaults to a generated password." },
+          localUrl: { type: "string", description: "Existing local canvas URL to expose. Usually omitted so the tool starts a tunnel-ready canvas server." },
+          reuseLocal: { type: "boolean", description: "Reuse canvas/.server.json instead of starting a tunnel-ready canvas server. Use only when the local server already allows the tunnel origin." },
+          restart: { type: "boolean", description: "Restart an existing tunnel. Defaults to false." },
+          compression: { type: "boolean", description: "Enable ngrok gzip compression. Defaults to true." },
+        },
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+    },
+    {
+      name: TOOL_CANVAS_TUNNEL_STATUS,
+      title: "BuzzAssist Canvas Tunnel Status",
+      description: "Return the current ngrok Canvas Tunnel URL, Basic Auth credentials, local canvas URL, and status file path.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          projectDir: { type: "string", description: "Absolute project directory containing canvas/." },
+          canvasDir: { type: "string", description: "Absolute canvas directory. Overrides projectDir." },
+        },
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    {
+      name: TOOL_CANVAS_TUNNEL_STOP,
+      title: "Stop BuzzAssist Canvas Tunnel",
+      description: "Stop the ngrok Canvas Tunnel and any tunnel-managed canvas server.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          projectDir: { type: "string", description: "Absolute project directory containing canvas/." },
+          canvasDir: { type: "string", description: "Absolute canvas directory. Overrides projectDir." },
+        },
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+    },
   ];
 }
 
@@ -2097,6 +2233,40 @@ async function handleToolCall(params, progress = () => {}) {
     return {
       content: [{ type: "text", text: summary }],
       structuredContent: status,
+    };
+  }
+
+  if (params?.name === TOOL_CANVAS_TUNNEL_START) {
+    progress(0, 1, "Starting Canvas Tunnel");
+    const result = await runCanvasTunnelCommand("start", params.arguments ?? {});
+    progress(1, 1, "Canvas Tunnel ready");
+    const status = result.status || {};
+    const text = status.publicUrl
+      ? `Canvas Tunnel is running: ${status.publicUrl} (Basic Auth: ${status.user} / ${status.password}). Local canvas: ${status.localBaseUrl}`
+      : result.stdout || "Canvas Tunnel start completed.";
+    return {
+      content: [{ type: "text", text }],
+      structuredContent: result,
+    };
+  }
+
+  if (params?.name === TOOL_CANVAS_TUNNEL_STATUS) {
+    const result = await runCanvasTunnelCommand("status", params.arguments ?? {});
+    const status = result.status || {};
+    const text = status.publicUrl
+      ? `Canvas Tunnel ${status.ok ? "running" : "stopped"}: ${status.publicUrl} (Basic Auth: ${status.user} / ${status.password}). Local canvas: ${status.localBaseUrl}`
+      : result.stdout || "Canvas Tunnel is not running.";
+    return {
+      content: [{ type: "text", text }],
+      structuredContent: result,
+    };
+  }
+
+  if (params?.name === TOOL_CANVAS_TUNNEL_STOP) {
+    const result = await runCanvasTunnelCommand("stop", params.arguments ?? {});
+    return {
+      content: [{ type: "text", text: result.stdout || "Canvas Tunnel stopped." }],
+      structuredContent: result,
     };
   }
 

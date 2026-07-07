@@ -24,6 +24,22 @@ async function runSetup(agent) {
   return stdout;
 }
 
+async function runSetupWithTunnel(agent) {
+  const { stdout } = await execFileAsync(process.execPath, [
+    "scripts/setup-agents.mjs",
+    "--dry-run",
+    "--skip-install",
+    "--skip-build",
+    "--skip-plugin-source",
+    "--agent",
+    agent,
+    "--project-dir",
+    `/tmp/buzzassist-${agent}-tunnel-test`,
+    "--tunnel",
+  ], { cwd: repoRoot });
+  return stdout;
+}
+
 test("setup CLI configures only Cursor when --agent cursor is used", async () => {
   const stdout = await runSetup("cursor");
   assert.match(stdout, /Agent target: Cursor/);
@@ -40,4 +56,13 @@ test("setup CLI configures only Antigravity when --agent antigravity is used", a
   assert.match(stdout, /Claude Code: not touched/);
   assert.match(stdout, /Cursor: not touched/);
   assert.match(stdout, /Antigravity: configured/);
+});
+
+test("setup CLI can include Canvas Tunnel output when --tunnel is used", async () => {
+  const stdout = await runSetupWithTunnel("codex");
+  assert.match(stdout, /Starting the BuzzAssist Canvas Tunnel/);
+  assert.match(stdout, /BUZZASSIST_TUNNEL_URL=https:\/\/example\.ngrok-free\.dev/);
+  assert.match(stdout, /BUZZASSIST_TUNNEL_USER=buzzassist/);
+  assert.match(stdout, /BUZZASSIST_TUNNEL_PASSWORD=<generated>/);
+  assert.match(stdout, /BUZZASSIST_TUNNEL_CHECK=ok/);
 });

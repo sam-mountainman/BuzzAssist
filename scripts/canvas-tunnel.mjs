@@ -17,6 +17,7 @@ const valueArgs = new Set([
   "--project-dir",
   "--canvas-dir",
   "--local-url",
+  "--ngrok-authtoken",
   "--user",
   "--password",
   "--session-name",
@@ -35,6 +36,7 @@ Options:
   --project-dir <path>         Project directory. Defaults to EXCALIDRAW_PROJECT_DIR or cwd.
   --canvas-dir <path>          Canvas data directory. Defaults to <projectDir>/canvas.
   --local-url <url>            Existing local canvas URL. Defaults to canvas/.server.json.
+  --ngrok-authtoken <token>    Configure ngrok before starting. Also reads BUZZASSIST_NGROK_AUTHTOKEN or NGROK_AUTHTOKEN.
   --user <name>                Basic Auth user. Defaults to buzzassist.
   --password <password>        Basic Auth password. Defaults to a generated password.
   --reuse-local                Reuse canvas/.server.json instead of starting a tunnel-ready canvas server.
@@ -129,6 +131,7 @@ function resolveConfig() {
     projectDir,
     canvasDir,
     localUrl: readArg("--local-url") || process.env.BUZZASSIST_TUNNEL_LOCAL_URL || "",
+    ngrokAuthtoken: readArg("--ngrok-authtoken") || process.env.BUZZASSIST_NGROK_AUTHTOKEN || process.env.NGROK_AUTHTOKEN || "",
     user: readArg("--user") || process.env.BUZZASSIST_TUNNEL_USER || "buzzassist",
     password: readArg("--password") || process.env.BUZZASSIST_TUNNEL_PASSWORD || randomBytes(6).toString("hex"),
     sessionName: readArg("--session-name") || process.env.BUZZASSIST_TUNNEL_TMUX_SESSION || DEFAULT_TUNNEL_SESSION,
@@ -136,6 +139,52 @@ function resolveConfig() {
     reuseLocal: hasArg("--reuse-local") || /^(1|true|yes)$/i.test(String(process.env.BUZZASSIST_TUNNEL_REUSE_LOCAL || "")),
     compression: !hasArg("--no-compression") && !/^(0|false|no)$/i.test(String(process.env.BUZZASSIST_TUNNEL_COMPRESSION || "true")),
   };
+}
+
+function ngrokInstallHelp() {
+  return [
+    "ngrok is required for Canvas Tunnel.",
+    "Install it, then add your personal ngrok authtoken:",
+    "  macOS:   brew install ngrok",
+    "  Windows: winget install Ngrok.Ngrok",
+    "  Linux:   install from https://ngrok.com/download",
+    "  ngrok config add-authtoken <token>",
+    "You can also run tunnel:start with --ngrok-authtoken <token> or set BUZZASSIST_NGROK_AUTHTOKEN.",
+  ].join("\n");
+}
+
+function tmuxInstallHelp() {
+  return [
+    "tmux is required for tunnel:start to keep ngrok and the canvas server running.",
+    "Install it first:",
+    "  macOS:   brew install tmux",
+    "  Linux:   sudo apt install tmux / sudo dnf install tmux",
+    "On Windows, run from WSL or start the canvas manually and use --reuse-local --local-url <url>.",
+  ].join("\n");
+}
+
+async function ensureNgrokReady(config) {
+  if (!await commandAvailable("ngrok", ["version"])) {
+    throw new Error(ngrokInstallHelp());
+  }
+
+  if (config.ngrokAuthtoken) {
+    try {
+      await execFileAsync("ngrok", ["config", "add-authtoken", config.ngrokAuthtoken], { timeout: 15_000 });
+    } catch (error) {
+      throw new Error(`Failed to configure ngrok authtoken: ${error.stderr || error.message || String(error)}`);
+    }
+  }
+
+  try {
+    await execFileAsync("ngrok", ["config", "check"], { timeout: 10_000 });
+  } catch (error) {
+    throw new Error([
+      "ngrok is installed but its config is not ready.",
+      "Run `ngrok config add-authtoken <token>`, pass `--ngrok-authtoken <token>`, or set BUZZASSIST_NGROK_AUTHTOKEN.",
+      error.stderr || error.stdout || error.message || String(error),
+    ].filter(Boolean).join("\n"));
+  }
 }
 
 function pathsFor(config) {
@@ -222,7 +271,7 @@ async function ensureLocalCanvas(config, paths) {
   }
 
   if (!await commandAvailable("tmux", ["-V"])) {
-    throw new Error("No reachable canvas server found, and tmux is not available to start one. Run npm run serve first.");
+    throw new Error(`No reachable canvas server found, and tmux is not available to start one.\n${tmuxInstallHelp()}`);
   }
 
   if (!await tmuxHasSession(config.canvasSessionName)) {
@@ -297,11 +346,9 @@ async function start() {
   const paths = pathsFor(config);
 
   if (!await commandAvailable("tmux", ["-V"])) {
-    throw new Error("tmux is required for tunnel:start.");
+    throw new Error(tmuxInstallHelp());
   }
-  if (!await commandAvailable("ngrok", ["version"])) {
-    throw new Error("ngrok is required for tunnel:start.");
-  }
+  await ensureNgrokReady(config);
 
   if (await tmuxHasSession(config.sessionName)) {
     if (!hasArg("--restart")) {
