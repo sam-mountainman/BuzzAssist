@@ -25,6 +25,11 @@ node scripts/setup-agents.mjs --agent cursor --project-dir /path/to/active/proje
 node scripts/setup-agents.mjs --agent antigravity --project-dir /path/to/active/project
 ```
 
+Add `--tunnel` when phone access should be ready immediately. The tunnel uses
+Cloudflare (`cloudflared`) by default — no account needed for a quick tunnel.
+To use ngrok instead, set `BUZZASSIST_TUNNEL_PROVIDER=ngrok` and pass an
+`--ngrok-authtoken <token>` (or set `BUZZASSIST_NGROK_AUTHTOKEN`).
+
 The setup script installs dependencies when needed, builds the canvas UI when
 needed, refreshes a lightweight local marketplace at `~/plugins/buzzassist`
 with the plugin root at `~/plugins/buzzassist/plugin`, configures only the
@@ -35,8 +40,17 @@ BUZZASSIST_CANVAS_URL=http://127.0.0.1:<port>/
 BUZZASSIST_CANVAS_CHECK=ok
 ```
 
-After that, the current host agent should open the printed URL in its in-app
-browser. If browser control is unavailable, use the URL from
+With `--tunnel`, it also starts the tunnel and prints (Cloudflare by default):
+
+```text
+BUZZASSIST_TUNNEL_URL=https://<slug>.trycloudflare.com
+BUZZASSIST_TUNNEL_ACCESS_URL=https://<slug>.trycloudflare.com/?t=<generated>
+BUZZASSIST_TUNNEL_CHECK=ok
+```
+
+After that, the current host agent should open `BUZZASSIST_CANVAS_URL` in its
+in-app browser. Use `BUZZASSIST_TUNNEL_ACCESS_URL` from a phone or other
+device. If browser control is unavailable, use the URL from
 `canvas/.server.json`; setup is considered complete when
 `BUZZASSIST_CANVAS_CHECK=ok` is printed.
 
@@ -79,39 +93,15 @@ canvas/excalidraw-view-state.json
 canvas/assets/
 ```
 
-## Remote Canvas
+## Mobile Full Canvas Tunnel
 
-The final remote/mobile design is **BuzzAssist Cloud Relay**, not one ngrok or
-Cloudflare Tunnel per user/session. The local Mac remains the execution
-environment; `https://buzzassist.ai/s/{sessionId}` is the mobile URL that
-relays authenticated viewer and generation requests to the local desktop client
-over an outbound Cloud connection.
+For phone/mobile access, BuzzAssist uses **Canvas Tunnel**: a public URL that
+opens the same full local Excalidraw/BuzzAssist UI as the desktop canvas. This
+is the supported path when the user wants the left generator rail, canvas
+frames, prompt editing, selection behavior, and generated assets to behave like
+the local browser canvas.
 
-Start a remote mobile session from a signed-in local machine:
-
-```bash
-npm run remote:start
-```
-
-Use a view-only mobile URL when you only want to share progress:
-
-```bash
-npm run remote:start -- --mode view
-```
-
-Check the active mobile URL, expiry, and relay state:
-
-```bash
-npm run remote:status
-```
-
-Stop the relay and revoke the active mobile URL:
-
-```bash
-npm run remote:stop
-```
-
-Open the full local Excalidraw canvas from a phone through ngrok:
+Start/inspect/stop the tunnel:
 
 ```bash
 npm run tunnel:start
@@ -119,19 +109,63 @@ npm run tunnel:status
 npm run tunnel:stop
 ```
 
-The tunnel command prints the ngrok URL and Basic Auth credentials. This exposes
-a tunnel-ready local canvas server that shares the same canvas data. Enter the
-Basic Auth credentials in the browser prompt instead of embedding them in the
-URL, and avoid editing heavily from desktop and phone at the same time.
+The tunnel command prints the public URL and an Access URL with a generated
+token. Open the Access URL on the phone; it sets a same-site cookie and then
+loads the same full canvas UI. Avoid editing heavily from desktop and phone at
+the same time.
 
-The tunnel is locked down to that one session: CORS is pinned to the exact ngrok
-URL (no `*.ngrok*` wildcard), and host-only endpoints — desktop chat keystroke
+### Provider: Cloudflare (default) or ngrok
+
+By default the tunnel uses **Cloudflare** via `cloudflared`, which has **no
+bandwidth cap** and needs no account for a quick tunnel (a random
+`*.trycloudflare.com` URL). Install it once:
+
+```bash
+brew install cloudflared      # macOS (or winget install Cloudflare.cloudflared)
+```
+
+For a **fixed** hostname like `canvas.buzzassist.ai` (Cloudflare already manages
+the domain), log in once and create a named tunnel, then pass the hostname:
+
+```bash
+cloudflared tunnel login                       # one-time browser auth
+cloudflared tunnel create buzzassist-canvas    # one-time
+npm run tunnel:start -- --cf-hostname canvas.buzzassist.ai
+```
+
+To use **ngrok** instead (per-account bandwidth cap, random URL), pass
+`--provider ngrok` and configure your own authtoken:
+
+```bash
+npm run tunnel:start -- --provider ngrok --ngrok-authtoken <token>
+```
+
+Cloudflare free plan caps a single request upload at 100 MB, so uploading a
+video larger than that from the phone will not go through (viewing, generating,
+and downloading are unaffected).
+
+The tunnel is locked down to that one session: CORS is pinned to the exact
+tunnel URL (no wildcard), and host-only endpoints — desktop chat keystroke
 injection (`/api/chat/send`), the OAuth login browser flow, and outbound probes —
 reject any request that arrives from the tunnel origin, so they stay usable only
-from the local browser. `npm run tunnel:stop` also stops the tunnel-managed
-canvas server it started, not just ngrok.
+from the local browser. The tunnel also requires the generated access token for
+non-local hosts. `npm run tunnel:stop` stops the tunnel-managed canvas server it
+started, not just the tunnel process. For ngrok you can also enable
+browser-native Basic Auth with `--provider ngrok --basic-auth`.
 
-Or attach the local canvas to an existing Cloud session:
+The MCP plugin also exposes:
+
+```text
+buzzassist_canvas_tunnel_start
+buzzassist_canvas_tunnel_status
+buzzassist_canvas_tunnel_stop
+```
+
+## Cloud Remote Canvas
+
+The older BuzzAssist Cloud Relay commands still exist for hosted relay
+experiments, but they are not the same full Excalidraw UI. Use Canvas Tunnel
+when the requested behavior is "exactly like the local canvas."
 
 ```bash
 npm run serve -- \
@@ -139,9 +173,6 @@ npm run serve -- \
   --remote-canvas-session rc_xxx \
   --remote-canvas-token <desktopToken>
 ```
-
-The mobile UI defaults image and video batches to 10 concurrent generations in
-5 columns; 18 requested prompts are processed as 10, then 8.
 
 See [docs/remote-canvas-relay-architecture.md](docs/remote-canvas-relay-architecture.md).
 

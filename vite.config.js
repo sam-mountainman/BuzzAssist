@@ -74,6 +74,23 @@ function sendJson(res, statusCode, payload) {
   res.end(JSON.stringify(payload))
 }
 
+function wantsAsyncGeneration(req, body = {}) {
+  const prefer = String(req.headers.prefer || '').toLowerCase()
+  return prefer.includes('respond-async') || body.async === true || body.respondAsync === true
+}
+
+function createGenerationJobId(kind) {
+  return `${kind}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
+}
+
+function runBackgroundGeneration(jobId, task) {
+  Promise.resolve()
+    .then(task)
+    .catch((error) => {
+      console.error(`[canvas generation job ${jobId}] ${error?.stack || error?.message || error}`)
+    })
+}
+
 function readRequestBody(req) {
   return new Promise((resolveBody, rejectBody) => {
     let body = ''
@@ -171,6 +188,64 @@ function restoreAssetBackedImageStatuses(elements, files) {
   return changed ? next : elements
 }
 
+function compactCanvasAssetValue(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+  let changed = false
+  const next = { ...value }
+  const url = typeof next.url === 'string' ? next.url : ''
+  const path = typeof next.path === 'string' ? next.path : ''
+  const fallback = url || path || ''
+  if (typeof next.dataURL === 'string' && next.dataURL.startsWith('data:') && fallback) {
+    next.dataURL = ''
+    changed = true
+  }
+  if (typeof next.thumbnail === 'string' && next.thumbnail.startsWith('data:') && fallback) {
+    next.thumbnail = fallback
+    changed = true
+  }
+  return changed ? next : value
+}
+
+function compactCanvasCustomData(value) {
+  if (Array.isArray(value)) {
+    let changed = false
+    const next = value.map((item) => {
+      const compacted = compactCanvasCustomData(item)
+      if (compacted !== item) changed = true
+      return compacted
+    })
+    return changed ? next : value
+  }
+  if (!value || typeof value !== 'object') return value
+
+  const compactedAsset = compactCanvasAssetValue(value)
+  if (compactedAsset !== value) return compactedAsset
+
+  let changed = false
+  const next = { ...value }
+  for (const [key, item] of Object.entries(value)) {
+    const compacted = compactCanvasCustomData(item)
+    if (compacted !== item) {
+      next[key] = compacted
+      changed = true
+    }
+  }
+  return changed ? next : value
+}
+
+function compactSceneElements(elements) {
+  if (!Array.isArray(elements)) return elements
+  let changed = false
+  const next = elements.map((element) => {
+    if (!element?.customData || typeof element.customData !== 'object') return element
+    const customData = compactCanvasCustomData(element.customData)
+    if (customData === element.customData) return element
+    changed = true
+    return { ...element, customData }
+  })
+  return changed ? next : elements
+}
+
 function normalizeScene(value) {
   if (!isScene(value)) {
     return {
@@ -190,7 +265,7 @@ function normalizeScene(value) {
     type: value.type ?? 'excalidraw',
     version: value.version ?? 2,
     source: value.source ?? 'codex-excalidraw-canvas',
-    elements: restoreAssetBackedImageStatuses(value.elements, files),
+    elements: compactSceneElements(restoreAssetBackedImageStatuses(value.elements, files)),
     appState: value.appState && typeof value.appState === 'object' ? value.appState : {},
     files
   }
@@ -271,6 +346,73 @@ function localAssetFilePathFromUrl(pathname) {
   return isSafeChildPath(canvasAssetsDir, filePath) ? filePath : null
 }
 
+// Downscalable canvas bitmaps: multi-MB originals are fine on localhost but
+// choke phones over the tunnel, so ?w=<px> serves an ffmpeg-scaled preview
+// cached under canvas/.asset-previews (keyed by name+width+mtime).
+const PREVIEWABLE_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp'])
+const assetPreviewJobs = new Map()
+
+function parsePreviewWidth(url) {
+  const raw = Number(url.searchParams.get('w'))
+  if (!Number.isFinite(raw) || raw <= 0) return 0
+  return Math.max(320, Math.min(3200, Math.round(raw)))
+}
+
+async function resolveAssetPreview(filePath, fileStat, width) {
+  if (!PREVIEWABLE_IMAGE_EXTENSIONS.has(extname(filePath).toLowerCase())) return null
+  // Tiny files gain nothing from rescaling.
+  if (fileStat.size <= 256 * 1024) return null
+  const previewsDir = join(canvasDir, '.asset-previews')
+  // WebP: ~10x smaller than PNG for photographic content, keeps alpha.
+  const key = `${basename(filePath)}.${width}.${Math.round(fileStat.mtimeMs)}.webp`
+  const previewPath = join(previewsDir, key)
+  const useIfSmaller = async (candidatePath) => {
+    try {
+      const previewStat = await stat(candidatePath)
+      if (previewStat.isFile() && previewStat.size > 0 && previewStat.size < fileStat.size) return candidatePath
+    } catch {}
+    return null
+  }
+  const cached = await useIfSmaller(previewPath)
+  if (cached) return cached
+  // Deduplicate concurrent generation of the same preview.
+  const jobKey = previewPath
+  if (!assetPreviewJobs.has(jobKey)) {
+    assetPreviewJobs.set(jobKey, (async () => {
+      await mkdir(previewsDir, { recursive: true })
+      const tmpPath = `${previewPath}.tmp.webp`
+      await new Promise((resolvePreview, rejectPreview) => {
+        const child = spawn('ffmpeg', [
+          '-y', '-v', 'error',
+          '-i', filePath,
+          '-vf', `scale='min(${width},iw)':-2`,
+          '-c:v', 'libwebp', '-quality', '82',
+          tmpPath,
+        ])
+        const timer = setTimeout(() => {
+          child.kill('SIGKILL')
+          rejectPreview(new Error('preview generation timed out'))
+        }, 20_000)
+        child.on('error', (error) => { clearTimeout(timer); rejectPreview(error) })
+        child.on('close', (code) => {
+          clearTimeout(timer)
+          if (code === 0) resolvePreview()
+          else rejectPreview(new Error(`ffmpeg exited with ${code}`))
+        })
+      })
+      await rename(tmpPath, previewPath)
+      return previewPath
+    })().finally(() => assetPreviewJobs.delete(jobKey)))
+  }
+  try {
+    await assetPreviewJobs.get(jobKey)
+    // Serve the preview only when it actually beats the original.
+    return await useIfSmaller(previewPath)
+  } catch {
+    return null // fall back to the original on any generation failure
+  }
+}
+
 async function serveCanvasAsset(req, res, next) {
   const url = new URL(req.url, 'http://127.0.0.1')
   if (!url.pathname.startsWith(canvasAssetsRoute)) {
@@ -292,14 +434,58 @@ async function serveCanvasAsset(req, res, next) {
       res.end('Not found')
       return
     }
-    res.statusCode = 200
-    res.setHeader('content-type', mimeTypes.get(extname(filePath).toLowerCase()) ?? 'application/octet-stream')
-    res.setHeader('content-length', String(fileStat.size))
-    res.setHeader('cache-control', 'no-cache')
+    const previewWidth = parsePreviewWidth(url)
+    let servePath = filePath
+    let serveStat = fileStat
+    let servedPreview = false
+    if (previewWidth && !url.searchParams.get('download')) {
+      const previewPath = await resolveAssetPreview(filePath, fileStat, previewWidth)
+      if (previewPath) {
+        servePath = previewPath
+        serveStat = await stat(previewPath)
+        servedPreview = true
+      }
+    }
+    const contentType = mimeTypes.get(extname(servePath).toLowerCase()) ?? 'application/octet-stream'
+    res.setHeader('content-type', contentType)
+    // Range support is required for iOS Safari to play <video> at all, and lets
+    // browsers seek/stream instead of downloading the whole file up front.
+    res.setHeader('accept-ranges', 'bytes')
+    // Previews are content-stable for a given (name, width, mtime); let the
+    // phone cache them so a reload does not re-download the whole canvas.
+    res.setHeader('cache-control', servedPreview ? 'private, max-age=86400' : 'no-cache')
+    res.setHeader('etag', `"${basename(servePath)}-${serveStat.size}-${Math.round(serveStat.mtimeMs)}"`)
     if (url.searchParams.get('download')) {
       res.setHeader('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(basename(filePath))}`)
     }
-    createReadStream(filePath).pipe(res)
+
+    const rangeHeader = req.headers.range
+    const rangeMatch = typeof rangeHeader === 'string' ? /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim()) : null
+    if (rangeMatch && (rangeMatch[1] || rangeMatch[2])) {
+      let start = rangeMatch[1] ? Number.parseInt(rangeMatch[1], 10) : 0
+      let end = rangeMatch[2] ? Number.parseInt(rangeMatch[2], 10) : serveStat.size - 1
+      end = Math.min(end, serveStat.size - 1)
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= serveStat.size) {
+        res.statusCode = 416
+        res.setHeader('content-range', `bytes */${serveStat.size}`)
+        res.end()
+        return
+      }
+      res.statusCode = 206
+      res.setHeader('content-range', `bytes ${start}-${end}/${serveStat.size}`)
+      res.setHeader('content-length', String(end - start + 1))
+      createReadStream(servePath, { start, end }).pipe(res)
+      return
+    }
+
+    if (req.headers['if-none-match'] === res.getHeader('etag')) {
+      res.statusCode = 304
+      res.end()
+      return
+    }
+    res.statusCode = 200
+    res.setHeader('content-length', String(serveStat.size))
+    createReadStream(servePath).pipe(res)
   } catch (error) {
     if (error.code === 'ENOENT') {
       res.statusCode = 404
@@ -1086,44 +1272,55 @@ function configureCanvasServer(server) {
           }
 
           const body = JSON.parse(await readRequestBody(req))
-          const media = await generateImageMedia(body)
-          const result = await insertExcalidrawImage({
-            canvasDir,
-            mediaBuffer: media.buffer,
-            mimeType: media.mimeType,
-            fileName: body.fileName,
-            anchorElementId: body.anchorElementId,
-            sourceElementId: body.sourceElementId,
-            placement: body.placement,
-            margin: body.margin,
-            matchAnchor: body.matchAnchor,
-            replaceAnchor: body.replaceAnchor,
-            selectCreated: body.selectCreated,
-            displayWidth: body.displayWidth,
-            displayHeight: body.displayHeight,
-            customData: {
-              codexGeneratedImage: true,
-              codexGenerationModel: media.model,
-              codexGenerationPrompt: body.prompt,
-              codexGenerationAspectRatio: body.aspectRatio ?? body.aspect_ratio,
-              codexGenerationQuality: body.quality,
-              generatorPrompt: body.prompt,
-              generatorModel: body.model,
-              generatorAspectRatio: body.aspectRatio ?? body.aspect_ratio,
-              generatorImageQuality: body.quality,
-              generatorImageSize: body.imageSize ?? body.size ?? '1K',
-              codexGenerationSource: media.source,
-              ...(body.customData && typeof body.customData === 'object' ? body.customData : {})
-            }
-          })
+          const runImageGeneration = async () => {
+            const media = await generateImageMedia(body)
+            const result = await insertExcalidrawImage({
+              canvasDir,
+              mediaBuffer: media.buffer,
+              mimeType: media.mimeType,
+              fileName: body.fileName,
+              anchorElementId: body.anchorElementId,
+              sourceElementId: body.sourceElementId,
+              placement: body.placement,
+              margin: body.margin,
+              matchAnchor: body.matchAnchor,
+              replaceAnchor: body.replaceAnchor,
+              selectCreated: body.selectCreated,
+              displayWidth: body.displayWidth,
+              displayHeight: body.displayHeight,
+              customData: {
+                codexGeneratedImage: true,
+                codexGenerationModel: media.model,
+                codexGenerationPrompt: body.prompt,
+                codexGenerationAspectRatio: body.aspectRatio ?? body.aspect_ratio,
+                codexGenerationQuality: body.quality,
+                generatorPrompt: body.prompt,
+                generatorModel: body.model,
+                generatorAspectRatio: body.aspectRatio ?? body.aspect_ratio,
+                generatorImageQuality: body.quality,
+                generatorImageSize: body.imageSize ?? body.size ?? '1K',
+                codexGenerationSource: media.source,
+                ...(body.customData && typeof body.customData === 'object' ? body.customData : {})
+              }
+            })
+            broadcastCanvasChanged([canvasFile, result.assetFile])
+            return { media, result }
+          }
 
+          if (wantsAsyncGeneration(req, body)) {
+            const jobId = createGenerationJobId('image')
+            sendJson(res, 202, { ok: true, async: true, jobId, kind: 'image' })
+            runBackgroundGeneration(jobId, runImageGeneration)
+            return
+          }
+
+          const { media, result } = await runImageGeneration()
           sendJson(res, 200, {
             ok: true,
             kind: 'image',
             model: media.model,
             ...result
           })
-          broadcastCanvasChanged([canvasFile, result.assetFile])
         } catch (error) {
           sendJson(res, 500, { error: error.message })
         }
@@ -1139,50 +1336,61 @@ function configureCanvasServer(server) {
           }
 
           const body = JSON.parse(await readRequestBody(req))
-          const media = await generateVideoMedia(body)
-          const result = await insertExcalidrawVideo({
-            canvasDir,
-            mediaBuffer: media.buffer,
-            mimeType: media.mimeType,
-            fileName: body.fileName || body.videoName,
-            anchorElementId: body.anchorElementId,
-            sourceElementId: body.sourceElementId,
-            placement: body.placement,
-            margin: body.margin,
-            matchAnchor: body.matchAnchor,
-            replaceAnchor: body.replaceAnchor,
-            selectCreated: body.selectCreated,
-            displayWidth: body.displayWidth,
-            displayHeight: body.displayHeight,
-            aspectRatio: body.aspectRatio,
-            duration: body.duration,
-            prompt: body.prompt,
-            model: media.model,
-            customData: {
-              codexGeneratedVideo: true,
-              codexGenerationModel: media.model,
-              codexGenerationPrompt: body.prompt,
-              codexGenerationAspectRatio: body.aspectRatio ?? body.aspect_ratio,
-              codexGenerationDuration: body.duration,
-              codexGenerationResolution: body.resolution,
-              videoPrompt: body.prompt,
-              videoModel: body.model,
-              videoAspectRatio: body.aspectRatio ?? body.aspect_ratio,
-              videoDuration: body.duration,
-              videoResolution: body.resolution,
-              videoGenerateAudio: body.generateAudio ?? body.generate_audio,
-              codexGenerationSource: media.source,
-              ...(body.customData && typeof body.customData === 'object' ? body.customData : {})
-            }
-          })
+          const runVideoGeneration = async () => {
+            const media = await generateVideoMedia(body)
+            const result = await insertExcalidrawVideo({
+              canvasDir,
+              mediaBuffer: media.buffer,
+              mimeType: media.mimeType,
+              fileName: body.fileName || body.videoName,
+              anchorElementId: body.anchorElementId,
+              sourceElementId: body.sourceElementId,
+              placement: body.placement,
+              margin: body.margin,
+              matchAnchor: body.matchAnchor,
+              replaceAnchor: body.replaceAnchor,
+              selectCreated: body.selectCreated,
+              displayWidth: body.displayWidth,
+              displayHeight: body.displayHeight,
+              aspectRatio: body.aspectRatio,
+              duration: body.duration,
+              prompt: body.prompt,
+              model: media.model,
+              customData: {
+                codexGeneratedVideo: true,
+                codexGenerationModel: media.model,
+                codexGenerationPrompt: body.prompt,
+                codexGenerationAspectRatio: body.aspectRatio ?? body.aspect_ratio,
+                codexGenerationDuration: body.duration,
+                codexGenerationResolution: body.resolution,
+                videoPrompt: body.prompt,
+                videoModel: body.model,
+                videoAspectRatio: body.aspectRatio ?? body.aspect_ratio,
+                videoDuration: body.duration,
+                videoResolution: body.resolution,
+                videoGenerateAudio: body.generateAudio ?? body.generate_audio,
+                codexGenerationSource: media.source,
+                ...(body.customData && typeof body.customData === 'object' ? body.customData : {})
+              }
+            })
+            broadcastCanvasChanged([canvasFile, result.assetFile])
+            return { media, result }
+          }
 
+          if (wantsAsyncGeneration(req, body)) {
+            const jobId = createGenerationJobId('video')
+            sendJson(res, 202, { ok: true, async: true, jobId, kind: 'video' })
+            runBackgroundGeneration(jobId, runVideoGeneration)
+            return
+          }
+
+          const { media, result } = await runVideoGeneration()
           sendJson(res, 200, {
             ok: true,
             kind: 'video',
             model: media.model,
             ...result
           })
-          broadcastCanvasChanged([canvasFile, result.assetFile])
         } catch (error) {
           sendJson(res, 500, { error: error.message })
         }

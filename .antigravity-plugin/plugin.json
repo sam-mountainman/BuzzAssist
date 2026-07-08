@@ -1,8 +1,8 @@
 {
   "name": "buzzassist",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "displayName": "BuzzAssist",
-  "description": "BuzzAssist canvas and media plugin for Antigravity.",
+  "description": "BuzzAssist canvas, media generation, and ngrok Canvas Tunnel plugin for Antigravity.",
   "author": {
     "name": "higataiyu"
   },

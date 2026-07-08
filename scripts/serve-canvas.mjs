@@ -10,6 +10,7 @@ import {
   createRemoteCanvasRelayClient,
   createRemoteCanvasSession,
 } from "../lib/remoteCanvasRelayClient.mjs";
+import { handleTunnelAccess } from "../lib/canvasServerRuntime.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const argv = process.argv.slice(2);
@@ -202,6 +203,11 @@ const { canvasStoragePlugin } = await import("../vite.config.js");
 const middlewares = createMiddlewareStack();
 const server = createServer((req, res) => middlewares.handle(req, res));
 const watcher = { add() {}, on() {} };
+
+middlewares.use((req, res, next) => {
+  if (handleTunnelAccess(req, res)) return;
+  next();
+});
 
 canvasStoragePlugin().configureServer({ middlewares, watcher, httpServer: server });
 
