@@ -1,8 +1,14 @@
 # BuzzAssist Remote Canvas Relay Architecture
 
+> Status: superseded for same-UI mobile access. The plugin now treats ngrok
+> Canvas Tunnel as the supported path when users want the exact same local
+> Excalidraw/BuzzAssist UI on a phone or another browser. This document remains
+> as the Cloud Relay design note for future hosted relay experiments.
+
 ## Decision
 
-BuzzAssist should use a **BuzzAssist Cloud Relay** as the final remote-canvas architecture. Do not create one ngrok or Cloudflare Tunnel route per user/session as the product architecture. Keep ngrok/Cloudflare Tunnel as developer and emergency fallback paths only.
+BuzzAssist Cloud Relay was the proposed hosted remote-canvas architecture. It
+is not the current same-UI mobile path.
 
 The production URL should be owned by BuzzAssist:
 

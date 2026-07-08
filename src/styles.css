@@ -38,6 +38,14 @@ body {
   display: none !important;
 }
 
+/* Excalidraw's native "Scroll back to content" fits the entire scene bounds in
+   view. This canvas can span ~38k scene pixels vertically; on a phone that
+   forces an extreme zoom-out and can blank the renderer. Narrow/tunnel views
+   should pan normally instead of invoking fit-all-content. */
+.lovart-ai-root.is-memory-constrained-canvas .excalidraw .scroll-back-to-content {
+  display: none !important;
+}
+
 .lovart-ai-rail {
   position: absolute;
   top: 50%;
@@ -198,6 +206,26 @@ body {
   transform-origin: center center;
 }
 
+/* On phone tunnels, bitmap files stay as tiny Excalidraw placeholders and the
+   visible image is painted by this overlay. That keeps Excalidraw's internal
+   file map small while preserving the same canvas appearance. */
+.lovart-image-preview-overlay {
+  position: absolute;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+  transform-origin: center center;
+}
+
+.lovart-image-preview-media {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+}
+
 .lovart-menu-backdrop {
   position: absolute;
   inset: 0;
@@ -255,7 +283,11 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  pointer-events: none;
+  /* Real button: the only playback entry point on touch devices. */
+  pointer-events: auto;
+  cursor: pointer;
+  padding: 0;
+  border: 0;
   background: rgb(0 0 0 / 0.45);
   border-radius: 999px;
   box-shadow: 0 10px 24px rgb(0 0 0 / 0.22);
@@ -1395,6 +1427,9 @@ body {
     font-size: 18px;
   }
 
+  /* No width overrides here: the frame-anchored panel keeps its exact desktop
+     layout and is scaled down as a whole (App.jsx panelStyle transform), so
+     phones render the same UI, just smaller. */
   .lovart-ai-panel {
     left: 50%;
     width: min(96vw, 520px);

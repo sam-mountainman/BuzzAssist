@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- maximum-scale/user-scalable keep iOS Safari from pinch-zooming the PAGE
+         (which shrinks the whole app into a corner); canvas zoom is handled by
+         Excalidraw itself. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>BuzzAssist</title>
   </head>
   <body>

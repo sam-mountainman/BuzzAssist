@@ -5,7 +5,7 @@ import {
 } from '@excalidraw/excalidraw'
 import '@excalidraw/excalidraw/index.css'
 import { generateKeyBetween } from 'fractional-indexing'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   IMAGE_MODEL_FAMILIES,
   MEDIA_ROUTES,
@@ -54,6 +54,7 @@ const ASSET_HYDRATION_CONCURRENCY = 6
 const OVERLAY_RENDER_MARGIN = 320
 const FRAME_OVERLAY_MAX_ITEMS = 320
 const MEDIA_HEADER_OVERLAY_MAX_ITEMS = 320
+const MOBILE_IMAGE_PREVIEW_OVERLAY_MAX_ITEMS = 8
 const VIDEO_PLAYBACK_OVERLAY_MAX_ITEMS = 120
 const SUBTITLE_PREVIEW_OVERLAY_MAX_ITEMS = 120
 const ATTACHMENT_CARD_WIDTH = 320
@@ -65,9 +66,127 @@ const COLLAPSED_FREEDRAW_MAX_DIMENSION = 1
 const TEXT_ATTACHMENT_EXTENSIONS = new Set(['txt', 'md', 'markdown'])
 const VIDEO_POSTER_FALLBACK_DATA_URL =
   'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjgwIDcyMCI+PHJlY3Qgd2lkdGg9IjEyODAiIGhlaWdodD0iNzIwIiBmaWxsPSIjMTExODI3Ii8+PHBhdGggZD0iTTU2MCAyNTB2MjIwbDE5MC0xMTB6IiBmaWxsPSIjZmZmIiBvcGFjaXR5PSIuOSIvPjwvc3ZnPg=='
+const CANVAS_ASSET_PLACEHOLDER_DATA_URL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=='
 const VIDEO_POSTER_CAPTURE_MAX_WIDTH = 960
 const VIDEO_POSTER_SCORE_SAMPLE_SIZE = 48
 const VIDEO_POSTER_GOOD_SCORE = 42
+
+function currentTunnelAccessToken() {
+  if (typeof window === 'undefined') return ''
+  try {
+    const params = new URLSearchParams(window.location.search)
+    return params.get('t') || params.get('token') || ''
+  } catch {
+    return ''
+  }
+}
+
+function isLocalCanvasHostname(hostname) {
+  const normalized = String(hostname || '').toLowerCase()
+  return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1' || normalized === '[::1]'
+}
+
+function isTunnelCanvasRuntime() {
+  if (typeof window === 'undefined') return false
+  return !isLocalCanvasHostname(window.location.hostname)
+}
+
+function isNarrowCanvasViewport() {
+  return typeof window !== 'undefined' && Number(window.innerWidth) > 0 && Number(window.innerWidth) <= 900
+}
+
+function isMemoryConstrainedCanvasRuntime() {
+  return isTunnelCanvasRuntime() && (isTouchLikeDevice() || isNarrowCanvasViewport())
+}
+
+// Touch devices have no hover, so the desktop hover-to-play preview never
+// fires. Detect them so videos can auto-play (muted) inline instead.
+function isTouchLikeDevice() {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
+  return window.matchMedia('(hover: none), (pointer: coarse)').matches
+}
+
+// Preview width for tunnel sessions, sized to the actual device: a phone that
+// can only show ~1170 physical pixels across doesn't need 1600px previews.
+// Decoding 37 x 1600px bitmaps (~200MB) is exactly what pushed iOS Safari over
+// its per-page memory limit and white-screened the tab. Rounded to 200px steps
+// so the server-side preview cache stays shared.
+let cachedTunnelPreviewWidth = 0
+function tunnelPreviewWidth() {
+  if (cachedTunnelPreviewWidth) return cachedTunnelPreviewWidth
+  let width = 1600
+  if (typeof window !== 'undefined' && (isTouchLikeDevice() || isNarrowCanvasViewport())) {
+    // Size to the screen's SHORT edge (portrait width) × DPR — the widest an
+    // image ever needs to fill the phone at native sharpness (~1170px on an
+    // iPhone). Using the long edge/full physical resolution just pins to the
+    // 1600 cap and defeats the point: decoding 37 x 1600px bitmaps (~370MB) is
+    // what white-screens iOS Safari. Short-edge sizing roughly halves that.
+    const shortEdge = Math.min(
+      Number(window.screen?.width) || 0,
+      Number(window.screen?.height) || 0
+    ) || 400
+    const physical = shortEdge * (Number(window.devicePixelRatio) || 1)
+    width = Math.min(1024, Math.max(640, Math.ceil(physical / 160) * 160))
+  }
+  cachedTunnelPreviewWidth = width
+  return width
+}
+
+function withTunnelPreviewWidth(url) {
+  if (!isTunnelCanvasRuntime() || !/\.(png|jpe?g|webp)$/i.test(String(url).split('?')[0])) return url
+  return `${url}${String(url).includes('?') ? '&' : '?'}w=${tunnelPreviewWidth()}`
+}
+
+function canvasRequestInfo(input) {
+  if (typeof window === 'undefined' || (typeof input !== 'string' && !(input instanceof URL))) {
+    return { url: input, sameOrigin: false }
+  }
+
+  const raw = String(input)
+  try {
+    const url = new URL(raw, window.location.href)
+    const sameOrigin = url.origin === window.location.origin
+    const localCanvasUrl =
+      (url.protocol === 'http:' || url.protocol === 'https:') &&
+      isLocalCanvasHostname(url.hostname) &&
+      (url.pathname.startsWith('/api/') || url.pathname.startsWith(CANVAS_ASSETS_ROUTE))
+
+    if (!sameOrigin && !localCanvasUrl) return { url: input, sameOrigin: false }
+
+    if (localCanvasUrl && !isLocalCanvasHostname(window.location.hostname)) {
+      url.protocol = window.location.protocol
+      url.host = window.location.host
+    }
+
+    const token = currentTunnelAccessToken()
+    if (token && !url.searchParams.has('t') && !url.searchParams.has('token')) {
+      url.searchParams.set('t', token)
+    }
+
+    const nextUrl = url.origin === window.location.origin
+      ? `${url.pathname}${url.search}${url.hash}`
+      : url.href
+    return { url: nextUrl, sameOrigin: url.origin === window.location.origin }
+  } catch {
+    return { url: input, sameOrigin: false }
+  }
+}
+
+function canvasFetch(input, init) {
+  const request = canvasRequestInfo(input)
+  if (!request.sameOrigin) return window.fetch(request.url, init)
+  return window.fetch(request.url, {
+    ...(init ?? {}),
+    credentials: init?.credentials ?? 'include'
+  })
+}
+
+function createCanvasEventSource(url) {
+  const request = canvasRequestInfo(url)
+  return request.sameOrigin
+    ? new EventSource(request.url, { withCredentials: true })
+    : new EventSource(request.url)
+}
 
 if (typeof window !== 'undefined' && !window.__lovartClipboardShortcutInstalled) {
   window.__lovartClipboardShortcutInstalled = true
@@ -528,7 +647,7 @@ async function saveUrlWithPicker(url, fileName = 'download', fallbackUrl = url) 
         suggestedName,
         types: filePickerTypesForName(suggestedName)
       })
-      const response = await fetch(url)
+      const response = await canvasFetch(url)
       if (!response.ok) throw new Error(`Download failed: ${response.status}`)
       const writable = await handle.createWritable()
       if (response.body?.pipeTo) {
@@ -1092,6 +1211,55 @@ function isAssetBackedFileRecord(file) {
   )
 }
 
+function runtimeCanvasAssetUrl(value) {
+  if (typeof value !== 'string') return value
+  if (value.startsWith(CANVAS_ASSETS_ROUTE)) return canvasRequestInfo(value).url
+  try {
+    const url = new URL(value, window.location.href)
+    if (url.pathname.startsWith(CANVAS_ASSETS_ROUTE)) return canvasRequestInfo(value).url
+  } catch {
+    // Leave non-URL values unchanged.
+  }
+  return value
+}
+
+function persistedCanvasAssetUrl(value) {
+  if (typeof value !== 'string') return value
+  try {
+    const url = new URL(value, window.location.href)
+    if (!url.pathname.startsWith(CANVAS_ASSETS_ROUTE)) return value
+    url.searchParams.delete('t')
+    url.searchParams.delete('token')
+    return `${url.pathname}${url.search}${url.hash}`
+  } catch {
+    return value
+  }
+}
+
+function withRuntimeAssetBackedFiles(files) {
+  if (!files || typeof files !== 'object') return files
+  let changed = false
+  const next = {}
+  for (const [id, file] of Object.entries(files)) {
+    if (!isAssetBackedFileRecord(file)) {
+      next[id] = file
+      continue
+    }
+    const runtimeUrl = runtimeCanvasAssetUrl(file.dataURL || file.codexAssetUrl)
+    if (runtimeUrl && runtimeUrl !== file.dataURL) {
+      next[id] = { ...file, dataURL: runtimeUrl }
+      changed = true
+    } else {
+      next[id] = file
+    }
+  }
+  return changed ? next : files
+}
+
+function withRuntimeAssetBackedScene(scene) {
+  return { ...scene, files: withRuntimeAssetBackedFiles(scene.files) }
+}
+
 function assetBackedFileIds(files) {
   return new Set(
     Object.entries(files ?? {})
@@ -1121,6 +1289,89 @@ function restoreAssetBackedImageStatuses(elements, files) {
 
 const assetDataURLCache = new Map()
 
+function assetBackedSourceUrl(file) {
+  if (typeof file?.codexAssetUrl === 'string' && file.codexAssetUrl.startsWith(CANVAS_ASSETS_ROUTE)) return file.codexAssetUrl
+  if (typeof file?.dataURL === 'string' && file.dataURL.startsWith(CANVAS_ASSETS_ROUTE)) return file.dataURL
+  return ''
+}
+
+function isHydratedAssetBackedFile(file) {
+  return (
+    isAssetBackedFileRecord(file) &&
+    typeof file?.dataURL === 'string' &&
+    file.dataURL.startsWith('data:') &&
+    file.dataURL !== CANVAS_ASSET_PLACEHOLDER_DATA_URL
+  )
+}
+
+function dehydrateAssetBackedFile(file) {
+  const assetUrl = persistedCanvasAssetUrl(assetBackedSourceUrl(file))
+  if (!assetUrl) return file
+  if (file.dataURL === CANVAS_ASSET_PLACEHOLDER_DATA_URL && file.codexAssetUrl === assetUrl) return file
+  return {
+    ...file,
+    dataURL: CANVAS_ASSET_PLACEHOLDER_DATA_URL,
+    codexAssetUrl: assetUrl,
+    codexAssetBacked: true
+  }
+}
+
+function placeholderAssetBackedFilesOutside(scene, keepFileIds) {
+  if (!scene?.files || !keepFileIds) return scene
+  const files = { ...scene.files }
+  let changed = false
+  for (const [id, file] of Object.entries(files)) {
+    if (!isAssetBackedFileRecord(file) || keepFileIds.has(id)) continue
+    if (file?.dataURL === CANVAS_ASSET_PLACEHOLDER_DATA_URL) continue
+    if (isHydratedAssetBackedFile(file)) evictAssetDataURLCacheForFile(file)
+    files[id] = dehydrateAssetBackedFile(file)
+    changed = true
+  }
+  return changed ? { ...scene, files } : scene
+}
+
+function assetBackedCanvasImageFileIds(scene) {
+  const files = scene?.files ?? {}
+  const ids = new Set()
+  for (const element of scene?.elements ?? []) {
+    if (
+      element?.type !== 'image' ||
+      element.isDeleted ||
+      element.customData?.codexMediaKind === 'video' ||
+      !element.fileId ||
+      !isAssetBackedFileRecord(files[element.fileId])
+    ) {
+      continue
+    }
+    ids.add(element.fileId)
+  }
+  return ids
+}
+
+function placeholderAssetBackedFilesByIds(scene, fileIds) {
+  if (!scene?.files || !(fileIds instanceof Set) || fileIds.size === 0) return scene
+  const files = { ...scene.files }
+  let changed = false
+  for (const id of fileIds) {
+    const file = files[id]
+    if (!isAssetBackedFileRecord(file) || file?.dataURL === CANVAS_ASSET_PLACEHOLDER_DATA_URL) continue
+    if (isHydratedAssetBackedFile(file)) evictAssetDataURLCacheForFile(file)
+    files[id] = dehydrateAssetBackedFile(file)
+    changed = true
+  }
+  return changed ? { ...scene, files } : scene
+}
+
+function evictAssetDataURLCacheForFile(file) {
+  const assetUrl = assetBackedSourceUrl(file)
+  if (!assetUrl) return
+  const candidates = new Set([assetUrl, withTunnelPreviewWidth(assetUrl), runtimeCanvasAssetUrl(assetUrl)])
+  for (const candidate of candidates) {
+    if (!candidate) continue
+    assetDataURLCache.delete(canvasRequestInfo(candidate).url)
+  }
+}
+
 function readBlobAsDataURL(blob, url) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -1131,18 +1382,19 @@ function readBlobAsDataURL(blob, url) {
 }
 
 function fetchAssetDataURL(url) {
-  let pending = assetDataURLCache.get(url)
+  const assetUrl = canvasRequestInfo(url).url
+  let pending = assetDataURLCache.get(assetUrl)
   if (pending) return pending
   pending = (async () => {
-    const response = await fetch(url)
-    if (!response.ok) throw new Error(`Failed to load asset ${url}: ${response.status}`)
+    const response = await canvasFetch(assetUrl)
+    if (!response.ok) throw new Error(`Failed to load asset ${assetUrl}: ${response.status}`)
     const blob = await response.blob()
-    return readBlobAsDataURL(blob, url)
+    return readBlobAsDataURL(blob, assetUrl)
   })()
   pending.catch(() => {
-    if (assetDataURLCache.get(url) === pending) assetDataURLCache.delete(url)
+    if (assetDataURLCache.get(assetUrl) === pending) assetDataURLCache.delete(assetUrl)
   })
-  assetDataURLCache.set(url, pending)
+  assetDataURLCache.set(assetUrl, pending)
   return pending
 }
 
@@ -1156,6 +1408,7 @@ async function hydrateAssetBackedFiles(files, onHydrated, options = {}) {
     return !onlyFileIds || onlyFileIds.has(file.id)
   })
   if (pending.length === 0) return
+  const concurrency = Math.max(1, Math.min(Number(options.concurrency) || ASSET_HYDRATION_CONCURRENCY, ASSET_HYDRATION_CONCURRENCY))
   let cursor = 0
   const worker = async () => {
     while (cursor < pending.length) {
@@ -1165,15 +1418,19 @@ async function hydrateAssetBackedFiles(files, onHydrated, options = {}) {
         typeof file.codexAssetUrl === 'string' && file.codexAssetUrl.startsWith(CANVAS_ASSETS_ROUTE)
           ? file.codexAssetUrl
           : file.dataURL
+      // Over the tunnel, multi-MB originals overwhelm phone bandwidth/memory —
+      // request a device-sized preview; the server falls back to the original
+      // for small files and non-bitmap types. Local sessions keep full-res.
+      const fetchUrl = withTunnelPreviewWidth(url)
       try {
-        const dataURL = await fetchAssetDataURL(url)
-        onHydrated({ ...file, dataURL, codexAssetBacked: true, codexAssetUrl: url })
+        const dataURL = await fetchAssetDataURL(fetchUrl)
+        onHydrated({ ...file, dataURL, codexAssetBacked: true, codexAssetUrl: persistedCanvasAssetUrl(url) })
       } catch (error) {
         console.error(error)
       }
     }
   }
-  await Promise.all(Array.from({ length: Math.min(ASSET_HYDRATION_CONCURRENCY, pending.length) }, worker))
+  await Promise.all(Array.from({ length: Math.min(concurrency, pending.length) }, worker))
 }
 
 function visibleAssetBackedImageFileIds(scene, padding = 900) {
@@ -1238,7 +1495,7 @@ function stripAssetBackedFilesForSave(elements, files) {
       typeof customData.codexAssetUrl === 'string' && customData.codexAssetUrl.startsWith(CANVAS_ASSETS_ROUTE) &&
       !assetUrlByFileId.has(element.fileId)
     ) {
-      assetUrlByFileId.set(element.fileId, customData.codexAssetUrl)
+      assetUrlByFileId.set(element.fileId, persistedCanvasAssetUrl(customData.codexAssetUrl))
     }
   }
   let changed = false
@@ -1249,18 +1506,22 @@ function stripAssetBackedFilesForSave(elements, files) {
       file?.codexAssetBacked === true &&
       typeof file.codexAssetUrl === 'string' &&
       file.codexAssetUrl.startsWith(CANVAS_ASSETS_ROUTE)
-        ? file.codexAssetUrl
+        ? persistedCanvasAssetUrl(file.codexAssetUrl)
         : null
-    if ((!inline && !markedUrl) || videoFileIds.has(id) || previewFileIds.has(id)) {
+    const dataAssetUrl =
+      typeof file?.dataURL === 'string' && file.dataURL.startsWith(CANVAS_ASSETS_ROUTE)
+        ? persistedCanvasAssetUrl(file.dataURL)
+        : null
+    if ((!inline && !markedUrl && !dataAssetUrl) || videoFileIds.has(id) || previewFileIds.has(id)) {
       next[id] = file
       continue
     }
-    const assetUrl = markedUrl || assetUrlByFileId.get(id) || null
+    const assetUrl = markedUrl || assetUrlByFileId.get(id) || dataAssetUrl || null
     if (!assetUrl) {
       next[id] = file
       continue
     }
-    next[id] = { ...file, dataURL: assetUrl, codexAssetBacked: true }
+    next[id] = { ...file, dataURL: assetUrl, codexAssetUrl: assetUrl, codexAssetBacked: true }
     changed = true
   }
   return changed ? next : files
@@ -1552,21 +1813,47 @@ function getPanelPlacementFromViewportTarget(target, kind = 'image') {
   const isVideo = kind === true || kind === 'video'
   const frameViewportWidth = Math.max(1, Number(target?.width) || 1)
   const frameViewportHeight = Math.max(1, Number(target?.height) || 1)
-  const panelWidth = isVideo
+  const desiredWidth = isVideo
     ? GENERATOR_PANEL_VIDEO_WIDTH
     : kind === 'subtitle' || kind === 'silenceCut'
       // The portrait SRT frame fits at a small zoom, so 0.9x its viewport
       // width would collapse the bar pills; keep the desktop's max width.
       ? 560
       : clamp(Math.round(frameViewportWidth * 0.9), GENERATOR_PANEL_IMAGE_MIN_WIDTH, GENERATOR_PANEL_IMAGE_MAX_WIDTH)
+  // Phones: keep the EXACT desktop panel (same internal layout, no reflow) and
+  // shrink it visually with a CSS scale so it fits the screen width. The
+  // content remains the desktop UI; only the outer placement is clamped so the
+  // prompt stays reachable after the user pans or zooms the canvas.
+  const viewportWidth = typeof window !== 'undefined' ? (window.innerWidth || 0) : 0
+  const viewportHeight = typeof window !== 'undefined' ? (window.innerHeight || 0) : 0
+  const isCompactViewport = viewportWidth > 0 && viewportWidth <= 900
+  const panelScale = viewportWidth > 0 && viewportWidth <= 900
+    ? Math.min(1, (viewportWidth - 16) / desiredWidth)
+    : 1
+  const panelWidth = desiredWidth
   const rawLeft = Math.round((Number(target?.left) || 0) + frameViewportWidth / 2 - panelWidth / 2)
   const targetTop = Number(target?.top) || 0
   const rawTop = Math.round(targetTop + frameViewportHeight + 4)
+  const panelVisualWidth = panelWidth * panelScale
+  const transformInsetX = (panelWidth - panelVisualWidth) / 2
+  const minLeft = 8 - transformInsetX
+  const maxLeft = viewportWidth - 8 - panelVisualWidth - transformInsetX
+  const panelEstimatedHeight = isVideo ? 280 : kind === 'subtitle' || kind === 'silenceCut' ? 220 : GENERATOR_PANEL_ESTIMATED_HEIGHT + 24
+  const panelVisualHeight = panelEstimatedHeight * panelScale
+  const minTop = 8
+  const maxTop = viewportHeight - 8 - panelVisualHeight
+  const left = isCompactViewport
+    ? clamp(rawLeft, minLeft, Math.max(minLeft, maxLeft))
+    : rawLeft
+  const top = isCompactViewport && viewportHeight > 0
+    ? clamp(rawTop, minTop, Math.max(minTop, maxTop))
+    : rawTop
 
   return {
-    left: rawLeft,
-    top: rawTop,
-    width: panelWidth
+    left,
+    top,
+    width: panelWidth,
+    scale: panelScale
   }
 }
 
@@ -1806,7 +2093,7 @@ function normalizeAssetList(value) {
       const displayURL = url || path || ''
       const rawThumbnail = typeof item.thumbnail === 'string' ? item.thumbnail : ''
       const thumbnail = rawThumbnail.startsWith('data:image/')
-        ? rawThumbnail
+        ? displayURL || rawThumbnail
         : rawThumbnail && !rawThumbnail.startsWith('data:')
         ? item.thumbnail
         : displayURL
@@ -2369,7 +2656,7 @@ function frameCustomDataFromForm(kind, form) {
       subtitleScriptText: form.subtitleScriptText,
       subtitleScriptName: form.subtitleScriptName,
       subtitleGlossary: form.subtitleGlossary,
-      subtitleAudioAsset: form.subtitleAudio || null
+      subtitleAudioAsset: normalizeAssetList(form.subtitleAudio ? [form.subtitleAudio] : [])[0] ?? null
     }
   }
   if (kind === 'silenceCut') {
@@ -2385,8 +2672,8 @@ function frameCustomDataFromForm(kind, form) {
       silenceCutThresholdAuto: form.silenceCutThresholdAuto,
       silenceCutPreMarginSeconds: form.silenceCutPreMarginSeconds,
       silenceCutPostMarginSeconds: form.silenceCutPostMarginSeconds,
-      silenceCutVideoAsset: form.silenceCutVideo || null,
-      silenceCutOutputAsset: form.silenceCutOutput || null
+      silenceCutVideoAsset: normalizeAssetList(form.silenceCutVideo ? [form.silenceCutVideo] : [])[0] ?? null,
+      silenceCutOutputAsset: normalizeAssetList(form.silenceCutOutput ? [form.silenceCutOutput] : [])[0] ?? null
     }
   }
   if (kind === 'lovart') {
@@ -2408,8 +2695,8 @@ function frameCustomDataFromForm(kind, form) {
         videoDuration: form.duration,
         videoResolution: form.resolution,
         videoTab: form.videoTab,
-        videoStartFrameAsset: form.videoStartFrame || null,
-        videoEndFrameAsset: form.videoEndFrame || null,
+        videoStartFrameAsset: normalizeAssetList(form.videoStartFrame ? [form.videoStartFrame] : [])[0] ?? null,
+        videoEndFrameAsset: normalizeAssetList(form.videoEndFrame ? [form.videoEndFrame] : [])[0] ?? null,
         videoReferenceImages: normalizeAssetList(form.videoReferenceImages),
         videoReferenceVideos: normalizeAssetList(form.videoReferenceVideos),
         videoReferenceAudios: normalizeAssetList(form.videoReferenceAudios),
@@ -2675,7 +2962,7 @@ function fetchSrtLines(url) {
   let pending = srtTextCache.get(url)
   if (pending) return pending
   pending = (async () => {
-    const response = await fetch(url)
+    const response = await canvasFetch(url)
     if (!response.ok) throw new Error(`Failed to load subtitles ${url}: ${response.status}`)
     const lines = splitSrtLines(await response.text())
     srtLinesCache.set(url, lines)
@@ -2917,36 +3204,97 @@ function SubtitleCanvasOverlay({ overlay, scrollOffset }) {
   )
 }
 
+function CanvasImagePreviewOverlay({ image }) {
+  const source = useMemo(() => {
+    if (!image.assetUrl) return ''
+    return canvasRequestInfo(withTunnelPreviewWidth(image.assetUrl)).url
+  }, [image.assetUrl])
+
+  if (!source) return null
+  return (
+    <div
+      className="lovart-image-preview-overlay"
+      style={{
+        left: `${image.left}px`,
+        top: `${image.top}px`,
+        width: `${image.width}px`,
+        height: `${image.height}px`,
+        transform: image.angle ? `rotate(${image.angle}rad)` : undefined
+      }}
+    >
+      <img
+        className="lovart-image-preview-media"
+        src={source}
+        alt=""
+        draggable={false}
+        decoding="async"
+        fetchPriority="high"
+      />
+    </div>
+  )
+}
+
 function VideoCanvasOverlay({ video, isHovered, onExpand }) {
   const hoverVideoRef = useRef(null)
+  const containerRef = useRef(null)
   const [isHoverVideoReady, setIsHoverVideoReady] = useState(false)
+  // Touch devices auto-play the muted inline preview (there is no hover), and
+  // only while the clip is actually on screen to save battery and data.
+  const autoPlayInline = useMemo(() => isTouchLikeDevice(), [])
+  const [isInView, setIsInView] = useState(false)
+
+  useEffect(() => {
+    if (!autoPlayInline) return undefined
+    const element = containerRef.current
+    if (!element || typeof IntersectionObserver === 'undefined') {
+      setIsInView(true)
+      return undefined
+    }
+    // Require the clip to be prominently on screen (>=50%) before auto-playing,
+    // so at most ~one video decodes at a time on a phone (each extra <video>
+    // element is real memory pressure toward an iOS Safari white-screen).
+    const observer = new IntersectionObserver(
+      (entries) => setIsInView(entries.some((entry) => entry.isIntersecting && entry.intersectionRatio >= 0.5)),
+      { threshold: [0, 0.5, 0.75] }
+    )
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [autoPlayInline])
+
+  const shouldPlayInline = isHovered || (autoPlayInline && isInView)
 
   useEffect(() => {
     setIsHoverVideoReady(false)
-  }, [isHovered, video.sourceURL])
+  }, [shouldPlayInline, video.sourceURL])
 
   useEffect(() => {
-    if (!isHovered) return undefined
+    if (!shouldPlayInline) return undefined
     const element = hoverVideoRef.current
     if (!element) return undefined
-    // Hover previews play with audio like Youtube-AGI. Browsers may reject
-    // unmuted autoplay, so fall back to muted playback and unmute right after
-    // play succeeds.
-    const enableAudio = () => {
-      element.defaultMuted = false
-      element.muted = false
-      element.volume = 1
-    }
-    enableAudio()
-    void element.play().then(enableAudio).catch(() => {
+    if (isHovered && !autoPlayInline) {
+      // Desktop hover preview plays with audio like Youtube-AGI. Browsers may
+      // reject unmuted autoplay, so fall back to muted and unmute on success.
+      const enableAudio = () => {
+        element.defaultMuted = false
+        element.muted = false
+        element.volume = 1
+      }
+      enableAudio()
+      void element.play().then(enableAudio).catch(() => {
+        element.muted = true
+        element.defaultMuted = true
+        void element.play()
+          .then(() => {
+            window.setTimeout(enableAudio, 0)
+          })
+          .catch(() => {})
+      })
+    } else {
+      // Touch auto-play must stay muted; browsers block unmuted autoplay.
       element.muted = true
       element.defaultMuted = true
-      void element.play()
-        .then(() => {
-          window.setTimeout(enableAudio, 0)
-        })
-        .catch(() => {})
-    })
+      void element.play().catch(() => {})
+    }
     return () => {
       try {
         element.pause()
@@ -2956,7 +3304,7 @@ function VideoCanvasOverlay({ video, isHovered, onExpand }) {
         // Ignore media reset failures.
       }
     }
-  }, [isHovered, video.sourceURL])
+  }, [shouldPlayInline, isHovered, autoPlayInline, video.sourceURL])
 
   const minDim = Math.min(video.width, video.height)
   const showOverlayUI = minDim >= 60
@@ -2976,18 +3324,19 @@ function VideoCanvasOverlay({ video, isHovered, onExpand }) {
   // mirroring Youtube-AGI's videoLayer (z1) / overlay portal (z3) split.
   return (
     <>
-    <div className="lovart-video-playback-overlay" style={placementStyle}>
+    <div className="lovart-video-playback-overlay" style={placementStyle} ref={containerRef}>
       {isRenderableVideoPosterDataURL(video.posterDataURL) ? (
         <img className="lovart-video-playback-media" src={video.posterDataURL} draggable={false} alt="" />
       ) : null}
-      {isHovered ? (
+      {shouldPlayInline ? (
         <video
           ref={hoverVideoRef}
           className="lovart-video-playback-media"
           src={video.sourceURL}
           loop
           playsInline
-          preload="auto"
+          muted={autoPlayInline}
+          preload="metadata"
           onLoadedData={() => setIsHoverVideoReady(true)}
           onCanPlay={() => setIsHoverVideoReady(true)}
           style={{ opacity: isHoverVideoReady ? 1 : 0 }}
@@ -2996,18 +3345,34 @@ function VideoCanvasOverlay({ video, isHovered, onExpand }) {
     </div>
     <div className="lovart-video-playback-ui" style={placementStyle}>
       {isHovered && showOverlayUI && !video.isSelected ? <div className="lovart-video-hover-gradient" /> : null}
-      {!isHovered && showOverlayUI ? (
-        <div
+      {!shouldPlayInline && showOverlayUI ? (
+        <button
+          type="button"
           className="lovart-video-play-icon"
           style={{
             width: `${Math.round(48 * iconScale)}px`,
             height: `${Math.round(48 * iconScale)}px`
           }}
+          onPointerDown={(event) => {
+            // Touch devices never hover, so this button is the only playback
+            // entry point on phones: open the modal player straight from the
+            // tap gesture. On mouse, hovering unmounts the icon before a click
+            // can land, so desktop selection behavior is unchanged.
+            event.preventDefault()
+            event.stopPropagation()
+            onExpand(video)
+          }}
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            onExpand(video)
+          }}
+          aria-label="動画を再生"
         >
           <svg width={Math.round(18 * iconScale)} height={Math.round(18 * iconScale)} viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M8 5.14v13.72a1 1 0 001.5.86l11.04-6.86a1 1 0 000-1.72L9.5 4.28A1 1 0 008 5.14z" fill="#fff" />
           </svg>
-        </div>
+        </button>
       ) : null}
       {durationLabel && showOverlayUI ? (
         <div
@@ -3021,7 +3386,7 @@ function VideoCanvasOverlay({ video, isHovered, onExpand }) {
           {durationLabel}
         </div>
       ) : null}
-      {isHovered && showOverlayUI ? (
+      {(isHovered || autoPlayInline) && showOverlayUI ? (
         <button
           type="button"
           className="lovart-video-expand"
@@ -3071,6 +3436,15 @@ function ExpandedVideoPlayer({ video, onClose }) {
         playsInline
         className="lovart-video-modal-player"
         onClick={(event) => event.stopPropagation()}
+        onLoadedMetadata={(event) => {
+          // iOS may reject unmuted autoplay outside the tap's call stack; start
+          // muted instead of silently not playing (controls allow unmuting).
+          const element = event.currentTarget
+          void element.play().catch(() => {
+            element.muted = true
+            void element.play().catch(() => {})
+          })
+        }}
       />
     </div>
   )
@@ -3226,7 +3600,7 @@ export default function App() {
     setChatSendStatus('sending')
     try {
       // Step 1: resolve asset URLs to absolute paths server-side.
-      const resolveResponse = await fetch('/api/chat/send', {
+      const resolveResponse = await canvasFetch('/api/chat/send', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ app: '', text, assetUrls, assetItems })
@@ -3246,7 +3620,7 @@ export default function App() {
         return
       }
       // Step 3: attach into the chat app (open -a) / activate it.
-      const response = await fetch('/api/chat/send', {
+      const response = await canvasFetch('/api/chat/send', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ app, text, assetUrls, assetItems, autoSend })
@@ -3286,7 +3660,7 @@ export default function App() {
   const saveGlossaryTerms = async () => {
     setGlossarySaving(true)
     try {
-      const response = await fetch('/api/subtitle-glossary', {
+      const response = await canvasFetch('/api/subtitle-glossary', {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ terms: glossaryTerms ?? [] })
@@ -3309,11 +3683,11 @@ export default function App() {
   const [selectedGeneratedResult, setSelectedGeneratedResult] = useState(null)
 
   useEffect(() => {
-    fetch('/api/subtitle-glossary')
+    canvasFetch('/api/subtitle-glossary')
       .then((response) => response.json())
       .then((payload) => setGlossaryTerms(Array.isArray(payload.terms) ? payload.terms : []))
       .catch(() => setGlossaryTerms([]))
-    fetch('/api/lovart/auth-status')
+    canvasFetch('/api/lovart/auth-status')
       .then((response) => response.json())
       .then(setLovartAuth)
       .catch(() => setLovartAuth({ configured: false }))
@@ -3361,17 +3735,26 @@ export default function App() {
   const lastSyncedFingerprintRef = useRef('')
   const pendingOverlaySceneRef = useRef(null)
   const overlayRefreshFrameRef = useRef(0)
+  const assetHydrationTimerRef = useRef(0)
+  const hydratedFileBufferRef = useRef(new Map())
+  const hydratedFlushTimerRef = useRef(0)
+  const visibleHydrationFileIdsRef = useRef(new Set())
 
   useEffect(() => {
     const controller = new AbortController()
 
     async function loadCanvas() {
       try {
-        const response = await fetch(CANVAS_ENDPOINT, { signal: controller.signal })
+        const response = await canvasFetch(CANVAS_ENDPOINT, { signal: controller.signal })
         if (!response.ok) throw new Error(`Failed to load canvas: ${response.status}`)
         const payload = await response.json()
-        const scene = normalizeScene(payload.scene)
-        lastSyncedFingerprintRef.current = sceneFingerprint(scene)
+        const diskScene = normalizeScene(payload.scene)
+        const runtimeScene = withRuntimeAssetBackedScene(diskScene)
+        const scene = isMemoryConstrainedCanvasRuntime()
+          ? placeholderAssetBackedFilesByIds(runtimeScene, assetBackedCanvasImageFileIds(runtimeScene))
+          : runtimeScene
+        if (isMemoryConstrainedCanvasRuntime()) visibleHydrationFileIdsRef.current = new Set()
+        lastSyncedFingerprintRef.current = sceneFingerprint(diskScene)
         latestSceneRef.current = scene
         previousGeneratorFrameIdsRef.current = new Set(scene.elements.filter(isGeneratorFrame).map((element) => element.id))
         setInitialScene(scene)
@@ -3399,7 +3782,7 @@ export default function App() {
 
     async function loadCapabilities() {
       try {
-        const response = await fetch(GENERATION_CAPABILITIES_ENDPOINT, { signal: controller.signal })
+        const response = await canvasFetch(GENERATION_CAPABILITIES_ENDPOINT, { signal: controller.signal })
         if (response.ok) setCapabilities(await response.json())
       } catch (error) {
         if (error.name !== 'AbortError') console.error(error)
@@ -3467,7 +3850,7 @@ export default function App() {
     lastSelectionRef.current = serialized
 
     try {
-      await fetch(SELECTION_ENDPOINT, {
+      await canvasFetch(SELECTION_ENDPOINT, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: serialized
@@ -3503,7 +3886,7 @@ export default function App() {
     const persistedFingerprint = sceneFingerprint(persisted)
     try {
       if (persistedFingerprint !== lastSyncedFingerprintRef.current) {
-        const canvasResponse = await fetch(CANVAS_ENDPOINT, {
+        const canvasResponse = await canvasFetch(CANVAS_ENDPOINT, {
           method: 'PUT',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(persisted)
@@ -3513,7 +3896,7 @@ export default function App() {
         // ignored instead of clobbering newer local edits.
         lastSyncedFingerprintRef.current = persistedFingerprint
       }
-      const viewResponse = await fetch(VIEW_STATE_ENDPOINT, {
+      const viewResponse = await canvasFetch(VIEW_STATE_ENDPOINT, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(getViewState(scene.appState))
@@ -3586,6 +3969,7 @@ export default function App() {
       window.cancelAnimationFrame(overlayRefreshFrameRef.current)
       overlayRefreshFrameRef.current = 0
     }
+    window.clearTimeout(assetHydrationTimerRef.current)
     pendingOverlaySceneRef.current = null
   }, [])
 
@@ -3709,10 +4093,37 @@ export default function App() {
     if (initialScene) syncGeneratorUi(initialScene)
   }, [initialScene, syncGeneratorUi])
 
-  const addHydratedAssetFile = useCallback((file) => {
-    if (!api || !file?.id) return
-    api.addFiles([file])
+  const constrainHydratedAssetsToViewport = useCallback((scene, keepFileIds) => {
+    if (!api || !scene || !isMemoryConstrainedCanvasRuntime()) return scene
+    const files = { ...(api.getFiles?.() ?? scene.files ?? {}) }
+    const constrainedScene = placeholderAssetBackedFilesOutside({ ...scene, files }, keepFileIds)
+    if (constrainedScene === scene || constrainedScene.files === files) return scene
+    const nextScene = createScene(scene.elements, scene.appState, constrainedScene.files)
+    latestSceneRef.current = nextScene
+    suppressNextChangeRef.current = true
+    api.updateScene({
+      files: constrainedScene.files,
+      captureUpdate: CaptureUpdateAction.NEVER
+    })
+    return nextScene
+  }, [api])
 
+  // Apply a batch of freshly hydrated files in ONE scene update. Hydrating a
+  // large canvas over the tunnel streams dozens of files; rebuilding and
+  // re-rendering the whole scene per file pins a phone CPU, so buffered files
+  // are flushed together (throttled) into a single updateScene.
+  const flushHydratedFiles = useCallback(() => {
+    hydratedFlushTimerRef.current = 0
+    const buffer = hydratedFileBufferRef.current
+    if (!api || buffer.size === 0) return
+    const memoryConstrained = isMemoryConstrainedCanvasRuntime()
+    const visibleFileIds = visibleHydrationFileIdsRef.current
+    const bufferedFiles = [...buffer.values()].filter((file) => !memoryConstrained || visibleFileIds.has(file.id))
+    hydratedFileBufferRef.current = new Map()
+    if (bufferedFiles.length === 0) return
+
+    api.addFiles(bufferedFiles)
+    const fileIds = new Set(bufferedFiles.map((file) => file.id))
     const currentElements = api.getSceneElementsIncludingDeleted?.() ?? latestSceneRef.current.elements
     let touchedImage = false
     let restoredStatus = false
@@ -3720,7 +4131,7 @@ export default function App() {
     const restoredElements = currentElements.map((element) => {
       if (
         element?.type !== 'image' ||
-        element.fileId !== file.id ||
+        !fileIds.has(element.fileId) ||
         element.customData?.codexMediaKind === 'video'
       ) {
         return element
@@ -3738,27 +4149,153 @@ export default function App() {
     if (!touchedImage) return
 
     const currentAppState = api.getAppState?.() ?? latestSceneRef.current.appState
-    const currentFiles = {
-      ...(api.getFiles?.() ?? latestSceneRef.current.files ?? {}),
-      [file.id]: file
-    }
-    const nextScene = createScene(restoredElements, currentAppState, currentFiles)
+    const currentFiles = { ...(api.getFiles?.() ?? latestSceneRef.current.files ?? {}) }
+    for (const file of bufferedFiles) currentFiles[file.id] = file
+    const constrainedFiles = memoryConstrained
+      ? placeholderAssetBackedFilesOutside({ files: currentFiles }, visibleFileIds).files
+      : currentFiles
+    const nextScene = createScene(restoredElements, currentAppState, constrainedFiles)
     latestSceneRef.current = nextScene
     suppressNextChangeRef.current = true
     api.updateScene({
       elements: restoredElements,
+      files: constrainedFiles,
       captureUpdate: CaptureUpdateAction.NEVER
     })
     refreshOverlayStates(nextScene)
     if (restoredStatus) scheduleCanvasSave(nextScene)
   }, [api, refreshOverlayStates, scheduleCanvasSave])
 
-  // Hydrate disk-backed file records once the Excalidraw API is ready. The
-  // scene renders immediately; images pop in as each asset finishes loading.
+  const addHydratedAssetFile = useCallback((file) => {
+    if (!api || !file?.id) return
+    if (isMemoryConstrainedCanvasRuntime() && !visibleHydrationFileIdsRef.current.has(file.id)) {
+      evictAssetDataURLCacheForFile(file)
+      return
+    }
+    hydratedFileBufferRef.current.set(file.id, file)
+    // Flush large backlogs immediately, otherwise coalesce a short burst.
+    if (hydratedFileBufferRef.current.size >= 12) {
+      window.clearTimeout(hydratedFlushTimerRef.current)
+      flushHydratedFiles()
+      return
+    }
+    if (!hydratedFlushTimerRef.current) {
+      hydratedFlushTimerRef.current = window.setTimeout(flushHydratedFiles, 140)
+    }
+  }, [api, flushHydratedFiles])
+
+  const scheduleVisibleAssetHydration = useCallback((scene) => {
+    if (!api || !scene || !isTunnelCanvasRuntime()) return
+    window.clearTimeout(assetHydrationTimerRef.current)
+    if (isMemoryConstrainedCanvasRuntime()) {
+      visibleHydrationFileIdsRef.current = new Set()
+      return
+    }
+    assetHydrationTimerRef.current = window.setTimeout(() => {
+      const visibleFileIds = visibleAssetBackedImageFileIds(scene, 240)
+      visibleHydrationFileIdsRef.current = visibleFileIds
+      constrainHydratedAssetsToViewport(scene, visibleFileIds)
+      if (visibleFileIds.size === 0) return
+      hydrateAssetBackedFiles(scene.files, addHydratedAssetFile, { onlyFileIds: visibleFileIds })
+    }, 250)
+  }, [api, addHydratedAssetFile, constrainHydratedAssetsToViewport])
+
+  // Hydrate disk-backed file records once the Excalidraw API is ready.
+  // Viewport-first: what is on screen hydrates immediately at full speed, then
+  // the rest trickles in behind interactions (brief yield + low concurrency) so
+  // the whole canvas still fills without janking pan/zoom on phones. Whatever
+  // the user pans to is prioritized live by scheduleVisibleAssetHydration.
   useEffect(() => {
     if (!api || !initialScene) return
-    hydrateAssetBackedFiles(initialScene.files, addHydratedAssetFile)
-  }, [api, initialScene, addHydratedAssetFile])
+    let cancelled = false
+    const addIfLive = (file) => {
+      if (!cancelled) addHydratedAssetFile(file)
+    }
+    const run = async () => {
+      const memoryConstrained = isMemoryConstrainedCanvasRuntime()
+      if (memoryConstrained) return
+      const visibleFileIds = visibleAssetBackedImageFileIds(initialScene, memoryConstrained ? 560 : 200)
+      visibleHydrationFileIdsRef.current = visibleFileIds
+      constrainHydratedAssetsToViewport(initialScene, visibleFileIds)
+      if (visibleFileIds.size > 0) {
+        await hydrateAssetBackedFiles(initialScene.files, addIfLive, { onlyFileIds: visibleFileIds })
+        if (cancelled) return
+      }
+      const restIds = new Set(
+        Object.values(initialScene.files ?? {})
+          .filter((file) => isAssetBackedFileRecord(file) && !visibleFileIds.has(file.id))
+          .map((file) => file.id)
+      )
+      if (restIds.size === 0) return
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 500))
+      if (cancelled) return
+      await hydrateAssetBackedFiles(initialScene.files, addIfLive, { onlyFileIds: restIds, concurrency: 2 })
+    }
+    run()
+    return () => {
+      cancelled = true
+    }
+  }, [api, initialScene, addHydratedAssetFile, constrainHydratedAssetsToViewport])
+
+  // Over the tunnel, a service worker keeps a persistent asset cache so repeat
+  // visits paint instantly (even after the HTTP cache is evicted) and offscreen
+  // images can be prefetched. Local sessions skip it so freshly generated
+  // images are never served stale.
+  useEffect(() => {
+    if (!isTunnelCanvasRuntime() || typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
+    navigator.serviceWorker.register('/canvas-sw.js', { updateViaCache: 'none' }).catch(() => {})
+  }, [])
+
+  // iOS Safari can pinch-zoom the PAGE itself (it ignores user-scalable=no),
+  // which shrinks the whole app into a corner of the screen and leaves the
+  // canvas "broken" until the page zoom is reset. Block the native page
+  // gesture on touch devices; Excalidraw's own pinch-to-zoom uses pointer
+  // events and keeps working.
+  useEffect(() => {
+    if (!isTouchLikeDevice()) return undefined
+    const preventPageGesture = (event) => event.preventDefault()
+    document.addEventListener('gesturestart', preventPageGesture, { passive: false })
+    document.addEventListener('gesturechange', preventPageGesture, { passive: false })
+    return () => {
+      document.removeEventListener('gesturestart', preventPageGesture)
+      document.removeEventListener('gesturechange', preventPageGesture)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (
+      !isTunnelCanvasRuntime() ||
+      isTouchLikeDevice() ||
+      !initialScene ||
+      typeof navigator === 'undefined' ||
+      !('serviceWorker' in navigator)
+    ) return
+    const previewUrl = (file) => {
+      const base =
+        typeof file.codexAssetUrl === 'string' && file.codexAssetUrl.startsWith(CANVAS_ASSETS_ROUTE)
+          ? file.codexAssetUrl
+          : file.dataURL
+      if (typeof base !== 'string' || !base.startsWith(CANVAS_ASSETS_ROUTE)) return ''
+      // Same device-sized width as hydration so both hit the same cache entry.
+      return withTunnelPreviewWidth(base)
+    }
+    const urls = [...new Set(
+      Object.values(initialScene.files ?? {})
+        .filter((file) => isAssetBackedFileRecord(file))
+        .map(previewUrl)
+        .filter(Boolean)
+    )]
+    if (urls.length === 0) return
+    let cancelled = false
+    navigator.serviceWorker.ready
+      .then((registration) => {
+        if (!cancelled) registration.active?.postMessage({ type: 'prefetch', urls })
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [initialScene])
 
   const handleChange = useCallback(
     (elements, appState, files) => {
@@ -3866,6 +4403,7 @@ export default function App() {
           setSelectedGeneratedResult(null)
           setOpenMenu(null)
           refreshOverlayStates(nextScene)
+          scheduleVisibleAssetHydration(nextScene)
           scheduleSelectionSave(nextScene)
           scheduleCanvasSave(nextScene)
           window.setTimeout(() => {
@@ -3882,6 +4420,7 @@ export default function App() {
 
       const scene = createScene(workingElements, appState, files)
       latestSceneRef.current = scene
+      scheduleVisibleAssetHydration(scene)
       if (shouldSkipChangeEffects) {
         scheduleOverlayRefresh(scene)
         scheduleSelectionSave(scene)
@@ -3936,7 +4475,7 @@ export default function App() {
         scheduleCanvasSave(scene)
       }
     },
-    [api, refreshOverlayStates, scheduleCanvasSave, scheduleOverlayRefresh, scheduleSelectionSave, syncGeneratorUi]
+    [api, refreshOverlayStates, scheduleCanvasSave, scheduleOverlayRefresh, scheduleSelectionSave, scheduleVisibleAssetHydration, syncGeneratorUi]
   )
 
   const applyRemoteScene = useCallback(
@@ -3946,9 +4485,13 @@ export default function App() {
       window.clearTimeout(saveTimerRef.current)
       saveTimerRef.current = null
       hasLocalChangesRef.current = false
-      const normalized = normalizeScene(scene)
+      const diskNormalized = normalizeScene(scene)
+      const runtimeNormalized = withRuntimeAssetBackedScene(diskNormalized)
+      const normalized = isMemoryConstrainedCanvasRuntime()
+        ? placeholderAssetBackedFilesByIds(runtimeNormalized, assetBackedCanvasImageFileIds(runtimeNormalized))
+        : runtimeNormalized
       const remoteApplyVersion = localChangeVersionRef.current
-      lastSyncedFingerprintRef.current = sceneFingerprint(normalized)
+      lastSyncedFingerprintRef.current = sceneFingerprint(diskNormalized)
       latestSceneRef.current = normalized
       previousGeneratorFrameIdsRef.current = new Set(normalized.elements.filter(isGeneratorFrame).map((element) => element.id))
       const currentAppState = api.getAppState?.() ?? {}
@@ -3976,7 +4519,20 @@ export default function App() {
       if (readyFiles.length > 0) api.addFiles(readyFiles)
       // Disk-backed records hydrate asynchronously after the scene applies;
       // images pop in as each asset resolves instead of blocking the update.
-      hydrateAssetBackedFiles(normalized.files, addHydratedAssetFile)
+      if (isTunnelCanvasRuntime()) {
+        if (isMemoryConstrainedCanvasRuntime()) {
+          visibleHydrationFileIdsRef.current = new Set()
+        } else {
+          const visibleFileIds = visibleAssetBackedImageFileIds(nextScene, 240)
+          visibleHydrationFileIdsRef.current = visibleFileIds
+          constrainHydratedAssetsToViewport(nextScene, visibleFileIds)
+          if (visibleFileIds.size > 0) {
+          hydrateAssetBackedFiles(normalized.files, addHydratedAssetFile, { onlyFileIds: visibleFileIds })
+          }
+        }
+      } else {
+        hydrateAssetBackedFiles(normalized.files, addHydratedAssetFile)
+      }
       window.setTimeout(() => {
         if (localChangeVersionRef.current !== remoteApplyVersion && !options.force) return
         applyingRemoteRef.current = true
@@ -3991,7 +4547,7 @@ export default function App() {
         }, 3000)
       }, 0)
     },
-    [api, addHydratedAssetFile, syncGeneratorUi]
+    [api, addHydratedAssetFile, constrainHydratedAssetsToViewport, syncGeneratorUi]
   )
 
   const openToolbarMediaPicker = useCallback(() => {
@@ -4019,7 +4575,7 @@ export default function App() {
 
     async function loadRemoteCanvas() {
       try {
-        const response = await fetch(CANVAS_ENDPOINT)
+        const response = await canvasFetch(CANVAS_ENDPOINT)
         if (!response.ok) throw new Error(`Failed to refresh canvas: ${response.status}`)
         const payload = await response.json()
         // Ignore the echo of our own save (and the duplicate file-watcher
@@ -4032,7 +4588,7 @@ export default function App() {
       }
     }
 
-    const events = new EventSource(CANVAS_EVENTS_ENDPOINT)
+    const events = createCanvasEventSource(CANVAS_EVENTS_ENDPOINT)
     events.addEventListener('canvas-changed', loadRemoteCanvas)
     events.onerror = (error) => {
       console.warn('Codex Excalidraw live refresh disconnected.', error)
@@ -4616,7 +5172,7 @@ export default function App() {
     const streamUpload = async (uploadFile) => {
       const localPath = typeof uploadFile.path === 'string' && uploadFile.path ? uploadFile.path : ''
       if (localPath) {
-        const response = await fetch(ASSET_UPLOAD_ENDPOINT, {
+        const response = await canvasFetch(ASSET_UPLOAD_ENDPOINT, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ sourcePath: localPath, fileName: uploadFile.name })
@@ -4625,7 +5181,7 @@ export default function App() {
         if (response.ok && !payload.error) return payload
         // Fall through to the streaming path (e.g. path outside this session).
       }
-      const response = await fetch(ASSET_UPLOAD_ENDPOINT, {
+      const response = await canvasFetch(ASSET_UPLOAD_ENDPOINT, {
         method: 'POST',
         headers: {
           'x-upload-filename': encodeURIComponent(uploadFile.name || `asset-${Date.now()}`),
@@ -4704,7 +5260,7 @@ export default function App() {
     }
 
     const dataURL = await fileToDataURL(file)
-    const response = await fetch(ASSET_UPLOAD_ENDPOINT, {
+    const response = await canvasFetch(ASSET_UPLOAD_ENDPOINT, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ fileName: file.name, dataURL })
@@ -4729,7 +5285,7 @@ export default function App() {
     const dataURL = typeof asset?.dataURL === 'string' ? asset.dataURL : ''
     if (!dataURL) return asset
     const fileName = asset.name || (asset.kind === 'video' ? 'canvas-video.mp4' : 'canvas-image.png')
-    const response = await fetch(ASSET_UPLOAD_ENDPOINT, {
+    const response = await canvasFetch(ASSET_UPLOAD_ENDPOINT, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ fileName, dataURL })
@@ -4750,7 +5306,7 @@ export default function App() {
   const readTextAsset = useCallback(async (asset) => {
     const url = asset?.url || ''
     if (!url) throw new Error('台本ファイルを読み込めません。')
-    const response = await fetch(url)
+    const response = await canvasFetch(url)
     if (!response.ok) throw new Error(`台本ファイルを読み込めません: ${response.status}`)
     const text = await response.text()
     return { ...asset, text }
@@ -5551,14 +6107,14 @@ export default function App() {
   // generation continues automatically after sign-in (BuzzAssist behavior).
   const ensureBuzzAssistLoggedIn = useCallback(async () => {
     try {
-      const status = await (await fetch('/api/buzzassist/auth-status')).json()
+      const status = await (await canvasFetch('/api/buzzassist/auth-status')).json()
       if (status?.loggedIn) return true
     } catch {
       // status probe failed — fall through to the login flow
     }
     setGenerationError('BuzzAssistのログイン画面を開きました。ブラウザでサインインすると自動で続行します…')
     try {
-      const response = await fetch('/api/buzzassist/login', { method: 'POST' })
+      const response = await canvasFetch('/api/buzzassist/login', { method: 'POST' })
       const payload = await response.json().catch(() => ({}))
       if (response.ok && payload.ok) {
         setGenerationError('')
@@ -5658,9 +6214,12 @@ export default function App() {
       }, 0)
     }
 
+    let keepGeneratingFrame = false
+
     try {
       await saveCanvas(latestSceneRef.current)
       const endpoint = kind === 'video' ? GENERATE_VIDEO_ENDPOINT : GENERATE_IMAGE_ENDPOINT
+      const useAsyncGeneration = isTunnelCanvasRuntime()
       const body =
         kind === 'video'
           ? {
@@ -5723,16 +6282,30 @@ export default function App() {
               customData: frameCustomDataFromForm(kind, savedForm)
             }
 
-      const response = await fetch(endpoint, {
+      const response = await canvasFetch(endpoint, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body)
+        headers: {
+          'content-type': 'application/json',
+          ...(useAsyncGeneration ? { prefer: 'respond-async' } : {})
+        },
+        body: JSON.stringify(useAsyncGeneration ? { ...body, async: true } : body)
       })
       const payload = await response.json().catch(() => ({}))
       if (!response.ok || payload.error) {
         throw new Error(payload.error || `Generation failed: ${response.status}`)
       }
-      const canvasResponse = await fetch(CANVAS_ENDPOINT)
+      if (payload.async) {
+        keepGeneratingFrame = true
+        window.setTimeout(() => {
+          setGeneratingFrameIds((current) => {
+            const next = new Set(current)
+            next.delete(generationAnchorId)
+            return next
+          })
+        }, 10 * 60 * 1000)
+        return
+      }
+      const canvasResponse = await canvasFetch(CANVAS_ENDPOINT)
       if (canvasResponse.ok) {
         const canvasPayload = await canvasResponse.json()
         // After generation the server replaces the frame with the result and
@@ -5783,11 +6356,13 @@ export default function App() {
         scheduleSelectionSave(errorScene)
       }
     } finally {
-      setGeneratingFrameIds((current) => {
-        const next = new Set(current)
-        next.delete(generationAnchorId)
-        return next
-      })
+      if (!keepGeneratingFrame) {
+        setGeneratingFrameIds((current) => {
+          const next = new Set(current)
+          next.delete(generationAnchorId)
+          return next
+        })
+      }
     }
   }, [api, applyRemoteScene, capabilities, ensureBuzzAssistLoggedIn, frameForm, generatingFrameIds, insertGeneratorFrame, refreshOverlayStates, saveCanvas, scheduleCanvasSave, scheduleSelectionSave, selectedGeneratedResult, updateActiveFrameElement])
 
@@ -5867,7 +6442,7 @@ export default function App() {
               postMarginSeconds: savedForm.silenceCutPostMarginSeconds
             }
 
-      const response = await fetch(endpoint, {
+      const response = await canvasFetch(endpoint, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body)
@@ -5937,7 +6512,7 @@ export default function App() {
         setFrameForm(nextForm)
         return
       }
-      const canvasResponse = await fetch(CANVAS_ENDPOINT)
+      const canvasResponse = await canvasFetch(CANVAS_ENDPOINT)
       if (canvasResponse.ok) {
         const canvasPayload = await canvasResponse.json()
         let nextScene = normalizeScene(canvasPayload.scene)
@@ -6057,6 +6632,14 @@ export default function App() {
   const isCurrentFrameGenerating = activeFrameId ? generatingFrameIds.has(activeFrameId) : false
   const activePanelTarget = livePanelTarget ?? activeOverlay ?? selectedGeneratedResult
   const showPromptPanel = Boolean(activePanelTarget && !isCurrentFrameGenerating)
+  const memoryConstrainedCanvas = isMemoryConstrainedCanvasRuntime()
+  const imagePreviewOverlays = memoryConstrainedCanvas
+    ? limitViewportOverlays(
+        selectedImageOverlays.filter((img) => img.assetType === 'image' && img.assetUrl),
+        latestSceneRef.current?.appState ?? {},
+        MOBILE_IMAGE_PREVIEW_OVERLAY_MAX_ITEMS
+      )
+    : []
   // One canonical entry per model; the execution route (Codex / Hermes /
   // BuzzAssist / Lovart) is chosen per model in the settings row and mapped
   // to the concrete backend id stored in frameForm.
@@ -6174,7 +6757,11 @@ export default function App() {
         top: `${panelPlacement.top}px`,
         bottom: 'auto',
         width: `${panelPlacement.width}px`,
-        transform: 'none'
+        // Phones shrink the whole desktop panel proportionally (same UI, just
+        // smaller) instead of reflowing it; origin "top center" keeps it
+        // centered under its frame.
+        transform: panelPlacement.scale && panelPlacement.scale < 1 ? `scale(${panelPlacement.scale})` : 'none',
+        transformOrigin: 'top center'
       }
     : undefined
   const closeOpenMenuIfOutsideGeneratorUi = (event) => {
@@ -6191,7 +6778,7 @@ export default function App() {
 
   return (
     <main
-      className={`codex-excalidraw-shell lovart-ai-root${showPromptPanel || managedSelectionActive ? ' hide-generator-props' : ''}`}
+      className={`codex-excalidraw-shell lovart-ai-root${showPromptPanel || managedSelectionActive ? ' hide-generator-props' : ''}${memoryConstrainedCanvas ? ' is-memory-constrained-canvas' : ''}`}
       aria-label="Codex Excalidraw canvas"
       onPointerDownCapture={closeOpenMenuIfOutsideGeneratorUi}
       onMouseDownCapture={closeOpenMenuIfOutsideGeneratorUi}
@@ -6434,6 +7021,10 @@ export default function App() {
       </div>
     )
   })}
+
+      {imagePreviewOverlays.map((image) => (
+        <CanvasImagePreviewOverlay key={image.id} image={image} />
+      ))}
 
       {videoPlaybackOverlays.map((video) => (
         <VideoCanvasOverlay
@@ -6846,11 +7437,11 @@ export default function App() {
                   onClick={() => {
                     setOpenMenu((current) => (current === 'route' ? null : 'route'))
                     setLovartKeyEditing(false)
-                    fetch('/api/lovart/auth-status')
+                    canvasFetch('/api/lovart/auth-status')
                       .then((response) => response.json())
                       .then(setLovartAuth)
                       .catch(() => {})
-                    fetch('/api/hermes/status')
+                    canvasFetch('/api/hermes/status')
                       .then((response) => response.json())
                       .then(setHermesStatus)
                       .catch(() => {})
@@ -6919,7 +7510,7 @@ export default function App() {
                                 }
                                 setLovartKeySaving(true)
                                 try {
-                                  const response = await fetch('/api/lovart/credentials', {
+                                  const response = await canvasFetch('/api/lovart/credentials', {
                                     method: 'POST',
                                     headers: { 'content-type': 'application/json' },
                                     body: JSON.stringify({ accessKey, secretKey })
@@ -7627,7 +8218,7 @@ export default function App() {
                         // Refresh in the background but never clear what's
                         // already shown — the terms load once at startup, so
                         // opening must not flash to empty on a slow/failed fetch.
-                        fetch('/api/subtitle-glossary')
+                        canvasFetch('/api/subtitle-glossary')
                           .then((response) => response.json())
                           .then((payload) => {
                             if (Array.isArray(payload.terms)) setGlossaryTerms(payload.terms)

@@ -40,6 +40,9 @@ Options:
   --skip-build           Do not run npm run build.
   --skip-plugin-source   Do not refresh ~/plugins/buzzassist.
   --no-launch            Do not start the canvas service.
+  --tunnel               Start a Canvas Tunnel after setup for phone access to the same full Excalidraw UI (Cloudflare by default).
+  --ngrok-authtoken <token>
+                         Opt into ngrok instead of Cloudflare and configure it. Also reads BUZZASSIST_NGROK_AUTHTOKEN or NGROK_AUTHTOKEN.
   --help                 Show this message.
 `;
 }
@@ -104,11 +107,13 @@ const skipInstall = hasArg("--skip-install");
 const skipBuild = hasArg("--skip-build");
 const skipPluginSource = hasArg("--skip-plugin-source");
 const launchCanvas = !hasArg("--no-launch");
+const launchTunnel = hasArg("--tunnel") && launchCanvas;
 const targetAgents = resolveTargetAgents();
 const projectDir = resolve(
   readArg("--project-dir", process.env.BUZZASSIST_PROJECT_DIR || process.env.EXCALIDRAW_PROJECT_DIR || process.cwd()),
 );
 const canvasDir = resolve(readArg("--canvas-dir", process.env.EXCALIDRAW_CANVAS_DIR || join(projectDir, "canvas")));
+const ngrokAuthtoken = readArg("--ngrok-authtoken", process.env.BUZZASSIST_NGROK_AUTHTOKEN || process.env.NGROK_AUTHTOKEN || "");
 
 function commandName(name) {
   return process.platform === "win32" ? `${name}.cmd` : name;
@@ -457,11 +462,13 @@ async function setupCodex(pluginDir) {
   await setupCodexMarketplace(codex);
 
   const current = await run(codex, ["plugin", "list"], { allowFailure: true, log: false, silent: true });
-  if (pluginNeedsRefresh(current.stdout, `${pluginName}@${marketplaceName}`)) {
-    await run(codex, ["plugin", "remove", `${pluginName}@${marketplaceName}`], { allowFailure: true });
+  const codexSelector = `${pluginName}@${marketplaceName}`;
+  const codexInstalled = current.stdout.includes(codexSelector);
+  if (pluginNeedsRefresh(current.stdout, codexSelector) || (codexInstalled && !skipPluginSource)) {
+    await run(codex, ["plugin", "remove", codexSelector], { allowFailure: true });
   }
 
-  const installed = await run(codex, ["plugin", "add", `${pluginName}@${marketplaceName}`], { allowFailure: true });
+  const installed = await run(codex, ["plugin", "add", codexSelector], { allowFailure: true });
   if (!installed.ok) {
     console.warn("Codex plugin install did not complete. Check the Codex CLI output above.");
   }
@@ -501,14 +508,16 @@ async function setupClaude(pluginDir) {
   }
 
   const current = await run(claude, ["plugin", "list"], { allowFailure: true, log: false, silent: true });
-  if (pluginNeedsRefresh(current.stdout, `${pluginName}@${marketplaceName}`)) {
-    await run(claude, ["plugin", "uninstall", `${pluginName}@${marketplaceName}`, "--scope", "user", "-y"], {
+  const claudeSelector = `${pluginName}@${marketplaceName}`;
+  const claudeInstalled = current.stdout.includes(claudeSelector);
+  if (pluginNeedsRefresh(current.stdout, claudeSelector) || (claudeInstalled && !skipPluginSource)) {
+    await run(claude, ["plugin", "uninstall", claudeSelector, "--scope", "user", "-y"], {
       allowFailure: true,
       timeoutMs: 180000,
     });
   }
 
-  const installed = await run(claude, ["plugin", "install", `${pluginName}@${marketplaceName}`, "--scope", "user"], {
+  const installed = await run(claude, ["plugin", "install", claudeSelector, "--scope", "user"], {
     allowFailure: true,
     timeoutMs: 180000,
   });
@@ -550,6 +559,8 @@ node scripts/setup-agents.mjs --agent cursor --project-dir <active-user-project-
 Configure Cursor only. Do not configure Codex, Claude Code, or Antigravity unless the user explicitly asks for those hosts too.
 
 After the script prints \`BUZZASSIST_CANVAS_URL=...\` and \`BUZZASSIST_CANVAS_CHECK=ok\`, open that URL in Cursor's in-app browser or browser preview if available. If browser control is unavailable, report the URL and say setup completed because the canvas check passed.
+
+If the user wants phone/mobile access or the exact same Excalidraw UI outside this machine, run setup with \`--tunnel\` or run \`npm run tunnel:start -- --project-dir <active-user-project-dir>\`. The tunnel uses Cloudflare (\`cloudflared\`) by default — no account needed; if it is not installed, tell the user to run \`brew install cloudflared\`. Give the printed \`BUZZASSIST_TUNNEL_ACCESS_URL\` for the phone.
 `;
 }
 
@@ -562,12 +573,14 @@ When the user gives this repository URL and asks to set it up, do the setup end 
 2. Run \`node scripts/setup-agents.mjs --agent antigravity --project-dir <active-user-project-dir>\` from the repository root. If there is no separate active project, use this repository root as the project dir.
 3. The script must configure Antigravity only. Do not configure Codex, Claude Code, or Cursor unless the user explicitly asks for those hosts too.
 4. After the script prints \`BUZZASSIST_CANVAS_URL=...\` and \`BUZZASSIST_CANVAS_CHECK=ok\`, open that URL in Antigravity's in-app browser if available. If browser control is unavailable, report the URL and say that setup still completed because the canvas check passed.
+5. If the user wants phone/mobile access or says they want the exact same Excalidraw UI outside the machine, use Canvas Tunnel: run setup with \`--tunnel\` or run \`npm run tunnel:start -- --project-dir <active-user-project-dir>\`. The tunnel uses Cloudflare (\`cloudflared\`) by default — no account needed; if it is not installed, tell the user to run \`brew install cloudflared\`. Give the printed \`BUZZASSIST_TUNNEL_ACCESS_URL\` for the phone.
 
 Manual fallback:
 
 \`\`\`bash
 node scripts/setup-agents.mjs --agent antigravity --project-dir <active-user-project-dir> --no-launch
 node scripts/serve-canvas.mjs <active-user-project-dir>
+npm run tunnel:start -- --project-dir <active-user-project-dir>
 \`\`\`
 
 Use the live URL from \`canvas/.server.json\` when a requested port is busy.
@@ -725,6 +738,44 @@ async function launchCanvasServer() {
   throw new Error(`Canvas server did not become reachable. Check ${join(canvasDir, ".server.json")} or run node scripts/serve-canvas.mjs ${shellQuote(projectDir)} manually.`);
 }
 
+async function launchCanvasTunnel() {
+  logStep("Starting the BuzzAssist Canvas Tunnel");
+  await mkdir(canvasDir, { recursive: true });
+
+  const args = [
+    join(repoRoot, "scripts", "canvas-tunnel.mjs"),
+    "start",
+    "--project-dir",
+    projectDir,
+    "--canvas-dir",
+    canvasDir,
+    "--restart",
+  ];
+  // Default provider is Cloudflare (no bandwidth cap, no account). Passing an
+  // ngrok authtoken opts into ngrok explicitly.
+  if (ngrokAuthtoken) args.push("--provider", "ngrok", "--ngrok-authtoken", ngrokAuthtoken);
+
+  if (dryRun) {
+    logCommand(process.execPath, args);
+    return {
+      ok: true,
+      publicUrl: "https://example.ngrok-free.dev",
+      accessUrl: "https://example.ngrok-free.dev/?t=<generated>",
+      localBaseUrl: "http://127.0.0.1:43219",
+      user: "buzzassist",
+      password: "<generated>",
+      dryRun: true,
+    };
+  }
+
+  await run(process.execPath, args, { timeoutMs: 75_000 });
+  const status = await readJson(join(canvasDir, ".canvas-tunnel.json"), null);
+  if (!status?.ok || !status.publicUrl) {
+    throw new Error(`Canvas Tunnel did not report a public URL. Check ${join(canvasDir, ".canvas-tunnel.log")}.`);
+  }
+  return status;
+}
+
 async function main() {
   console.log("BuzzAssist setup");
   console.log(`Repository: ${repoRoot}`);
@@ -742,7 +793,16 @@ async function main() {
     results[agent] = await setupAgent(agent, pluginDir);
   }
 
-  const discovery = launchCanvas ? await launchCanvasServer() : null;
+  const tunnelStatus = launchTunnel ? await launchCanvasTunnel() : null;
+  const discovery = launchCanvas
+    ? (launchTunnel
+        ? (await readDiscovery()) || {
+            url: tunnelStatus.localBaseUrl.endsWith("/") ? tunnelStatus.localBaseUrl : `${tunnelStatus.localBaseUrl}/`,
+            canvasDir,
+            projectDir,
+          }
+        : await launchCanvasServer())
+    : null;
   const canvasCheck = discovery ? await verifyCanvasDiscovery(discovery) : null;
 
   logStep("Setup summary");
@@ -763,6 +823,16 @@ async function main() {
     console.log(`BUZZASSIST_CANVAS_CHECK=${canvasCheck?.ok ? "ok" : "needs-attention"}`);
     console.log(`BUZZASSIST_CANVAS_DISCOVERY=${join(canvasDir, ".server.json")}`);
     console.log("Open BUZZASSIST_CANVAS_URL in the current host's in-app browser now. For Codex/Claude Code, use the host in-app browser tool; do not use the OS/default browser unless the user explicitly asks.");
+  }
+  if (tunnelStatus?.publicUrl) {
+    console.log(`BUZZASSIST_TUNNEL_URL=${tunnelStatus.publicUrl}`);
+    if (tunnelStatus.accessUrl) console.log(`BUZZASSIST_TUNNEL_ACCESS_URL=${tunnelStatus.accessUrl}`);
+    if (tunnelStatus.basicAuth) {
+      console.log(`BUZZASSIST_TUNNEL_USER=${tunnelStatus.user}`);
+      console.log(`BUZZASSIST_TUNNEL_PASSWORD=${tunnelStatus.password}`);
+    }
+    console.log(`BUZZASSIST_TUNNEL_CHECK=${tunnelStatus.ok ? "ok" : "needs-attention"}`);
+    console.log("Open BUZZASSIST_TUNNEL_ACCESS_URL on the phone to use the same full Excalidraw canvas UI. Basic Auth is only needed when the tunnel was started with --basic-auth.");
   }
 }
 
