@@ -1684,14 +1684,24 @@ function getPanelPlacementFromViewportTarget(target, kind = 'image') {
   const isVideo = kind === true || kind === 'video'
   const frameViewportWidth = Math.max(1, Number(target?.width) || 1)
   const frameViewportHeight = Math.max(1, Number(target?.height) || 1)
-  const panelWidth = isVideo
+  const desiredWidth = isVideo
     ? GENERATOR_PANEL_VIDEO_WIDTH
     : kind === 'subtitle' || kind === 'silenceCut'
       // The portrait SRT frame fits at a small zoom, so 0.9x its viewport
       // width would collapse the bar pills; keep the desktop's max width.
       ? 560
       : clamp(Math.round(frameViewportWidth * 0.9), GENERATOR_PANEL_IMAGE_MIN_WIDTH, GENERATOR_PANEL_IMAGE_MAX_WIDTH)
-  const rawLeft = Math.round((Number(target?.left) || 0) + frameViewportWidth / 2 - panelWidth / 2)
+  // Phones only: the frame is wider than the screen, so cap the panel width and
+  // keep it fully on-screen instead of anchoring to the (off-screen) frame
+  // center. Desktop keeps the panel glued to its frame even past the edge.
+  const viewportWidth = typeof window !== 'undefined' ? (window.innerWidth || 0) : 0
+  const margin = 8
+  const clampToViewport = viewportWidth > 0 && viewportWidth <= 900
+  const panelWidth = clampToViewport ? Math.min(desiredWidth, viewportWidth - margin * 2) : desiredWidth
+  let rawLeft = Math.round((Number(target?.left) || 0) + frameViewportWidth / 2 - panelWidth / 2)
+  if (clampToViewport) {
+    rawLeft = clamp(rawLeft, margin, Math.max(margin, viewportWidth - panelWidth - margin))
+  }
   const targetTop = Number(target?.top) || 0
   const rawTop = Math.round(targetTop + frameViewportHeight + 4)
 

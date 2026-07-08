@@ -11,13 +11,16 @@ test("uploaded canvas media does not open the generator prompt panel", async () 
   assert.doesNotMatch(match[1], /isCanvasVideoElement\(element\)/);
 });
 
-test("prompt panel stays centered below its target without viewport wall clamping", async () => {
+test("prompt panel centers below its target and only clamps to the viewport on phones", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
 
-  assert.match(source, /const rawLeft = Math\.round\(\(Number\(target\?\.left\) \|\| 0\) \+ frameViewportWidth \/ 2 - panelWidth \/ 2\)/);
+  // Centering formula (frame center minus half the panel) is preserved.
+  assert.match(source, /rawLeft = Math\.round\(\(Number\(target\?\.left\) \|\| 0\) \+ frameViewportWidth \/ 2 - panelWidth \/ 2\)/);
   assert.match(source, /const rawTop = Math\.round\(targetTop \+ frameViewportHeight \+ 4\)/);
   assert.match(source, /left: rawLeft,\s*top: rawTop,/);
-  assert.doesNotMatch(source, /clamp\(rawLeft/);
+  // Clamping is gated to narrow (phone) viewports so desktop stays glued to the frame.
+  assert.match(source, /const clampToViewport = viewportWidth > 0 && viewportWidth <= 900/);
+  assert.match(source, /if \(clampToViewport\) \{\s*rawLeft = clamp\(rawLeft, margin/);
   assert.doesNotMatch(source, /const maxTop = viewportHeight - panelHeight/);
   assert.match(source, /if \(kind === 'subtitle'\) return 300/);
 });
