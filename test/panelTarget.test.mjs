@@ -11,6 +11,37 @@ test("uploaded canvas media does not open the generator prompt panel", async () 
   assert.doesNotMatch(match[1], /isCanvasVideoElement\(element\)/);
 });
 
+test("generated media labels resolve to their backing result for panel selection only", async () => {
+  const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const helper = source.match(/function panelMediaTargetIdFromSelection\(selectedIds, elementsById\) \{\n([\s\S]*?)\n\}/);
+  assert.ok(helper, "Missing panelMediaTargetIdFromSelection");
+
+  assert.match(helper[1], /if \(isPanelMediaTargetElement\(direct\)\) return id/);
+  assert.match(helper[1], /const labelFor = direct\?\.customData\?\.codexVideoLabelFor/);
+  assert.match(helper[1], /if \(isPanelMediaTargetElement\(elementsById\.get\(labelFor\)\)\) return labelFor/);
+  assert.match(source, /const selectedResultId = panelMediaTargetIdFromSelection\(selectedIds, elementsById\)/);
+});
+
+test("canvas picker resolves media labels and keeps picking on invalid asset types", async () => {
+  const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const helper = source.match(/function selectedCanvasAttachableElementFromScene\(scene\) \{\n([\s\S]*?)\n\}/);
+  assert.ok(helper, "Missing selectedCanvasAttachableElementFromScene");
+
+  assert.match(helper[1], /if \(direct && !isGeneratorFrame\(direct\) && isCanvasAttachableElement\(direct\)\) return direct/);
+  assert.match(helper[1], /const labelFor = direct\?\.customData\?\.codexVideoLabelFor/);
+  assert.match(helper[1], /if \(labeledElement && !isGeneratorFrame\(labeledElement\) && isCanvasAttachableElement\(labeledElement\)\) \{/);
+  assert.match(source, /const selected = selectedCanvasAttachableElementFromScene\(scene\)/);
+  assert.match(source, /if \(!selected\) return keepPickingWithError\('キャンバス上の画像・動画・ファイルを選択してください。'\)/);
+  assert.match(source, /const restorePickerTargetSelection = \(\) => \{/);
+  assert.match(source, /const restoreElementId = restoreFrameId \|\| restoreResult\?\.elementId \|\| ''/);
+  assert.match(source, /appState: \{ selectedElementIds: \{ \[restoreElementId\]: true \} \}/);
+  assert.match(source, /const keepPickingWithError = \(message\) => \{/);
+  assert.match(source, /restorePickerTargetSelection\(\)/);
+  assert.match(source, /return keepPickingWithError\('この欄には画像を選択してください。'\)/);
+  assert.match(source, /return keepPickingWithError\('この欄には動画を選択してください。'\)/);
+  assert.doesNotMatch(source, /if \(picker\.target === 'imageReferences' && asset\.kind !== 'image'\) return false/);
+});
+
 test("prompt panel keeps the desktop layout, scaled and kept reachable on phones", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");

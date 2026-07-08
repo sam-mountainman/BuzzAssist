@@ -2000,6 +2000,31 @@ function isPanelMediaTargetElement(element) {
   return Boolean(!element?.isDeleted && isGeneratedResult(element))
 }
 
+function panelMediaTargetIdFromSelection(selectedIds, elementsById) {
+  for (const id of selectedIds) {
+    const direct = elementsById.get(id)
+    if (isPanelMediaTargetElement(direct)) return id
+    const labelFor = direct?.customData?.codexVideoLabelFor
+    if (isPanelMediaTargetElement(elementsById.get(labelFor))) return labelFor
+  }
+  return ''
+}
+
+function selectedCanvasAttachableElementFromScene(scene) {
+  const selectedIds = getSelectedIds(scene.appState)
+  const elementsById = new Map(scene.elements.map((element) => [element.id, element]))
+  for (const id of selectedIds) {
+    const direct = elementsById.get(id)
+    if (direct && !isGeneratorFrame(direct) && isCanvasAttachableElement(direct)) return direct
+    const labelFor = direct?.customData?.codexVideoLabelFor
+    const labeledElement = elementsById.get(labelFor)
+    if (labeledElement && !isGeneratorFrame(labeledElement) && isCanvasAttachableElement(labeledElement)) {
+      return labeledElement
+    }
+  }
+  return null
+}
+
 function panelMediaKindFromElement(element) {
   return canvasAssetKindFromElement(element) === 'video' ? 'video' : getGeneratedResultKind(element)
 }
@@ -4013,12 +4038,7 @@ export default function App() {
     else refreshOverlayStates(scene)
     const elementsById = new Map(scene.elements.map((element) => [element.id, element]))
     const selectedIds = getSelectedIds(scene.appState)
-    const selectedResultId =
-      selectedIds.find((id) => isPanelMediaTargetElement(elementsById.get(id))) ??
-      selectedIds
-        .map((id) => elementsById.get(id)?.customData?.codexVideoLabelFor)
-        .find((id) => isPanelMediaTargetElement(elementsById.get(id))) ??
-      ''
+    const selectedResultId = panelMediaTargetIdFromSelection(selectedIds, elementsById)
     const selectedFrameId = selectedResultId
       ? ''
       : selectedIds.find((id) => isGeneratorFrame(elementsById.get(id))) ?? ''
@@ -4034,6 +4054,7 @@ export default function App() {
       const frameChanged = activeFrameIdRef.current !== selectedFrameId
       activeFrameIdRef.current = selectedFrameId
       lastFocusedFrameIdRef.current = selectedFrameId
+      selectedGeneratedResultRef.current = null
       setActiveFrameId(selectedFrameId)
       setPendingPanelFrame(null)
       setSelectedGeneratedResult(null)
@@ -4052,16 +4073,18 @@ export default function App() {
       const kind = panelMediaKindFromElement(selectedResult)
       const geometry = getElementGeometry(selectedResult)
       const placement = getFrameViewportPlacement(geometry, scene.appState)
-      activeFrameIdRef.current = ''
-      setActiveFrameId('')
-      setPendingPanelFrame(null)
-      setSelectedGeneratedResult({
+      const nextResult = {
         id: `result:${selectedResultId}`,
         elementId: selectedResultId,
         kind,
         ...geometry,
         ...placement
-      })
+      }
+      activeFrameIdRef.current = ''
+      selectedGeneratedResultRef.current = nextResult
+      setActiveFrameId('')
+      setPendingPanelFrame(null)
+      setSelectedGeneratedResult(nextResult)
       if (resultChanged) {
         setOpenMenu(null)
         setGenerationError('')
@@ -4075,6 +4098,7 @@ export default function App() {
     if (pending && isGeneratorFrame(elementsById.get(pending.id))) {
       activeFrameIdRef.current = pending.id
       lastFocusedFrameIdRef.current = pending.id
+      selectedGeneratedResultRef.current = null
       setActiveFrameId(pending.id)
       setActiveFrameKind(pending.kind)
       setSelectedGeneratedResult(null)
@@ -4083,6 +4107,7 @@ export default function App() {
 
     if (activeFrameIdRef.current || selectedGeneratedResultRef.current) {
       activeFrameIdRef.current = ''
+      selectedGeneratedResultRef.current = null
       setActiveFrameId('')
       setSelectedGeneratedResult(null)
       setOpenMenu(null)
@@ -5439,23 +5464,63 @@ export default function App() {
     consumeCanvasPickerSelectionRef.current = (scene) => {
       const picker = canvasPickerRef.current
       if (!picker) return false
-      const selectedIds = new Set(getSelectedIds(scene.appState))
-      const selected = scene.elements.find((element) =>
-        selectedIds.has(element.id) &&
-        !isGeneratorFrame(element) &&
-        isCanvasAttachableElement(element)
-      )
-      if (!selected) return false
+      const restorePickerTargetSelection = () => {
+        const restoreFrameId = picker.frameId || canvasPickerFrameIdRef.current || ''
+        const restoreResult = picker.selectedGeneratedResult || null
+        const restoreElementId = restoreFrameId || restoreResult?.elementId || ''
+        if (restoreFrameId) {
+          activeFrameIdRef.current = restoreFrameId
+          selectedGeneratedResultRef.current = null
+          setActiveFrameId(restoreFrameId)
+          setSelectedGeneratedResult(null)
+        } else if (restoreResult?.elementId) {
+          activeFrameIdRef.current = ''
+          selectedGeneratedResultRef.current = restoreResult
+          setActiveFrameId('')
+          setSelectedGeneratedResult(restoreResult)
+          setActiveFrameKind(restoreResult.kind)
+        }
+        if (!api || !restoreElementId) return
+        window.setTimeout(() => {
+          suppressNextChangeRef.current = true
+          api.updateScene({
+            appState: { selectedElementIds: { [restoreElementId]: true } },
+            captureUpdate: CaptureUpdateAction.NEVER
+          })
+        }, 0)
+      }
+      const keepPickingWithError = (message) => {
+        setGenerationError(message)
+        restorePickerTargetSelection()
+        return true
+      }
+      const selected = selectedCanvasAttachableElementFromScene(scene)
+      if (!selected) return keepPickingWithError('キャンバス上の画像・動画・ファイルを選択してください。')
       const asset = assetReferenceFromElement(selected, scene.files)
-      if (!asset) return false
-      if (['videoStartFrame', 'videoEndFrame', 'videoReferenceImages'].includes(picker.target) && asset.kind !== 'image') return false
-      if (picker.target === 'imageReferences' && asset.kind !== 'image') return false
-      if (picker.target === 'videoReferenceVideos' && asset.kind !== 'video') return false
-      if (picker.target === 'videoReferenceAudios' && asset.kind !== 'audio') return false
-      if (picker.target === 'subtitleScript' && asset.kind !== 'script') return false
+      if (!asset) return keepPickingWithError('選択した素材を参照できません。')
+      if (['videoStartFrame', 'videoEndFrame', 'videoReferenceImages'].includes(picker.target) && asset.kind !== 'image') {
+        return keepPickingWithError('この欄には画像を選択してください。')
+      }
+      if (picker.target === 'imageReferences' && asset.kind !== 'image') {
+        return keepPickingWithError('この欄には画像を選択してください。')
+      }
+      if (picker.target === 'videoReferenceVideos' && asset.kind !== 'video') {
+        return keepPickingWithError('この欄には動画を選択してください。')
+      }
+      if (picker.target === 'videoReferenceAudios' && asset.kind !== 'audio') {
+        return keepPickingWithError('この欄には音声を選択してください。')
+      }
+      if (picker.target === 'subtitleScript' && asset.kind !== 'script') {
+        return keepPickingWithError('この欄には台本ファイルを選択してください。')
+      }
       // SRT audio accepts audio files or videos (audio extraction happens server-side).
-      if (picker.target === 'subtitleAudio' && asset.kind !== 'audio' && asset.kind !== 'video') return false
-      if (picker.target === 'silenceCutVideo' && asset.kind !== 'video' && asset.kind !== 'xml') return false
+      if (picker.target === 'subtitleAudio' && asset.kind !== 'audio' && asset.kind !== 'video') {
+        return keepPickingWithError('この欄には音声または動画を選択してください。')
+      }
+      if (picker.target === 'silenceCutVideo' && asset.kind !== 'video' && asset.kind !== 'xml') {
+        return keepPickingWithError('この欄には動画またはPremiere XMLを選択してください。')
+      }
+      setGenerationError('')
       const restoreFrameId = picker.frameId || canvasPickerFrameIdRef.current || ''
       const applyPickedAsset = (pickedAsset) => {
         if (restoreFrameId) activeFrameIdRef.current = restoreFrameId
