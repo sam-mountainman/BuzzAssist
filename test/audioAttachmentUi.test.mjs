@@ -49,7 +49,7 @@ test("subtitle utility attachments collapse until hover, menu, or attachment", a
   assert.match(appSource, /const trayOpen =\s*utilityTrayHovered \|\|\s*Boolean\(primaryAsset\) \|\|\s*utilitySlotMenuOpen \|\|\s*\(!isSilencePanel && !scriptSlotDisabled && hasScriptFile\)/);
   assert.doesNotMatch(appSource, /: true\s*const primaryTarget/);
   assert.match(appSource, /if \(target === 'subtitleScript'\) return \{ \.\.\.form, subtitleScriptText: String\(asset\?\.text \|\| ''\)\.trim\(\), subtitleScriptName: asset\?\.name \|\| 'script\.txt' \}/);
-  assert.match(appSource, /if \(picker\.target === 'subtitleScript' && asset\.kind !== 'script'\) return false/);
+  assert.match(appSource, /if \(picker\.target === 'subtitleScript' && asset\.kind !== 'script'\) \{\s*return keepPickingWithError\('この欄には台本ファイルを選択してください。'\)\s*\}/);
   assert.match(appSource, /data-lovart-canvas-pick-target="subtitleScript"/);
   assert.match(appSource, /openCanvasPicker\('subtitleScript'\)/);
 });
