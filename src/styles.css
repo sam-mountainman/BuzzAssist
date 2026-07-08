@@ -1418,11 +1418,11 @@ body {
 }
 
 @media (max-width: 900px) {
-  .lovart-ai-rail {
+  .is-memory-constrained-canvas .lovart-ai-rail {
     left: 8px;
   }
 
-  .lovart-ai-prompt {
+  .is-memory-constrained-canvas .lovart-ai-prompt {
     min-height: 80px;
     font-size: 18px;
   }
@@ -1430,7 +1430,7 @@ body {
   /* No width overrides here: the frame-anchored panel keeps its exact desktop
      layout and is scaled down as a whole (App.jsx panelStyle transform), so
      phones render the same UI, just smaller. */
-  .lovart-ai-panel {
+  .is-memory-constrained-canvas .lovart-ai-panel {
     left: 50%;
     width: min(96vw, 520px);
   }

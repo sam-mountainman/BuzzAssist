@@ -13,6 +13,7 @@ test("uploaded canvas media does not open the generator prompt panel", async () 
 
 test("prompt panel keeps the desktop layout, scaled and kept reachable on phones", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
 
   // Centering formula (frame center minus half the panel) is still the default
   // desktop placement.
@@ -24,11 +25,15 @@ test("prompt panel keeps the desktop layout, scaled and kept reachable on phones
   // Phones shrink the whole panel with a CSS scale instead of reflowing it, so
   // the mobile UI is pixel-identical to desktop, just smaller. The outer
   // placement is clamped after scaling so it stays reachable while panning.
-  assert.match(source, /const panelScale = viewportWidth > 0 && viewportWidth <= 900\s*\?\s*Math\.min\(1, \(viewportWidth - 16\) \/ desiredWidth\)/);
+  assert.match(source, /const isCompactViewport = isTunnelCanvasRuntime\(\) && viewportWidth > 0 && viewportWidth <= 900/);
+  assert.match(source, /const panelScale = isCompactViewport\s*\?\s*Math\.min\(1, \(viewportWidth - 16\) \/ desiredWidth\)/);
   assert.match(source, /const transformInsetX = \(panelWidth - panelVisualWidth\) \/ 2/);
   assert.match(source, /transform: panelPlacement\.scale && panelPlacement\.scale < 1 \? `scale\(\$\{panelPlacement\.scale\}\)` : 'none'/);
   assert.match(source, /transformOrigin: 'top center'/);
   assert.match(source, /if \(kind === 'subtitle'\) return 300/);
+  assert.match(styles, /\.is-memory-constrained-canvas \.lovart-ai-panel/);
+  assert.match(styles, /\.is-memory-constrained-canvas \.lovart-ai-prompt/);
+  assert.doesNotMatch(styles, /@media \(max-width: 900px\) \{\s*\.lovart-ai-panel/);
 });
 
 test("phone tunnel renders images via capped overlays instead of hydrating Excalidraw files", async () => {

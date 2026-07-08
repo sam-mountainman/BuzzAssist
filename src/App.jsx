@@ -1826,8 +1826,8 @@ function getPanelPlacementFromViewportTarget(target, kind = 'image') {
   // prompt stays reachable after the user pans or zooms the canvas.
   const viewportWidth = typeof window !== 'undefined' ? (window.innerWidth || 0) : 0
   const viewportHeight = typeof window !== 'undefined' ? (window.innerHeight || 0) : 0
-  const isCompactViewport = viewportWidth > 0 && viewportWidth <= 900
-  const panelScale = viewportWidth > 0 && viewportWidth <= 900
+  const isCompactViewport = isTunnelCanvasRuntime() && viewportWidth > 0 && viewportWidth <= 900
+  const panelScale = isCompactViewport
     ? Math.min(1, (viewportWidth - 16) / desiredWidth)
     : 1
   const panelWidth = desiredWidth
