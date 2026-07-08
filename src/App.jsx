@@ -96,6 +96,37 @@ function isTouchLikeDevice() {
   return window.matchMedia('(hover: none), (pointer: coarse)').matches
 }
 
+// Preview width for tunnel sessions, sized to the actual device: a phone that
+// can only show ~1170 physical pixels across doesn't need 1600px previews.
+// Decoding 37 x 1600px bitmaps (~200MB) is exactly what pushed iOS Safari over
+// its per-page memory limit and white-screened the tab. Rounded to 200px steps
+// so the server-side preview cache stays shared.
+let cachedTunnelPreviewWidth = 0
+function tunnelPreviewWidth() {
+  if (cachedTunnelPreviewWidth) return cachedTunnelPreviewWidth
+  let width = 1600
+  if (typeof window !== 'undefined' && isTouchLikeDevice()) {
+    // Size to the screen's SHORT edge (portrait width) × DPR — the widest an
+    // image ever needs to fill the phone at native sharpness (~1170px on an
+    // iPhone). Using the long edge/full physical resolution just pins to the
+    // 1600 cap and defeats the point: decoding 37 x 1600px bitmaps (~370MB) is
+    // what white-screens iOS Safari. Short-edge sizing roughly halves that.
+    const shortEdge = Math.min(
+      Number(window.screen?.width) || 0,
+      Number(window.screen?.height) || 0
+    ) || 400
+    const physical = shortEdge * (Number(window.devicePixelRatio) || 1)
+    width = Math.min(1024, Math.max(640, Math.ceil(physical / 160) * 160))
+  }
+  cachedTunnelPreviewWidth = width
+  return width
+}
+
+function withTunnelPreviewWidth(url) {
+  if (!isTunnelCanvasRuntime() || !/\.(png|jpe?g|webp)$/i.test(String(url).split('?')[0])) return url
+  return `${url}${String(url).includes('?') ? '&' : '?'}w=${tunnelPreviewWidth()}`
+}
+
 function canvasRequestInfo(input) {
   if (typeof window === 'undefined' || (typeof input !== 'string' && !(input instanceof URL))) {
     return { url: input, sameOrigin: false }
@@ -1295,11 +1326,9 @@ async function hydrateAssetBackedFiles(files, onHydrated, options = {}) {
           ? file.codexAssetUrl
           : file.dataURL
       // Over the tunnel, multi-MB originals overwhelm phone bandwidth/memory —
-      // request a downscaled preview; the server falls back to the original
+      // request a device-sized preview; the server falls back to the original
       // for small files and non-bitmap types. Local sessions keep full-res.
-      const fetchUrl = isTunnelCanvasRuntime() && /\.(png|jpe?g|webp)$/i.test(url.split('?')[0])
-        ? `${url}${url.includes('?') ? '&' : '?'}w=1600`
-        : url
+      const fetchUrl = withTunnelPreviewWidth(url)
       try {
         const dataURL = await fetchAssetDataURL(fetchUrl)
         onHydrated({ ...file, dataURL, codexAssetBacked: true, codexAssetUrl: persistedCanvasAssetUrl(url) })
@@ -3083,9 +3112,12 @@ function VideoCanvasOverlay({ video, isHovered, onExpand }) {
       setIsInView(true)
       return undefined
     }
+    // Require the clip to be prominently on screen (>=50%) before auto-playing,
+    // so at most ~one video decodes at a time on a phone (each extra <video>
+    // element is real memory pressure toward an iOS Safari white-screen).
     const observer = new IntersectionObserver(
-      (entries) => setIsInView(entries.some((entry) => entry.isIntersecting && entry.intersectionRatio > 0.25)),
-      { threshold: [0, 0.25, 0.6] }
+      (entries) => setIsInView(entries.some((entry) => entry.isIntersecting && entry.intersectionRatio >= 0.5)),
+      { threshold: [0, 0.5, 0.75] }
     )
     observer.observe(element)
     return () => observer.disconnect()
@@ -4036,6 +4068,22 @@ export default function App() {
     navigator.serviceWorker.register('/canvas-sw.js', { updateViaCache: 'none' }).catch(() => {})
   }, [])
 
+  // iOS Safari can pinch-zoom the PAGE itself (it ignores user-scalable=no),
+  // which shrinks the whole app into a corner of the screen and leaves the
+  // canvas "broken" until the page zoom is reset. Block the native page
+  // gesture on touch devices; Excalidraw's own pinch-to-zoom uses pointer
+  // events and keeps working.
+  useEffect(() => {
+    if (!isTouchLikeDevice()) return undefined
+    const preventPageGesture = (event) => event.preventDefault()
+    document.addEventListener('gesturestart', preventPageGesture, { passive: false })
+    document.addEventListener('gesturechange', preventPageGesture, { passive: false })
+    return () => {
+      document.removeEventListener('gesturestart', preventPageGesture)
+      document.removeEventListener('gesturechange', preventPageGesture)
+    }
+  }, [])
+
   useEffect(() => {
     if (!isTunnelCanvasRuntime() || !initialScene || typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
     const previewUrl = (file) => {
@@ -4044,7 +4092,8 @@ export default function App() {
           ? file.codexAssetUrl
           : file.dataURL
       if (typeof base !== 'string' || !base.startsWith(CANVAS_ASSETS_ROUTE)) return ''
-      return /\.(png|jpe?g|webp)$/i.test(base.split('?')[0]) ? `${base}?w=1600` : base
+      // Same device-sized width as hydration so both hit the same cache entry.
+      return withTunnelPreviewWidth(base)
     }
     const urls = [...new Set(
       Object.values(initialScene.files ?? {})
