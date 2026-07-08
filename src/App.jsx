@@ -89,6 +89,13 @@ function isTunnelCanvasRuntime() {
   return !isLocalCanvasHostname(window.location.hostname)
 }
 
+// Touch devices have no hover, so the desktop hover-to-play preview never
+// fires. Detect them so videos can auto-play (muted) inline instead.
+function isTouchLikeDevice() {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
+  return window.matchMedia('(hover: none), (pointer: coarse)').matches
+}
+
 function canvasRequestInfo(input) {
   if (typeof window === 'undefined' || (typeof input !== 'string' && !(input instanceof URL))) {
     return { url: input, sameOrigin: false }
@@ -3061,34 +3068,62 @@ function SubtitleCanvasOverlay({ overlay, scrollOffset }) {
 
 function VideoCanvasOverlay({ video, isHovered, onExpand }) {
   const hoverVideoRef = useRef(null)
+  const containerRef = useRef(null)
   const [isHoverVideoReady, setIsHoverVideoReady] = useState(false)
+  // Touch devices auto-play the muted inline preview (there is no hover), and
+  // only while the clip is actually on screen to save battery and data.
+  const autoPlayInline = useMemo(() => isTouchLikeDevice(), [])
+  const [isInView, setIsInView] = useState(false)
+
+  useEffect(() => {
+    if (!autoPlayInline) return undefined
+    const element = containerRef.current
+    if (!element || typeof IntersectionObserver === 'undefined') {
+      setIsInView(true)
+      return undefined
+    }
+    const observer = new IntersectionObserver(
+      (entries) => setIsInView(entries.some((entry) => entry.isIntersecting && entry.intersectionRatio > 0.25)),
+      { threshold: [0, 0.25, 0.6] }
+    )
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [autoPlayInline])
+
+  const shouldPlayInline = isHovered || (autoPlayInline && isInView)
 
   useEffect(() => {
     setIsHoverVideoReady(false)
-  }, [isHovered, video.sourceURL])
+  }, [shouldPlayInline, video.sourceURL])
 
   useEffect(() => {
-    if (!isHovered) return undefined
+    if (!shouldPlayInline) return undefined
     const element = hoverVideoRef.current
     if (!element) return undefined
-    // Hover previews play with audio like Youtube-AGI. Browsers may reject
-    // unmuted autoplay, so fall back to muted playback and unmute right after
-    // play succeeds.
-    const enableAudio = () => {
-      element.defaultMuted = false
-      element.muted = false
-      element.volume = 1
-    }
-    enableAudio()
-    void element.play().then(enableAudio).catch(() => {
+    if (isHovered && !autoPlayInline) {
+      // Desktop hover preview plays with audio like Youtube-AGI. Browsers may
+      // reject unmuted autoplay, so fall back to muted and unmute on success.
+      const enableAudio = () => {
+        element.defaultMuted = false
+        element.muted = false
+        element.volume = 1
+      }
+      enableAudio()
+      void element.play().then(enableAudio).catch(() => {
+        element.muted = true
+        element.defaultMuted = true
+        void element.play()
+          .then(() => {
+            window.setTimeout(enableAudio, 0)
+          })
+          .catch(() => {})
+      })
+    } else {
+      // Touch auto-play must stay muted; browsers block unmuted autoplay.
       element.muted = true
       element.defaultMuted = true
-      void element.play()
-        .then(() => {
-          window.setTimeout(enableAudio, 0)
-        })
-        .catch(() => {})
-    })
+      void element.play().catch(() => {})
+    }
     return () => {
       try {
         element.pause()
@@ -3098,7 +3133,7 @@ function VideoCanvasOverlay({ video, isHovered, onExpand }) {
         // Ignore media reset failures.
       }
     }
-  }, [isHovered, video.sourceURL])
+  }, [shouldPlayInline, isHovered, autoPlayInline, video.sourceURL])
 
   const minDim = Math.min(video.width, video.height)
   const showOverlayUI = minDim >= 60
@@ -3118,17 +3153,18 @@ function VideoCanvasOverlay({ video, isHovered, onExpand }) {
   // mirroring Youtube-AGI's videoLayer (z1) / overlay portal (z3) split.
   return (
     <>
-    <div className="lovart-video-playback-overlay" style={placementStyle}>
+    <div className="lovart-video-playback-overlay" style={placementStyle} ref={containerRef}>
       {isRenderableVideoPosterDataURL(video.posterDataURL) ? (
         <img className="lovart-video-playback-media" src={video.posterDataURL} draggable={false} alt="" />
       ) : null}
-      {isHovered ? (
+      {shouldPlayInline ? (
         <video
           ref={hoverVideoRef}
           className="lovart-video-playback-media"
           src={video.sourceURL}
           loop
           playsInline
+          muted={autoPlayInline}
           preload="auto"
           onLoadedData={() => setIsHoverVideoReady(true)}
           onCanPlay={() => setIsHoverVideoReady(true)}
@@ -3138,7 +3174,7 @@ function VideoCanvasOverlay({ video, isHovered, onExpand }) {
     </div>
     <div className="lovart-video-playback-ui" style={placementStyle}>
       {isHovered && showOverlayUI && !video.isSelected ? <div className="lovart-video-hover-gradient" /> : null}
-      {!isHovered && showOverlayUI ? (
+      {!shouldPlayInline && showOverlayUI ? (
         <button
           type="button"
           className="lovart-video-play-icon"
@@ -3179,7 +3215,7 @@ function VideoCanvasOverlay({ video, isHovered, onExpand }) {
           {durationLabel}
         </div>
       ) : null}
-      {isHovered && showOverlayUI ? (
+      {(isHovered || autoPlayInline) && showOverlayUI ? (
         <button
           type="button"
           className="lovart-video-expand"
