@@ -11,19 +11,21 @@ test("uploaded canvas media does not open the generator prompt panel", async () 
   assert.doesNotMatch(match[1], /isCanvasVideoElement\(element\)/);
 });
 
-test("prompt panel keeps the desktop layout, scaled to fit on phones", async () => {
+test("prompt panel keeps the desktop layout, scaled and kept reachable on phones", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
 
-  // Centering formula (frame center minus half the panel) is preserved and
-  // never clamped: the panel stays glued to its frame exactly like desktop.
+  // Centering formula (frame center minus half the panel) is still the default
+  // desktop placement.
   assert.match(source, /const rawLeft = Math\.round\(\(Number\(target\?\.left\) \|\| 0\) \+ frameViewportWidth \/ 2 - panelWidth \/ 2\)/);
   assert.match(source, /const rawTop = Math\.round\(targetTop \+ frameViewportHeight \+ 4\)/);
-  assert.match(source, /left: rawLeft,\s*top: rawTop,/);
-  assert.doesNotMatch(source, /clamp\(rawLeft/);
-  assert.doesNotMatch(source, /const maxTop = viewportHeight - panelHeight/);
+  assert.match(source, /const left = isCompactViewport\s*\?\s*clamp\(rawLeft, minLeft, Math\.max\(minLeft, maxLeft\)\)\s*:\s*rawLeft/);
+  assert.match(source, /const top = isCompactViewport && viewportHeight > 0\s*\?\s*clamp\(rawTop, minTop, Math\.max\(minTop, maxTop\)\)\s*:\s*rawTop/);
+  assert.match(source, /left,\s*top,/);
   // Phones shrink the whole panel with a CSS scale instead of reflowing it, so
-  // the mobile UI is pixel-identical to desktop, just smaller.
+  // the mobile UI is pixel-identical to desktop, just smaller. The outer
+  // placement is clamped after scaling so it stays reachable while panning.
   assert.match(source, /const panelScale = viewportWidth > 0 && viewportWidth <= 900\s*\?\s*Math\.min\(1, \(viewportWidth - 16\) \/ desiredWidth\)/);
+  assert.match(source, /const transformInsetX = \(panelWidth - panelVisualWidth\) \/ 2/);
   assert.match(source, /transform: panelPlacement\.scale && panelPlacement\.scale < 1 \? `scale\(\$\{panelPlacement\.scale\}\)` : 'none'/);
   assert.match(source, /transformOrigin: 'top center'/);
   assert.match(source, /if \(kind === 'subtitle'\) return 300/);
@@ -59,6 +61,23 @@ test("left generator rail keeps requested utility tool order", async () => {
   assert.ok(video > image, "video should follow image");
   assert.ok(silenceCut > video, "silence cut should follow video");
   assert.ok(subtitle > silenceCut, "SRT should follow silence cut");
+});
+
+test("tunnel generation requests use async responses to avoid Cloudflare timeouts", async () => {
+  const appSource = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const viteSource = await readFile(new URL("../vite.config.js", import.meta.url), "utf8");
+
+  assert.match(appSource, /const useAsyncGeneration = isTunnelCanvasRuntime\(\)/);
+  assert.match(appSource, /\.\.\.\(useAsyncGeneration \? \{ prefer: 'respond-async' \} : \{\}\)/);
+  assert.match(appSource, /JSON\.stringify\(useAsyncGeneration \? \{ \.\.\.body, async: true \} : body\)/);
+  assert.match(appSource, /if \(payload\.async\) \{/);
+
+  assert.match(viteSource, /function wantsAsyncGeneration\(req, body = \{\}\) \{/);
+  assert.match(viteSource, /prefer\.includes\('respond-async'\) \|\| body\.async === true/);
+  assert.match(viteSource, /sendJson\(res, 202, \{ ok: true, async: true, jobId, kind: 'image' \}\)/);
+  assert.match(viteSource, /sendJson\(res, 202, \{ ok: true, async: true, jobId, kind: 'video' \}\)/);
+  assert.match(viteSource, /runBackgroundGeneration\(jobId, runImageGeneration\)/);
+  assert.match(viteSource, /runBackgroundGeneration\(jobId, runVideoGeneration\)/);
 });
 
 test("generator creation keeps a moved viewport instead of focusing every new frame", async () => {

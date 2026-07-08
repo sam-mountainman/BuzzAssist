@@ -1821,11 +1821,12 @@ function getPanelPlacementFromViewportTarget(target, kind = 'image') {
       ? 560
       : clamp(Math.round(frameViewportWidth * 0.9), GENERATOR_PANEL_IMAGE_MIN_WIDTH, GENERATOR_PANEL_IMAGE_MAX_WIDTH)
   // Phones: keep the EXACT desktop panel (same internal layout, no reflow) and
-  // shrink it visually with a CSS scale so it fits the screen width. The panel
-  // stays anchored to its frame like desktop (it may leave the screen when the
-  // user pans away), but on first open the frame is centered, so the scaled
-  // panel lands fully on-screen.
+  // shrink it visually with a CSS scale so it fits the screen width. The
+  // content remains the desktop UI; only the outer placement is clamped so the
+  // prompt stays reachable after the user pans or zooms the canvas.
   const viewportWidth = typeof window !== 'undefined' ? (window.innerWidth || 0) : 0
+  const viewportHeight = typeof window !== 'undefined' ? (window.innerHeight || 0) : 0
+  const isCompactViewport = viewportWidth > 0 && viewportWidth <= 900
   const panelScale = viewportWidth > 0 && viewportWidth <= 900
     ? Math.min(1, (viewportWidth - 16) / desiredWidth)
     : 1
@@ -1833,10 +1834,24 @@ function getPanelPlacementFromViewportTarget(target, kind = 'image') {
   const rawLeft = Math.round((Number(target?.left) || 0) + frameViewportWidth / 2 - panelWidth / 2)
   const targetTop = Number(target?.top) || 0
   const rawTop = Math.round(targetTop + frameViewportHeight + 4)
+  const panelVisualWidth = panelWidth * panelScale
+  const transformInsetX = (panelWidth - panelVisualWidth) / 2
+  const minLeft = 8 - transformInsetX
+  const maxLeft = viewportWidth - 8 - panelVisualWidth - transformInsetX
+  const panelEstimatedHeight = isVideo ? 280 : kind === 'subtitle' || kind === 'silenceCut' ? 220 : GENERATOR_PANEL_ESTIMATED_HEIGHT + 24
+  const panelVisualHeight = panelEstimatedHeight * panelScale
+  const minTop = 8
+  const maxTop = viewportHeight - 8 - panelVisualHeight
+  const left = isCompactViewport
+    ? clamp(rawLeft, minLeft, Math.max(minLeft, maxLeft))
+    : rawLeft
+  const top = isCompactViewport && viewportHeight > 0
+    ? clamp(rawTop, minTop, Math.max(minTop, maxTop))
+    : rawTop
 
   return {
-    left: rawLeft,
-    top: rawTop,
+    left,
+    top,
     width: panelWidth,
     scale: panelScale
   }
@@ -6199,9 +6214,12 @@ export default function App() {
       }, 0)
     }
 
+    let keepGeneratingFrame = false
+
     try {
       await saveCanvas(latestSceneRef.current)
       const endpoint = kind === 'video' ? GENERATE_VIDEO_ENDPOINT : GENERATE_IMAGE_ENDPOINT
+      const useAsyncGeneration = isTunnelCanvasRuntime()
       const body =
         kind === 'video'
           ? {
@@ -6266,12 +6284,26 @@ export default function App() {
 
       const response = await canvasFetch(endpoint, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body)
+        headers: {
+          'content-type': 'application/json',
+          ...(useAsyncGeneration ? { prefer: 'respond-async' } : {})
+        },
+        body: JSON.stringify(useAsyncGeneration ? { ...body, async: true } : body)
       })
       const payload = await response.json().catch(() => ({}))
       if (!response.ok || payload.error) {
         throw new Error(payload.error || `Generation failed: ${response.status}`)
+      }
+      if (payload.async) {
+        keepGeneratingFrame = true
+        window.setTimeout(() => {
+          setGeneratingFrameIds((current) => {
+            const next = new Set(current)
+            next.delete(generationAnchorId)
+            return next
+          })
+        }, 10 * 60 * 1000)
+        return
       }
       const canvasResponse = await canvasFetch(CANVAS_ENDPOINT)
       if (canvasResponse.ok) {
@@ -6324,11 +6356,13 @@ export default function App() {
         scheduleSelectionSave(errorScene)
       }
     } finally {
-      setGeneratingFrameIds((current) => {
-        const next = new Set(current)
-        next.delete(generationAnchorId)
-        return next
-      })
+      if (!keepGeneratingFrame) {
+        setGeneratingFrameIds((current) => {
+          const next = new Set(current)
+          next.delete(generationAnchorId)
+          return next
+        })
+      }
     }
   }, [api, applyRemoteScene, capabilities, ensureBuzzAssistLoggedIn, frameForm, generatingFrameIds, insertGeneratorFrame, refreshOverlayStates, saveCanvas, scheduleCanvasSave, scheduleSelectionSave, selectedGeneratedResult, updateActiveFrameElement])
 

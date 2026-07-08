@@ -74,6 +74,23 @@ function sendJson(res, statusCode, payload) {
   res.end(JSON.stringify(payload))
 }
 
+function wantsAsyncGeneration(req, body = {}) {
+  const prefer = String(req.headers.prefer || '').toLowerCase()
+  return prefer.includes('respond-async') || body.async === true || body.respondAsync === true
+}
+
+function createGenerationJobId(kind) {
+  return `${kind}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
+}
+
+function runBackgroundGeneration(jobId, task) {
+  Promise.resolve()
+    .then(task)
+    .catch((error) => {
+      console.error(`[canvas generation job ${jobId}] ${error?.stack || error?.message || error}`)
+    })
+}
+
 function readRequestBody(req) {
   return new Promise((resolveBody, rejectBody) => {
     let body = ''
@@ -1255,44 +1272,55 @@ function configureCanvasServer(server) {
           }
 
           const body = JSON.parse(await readRequestBody(req))
-          const media = await generateImageMedia(body)
-          const result = await insertExcalidrawImage({
-            canvasDir,
-            mediaBuffer: media.buffer,
-            mimeType: media.mimeType,
-            fileName: body.fileName,
-            anchorElementId: body.anchorElementId,
-            sourceElementId: body.sourceElementId,
-            placement: body.placement,
-            margin: body.margin,
-            matchAnchor: body.matchAnchor,
-            replaceAnchor: body.replaceAnchor,
-            selectCreated: body.selectCreated,
-            displayWidth: body.displayWidth,
-            displayHeight: body.displayHeight,
-            customData: {
-              codexGeneratedImage: true,
-              codexGenerationModel: media.model,
-              codexGenerationPrompt: body.prompt,
-              codexGenerationAspectRatio: body.aspectRatio ?? body.aspect_ratio,
-              codexGenerationQuality: body.quality,
-              generatorPrompt: body.prompt,
-              generatorModel: body.model,
-              generatorAspectRatio: body.aspectRatio ?? body.aspect_ratio,
-              generatorImageQuality: body.quality,
-              generatorImageSize: body.imageSize ?? body.size ?? '1K',
-              codexGenerationSource: media.source,
-              ...(body.customData && typeof body.customData === 'object' ? body.customData : {})
-            }
-          })
+          const runImageGeneration = async () => {
+            const media = await generateImageMedia(body)
+            const result = await insertExcalidrawImage({
+              canvasDir,
+              mediaBuffer: media.buffer,
+              mimeType: media.mimeType,
+              fileName: body.fileName,
+              anchorElementId: body.anchorElementId,
+              sourceElementId: body.sourceElementId,
+              placement: body.placement,
+              margin: body.margin,
+              matchAnchor: body.matchAnchor,
+              replaceAnchor: body.replaceAnchor,
+              selectCreated: body.selectCreated,
+              displayWidth: body.displayWidth,
+              displayHeight: body.displayHeight,
+              customData: {
+                codexGeneratedImage: true,
+                codexGenerationModel: media.model,
+                codexGenerationPrompt: body.prompt,
+                codexGenerationAspectRatio: body.aspectRatio ?? body.aspect_ratio,
+                codexGenerationQuality: body.quality,
+                generatorPrompt: body.prompt,
+                generatorModel: body.model,
+                generatorAspectRatio: body.aspectRatio ?? body.aspect_ratio,
+                generatorImageQuality: body.quality,
+                generatorImageSize: body.imageSize ?? body.size ?? '1K',
+                codexGenerationSource: media.source,
+                ...(body.customData && typeof body.customData === 'object' ? body.customData : {})
+              }
+            })
+            broadcastCanvasChanged([canvasFile, result.assetFile])
+            return { media, result }
+          }
 
+          if (wantsAsyncGeneration(req, body)) {
+            const jobId = createGenerationJobId('image')
+            sendJson(res, 202, { ok: true, async: true, jobId, kind: 'image' })
+            runBackgroundGeneration(jobId, runImageGeneration)
+            return
+          }
+
+          const { media, result } = await runImageGeneration()
           sendJson(res, 200, {
             ok: true,
             kind: 'image',
             model: media.model,
             ...result
           })
-          broadcastCanvasChanged([canvasFile, result.assetFile])
         } catch (error) {
           sendJson(res, 500, { error: error.message })
         }
@@ -1308,50 +1336,61 @@ function configureCanvasServer(server) {
           }
 
           const body = JSON.parse(await readRequestBody(req))
-          const media = await generateVideoMedia(body)
-          const result = await insertExcalidrawVideo({
-            canvasDir,
-            mediaBuffer: media.buffer,
-            mimeType: media.mimeType,
-            fileName: body.fileName || body.videoName,
-            anchorElementId: body.anchorElementId,
-            sourceElementId: body.sourceElementId,
-            placement: body.placement,
-            margin: body.margin,
-            matchAnchor: body.matchAnchor,
-            replaceAnchor: body.replaceAnchor,
-            selectCreated: body.selectCreated,
-            displayWidth: body.displayWidth,
-            displayHeight: body.displayHeight,
-            aspectRatio: body.aspectRatio,
-            duration: body.duration,
-            prompt: body.prompt,
-            model: media.model,
-            customData: {
-              codexGeneratedVideo: true,
-              codexGenerationModel: media.model,
-              codexGenerationPrompt: body.prompt,
-              codexGenerationAspectRatio: body.aspectRatio ?? body.aspect_ratio,
-              codexGenerationDuration: body.duration,
-              codexGenerationResolution: body.resolution,
-              videoPrompt: body.prompt,
-              videoModel: body.model,
-              videoAspectRatio: body.aspectRatio ?? body.aspect_ratio,
-              videoDuration: body.duration,
-              videoResolution: body.resolution,
-              videoGenerateAudio: body.generateAudio ?? body.generate_audio,
-              codexGenerationSource: media.source,
-              ...(body.customData && typeof body.customData === 'object' ? body.customData : {})
-            }
-          })
+          const runVideoGeneration = async () => {
+            const media = await generateVideoMedia(body)
+            const result = await insertExcalidrawVideo({
+              canvasDir,
+              mediaBuffer: media.buffer,
+              mimeType: media.mimeType,
+              fileName: body.fileName || body.videoName,
+              anchorElementId: body.anchorElementId,
+              sourceElementId: body.sourceElementId,
+              placement: body.placement,
+              margin: body.margin,
+              matchAnchor: body.matchAnchor,
+              replaceAnchor: body.replaceAnchor,
+              selectCreated: body.selectCreated,
+              displayWidth: body.displayWidth,
+              displayHeight: body.displayHeight,
+              aspectRatio: body.aspectRatio,
+              duration: body.duration,
+              prompt: body.prompt,
+              model: media.model,
+              customData: {
+                codexGeneratedVideo: true,
+                codexGenerationModel: media.model,
+                codexGenerationPrompt: body.prompt,
+                codexGenerationAspectRatio: body.aspectRatio ?? body.aspect_ratio,
+                codexGenerationDuration: body.duration,
+                codexGenerationResolution: body.resolution,
+                videoPrompt: body.prompt,
+                videoModel: body.model,
+                videoAspectRatio: body.aspectRatio ?? body.aspect_ratio,
+                videoDuration: body.duration,
+                videoResolution: body.resolution,
+                videoGenerateAudio: body.generateAudio ?? body.generate_audio,
+                codexGenerationSource: media.source,
+                ...(body.customData && typeof body.customData === 'object' ? body.customData : {})
+              }
+            })
+            broadcastCanvasChanged([canvasFile, result.assetFile])
+            return { media, result }
+          }
 
+          if (wantsAsyncGeneration(req, body)) {
+            const jobId = createGenerationJobId('video')
+            sendJson(res, 202, { ok: true, async: true, jobId, kind: 'video' })
+            runBackgroundGeneration(jobId, runVideoGeneration)
+            return
+          }
+
+          const { media, result } = await runVideoGeneration()
           sendJson(res, 200, {
             ok: true,
             kind: 'video',
             model: media.model,
             ...result
           })
-          broadcastCanvasChanged([canvasFile, result.assetFile])
         } catch (error) {
           sendJson(res, 500, { error: error.message })
         }
