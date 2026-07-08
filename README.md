@@ -1,22 +1,31 @@
 # BuzzAssist
 
-BuzzAssist is a local Excalidraw canvas and media plugin for Codex, Claude Code, Cursor, and Antigravity, modeled after Cowart's architecture:
+BuzzAssist は、Codex / Claude Code / Cursor / Antigravity から同じローカル Excalidraw キャンバスを操作するための、プロジェクト単位のキャンバス・メディア生成プラグインです。
 
-- official Excalidraw MCP App access through `https://mcp.excalidraw.com/mcp`
-- a local static React canvas service
-- project-local canvas persistence under `canvas/`
-- plugin-provided tools for supported agents to read selection state, insert assets, and generate images/videos
-- host manifests and MCP config templates with shared skills
-
-## Agent URL Setup
-
-Paste this GitHub URL into Codex, Claude Code, Cursor, or Antigravity and ask "セットアップして".
-That URL plus that instruction is the intended setup contract; no manual
-plugin IDs are needed. The agent should clone/open the repo and run the setup for itself only:
+正しいセットアップ URL はこれです。
 
 ```text
-https://github.com/taiyuhiga/BuzzAssist
+https://github.com/sam-mountainman/BuzzAssist
 ```
+
+古い所有者名のURLは使わないでください。
+
+## まず答え
+
+- **macOS でも Windows でも使えます。** Node.js 20 以上が必要です。macOS/Linux は `./scripts/*.sh` も使えますが、Windows は `node scripts/*.mjs` を使います。
+- **Codex / Claude Code / Cursor / Antigravity に対応しています。** セットアップスクリプトは、指定したホストだけを設定します。全ホストをまとめて設定したい時だけ `--all-agents` を使います。
+- **スマホや別PCで同じ Excalidraw UI を開く場合は Canvas Tunnel を使います。** 既定は Cloudflare (`cloudflared`) です。PCが起動していて、ローカルのキャンバスサーバーとトンネルが動いている必要があります。
+- **READMEとセットアップ手順は日本語前提です。** コマンド名、モデルID、環境変数だけ英語のままです。
+
+## エージェントURLセットアップ
+
+Codex、Claude Code、Cursor、Antigravity に次のURLを貼り付けて、「セットアップして」と指示してください。手動でプラグインIDを入力する必要はありません。
+
+```text
+https://github.com/sam-mountainman/BuzzAssist
+```
+
+エージェントはリポジトリを clone/open し、自分自身のホストだけを設定します。
 
 ```bash
 node scripts/setup-agents.mjs --agent codex --project-dir /path/to/active/project
@@ -25,22 +34,20 @@ node scripts/setup-agents.mjs --agent cursor --project-dir /path/to/active/proje
 node scripts/setup-agents.mjs --agent antigravity --project-dir /path/to/active/project
 ```
 
-Add `--tunnel` when phone access should be ready immediately. The tunnel uses
-Cloudflare (`cloudflared`) by default — no account needed for a quick tunnel.
-To use ngrok instead, set `BUZZASSIST_TUNNEL_PROVIDER=ngrok` and pass an
-`--ngrok-authtoken <token>` (or set `BUZZASSIST_NGROK_AUTHTOKEN`).
+スマホから同じキャンバスを開きたい場合は `--tunnel` を付けます。
 
-The setup script installs dependencies when needed, builds the canvas UI when
-needed, refreshes a lightweight local marketplace at `~/plugins/buzzassist`
-with the plugin root at `~/plugins/buzzassist/plugin`, configures only the
-requested host, starts the local canvas server, and prints:
+```bash
+node scripts/setup-agents.mjs --agent codex --project-dir /path/to/active/project --tunnel
+```
+
+セットアップが成功すると、ローカルPC用のURLが出ます。
 
 ```text
 BUZZASSIST_CANVAS_URL=http://127.0.0.1:<port>/
 BUZZASSIST_CANVAS_CHECK=ok
 ```
 
-With `--tunnel`, it also starts the tunnel and prints (Cloudflare by default):
+`--tunnel` を付けた場合は、スマホ用のURLも出ます。
 
 ```text
 BUZZASSIST_TUNNEL_URL=https://<slug>.trycloudflare.com
@@ -48,112 +55,130 @@ BUZZASSIST_TUNNEL_ACCESS_URL=https://<slug>.trycloudflare.com/?t=<generated>
 BUZZASSIST_TUNNEL_CHECK=ok
 ```
 
-After that, the current host agent should open `BUZZASSIST_CANVAS_URL` in its
-in-app browser. Use `BUZZASSIST_TUNNEL_ACCESS_URL` from a phone or other
-device. If browser control is unavailable, use the URL from
-`canvas/.server.json`; setup is considered complete when
-`BUZZASSIST_CANVAS_CHECK=ok` is printed.
+PC上のエージェント作業では `BUZZASSIST_CANVAS_URL` を in-app browser で開きます。スマホや別PCでは `BUZZASSIST_TUNNEL_ACCESS_URL` を開きます。
 
-The script intentionally leaves other agents untouched. Use `--all-agents` only
-when the user explicitly asks to configure every supported host.
+## 対応OS
 
-## Run The Canvas
+### macOS
+
+```bash
+brew install node
+brew install cloudflared
+```
+
+ローカルキャンバスだけなら `cloudflared` は不要です。スマホアクセスを使う時だけ必要です。
+
+### Windows
+
+PowerShell で使う想定です。
+
+```powershell
+winget install OpenJS.NodeJS.LTS
+winget install Cloudflare.cloudflared
+```
+
+Windows では `.sh` ではなく、次のように `.mjs` を直接実行します。
+
+```powershell
+node scripts/setup-agents.mjs --agent codex --project-dir C:\path\to\active\project
+node scripts/start-canvas.mjs C:\path\to\active\project
+npm run tunnel:start -- --project-dir C:\path\to\active\project
+```
+
+### Linux
+
+Node.js 20 以上と `cloudflared` があれば使えます。
+
+## 対応ホスト
+
+| ホスト | 対応 | セットアップ内容 |
+|---|---:|---|
+| Codex | 対応 | `.codex-plugin/plugin.json` とローカル marketplace を使って `buzzassist@buzzassist` を追加 |
+| Claude Code | 対応 | `.claude-plugin/plugin.json` とローカル marketplace を使って `buzzassist@buzzassist` を追加 |
+| Cursor | 対応 | アクティブプロジェクトに `.cursor/mcp.json` と `.cursor/rules/buzzassist.mdc` を書き込み |
+| Antigravity | 対応 | アクティブプロジェクトに `.agents/mcp_config.json` と `GEMINI.md` の管理ブロックを書き込み |
+
+重要: セットアップスクリプトは、指定されたホスト以外を勝手に変更しません。全対応ホストをまとめて設定する場合だけ、明示的に `--all-agents` を使います。
+
+```bash
+node scripts/setup-agents.mjs --all-agents --project-dir /path/to/active/project
+```
+
+## キャンバスの起動
 
 ```bash
 # macOS / Linux
 ./scripts/start-canvas.sh /path/to/user/project
 
-# any OS (Windows included)
+# Windowsを含む全OS
 node scripts/start-canvas.mjs /path/to/user/project
 
-# after packaging / install
+# package経由
 npx buzzassist-canvas-mcp
 npx buzzassist-canvas /path/to/user/project
 ```
 
-Default URL, when available:
+既定URLは空いていれば次です。
 
 ```text
 http://127.0.0.1:43219/
 ```
 
-If that port is already busy, the canvas server selects the next available
-local port and writes the live URL, HTTP MCP URL, and bearer token to:
+ポートが埋まっている場合は次の空きポートを使い、実際のURL、HTTP MCP URL、Bearer token をここに書きます。
 
 ```text
 canvas/.server.json
 ```
 
-Project-local data:
+プロジェクトごとのデータは、そのプロジェクト配下に保存されます。
 
 ```text
 canvas/excalidraw-canvas.json
 canvas/excalidraw-selection.json
 canvas/excalidraw-view-state.json
 canvas/assets/
+canvas/assets-trash/
 ```
 
-## Mobile Full Canvas Tunnel
+## スマホ・別PCで開く Canvas Tunnel
 
-For phone/mobile access, BuzzAssist uses **Canvas Tunnel**: a public URL that
-opens the same full local Excalidraw/BuzzAssist UI as the desktop canvas. This
-is the supported path when the user wants the left generator rail, canvas
-frames, prompt editing, selection behavior, and generated assets to behave like
-the local browser canvas.
-
-Start/inspect/stop the tunnel:
+Canvas Tunnel は、ローカルPCで動いている同じ BuzzAssist / Excalidraw UI を、スマホや別PCから開くための機能です。Remote Canvas の簡易ビューアではなく、ローカルで開くものと同じUIを外から開きます。
 
 ```bash
-npm run tunnel:start
+npm run tunnel:start -- --project-dir /path/to/user/project
 npm run tunnel:status
 npm run tunnel:stop
 ```
 
-The tunnel command prints the public URL and an Access URL with a generated
-token. Open the Access URL on the phone; it sets a same-site cookie and then
-loads the same full canvas UI. Avoid editing heavily from desktop and phone at
-the same time.
-
-### Provider: Cloudflare (default) or ngrok
-
-By default the tunnel uses **Cloudflare** via `cloudflared`, which has **no
-bandwidth cap** and needs no account for a quick tunnel (a random
-`*.trycloudflare.com` URL). Install it once:
+既定は Cloudflare quick tunnel です。アカウントなしでランダムな `*.trycloudflare.com` URL を作れます。
 
 ```bash
-brew install cloudflared      # macOS (or winget install Cloudflare.cloudflared)
+brew install cloudflared                 # macOS
+winget install Cloudflare.cloudflared    # Windows
 ```
 
-For a **fixed** hostname like `canvas.buzzassist.ai` (Cloudflare already manages
-the domain), log in once and create a named tunnel, then pass the hostname:
+固定URLにしたい場合は、Cloudflareでドメインを管理したうえで、初回だけログインとnamed tunnel作成をします。
 
 ```bash
-cloudflared tunnel login                       # one-time browser auth
-cloudflared tunnel create buzzassist-canvas    # one-time
+cloudflared tunnel login
+cloudflared tunnel create buzzassist-canvas
 npm run tunnel:start -- --cf-hostname canvas.buzzassist.ai
 ```
 
-To use **ngrok** instead (per-account bandwidth cap, random URL), pass
-`--provider ngrok` and configure your own authtoken:
+ngrokを使いたい場合だけ、明示的にproviderを変えます。
 
 ```bash
 npm run tunnel:start -- --provider ngrok --ngrok-authtoken <token>
 ```
 
-Cloudflare free plan caps a single request upload at 100 MB, so uploading a
-video larger than that from the phone will not go through (viewing, generating,
-and downloading are unaffected).
+注意点:
 
-The tunnel is locked down to that one session: CORS is pinned to the exact
-tunnel URL (no wildcard), and host-only endpoints — desktop chat keystroke
-injection (`/api/chat/send`), the OAuth login browser flow, and outbound probes —
-reject any request that arrives from the tunnel origin, so they stay usable only
-from the local browser. The tunnel also requires the generated access token for
-non-local hosts. `npm run tunnel:stop` stops the tunnel-managed canvas server it
-started, not just the tunnel process. For ngrok you can also enable
-browser-native Basic Auth with `--provider ngrok --basic-auth`.
+- スマホURLを使うには、ローカルPCが起動していて、キャンバスサーバーとトンネルが動いている必要があります。
+- PCとスマホで同時に強く編集すると競合する可能性があります。確認・軽い編集・生成指示が主用途です。
+- Cloudflare free plan は単一リクエストのアップロード上限が100MBです。大きい動画をスマホから直接アップロードする場合は引っかかります。
+- トンネルURLはセッションtoken付きです。不要になったら `npm run tunnel:stop` で止めます。
 
-The MCP plugin also exposes:
+MCPツールからも操作できます。
 
 ```text
 buzzassist_canvas_tunnel_start
@@ -161,11 +186,14 @@ buzzassist_canvas_tunnel_status
 buzzassist_canvas_tunnel_stop
 ```
 
-## Cloud Remote Canvas
+## Cloud Remote Canvas との違い
 
-The older BuzzAssist Cloud Relay commands still exist for hosted relay
-experiments, but they are not the same full Excalidraw UI. Use Canvas Tunnel
-when the requested behavior is "exactly like the local canvas."
+BuzzAssist Cloud Relay の実験用コマンドも残っていますが、これは Canvas Tunnel とは別物です。
+
+- **Canvas Tunnel**: ローカルと同じフル Excalidraw UI をスマホや別PCで開く。本命の実用ルート。
+- **Cloud Remote Canvas**: Cloud側のrelay実験用。フルUIではなく、構成や同期の検証用。
+
+「ローカルで開くものと同じUIが欲しい」場合は Canvas Tunnel を使ってください。
 
 ```bash
 npm run serve -- \
@@ -174,142 +202,38 @@ npm run serve -- \
   --remote-canvas-token <desktopToken>
 ```
 
-See [docs/remote-canvas-relay-architecture.md](docs/remote-canvas-relay-architecture.md).
+設計メモ: [docs/remote-canvas-relay-architecture.md](docs/remote-canvas-relay-architecture.md)
 
-## Plugin Tools
+## プラグインツール
 
-This plugin installs the user-facing BuzzAssist plugin and includes two MCP-backed Excalidraw entries internally:
+BuzzAssist は内部的に2つの Excalidraw 系MCPエントリを持ちます。
 
-- `excalidraw_official`: the official open-source Excalidraw MCP App hosted by Excalidraw, useful for prompt-to-diagram generation and MCP App rendering
-- `excalidraw_mcp`: this repository's local project-bound stdio MCP server. It auto-starts the browser canvas when needed.
+- `excalidraw_official`: 公式Excalidraw MCP App。prompt-to-diagramやMCP Appレンダリング向け。
+- `excalidraw_mcp`: このリポジトリのプロジェクトローカルMCPサーバー。必要に応じてローカルキャンバスを自動起動します。
 
-The local plugin tool server runs on `@modelcontextprotocol/sdk`, so initialization,
-tool listing/calling, protocol negotiation, and `notifications/progress` are
-handled by the SDK rather than a hand-written JSON-RPC loop.
+主なローカルツール:
 
-The official remote MCP is configured in `.mcp.json` as:
+- `read_me`: `create_view` 用のExcalidraw互換フォーマット説明を返す
+- `create_view`: JSON配列のExcalidraw風要素を書き込み
+- `get_excalidraw_selection`: 選択中の要素を読む
+- `insert_excalidraw_image`: ローカル画像を `canvas/assets/` にコピーして配置
+- `insert_excalidraw_video`: ローカル動画を `canvas/assets/` にコピーして配置
+- `generate_excalidraw_image`: 画像生成してキャンバスへ挿入
+- `generate_excalidraw_video`: 動画生成してキャンバスへ挿入
+- `generate_excalidraw_images_batch`: 複数の画像生成フレームを作って順次生成
+- `generate_excalidraw_videos_batch`: 複数の動画生成フレームを作って順次生成
+- `generate_excalidraw_subtitles`: 音声から日本語SRTを生成してカード配置
+- `silence_cut_excalidraw_video`: Premiere XMLまたは動画から無音カットXMLを作成
+- `buzzassist_login`: BuzzAssistアカウントへブラウザーサインイン
+- `buzzassist_auth_status`: サインイン状態を確認
 
-```json
-{
-  "type": "http",
-  "url": "https://mcp.excalidraw.com/mcp"
-}
-```
+HTTP MCP はキャンバスプロセスの `/mcp` でも提供されますが、token保護されています。現在の `mcpUrl` と `token` は `canvas/.server.json` を見てください。
 
-The local MCP is configured in `.mcp.json` as:
+## 画像・動画・字幕生成
 
-```json
-{
-  "command": "node",
-  "args": ["./mcp/server.mjs"],
-  "cwd": "."
-}
-```
+キャンバスUIとプラグインツールは同じ生成バックエンドを使います。UI上ではモデル名は正規化され、実行先は設定行の `実行先` pill で Codex / Hermes / BuzzAssist / Lovart から選ばれます。
 
-The local tool server starts the canvas automatically for canvas-writing tools. To open
-the canvas manually:
-
-```bash
-./scripts/start-canvas.sh /path/to/user/project
-```
-
-The local HTTP MCP endpoint is still served by the browser canvas process at
-`/mcp`, but it is token-protected. Read `canvas/.server.json` for the current
-`mcpUrl` and bearer `token`.
-
-For plugin hosts or clients that need a direct stdio command:
-
-```bash
-./scripts/start-mcp.sh
-```
-
-Local tools include both official-compatible diagram tools and media tools:
-
-- `read_me`: returns the official-compatible Excalidraw element format used by `create_view`
-- `create_view`: accepts a JSON array string of Excalidraw-like elements and writes the diagram into the live local browser canvas
-- `get_excalidraw_selection`: reads selected elements from `canvas/excalidraw-selection.json`
-- `insert_excalidraw_image`: copies a local bitmap into `canvas/assets/`, adds an Excalidraw image file and element, and saves the scene
-- `insert_excalidraw_video`: copies a local video into `canvas/assets/`, adds a Youtube-AGI-style video media element, and saves the scene
-- `generate_excalidraw_image`: generates with `gpt-image-2-codex` or `grok-imagine-image-hermes`, inserts the result, and saves the scene
-- `generate_excalidraw_video`: generates with `grok-imagine-video-hermes`, inserts a Youtube-AGI-style video media element, and saves the scene
-- `generate_excalidraw_images_batch`: creates image generator frames first, then fills each frame with generated results as they finish
-- `generate_excalidraw_videos_batch`: creates video generator frames first, then fills each frame with generated video media as results finish
-- `generate_excalidraw_subtitles`: generates Japanese SRT subtitles from an audio file via BuzzAssist cloud (ElevenLabs forced alignment / Scribe v2), saves the SRT under `canvas/assets/`, and places an SRT card on the canvas
-- `silence_cut_excalidraw_video`: removes silences from a Premiere XML or local video and writes a downloadable non-destructive Premiere XML under `canvas/assets/` (no rendered video/result card)
-- `buzzassist_login`: browser sign-in to BuzzAssist for cloud models and cloud subtitles (token saved to `~/.buzzassist/excalidraw-media-auth.json`)
-- `buzzassist_auth_status`: reports the current BuzzAssist sign-in state (warns when the token expires within 3 days)
-
-Generation extras:
-
-- `generate_excalidraw_image` / `generate_excalidraw_video` accept `payloadPreview: true` to return the resolved fal endpoint, request payload, and estimated BuzzAssist credits without generating (`lib/mediaCredits.mjs` ports the BuzzAssist rate card)
-- `generate_excalidraw_subtitles` supports a two-step LLM segmentation flow: call with `returnWordsOnly: true` to get timed words, let the agent decide semantic line breaks, then call again with `subtitleLines` to render and place the SRT without a second cloud call
-- 429 responses retry automatically with backoff; payload builders are covered by `node scripts/test-fal-payloads.mjs`
-
-## Plugin Packaging
-
-Codex uses `.codex-plugin/plugin.json`; Claude Code uses
-`.claude-plugin/plugin.json`; Cursor uses `.cursor/mcp.json` plus
-`.cursor/rules/buzzassist.mdc`; Antigravity uses
-`.antigravity-plugin/plugin.json`, `.agents/mcp_config.json`, and `GEMINI.md`.
-All hosts point at the shared `skills/` folder and local MCP server.
-
-For Codex local testing, `.agents/plugins/marketplace.json` exposes this repo
-as `buzzassist`. For Cursor and Antigravity, the setup script writes project-local
-config files because those hosts discover MCP servers from workspace config.
-For npm packaging, `package.json` provides:
-
-```bash
-npx buzzassist-canvas-mcp   # stdio MCP server
-npx buzzassist-canvas       # local canvas web server
-```
-
-Run the verification suite before packaging:
-
-```bash
-npm test
-npm run build
-npm pack --dry-run
-```
-
-## Batch Generation
-
-Generate many images or videos in one call. The plugin batch tools first place Youtube-AGI-style generator frames as 10-item chunks below existing canvas content, keep the user's current canvas view in place by default, then run each chunk with bounded concurrency and replace each frame as its media result finishes. For example, 18 jobs run as 10 items in a 2x5 grid, then 8 items in the next grid.
-
-Plugin tools:
-
-- `generate_excalidraw_images_batch`: `{ jobs: [{ prompt, model?, aspectRatio?, imageSize?, quality?, referenceImagePaths?, fileName? }], columns?=5, gap?=24, concurrency?=10, focusCreated?=false, projectDir?, canvasDir?, dryRun? }`
-- `generate_excalidraw_videos_batch`: `{ jobs: [{ prompt, model?, aspectRatio?, duration?, resolution?, generateAudio?, referenceImagePaths?, fileName? }], columns?=5, gap?=24, concurrency?=10, focusCreated?=false, projectDir?, canvasDir?, dryRun? }`
-
-Both return `{ ok, total, succeeded, failed, results: [{ prompt, elementId, fileId, bounds, error? }] }`.
-
-HTTP endpoints (same backend, served by the canvas process):
-
-```text
-POST /api/generate/images/batch   { jobs, columns, gap, concurrency }
-POST /api/generate/videos/batch   { jobs, columns, gap, concurrency }
-```
-
-Each endpoint runs the batch in 10-item chunks, saves and broadcasts after each inserted chunk, and responds with the per-job results array.
-
-## Agent Clarifications
-
-When an agent uses the BuzzAssist plugin media tools, the tool instructions tell it to ask before generating if required media settings are missing instead of silently guessing defaults. Use the host AskUserQuestion/request_user_input flow for those questions.
-
-The server also enforces this gate. Generation, subtitle, and paid silence-cut
-tools reject calls without `confirmedSettings: true`, except for payload
-previews and offline ffmpeg-local dry runs.
-
-- Image generation should confirm missing model, aspect ratio, and quality. Recommended defaults: `GPT-Image-2.0(Codex)`, `1:1`, `Auto`.
-- Video generation should confirm missing model, aspect ratio, duration, and resolution. Recommended defaults: `Grok Imagine(Hermes)`, `16:9`, `5s`, `720p`.
-- If attached or selected media can be routed more than one way, ask before generation. For video, distinguish start frame/image-to-video from style reference.
-
-## Media Generation Providers
-
-The canvas UI and plugin tools use the same generation backend. Supported model IDs are aligned with the Youtube-AGI (BuzzAssist) Excalidraw bridge.
-
-In the canvas UI, models appear once by canonical name (`lib/modelCatalog.mjs`) and the execution route — Codex / Hermes / BuzzAssist / Lovart — is picked per model from the 実行先 pill in the panel's settings row. The ⚡ generate button shows the pre-generation credit estimate for the selected route (0 for local routes, — for Lovart whose rates are external). The concrete backend model IDs below are what frames store and what plugin tools accept.
-
-Local models (no BuzzAssist account needed):
+ローカル系モデル:
 
 ```text
 gpt-image-2-codex
@@ -317,7 +241,7 @@ grok-imagine-image-hermes
 grok-imagine-video-hermes
 ```
 
-BuzzAssist cloud models (billed through the BuzzAssist fal proxy; sign in first):
+BuzzAssist cloud系モデル:
 
 ```text
 nano-banana-2            gpt-image-2              seedream-v5-lite
@@ -326,100 +250,45 @@ kling-v3                 kling-o3                 kling-v2-6
 grok-imagine-video-api
 ```
 
-## Lovart Models
-
-Lovart's Agent OpenAPI (issued from Lovart's OpenClaw settings) adds models the fal proxy does not have:
+Lovart系モデル:
 
 ```text
 images: lovart-midjourney  lovart-flux-2-max  lovart-nano-banana-pro  lovart-ideogram-v4  lovart-agent
 videos: lovart-veo-3-1  lovart-veo-3-1-fast  lovart-hailuo-2-3  lovart-kling-3-omni  lovart-wan-2-6
 ```
 
-Auth: set `LOVART_ACCESS_KEY` / `LOVART_SECRET_KEY`, or put `access_key` / `secret_key` in `~/.lovart/credentials.json` (0600). Requests are HMAC-SHA256 signed against `https://lgw.lovart.ai/v1/openapi` (`lib/lovartMediaGeneration.mjs`). Generation is prompt-driven (aspect ratio / duration are hints); results are billed in Lovart credits, generated inside a dedicated "BuzzAssist Excalidraw" Lovart project, and downloaded onto the canvas. High-cost confirmations are auto-approved by default (`autoConfirmCredits: false` to require explicit approval).
-
-## BuzzAssist Sign-In
-
-Cloud models, cloud subtitles, and their credits use your BuzzAssist account:
-
-- Plugin: run the `buzzassist_login` tool (opens the browser, loopback callback), check with `buzzassist_auth_status`
-- HTTP: `GET/POST <canvas-url>/api/buzzassist/login`, status at `/api/buzzassist/auth-status`
-- CI/headless: set `BUZZASSIST_MEDIA_TOKEN` with a desktop auth token
-
-Tokens are desktop-app auth tokens (30-day TTL) stored at `~/.buzzassist/excalidraw-media-auth.json`. Credits are reserved and refunded server-side by the BuzzAssist proxy; failed generations refund automatically.
-
-## Silence Cut / Subtitles
-
-- `silence_cut_excalidraw_video` runs the BuzzAssist tempo-cut pipeline (ffmpeg-local mode) ported to `lib/tempoCut.mjs`: silencedetect with adaptive threshold fallback, margin/keep cutlist math, and a filter_complex jet-cut render. Requires `ffmpeg`/`ffprobe`.
-- `generate_excalidraw_subtitles` reserves subtitle credits, calls the BuzzAssist subtitle API (ElevenLabs forced alignment for scripted mode, Scribe v2 for scriptless), then builds SRT cues locally with the ported Japanese-aware segmentation (`lib/subtitleGeneration.mjs`).
-
-## Folder-Canvas Storage
-
-Same model as the Youtube-AGI (BuzzAssist) folder canvas: a canvas belongs to one project folder, and everything generated on it is written under that folder.
+BuzzAssist cloudモデル、cloud字幕、クレジット利用にはサインインが必要です。
 
 ```text
-<project>/
-  canvas/excalidraw-canvas.json     # the canvas (BuzzAssist: the folder's .excalidraw canvas)
-  canvas/excalidraw-selection.json
-  canvas/excalidraw-view-state.json
-  canvas/assets/                    # generated images, videos, SRT files (BuzzAssist: .excalidraw/)
-  canvas/assets-trash/              # orphaned assets moved here by startup maintenance (recoverable)
+buzzassist_login
+buzzassist_auth_status
 ```
 
-Bind the canvas to a project with `./scripts/start-canvas.sh /path/to/project` (macOS/Linux), `node scripts/start-canvas.mjs /path/to/project` (any OS), or `EXCALIDRAW_PROJECT_DIR`. Plugin tools take `projectDir` per call, so different projects keep separate canvases and assets.
+headless/CIでは `BUZZASSIST_MEDIA_TOKEN` を使えます。tokenは `~/.buzzassist/excalidraw-media-auth.json` に保存されます。
 
-Downloads: every media header has a ⬇ button (`/excalidraw-assets/<name>?download=1`); selecting two or more media shows a ZIP chip backed by `POST /api/assets/archive` (STORE-method ZIP, `lib/zipStore.mjs`). Select-all + chip = bulk export.
+## SRT・無音カット
 
-Maintenance: both servers run `performCanvasMaintenance` at startup (`lib/canvasScene.mjs`) — legacy inline base64 file records migrate to `canvas/assets/`, stale atomic-write `.tmp` files are removed, and assets referenced nowhere move to `canvas/assets-trash/`. `node scripts/cleanup-canvas.mjs [--dry-run]` removes empty generator frames (backs up the canvas first).
+- `generate_excalidraw_subtitles` は BuzzAssist subtitle API を呼び、`lib/subtitleGeneration.mjs` の日本語分割でSRTを作ってキャンバスに配置します。
+- `silence_cut_excalidraw_video` は `lib/tempoCut.mjs` のffmpegベース処理で、非破壊のPremiere XMLを `canvas/assets/` に出力します。
+- どちらも必要な設定が不足している場合は、エージェントが勝手に推測せず確認する設計です。
 
-## Host Integrations
+## バッチ生成
 
-- Codex: `.codex-plugin/plugin.json` registers shared skills and `.mcp.json`; `node scripts/setup-agents.mjs --agent codex ...` installs `buzzassist@buzzassist`.
-- Claude Code: `.claude-plugin/plugin.json` registers shared skills and `.mcp.json`; `node scripts/setup-agents.mjs --agent claude ...` installs `buzzassist@buzzassist`.
-- Cursor: `.cursor/mcp.json` registers the local stdio MCP server, and `.cursor/rules/buzzassist.mdc` tells Cursor to run `--agent cursor` when asked to set up from the repository URL.
-- Antigravity: `.agents/mcp_config.json` registers the local MCP server, and `GEMINI.md` tells Antigravity to run `--agent antigravity` when asked to set up from the repository URL.
-
-Start the canvas with `./scripts/start-canvas.sh`, then use the same BuzzAssist plugin tools from supported agent sessions.
-
-`grok-imagine-image-hermes` and `grok-imagine-video-hermes` use the local Hermes Agent xAI OAuth flow:
-
-```bash
-hermes auth add xai-oauth --timeout 600
-```
-
-Optional environment variables:
+大量生成では、まずキャンバス上に生成フレームを並べ、その後に結果ができたものから置き換えます。
 
 ```text
-HERMES_PATH=/absolute/path/to/hermes
-HERMES_HOME=/absolute/path/to/.hermes
-HERMES_PROJECT_PATH=/absolute/path/to/hermes-agent
+generate_excalidraw_images_batch
+generate_excalidraw_videos_batch
 ```
 
-`gpt-image-2-codex` is a Codex bridge model, not a plain HTTP OpenAI API model in this standalone service. By default the canvas uses the bundled Codex app-server bridge at `scripts/codex-image-bridge.mjs`, which requires a working `codex` CLI login and the Codex `$imagegen` skill/tool path. You can still override it with one of these hooks:
+HTTPでも同じbackendを使えます。
 
 ```text
-EXCALIDRAW_GPT_IMAGE_2_CODEX_COMMAND="node /path/to/codex-image-bridge.mjs"
-EXCALIDRAW_GPT_IMAGE_2_CODEX_URL="http://127.0.0.1:PORT/generate-image"
+POST /api/generate/images/batch
+POST /api/generate/videos/batch
 ```
 
-The bridge receives JSON on stdin or via POST and should return one of:
-
-```json
-{ "mimeType": "image/png", "base64": "..." }
-{ "image": "data:image/png;base64,..." }
-{ "url": "https://..." }
-{ "path": "/absolute/path/to/image.png" }
-```
-
-Hermes override hooks are also available for custom provider shims:
-
-```text
-EXCALIDRAW_GROK_IMAGE_HERMES_COMMAND="node /path/to/grok-image-bridge.mjs"
-EXCALIDRAW_GROK_VIDEO_HERMES_COMMAND="node /path/to/grok-video-bridge.mjs"
-```
-
-## Plugin Shape
-
-The host metadata is in:
+## ホスト構成ファイル
 
 ```text
 .codex-plugin/plugin.json
@@ -428,18 +297,22 @@ The host metadata is in:
 .cursor/rules/buzzassist.mdc
 .antigravity-plugin/plugin.json
 .agents/mcp_config.json
+AGENTS.md
+CLAUDE.md
 GEMINI.md
 .mcp.json
 skills/
 ```
 
-The local service intentionally does not store user canvas data inside the plugin repository. Pass the active project directory to `start-canvas.sh`, the same way Cowart separates plugin code from project-local canvas state.
+プラグイン本体のリポジトリにはユーザーのキャンバスデータを保存しません。必ず作業中プロジェクトの `canvas/` に保存します。
 
-## Development
+## 開発
 
 ```bash
 npm install
 npm run build
+npm test
+npm pack --dry-run
 ```
 
-The Excalidraw package pulls in large optional diagram/font chunks, so production build can take around 40-50 seconds on first runs.
+Excalidraw package は大きめのchunkを含むため、初回のproduction buildは40〜50秒ほどかかることがあります。

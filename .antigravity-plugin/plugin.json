@@ -1,12 +1,12 @@
 {
   "name": "buzzassist",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "displayName": "BuzzAssist",
-  "description": "BuzzAssist canvas, media generation, and ngrok Canvas Tunnel plugin for Antigravity.",
+  "description": "BuzzAssist canvas, media generation, and Cloudflare Canvas Tunnel plugin for Antigravity.",
   "author": {
     "name": "higataiyu"
   },
-  "repository": "https://github.com/taiyuhiga/BuzzAssist.git",
+  "repository": "https://github.com/sam-mountainman/BuzzAssist.git",
   "icon": "./assets/icon.png",
   "skills": "./skills/",
   "rules": [

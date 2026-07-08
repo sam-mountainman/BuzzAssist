@@ -1,13 +1,18 @@
-# BuzzAssist Setup
+# BuzzAssist セットアップ
 
-This repository is intended to work from only a GitHub URL plus "セットアップして".
-No manual plugin ID should be required. The setup target is the host that received the request.
+このリポジトリは、GitHub URL と「セットアップして」という指示だけで導入できる想定です。手動でプラグインIDを入力する必要はありません。
+
+正しいURL:
 
 ```text
-https://github.com/taiyuhiga/BuzzAssist
+https://github.com/sam-mountainman/BuzzAssist
 ```
 
-An agent should clone/open the repo, run the setup script for itself only, then open the canvas URL in the current host's in-app browser.
+古い所有者名のURLは使わないでください。
+
+## 基本
+
+エージェントはリポジトリを clone/open し、自分自身のホストだけを設定してから、ローカルキャンバスURLをそのホストの in-app browser で開きます。
 
 ```bash
 node scripts/setup-agents.mjs --agent codex --project-dir /path/to/active/project
@@ -16,32 +21,80 @@ node scripts/setup-agents.mjs --agent cursor --project-dir /path/to/active/proje
 node scripts/setup-agents.mjs --agent antigravity --project-dir /path/to/active/project
 ```
 
-If the user wants phone access to the exact same Excalidraw UI, add `--tunnel`.
-On first use, pass `--ngrok-authtoken <token>` or set
-`BUZZASSIST_NGROK_AUTHTOKEN`; each user should use their own ngrok account.
+スマホから同じ Excalidraw UI を開きたい場合:
 
-What the script does:
+```bash
+node scripts/setup-agents.mjs --agent codex --project-dir /path/to/active/project --tunnel
+```
 
-- installs npm dependencies when needed
-- builds the static canvas UI when needed
-- refreshes a lightweight local marketplace at `~/plugins/buzzassist`
-- stores the actual plugin root at `~/plugins/buzzassist/plugin`
-- for Codex: registers `~/plugins/buzzassist` and installs `buzzassist@buzzassist`
-- for Claude Code: registers `~/plugins/buzzassist` and installs `buzzassist@buzzassist`
-- for Cursor: writes `.cursor/mcp.json` and `.cursor/rules/buzzassist.mdc` in the active project
-- for Antigravity: writes `.agents/mcp_config.json` and a managed BuzzAssist block in `GEMINI.md` in the active project
-- starts the local canvas service and prints `BUZZASSIST_CANVAS_URL=...`
-- checks the browser canvas and prints `BUZZASSIST_CANVAS_CHECK=ok`
-- with `--tunnel`, starts ngrok and prints `BUZZASSIST_TUNNEL_URL=...` and
-  `BUZZASSIST_TUNNEL_ACCESS_URL=...`
+## Windows / macOS
 
-The script intentionally leaves other agents untouched. Use `--all-agents` only when the user explicitly asks to configure every supported host.
+macOS:
 
-After setup, open the printed URL in the host in-app browser. If browser control is unavailable, use the URL from the discovery file and treat `BUZZASSIST_CANVAS_CHECK=ok` as the setup completion signal:
+```bash
+brew install node
+brew install cloudflared
+```
+
+Windows:
+
+```powershell
+winget install OpenJS.NodeJS.LTS
+winget install Cloudflare.cloudflared
+```
+
+Windowsでは `.sh` ではなく `.mjs` を使います。
+
+```powershell
+node scripts/setup-agents.mjs --agent codex --project-dir C:\path\to\active\project
+node scripts/start-canvas.mjs C:\path\to\active\project
+npm run tunnel:start -- --project-dir C:\path\to\active\project
+```
+
+## スクリプトがやること
+
+- 必要に応じて npm dependencies をインストール
+- 必要に応じてキャンバスUIをbuild
+- `~/plugins/buzzassist` に軽量ローカルmarketplaceを作成
+- 実際のplugin rootを `~/plugins/buzzassist/plugin` に配置
+- Codex: `buzzassist@buzzassist` をCodexへ登録
+- Claude Code: `buzzassist@buzzassist` をClaude Codeへ登録
+- Cursor: アクティブプロジェクトに `.cursor/mcp.json` と `.cursor/rules/buzzassist.mdc` を作成
+- Antigravity: アクティブプロジェクトに `.agents/mcp_config.json` と `GEMINI.md` 管理ブロックを作成
+- ローカルキャンバスを起動して `BUZZASSIST_CANVAS_URL=...` を出力
+- ブラウザーキャンバスを確認して `BUZZASSIST_CANVAS_CHECK=ok` を出力
+- `--tunnel` 付きなら Cloudflare Canvas Tunnel を起動して `BUZZASSIST_TUNNEL_ACCESS_URL=...` を出力
+
+既定では指定ホスト以外は変更しません。全ホストを明示的に設定する時だけ使います。
+
+```bash
+node scripts/setup-agents.mjs --all-agents --project-dir /path/to/active/project
+```
+
+## 出力URL
+
+ローカルPC上のエージェント作業ではこれを使います。
+
+```text
+BUZZASSIST_CANVAS_URL=http://127.0.0.1:<port>/
+BUZZASSIST_CANVAS_CHECK=ok
+```
+
+スマホや別PCでは、`--tunnel` で出るAccess URLを使います。
+
+```text
+BUZZASSIST_TUNNEL_ACCESS_URL=https://<slug>.trycloudflare.com/?t=<generated>
+BUZZASSIST_TUNNEL_CHECK=ok
+```
+
+ブラウザー制御が使えないホストでは、次のファイルのURLを使ってください。
 
 ```text
 canvas/.server.json
 ```
 
-For mobile access, open `BUZZASSIST_TUNNEL_ACCESS_URL` on the phone. Stop it
-with `npm run tunnel:stop` or the `buzzassist_canvas_tunnel_stop` MCP tool.
+トンネルを止める時:
+
+```bash
+npm run tunnel:stop
+```

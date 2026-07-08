@@ -1,11 +1,11 @@
 {
   "name": "buzzassist",
-  "version": "0.1.4",
-  "description": "BuzzAssist canvas, media generation, and ngrok Canvas Tunnel plugin for Claude Code.",
+  "version": "0.1.5",
+  "description": "BuzzAssist canvas, media generation, and Cloudflare Canvas Tunnel plugin for Claude Code.",
   "author": {
     "name": "higataiyu"
   },
-  "repository": "https://github.com/taiyuhiga/BuzzAssist.git",
+  "repository": "https://github.com/sam-mountainman/BuzzAssist.git",
   "keywords": [
     "canvas",
     "buzzassist",
