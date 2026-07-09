@@ -95,7 +95,7 @@ test("plugin MCP exposes a Codex and Claude Desktop widget entrypoint", async ()
   assert.match(widgetSource, /attachmentContentForHost/);
   assert.match(widgetSource, /buzzassist_canvas_tunnel_start/);
   assert.match(readme, /render_buzzassist_canvas_widget/);
-  assert.match(readme, /Claude Codeはwidget描画を持たない/);
+  assert.match(readme, /通常は `BUZZASSIST_CANVAS_URL` をローカルのin-app browser/);
 });
 
 test("native widget defaults to the inlined canvas app instead of a localhost iframe shell", () => {

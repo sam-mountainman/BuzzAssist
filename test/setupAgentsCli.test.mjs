@@ -76,6 +76,8 @@ test("setup CLI configures only Antigravity when --agent antigravity is used", a
 test("setup CLI can include Canvas Tunnel output when --tunnel is used", async () => {
   const stdout = await runSetupWithTunnel("codex");
   assert.match(stdout, /Starting the BuzzAssist Canvas Tunnel/);
+  assert.doesNotMatch(stdout, /BUZZASSIST_WIDGET_TOOL=render_buzzassist_canvas_widget/);
+  assert.match(stdout, /For Codex, Claude Code, Cursor, or Antigravity, open BUZZASSIST_CANVAS_URL in the host in-app browser/);
   assert.match(stdout, /BUZZASSIST_TUNNEL_URL=https:\/\/example\.ngrok-free\.dev/);
   assert.match(stdout, /BUZZASSIST_TUNNEL_ACCESS_URL=https:\/\/example\.ngrok-free\.dev\/\?t=<generated>/);
   assert.match(stdout, /BUZZASSIST_TUNNEL_CHECK=ok/);

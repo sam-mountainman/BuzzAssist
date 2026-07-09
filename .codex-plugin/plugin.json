@@ -20,7 +20,7 @@
   "interface": {
     "displayName": "BuzzAssist",
     "shortDescription": "Use the BuzzAssist canvas and media generation plugin from Codex.",
-    "longDescription": "BuzzAssist is a Codex plugin that bundles a project-local Excalidraw canvas, a Codex/Claude Desktop-compatible MCP Apps widget entrypoint, MCP-backed plugin tools, and an optional token-protected local HTTP MCP endpoint discovered through canvas/.server.json. Tool calls update the same browser canvas and can draw diagrams, read selections, insert assets, and run image, video, subtitle, and silence-cut workflows. For phone access to the exact same canvas UI, the plugin can start a Cloudflare Canvas Tunnel by default, with ngrok available as an optional provider.",
+    "longDescription": "BuzzAssist is a Codex plugin that bundles a project-local Excalidraw canvas, MCP-backed plugin tools, and an optional token-protected local HTTP MCP endpoint discovered through canvas/.server.json. Open the local canvas URL in Codex's in-app browser for desktop work. Tool calls update the same browser canvas and can draw diagrams, read selections, insert assets, and run image, video, subtitle, and silence-cut workflows. For phone access to the exact same canvas UI, the plugin can start a Cloudflare Canvas Tunnel by default, with ngrok available as an optional provider.",
     "developerName": "BuzzAssist",
     "category": "Productivity",
     "brandColor": "#ff6a4d",
@@ -28,7 +28,6 @@
     "logo": "./assets/logo.png",
     "capabilities": [
       "Interactive BuzzAssist canvas",
-      "MCP Apps widget entrypoint",
       "Official Excalidraw MCP App",
       "Local plugin tools",
       "Token-protected HTTP MCP endpoint",
@@ -39,7 +38,7 @@
       "Video generation"
     ],
     "defaultPrompt": [
-      "Open the native BuzzAssist MCP Apps widget for this project with render_buzzassist_canvas_widget.",
+      "Open the BuzzAssist local canvas URL for this project in the in-app browser.",
       "Use read_me and create_view to draw into the live BuzzAssist canvas.",
       "Generate a new image into the selected Excalidraw AI holder."
     ]
