@@ -748,6 +748,25 @@ async function createAgentAttachmentBundle(assets = []) {
   return { ...payload, prompt, copied }
 }
 
+async function attachAssetsToCodexChat(assets = []) {
+  const items = uniqueDownloadAssets(assets)
+  if (items.length === 0) throw new Error('添付できるアセットがありません。')
+  const response = await canvasFetch('/api/chat/send', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      app: 'codex',
+      text: '',
+      assetItems: items,
+      autoSend: false
+    })
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(payload.error || `Codexへの添付に失敗しました (${response.status})`)
+  if (!payload.attached) throw new Error(payload.error || 'Codexへファイルを添付できませんでした。')
+  return { ...payload, items }
+}
+
 async function writeTextToClipboard(text) {
   const value = String(text ?? '')
   if (!value) return
@@ -787,6 +806,22 @@ function isClipboardVideoAsset(asset) {
   const mimeType = String(asset?.mimeType || '').toLowerCase()
   const fileName = String(asset?.fileName || asset?.name || asset?.assetUrl || '').toLowerCase()
   return kind === 'video' || mimeType.startsWith('video/') || /\.(mp4|mov|webm|m4v)$/i.test(fileName)
+}
+
+function isNativeChatFileAsset(asset) {
+  if (isClipboardVideoAsset(asset)) return true
+  const kind = String(asset?.kind || asset?.assetType || '').toLowerCase()
+  const mimeType = String(asset?.mimeType || '').toLowerCase()
+  const fileName = String(asset?.fileName || asset?.name || asset?.assetUrl || '').toLowerCase()
+  return kind === 'audio' ||
+    kind === 'subtitle' ||
+    kind === 'srt' ||
+    kind === 'xml' ||
+    kind === 'silencecut' ||
+    mimeType.startsWith('audio/') ||
+    mimeType.includes('subrip') ||
+    mimeType.includes('xml') ||
+    /\.(aac|flac|m4a|mp3|ogg|opus|wav|srt|xml)$/i.test(fileName)
 }
 
 function canvasToPngBlob(canvas) {
@@ -3845,10 +3880,10 @@ export default function App() {
   const [chatSendStatus, setChatSendStatus] = useState('')
 
   // Bridge to the local Claude Code / Codex app. Files attach natively via
-  // `open -a` (same route as drag & drop — no macOS permissions); text
-  // prompts ride the same channel as a small request file. The message is
+  // the OS open-file route (same route as drag & drop — no GUI keystrokes);
+  // text prompts ride the same channel as a small request file. The message is
   // also written to the user-session clipboard from the browser so a manual
-  // ⌘V always works (Codex can't accept media files via open).
+  // paste always works if the host refuses automation.
   const sendToChatApp = useCallback(async ({ app, text, assetUrls, assetItems, autoSend = false }) => {
     setChatSendStatus('sending')
     try {
@@ -3995,6 +4030,18 @@ export default function App() {
           return
         } catch (error) {
           console.warn('image clipboard copy failed; falling back to attachment bundle:', error)
+        }
+      }
+      if (items.some(isNativeChatFileAsset)) {
+        try {
+          await attachAssetsToCodexChat(items)
+          setAgentAttachStatus('attached')
+          setAgentAttachStatusText(single && isClipboardVideoAsset(single)
+            ? '動画をチャットに添付しました'
+            : `${items.length}件をチャットに添付しました`)
+          return
+        } catch (error) {
+          console.warn('codex file attachment failed; falling back to attachment bundle:', error)
         }
       }
       const result = await createAgentAttachmentBundle(items)
@@ -7510,8 +7557,12 @@ export default function App() {
         const attachTitle = single
           ? `${selectedCanvasDownloadAssets[0]?.fileName || 'asset'} をコピー`
           : `${selectedCanvasDownloadAssets.length}件をbundleとしてコピー`
-        const attachDone = ['image-copied', 'bundle-copied', 'ready', 'ready-no-copy', 'queued', 'sent'].includes(agentAttachStatus)
-        const attachLabel = agentAttachStatus === 'ready-no-copy' ? '作成済' : 'コピー済'
+        const attachDone = ['image-copied', 'bundle-copied', 'ready', 'ready-no-copy', 'queued', 'sent', 'attached'].includes(agentAttachStatus)
+        const attachLabel = agentAttachStatus === 'ready-no-copy'
+          ? '作成済'
+          : agentAttachStatus === 'attached'
+            ? '添付済'
+            : 'コピー済'
         const attachStatusText =
           agentAttachStatusText ||
           (agentChatComposer
@@ -7520,6 +7571,8 @@ export default function App() {
             ? 'コピー中...'
             : agentAttachStatus === 'sent'
               ? 'チャットへ送信しました'
+            : agentAttachStatus === 'attached'
+              ? 'チャットへ添付しました'
             : agentAttachStatus === 'queued'
               ? '送信待ちです。チャット欄に貼り付けできるよう読み取り文もコピーしました'
             : agentAttachStatus === 'ready'

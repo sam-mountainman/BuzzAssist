@@ -45,10 +45,13 @@ test("canvas picker resolves media labels and keeps picking on invalid asset typ
 test("selected canvas media exposes download controls and archives multi-select", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  const viteSource = await readFile(new URL("../vite.config.js", import.meta.url), "utf8");
 
   assert.match(source, /function saveDownloadAssetsWithPicker\(assets = \[\]\) \{/);
   assert.match(source, /async function createAgentAttachmentBundle\(assets = \[\]\) \{/);
+  assert.match(source, /async function attachAssetsToCodexChat\(assets = \[\]\) \{/);
   assert.match(source, /async function writeImageAssetToClipboard\(asset\) \{/);
+  assert.match(source, /function isNativeChatFileAsset\(asset\) \{/);
   assert.match(source, /const copySelectedCanvasAssets = useCallback\(async \(assets = \[\]\) => \{/);
   assert.match(source, /function archiveUrlForDownloadAssets\(assets = \[\]\) \{/);
   assert.match(source, /`\/api\/assets\/archive\?\$\{query\}`/);
@@ -69,9 +72,15 @@ test("selected canvas media exposes download controls and archives multi-select"
   assert.match(source, /sendToChatApp\(\{\s*app: 'codex',\s*autoSend: true,\s*text: message\s*\}\)/);
   assert.match(source, /agentAttachStatus === 'sent'/);
   assert.match(source, /agentAttachStatus === 'queued'/);
+  assert.match(source, /agentAttachStatus === 'attached'/);
   assert.match(source, /agentAttachStatus === 'image-copied'/);
+  assert.match(source, /setAgentAttachStatus\('attached'\)/);
+  assert.match(source, /動画をチャットに添付しました/);
+  assert.match(source, /添付済/);
   assert.match(source, /copySelectedCanvasAssets\(selectedCanvasDownloadAssets\)/);
   assert.match(source, /saveDownloadAssetsWithPicker\(selectedCanvasDownloadAssets\)/);
+  assert.match(viteSource, /const attachViaOpen = appName === 'Claude' \|\| appName === 'Codex'/);
+  assert.match(viteSource, /Start-Process -FilePath/);
   assert.match(styles, /\.lovart-selection-toolbar/);
   assert.match(styles, /\.lovart-selection-toolbar-btn/);
   assert.match(styles, /\.lovart-selection-toolbar-btn\.is-success/);

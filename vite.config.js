@@ -1922,7 +1922,15 @@ function configureCanvasServer(server) {
           }
 
           const runOpen = (args) => new Promise((resolveOpen) => {
-            const child = spawn('open', args)
+            const command = process.platform === 'darwin'
+              ? 'open'
+              : process.platform === 'win32'
+                ? 'powershell.exe'
+                : 'xdg-open'
+            const commandArgs = process.platform === 'win32'
+              ? ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', args]
+              : args
+            const child = spawn(command, commandArgs)
             let stderr = ''
             let settled = false
             const finish = (result) => {
@@ -1936,6 +1944,18 @@ function configureCanvasServer(server) {
             child.on('error', (error) => finish({ ok: false, error: error.message }))
             child.on('close', (code) => finish(code === 0 ? { ok: true } : { ok: false, error: stderr.trim() }))
           })
+          const powershellLiteral = (value) => `'${String(value ?? '').replace(/'/g, "''")}'`
+          const openAppArgs = (appName, files = []) => {
+            if (process.platform === 'darwin') return ['-a', appName, ...files]
+            if (process.platform === 'win32') {
+              const fileList = files.map(powershellLiteral).join(', ')
+              const quotedApp = powershellLiteral(appName)
+              return files.length
+                ? `$ErrorActionPreference = 'Stop'; Start-Process -FilePath ${quotedApp} -ArgumentList @(${fileList})`
+                : `$ErrorActionPreference = 'Stop'; Start-Process -FilePath ${quotedApp}`
+            }
+            return files.length ? [files[0]] : [appName]
+          }
 
           // Text-only auto-send (e.g. Hermes setup requests): paste + Enter
           // via keystrokes — directly when this process can drive the GUI, or
@@ -1950,22 +1970,22 @@ function configureCanvasServer(server) {
             }
           }
 
-          // Claude's composer accepts any file (public.data Viewer) via the
-          // open-file event — the same route as drag & drop, no permissions
-          // needed. Text prompts become a small .md request file so they ride
-          // the same channel.
-          const attachViaOpen = appName === 'Claude'
+          // Claude and current Codex desktop composers accept files via the
+          // OS open-file event — the same route as drag & drop, no GUI
+          // keystrokes needed. Text prompts become a small .md request file so
+          // they ride the same channel when files are being attached.
+          const attachViaOpen = appName === 'Claude' || appName === 'Codex'
           let attachFiles = [...assetPaths]
-          if (attachViaOpen && note && assetPaths.length === 0) {
+          if (attachViaOpen && note) {
             const requestsDir = join(canvasAssetsDir, 'chat-requests')
             await mkdir(requestsDir, { recursive: true })
             const requestPath = join(requestsDir, `request-${Date.now()}.md`)
             await writeFile(requestPath, `${note}\n`, 'utf8')
-            attachFiles = [requestPath]
+            attachFiles = [...attachFiles, requestPath]
           }
 
           if (attachViaOpen && attachFiles.length > 0) {
-            const opened = await runOpen(['-a', appName, ...attachFiles])
+            const opened = await runOpen(openAppArgs(appName, attachFiles))
             if (!opened.ok) {
               sendJson(res, 200, { copied: true, sent: false, message, error: `添付できませんでした: ${opened.error}` })
               return
@@ -1985,9 +2005,8 @@ function configureCanvasServer(server) {
             return
           }
 
-          // Codex: no open-file route into the composer, so paste the message
-          // into the input box (no Enter unless autoSend) via keystrokes —
-          // direct or through the bridge worker.
+          // Fallback: paste the message into the input box (no Enter unless
+          // autoSend) via keystrokes — direct or through the bridge worker.
           const pasted = await sendChatMessage({ canvasDir, app: bridgeApp, message, autoSend: body.autoSend === true })
           if (pasted.sent) {
             sendJson(res, 200, { copied: true, attached: true, sent: body.autoSend === true, via: pasted.via, app: appName, message })
@@ -1995,7 +2014,7 @@ function configureCanvasServer(server) {
           }
           // Nothing can type for us: bring the app forward; the message is on
           // the clipboard for a ⌘V.
-          await runOpen(['-a', appName])
+          await runOpen(openAppArgs(appName))
           sendJson(res, 200, { copied: true, attached: false, sent: false, needsPaste: true, app: appName, message, error: pasted.error })
         } catch (error) {
           sendJson(res, 400, { error: error.message })
