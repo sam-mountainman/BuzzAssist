@@ -130,11 +130,18 @@ test("phone tunnel renders images via capped overlays instead of hydrating Excal
   assert.match(source, /function isNarrowCanvasViewport\(\)/);
   assert.match(source, /function isMemoryConstrainedCanvasRuntime\(\) \{\s*return isTunnelCanvasRuntime\(\) && \(isTouchLikeDevice\(\) \|\| isNarrowCanvasViewport\(\)\)\s*\}/);
   assert.match(source, /placeholderAssetBackedFilesByIds\(runtimeScene, assetBackedCanvasImageFileIds\(runtimeScene\)\)/);
+  assert.match(source, /function hydrateSceneAssetBackedFilesWithTimeout\(scene, options = \{\}, timeoutMs = 1200\)/);
+  assert.match(source, /await hydrateSceneAssetBackedFilesWithTimeout\(runtimeScene, \{ onlyVisible: true \}\)/);
   assert.match(source, /function CanvasImagePreviewOverlay\(\{ image \}\)/);
   assert.match(source, /selectedImageOverlays\.filter\(\(img\) => img\.assetType === 'image' && img\.assetUrl\)/);
   assert.match(source, /MOBILE_IMAGE_PREVIEW_OVERLAY_MAX_ITEMS/);
   assert.match(source, /is-memory-constrained-canvas/);
   assert.match(source, /if \(memoryConstrained\) return/);
+  assert.match(source, /if \(isHydratedAssetBackedFile\(file\)\) return false/);
+  assert.match(source, /if \(!api \|\| !scene\) return/);
+  assert.doesNotMatch(source, /if \(!api \|\| !scene \|\| !isTunnelCanvasRuntime\(\)\) return/);
+  assert.match(source, /isTunnelCanvasRuntime\(\) \? 250 : 50/);
+  assert.match(source, /concurrency: isTunnelCanvasRuntime\(\) \? 2 : ASSET_HYDRATION_CONCURRENCY/);
   assert.match(source, /isTouchLikeDevice\(\)\s*\|\|\s*!initialScene/);
   assert.match(source, /preload="metadata"/);
   assert.doesNotMatch(source, /preload="auto"/);

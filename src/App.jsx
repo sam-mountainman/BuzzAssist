@@ -1662,6 +1662,7 @@ async function hydrateAssetBackedFiles(files, onHydrated, options = {}) {
   const onlyFileIds = options.onlyFileIds instanceof Set ? options.onlyFileIds : null
   const pending = Object.values(files ?? {}).filter((file) => {
     if (!isAssetBackedFileRecord(file)) return false
+    if (isHydratedAssetBackedFile(file)) return false
     return !onlyFileIds || onlyFileIds.has(file.id)
   })
   if (pending.length === 0) return
@@ -1724,6 +1725,20 @@ async function hydrateSceneAssetBackedFiles(scene, options = {}) {
     files[file.id] = file
   }, { onlyFileIds })
   return { ...scene, files }
+}
+
+async function hydrateSceneAssetBackedFilesWithTimeout(scene, options = {}, timeoutMs = 1200) {
+  let timeoutId = 0
+  try {
+    return await Promise.race([
+      hydrateSceneAssetBackedFiles(scene, options),
+      new Promise((resolve) => {
+        timeoutId = window.setTimeout(() => resolve(scene), timeoutMs)
+      })
+    ])
+  } finally {
+    window.clearTimeout(timeoutId)
+  }
 }
 
 // Inverse of hydration for the save path: swap hydrated base64 back to the
@@ -4186,7 +4201,9 @@ export default function App() {
         const runtimeScene = withRuntimeAssetBackedScene(diskScene)
         const scene = isMemoryConstrainedCanvasRuntime()
           ? placeholderAssetBackedFilesByIds(runtimeScene, assetBackedCanvasImageFileIds(runtimeScene))
-          : runtimeScene
+          : isTunnelCanvasRuntime()
+            ? runtimeScene
+            : await hydrateSceneAssetBackedFilesWithTimeout(runtimeScene, { onlyVisible: true })
         if (isMemoryConstrainedCanvasRuntime()) visibleHydrationFileIdsRef.current = new Set()
         lastSyncedFingerprintRef.current = sceneFingerprint(diskScene)
         latestSceneRef.current = scene
@@ -4620,7 +4637,7 @@ export default function App() {
   }, [api, flushHydratedFiles])
 
   const scheduleVisibleAssetHydration = useCallback((scene) => {
-    if (!api || !scene || !isTunnelCanvasRuntime()) return
+    if (!api || !scene) return
     window.clearTimeout(assetHydrationTimerRef.current)
     if (isMemoryConstrainedCanvasRuntime()) {
       visibleHydrationFileIdsRef.current = new Set()
@@ -4632,7 +4649,7 @@ export default function App() {
       constrainHydratedAssetsToViewport(scene, visibleFileIds)
       if (visibleFileIds.size === 0) return
       hydrateAssetBackedFiles(scene.files, addHydratedAssetFile, { onlyFileIds: visibleFileIds })
-    }, 250)
+    }, isTunnelCanvasRuntime() ? 250 : 50)
   }, [api, addHydratedAssetFile, constrainHydratedAssetsToViewport])
 
   // Hydrate disk-backed file records once the Excalidraw API is ready.
@@ -4662,9 +4679,13 @@ export default function App() {
           .map((file) => file.id)
       )
       if (restIds.size === 0) return
-      await new Promise((resolveDelay) => setTimeout(resolveDelay, 500))
+      const backgroundDelay = isTunnelCanvasRuntime() ? 500 : 0
+      if (backgroundDelay > 0) await new Promise((resolveDelay) => setTimeout(resolveDelay, backgroundDelay))
       if (cancelled) return
-      await hydrateAssetBackedFiles(initialScene.files, addIfLive, { onlyFileIds: restIds, concurrency: 2 })
+      await hydrateAssetBackedFiles(initialScene.files, addIfLive, {
+        onlyFileIds: restIds,
+        concurrency: isTunnelCanvasRuntime() ? 2 : ASSET_HYDRATION_CONCURRENCY
+      })
     }
     run()
     return () => {
