@@ -206,6 +206,21 @@ test("generated result settings are written to the result element", async () => 
   assert.match(source, /const customData = \{\s*\.\.\.\(resultElement\.customData \?\? \{\}\),\s*\.\.\.frameCustomDataFromForm\(kind, nextForm\)\s*\}/);
 });
 
+test("aspect ratio changes resize the selected generator frame immediately", async () => {
+  const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+
+  assert.match(source, /const FRAME_GEOMETRY_FORM_KEYS = new Set\(\[/);
+  assert.match(source, /'aspectRatio'/);
+  assert.match(source, /'videoAspectRatio'/);
+  assert.match(source, /function formPatchAffectsFrameGeometry\(patch = \{\}\) \{/);
+  assert.match(source, /const immediateFrameId = FRAME_GEOMETRY_FORM_KEYS\.has\(key\) \? activeFrameIdRef\.current : ''/);
+  assert.match(source, /const immediateFrameId = formPatchAffectsFrameGeometry\(patch\) \? activeFrameIdRef\.current : ''/);
+  assert.match(source, /updateActiveFrameElementRef\.current\?\.\(nextForm, immediateFrameId\)/);
+  assert.match(source, /window\.clearTimeout\(pending\.timer\)/);
+  assert.match(source, /updateFrameForm\('aspectRatio', ratio\)/);
+  assert.match(source, /updateFrameForm\('videoAspectRatio', ratio\)/);
+});
+
 test("programmatic scene echoes do not resync or close the generator panel", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
 

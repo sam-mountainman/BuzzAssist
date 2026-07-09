@@ -3851,6 +3851,18 @@ function frameSizeFor(kind, form) {
   }
 }
 
+const FRAME_GEOMETRY_FORM_KEYS = new Set([
+  'aspectRatio',
+  'videoAspectRatio',
+  'lovartAspectRatio',
+  'lovartVideoAspectRatio',
+  'lovartKind'
+])
+
+function formPatchAffectsFrameGeometry(patch = {}) {
+  return Object.keys(patch).some((key) => FRAME_GEOMETRY_FORM_KEYS.has(key))
+}
+
 export default function App() {
   const [initialScene, setInitialScene] = useState(null)
   const [loadError, setLoadError] = useState(null)
@@ -5555,13 +5567,24 @@ export default function App() {
   const updateFrameForm = useCallback(
     (key, value) => {
       let nextForm = null
+      const immediateFrameId = FRAME_GEOMETRY_FORM_KEYS.has(key) ? activeFrameIdRef.current : ''
       setFrameForm((current) => {
         const next = { ...current, [key]: value }
         nextForm = next
         return next
       })
       window.setTimeout(() => {
-        if (nextForm) scheduleFrameFormWrite(nextForm)
+        if (!nextForm) return
+        if (immediateFrameId) {
+          const pending = pendingFrameFormWriteRef.current
+          if (pending) {
+            window.clearTimeout(pending.timer)
+            pendingFrameFormWriteRef.current = null
+          }
+          updateActiveFrameElementRef.current?.(nextForm, immediateFrameId)
+          return
+        }
+        scheduleFrameFormWrite(nextForm)
       }, 0)
       setGenerationError('')
     },
@@ -5571,13 +5594,24 @@ export default function App() {
   const patchFrameForm = useCallback(
     (patch) => {
       let nextForm = null
+      const immediateFrameId = formPatchAffectsFrameGeometry(patch) ? activeFrameIdRef.current : ''
       setFrameForm((current) => {
         const next = { ...current, ...patch }
         nextForm = next
         return next
       })
       window.setTimeout(() => {
-        if (nextForm) scheduleFrameFormWrite(nextForm)
+        if (!nextForm) return
+        if (immediateFrameId) {
+          const pending = pendingFrameFormWriteRef.current
+          if (pending) {
+            window.clearTimeout(pending.timer)
+            pendingFrameFormWriteRef.current = null
+          }
+          updateActiveFrameElementRef.current?.(nextForm, immediateFrameId)
+          return
+        }
+        scheduleFrameFormWrite(nextForm)
       }, 0)
       setGenerationError('')
     },
