@@ -42,6 +42,38 @@ test("canvas picker resolves media labels and keeps picking on invalid asset typ
   assert.doesNotMatch(source, /if \(picker\.target === 'imageReferences' && asset\.kind !== 'image'\) return false/);
 });
 
+test("selected canvas media exposes download controls and archives multi-select", async () => {
+  const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+
+  assert.match(source, /function saveDownloadAssetsWithPicker\(assets = \[\]\) \{/);
+  assert.match(source, /async function createAgentAttachmentBundle\(assets = \[\]\) \{/);
+  assert.match(source, /function archiveUrlForDownloadAssets\(assets = \[\]\) \{/);
+  assert.match(source, /`\/api\/assets\/archive\?\$\{query\}`/);
+  assert.match(source, /const selectedCanvasDownloadOverlays = \(\(\) => \{/);
+  assert.match(source, /selectedImageOverlays\.filter\(\(item\) => item\.isSelected && item\.assetUrl\)/);
+  assert.match(source, /overlay\.kind === 'silenceCut' && overlay\.outputAsset\?\.url/);
+  assert.match(source, /className="lovart-selection-toolbar"/);
+  assert.match(source, /className="lovart-selection-toolbar-btn"/);
+  assert.match(source, /const \[agentChatComposer, setAgentChatComposer\] = useState\(null\)/);
+  assert.match(source, /className="lovart-agent-chat-popover"/);
+  assert.match(source, /placeholder="修正内容や依頼を書いてください"/);
+  assert.match(source, /createAgentAttachmentBundle\(assets\)/);
+  assert.match(source, /const message = note \? `\$\{note\}\\n\\n\$\{result\.prompt\}` : result\.prompt/);
+  assert.match(source, /function hostFollowUpSender\(\) \{/);
+  assert.match(source, /window\.buzzassistMcp\?\.sendFollowUpMessage/);
+  assert.match(source, /window\.openai\?\.sendFollowUpMessage/);
+  assert.match(source, /sendFollowUpThroughHostBridge\(message\)/);
+  assert.match(source, /sendToChatApp\(\{\s*app: 'codex',\s*autoSend: true,\s*text: message\s*\}\)/);
+  assert.match(source, /agentAttachStatus === 'sent'/);
+  assert.match(source, /agentAttachStatus === 'queued'/);
+  assert.match(source, /saveDownloadAssetsWithPicker\(selectedCanvasDownloadAssets\)/);
+  assert.match(styles, /\.lovart-selection-toolbar/);
+  assert.match(styles, /\.lovart-selection-toolbar-btn/);
+  assert.match(styles, /\.lovart-agent-chat-popover/);
+  assert.match(styles, /\.lovart-agent-chat-input/);
+});
+
 test("prompt panel keeps the desktop layout, scaled and kept reachable on phones", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");

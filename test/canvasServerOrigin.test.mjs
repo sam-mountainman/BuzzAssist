@@ -27,6 +27,7 @@ test("local origins are always allowed; foreign origins are rejected by default"
   withEnv({}, () => {
     assert.equal(isAllowedOrigin("http://localhost:43219"), true);
     assert.equal(isAllowedOrigin("http://127.0.0.1:43219"), true);
+    assert.equal(isAllowedOrigin("http://127.0.0.1:51235", { port: 43219 }), true, "local preview/widget ports are allowed");
     assert.equal(isAllowedOrigin("https://evil.example.com"), false);
     assert.equal(isAllowedOrigin("https://random.ngrok-free.dev"), false, "wildcard tunnel origins are NOT allowed unless opted in");
   });

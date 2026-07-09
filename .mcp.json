@@ -5,13 +5,15 @@
       "url": "https://mcp.excalidraw.com/mcp",
       "note": "Official open-source Excalidraw MCP App from excalidraw/excalidraw-mcp. Use for prompt-to-diagram Excalidraw generation and interactive MCP App rendering."
     },
-    "excalidraw_mcp": {
+    "buzzassist_mcp": {
+      "title": "BuzzAssist Canvas Widget MCP",
+      "description": "Render and control the native BuzzAssist Codex widget without opening a localhost page.",
       "command": "node",
       "args": [
-        "./mcp/server.mjs"
+        "./scripts/start-mcp.mjs"
       ],
       "cwd": ".",
-      "note": "Primary local MCP server. It auto-starts the local canvas server, which writes canvas/.server.json with the dynamic HTTP URL and bearer token."
+      "note": "Primary local MCP server. It auto-starts the local canvas server, writes canvas/.server.json, and renders the native BuzzAssist widget."
     }
   }
 }

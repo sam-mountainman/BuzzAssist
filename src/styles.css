@@ -196,6 +196,13 @@ body {
   color: #808996;
 }
 
+.lovart-image-header-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 5px;
+  align-items: center;
+}
+
 .lovart-hover-border {
   position: absolute;
   z-index: 3;
@@ -1373,10 +1380,10 @@ body {
 }
 
 .lovart-canvas-picker-bar {
-  position: absolute;
+  position: fixed;
   bottom: 24px;
   left: 50%;
-  z-index: 26;
+  z-index: 140;
   display: inline-flex;
   gap: 4px;
   align-items: center;
@@ -1405,6 +1412,200 @@ body {
 
 .lovart-canvas-picker-bar button:hover {
   background: rgb(0 0 0 / 0.35);
+}
+
+/* Lovart-style floating selection toolbar: appears above the selected media
+   bounds and offers chat attachment plus download/archive actions. */
+.lovart-selection-toolbar {
+  position: absolute;
+  z-index: 4;
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+  padding: 4px;
+  background: #ffffff;
+  border: 1px solid #ececf1;
+  border-radius: 12px;
+  box-shadow: 0 6px 20px rgb(17 24 39 / 0.14);
+  transform: translateX(-50%);
+}
+
+.lovart-selection-toolbar-btn {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 6px;
+  color: #374151;
+  text-decoration: none;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 9px;
+}
+
+.lovart-selection-toolbar-btn:hover:not(:disabled) {
+  color: #7c3aed;
+  background: #f3f0ff;
+}
+
+.lovart-selection-toolbar-btn:disabled {
+  color: #9ca3af;
+  cursor: default;
+}
+
+.lovart-selection-toolbar-count {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.lovart-agent-chat-popover {
+  position: absolute;
+  z-index: 145;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  color: #20222a;
+  background: #ffffff;
+  border: 1px solid #e8eaf1;
+  border-radius: 14px;
+  box-shadow: 0 18px 50px rgb(17 24 39 / 0.2);
+  transform: translateX(-50%);
+  font: 500 13px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.lovart-agent-chat-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.lovart-agent-chat-title {
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.lovart-agent-chat-subtitle {
+  margin-top: 2px;
+  overflow: hidden;
+  color: #6b7280;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  letter-spacing: 0;
+}
+
+.lovart-agent-chat-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: #6b7280;
+  cursor: pointer;
+  background: #f6f7fb;
+  border: 0;
+  border-radius: 8px;
+  font-size: 17px;
+  line-height: 1;
+}
+
+.lovart-agent-chat-close:hover {
+  color: #111827;
+  background: #eef0f6;
+}
+
+.lovart-agent-chat-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 74px;
+  max-height: 150px;
+  padding: 10px 11px;
+  color: #1f2937;
+  resize: vertical;
+  background: #fbfbfd;
+  border: 1px solid #dfe3ec;
+  border-radius: 10px;
+  outline: none;
+  font: 500 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.lovart-agent-chat-input:focus {
+  background: #ffffff;
+  border-color: #8b7cf6;
+  box-shadow: 0 0 0 3px rgb(139 124 246 / 0.16);
+}
+
+.lovart-agent-chat-input:disabled {
+  color: #9ca3af;
+  background: #f6f7fb;
+}
+
+.lovart-agent-chat-foot {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.lovart-agent-chat-status {
+  min-width: 0;
+  overflow: hidden;
+  color: #6b7280;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  letter-spacing: 0;
+}
+
+.lovart-agent-chat-status.is-error {
+  color: #b91c1c;
+}
+
+.lovart-agent-chat-actions {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 6px;
+}
+
+.lovart-agent-chat-secondary,
+.lovart-agent-chat-primary {
+  height: 30px;
+  padding: 0 12px;
+  cursor: pointer;
+  border: 0;
+  border-radius: 9px;
+  font: 650 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.lovart-agent-chat-secondary {
+  color: #4b5563;
+  background: #f1f3f8;
+}
+
+.lovart-agent-chat-primary {
+  color: #ffffff;
+  background: #6d5df6;
+  box-shadow: 0 5px 14px rgb(109 93 246 / 0.22);
+}
+
+.lovart-agent-chat-secondary:hover:not(:disabled) {
+  background: #e8ebf3;
+}
+
+.lovart-agent-chat-primary:hover:not(:disabled) {
+  background: #5e50e8;
+}
+
+.lovart-agent-chat-secondary:disabled,
+.lovart-agent-chat-primary:disabled {
+  cursor: default;
+  opacity: 0.62;
 }
 
 .codex-excalidraw-status {

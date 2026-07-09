@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { access, cp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,9 +18,10 @@ const personalMarketplacePath = join(homeDir, ".agents", "plugins", "marketplace
 const argv = process.argv.slice(2);
 const packageManifest = JSON.parse(await readFile(join(repoRoot, "package.json"), "utf8"));
 const pluginVersion = packageManifest.version;
-const supportedAgents = ["codex", "claude", "cursor", "antigravity"];
+const supportedAgents = ["codex", "claude-desktop", "claude", "cursor", "antigravity"];
 const agentLabels = {
   codex: "Codex",
+  "claude-desktop": "Claude Desktop",
   claude: "Claude Code",
   cursor: "Cursor",
   antigravity: "Antigravity",
@@ -30,7 +31,7 @@ function usage() {
   return `Usage: node scripts/setup-agents.mjs [options]
 
 Options:
-  --agent <name>         Configure one host: codex, claude, cursor, antigravity.
+  --agent <name>         Configure one host: codex, claude-desktop, claude, cursor, antigravity.
   --host <name>          Alias for --agent.
   --all-agents           Configure all supported hosts. Not used by default.
   --project-dir <path>   Project whose canvas/ directory should store state.
@@ -59,6 +60,7 @@ function hasArg(name) {
 function normalizeAgentName(value) {
   const normalized = String(value || "").trim().toLowerCase().replace(/[_\s]+/g, "-");
   if (!normalized || normalized === "auto" || normalized === "current") return null;
+  if (["claude-desktop", "claude-app", "claude-desktop-app"].includes(normalized)) return "claude-desktop";
   if (["claude-code", "claude"].includes(normalized)) return "claude";
   if (["google-antigravity", "gemini", "antigravity"].includes(normalized)) return "antigravity";
   if (["cursor", "cursor-ide"].includes(normalized)) return "cursor";
@@ -277,6 +279,22 @@ async function ensureBuild() {
   await run(commandName("npm"), ["run", "build"], { inherit: true });
 }
 
+async function ensureWidgetBuild() {
+  if (!targetIncludesWidgetHost()) return;
+  if (skipBuild) {
+    console.log("Skipping npm run build:widget.");
+    return;
+  }
+
+  if (await pathExists(join(repoRoot, "dist-widget", "index.html"))) {
+    console.log("Widget build already exists.");
+    return;
+  }
+
+  logStep("Building the native widget UI");
+  await run(commandName("npm"), ["run", "build:widget"], { inherit: true });
+}
+
 async function copyIfExists(source, target) {
   if (!(await pathExists(source))) return;
   await cp(source, target, { recursive: true, force: true, dereference: false });
@@ -302,6 +320,7 @@ async function refreshManagedPluginSource() {
   for (const dirName of [
     "assets",
     "dist",
+    "dist-widget",
     "lib",
     "mcp",
     "scripts",
@@ -365,7 +384,34 @@ async function refreshManagedPluginSource() {
     ],
   });
 
+  await writeJson(join(tmpPluginRoot, ".mcp.json"), {
+    mcpServers: {
+      excalidraw_official: {
+        type: "http",
+        url: "https://mcp.excalidraw.com/mcp",
+        note: "Official open-source Excalidraw MCP App from excalidraw/excalidraw-mcp. Use for prompt-to-diagram Excalidraw generation and interactive MCP App rendering.",
+      },
+      buzzassist_mcp: {
+        title: "BuzzAssist Canvas Widget MCP",
+        description: "Render and control the native BuzzAssist Codex widget without opening a localhost page.",
+        command: process.execPath,
+        args: [join(managedPluginRoot, "scripts", "start-mcp.mjs")],
+        cwd: managedPluginRoot,
+        env: {
+          NODE_PATH: join(repoRoot, "node_modules"),
+          EXCALIDRAW_ALLOW_WIDGET_ORIGINS: "1",
+          EXCALIDRAW_PROJECT_DIR: projectDir,
+          EXCALIDRAW_CANVAS_DIR: canvasDir,
+        },
+        note: "Primary local MCP server. It auto-starts the local canvas server, writes canvas/.server.json, and renders the native BuzzAssist widget.",
+      },
+    },
+  });
+
   await rm(join(tmpPluginRoot, "node_modules"), { recursive: true, force: true });
+  if (await pathExists(join(repoRoot, "node_modules"))) {
+    await symlink(join(repoRoot, "node_modules"), join(tmpPluginRoot, "node_modules"), process.platform === "win32" ? "junction" : "dir");
+  }
   await rm(join(tmpPluginRoot, "canvas"), { recursive: true, force: true });
   await rm(managedPluginDir, { recursive: true, force: true });
   await mkdir(dirname(managedPluginDir), { recursive: true });
@@ -532,14 +578,40 @@ async function setupClaude(pluginDir) {
 function localMcpServerConfig(pluginDir, { cursor = false } = {}) {
   const config = {
     command: process.execPath,
-    args: [join(pluginDir, "mcp", "server.mjs")],
+    args: [join(pluginDir, "scripts", "start-mcp.mjs")],
     env: {
+      EXCALIDRAW_ALLOW_WIDGET_ORIGINS: "1",
       EXCALIDRAW_PROJECT_DIR: projectDir,
       EXCALIDRAW_CANVAS_DIR: canvasDir,
     },
   };
   if (cursor) config.type = "stdio";
   return config;
+}
+
+function claudeDesktopConfigPath() {
+  if (process.platform === "darwin") {
+    return join(homeDir, "Library", "Application Support", "Claude", "claude_desktop_config.json");
+  }
+  if (process.platform === "win32") {
+    const appData = process.env.APPDATA || join(homeDir, "AppData", "Roaming");
+    return join(appData, "Claude", "claude_desktop_config.json");
+  }
+  return join(homeDir, ".config", "Claude", "claude_desktop_config.json");
+}
+
+async function setupClaudeDesktop(pluginDir) {
+  logStep("Configuring Claude Desktop");
+  const configPath = claudeDesktopConfigPath();
+  const config = await readJson(configPath, {});
+  config.mcpServers = config.mcpServers && typeof config.mcpServers === "object" ? config.mcpServers : {};
+  config.mcpServers[pluginName] = localMcpServerConfig(pluginDir);
+
+  if (dryRun) console.log(`Would write ${configPath}`);
+  else await writeJson(configPath, config);
+
+  console.log("Claude Desktop uses the native MCP Apps widget. Restart Claude Desktop, then call render_buzzassist_canvas_widget.");
+  return { ok: true, configPath };
 }
 
 function cursorRuleContent() {
@@ -652,10 +724,19 @@ async function setupAntigravity(pluginDir) {
 
 async function setupAgent(agent, pluginDir) {
   if (agent === "codex") return setupCodex(pluginDir);
+  if (agent === "claude-desktop") return setupClaudeDesktop(pluginDir);
   if (agent === "claude") return setupClaude(pluginDir);
   if (agent === "cursor") return setupCursor(pluginDir);
   if (agent === "antigravity") return setupAntigravity(pluginDir);
   throw new Error(`Unsupported agent "${agent}".`);
+}
+
+function targetIncludesWidgetHost() {
+  return targetAgents.includes("codex") || targetAgents.includes("claude-desktop");
+}
+
+function targetIncludesLocalBrowserHost() {
+  return targetAgents.some((agent) => ["claude", "cursor", "antigravity"].includes(agent));
 }
 
 async function readDiscovery() {
@@ -720,6 +801,7 @@ async function launchCanvasServer() {
     stdio: "ignore",
     env: {
       ...process.env,
+      EXCALIDRAW_ALLOW_WIDGET_ORIGINS: "1",
       EXCALIDRAW_PROJECT_DIR: projectDir,
       EXCALIDRAW_CANVAS_DIR: canvasDir,
     },
@@ -786,6 +868,7 @@ async function main() {
 
   await ensureDependencies();
   await ensureBuild();
+  await ensureWidgetBuild();
   const pluginDir = await refreshManagedPluginSource();
 
   const results = {};
@@ -818,11 +901,17 @@ async function main() {
   if (!hasArg("--all-agents")) {
     console.log("Other agents were intentionally left untouched. Use --all-agents only when the user explicitly asks for every host.");
   }
+  if (targetIncludesWidgetHost()) {
+    console.log("BUZZASSIST_WIDGET_TOOL=render_buzzassist_canvas_widget");
+    console.log("For Codex and Claude Desktop, open the native widget with render_buzzassist_canvas_widget. Do not open BUZZASSIST_CANVAS_URL for desktop unless the user explicitly asks for the fallback local browser.");
+  }
   if (discovery?.url) {
     console.log(`BUZZASSIST_CANVAS_URL=${discovery.url}`);
     console.log(`BUZZASSIST_CANVAS_CHECK=${canvasCheck?.ok ? "ok" : "needs-attention"}`);
     console.log(`BUZZASSIST_CANVAS_DISCOVERY=${join(canvasDir, ".server.json")}`);
-    console.log("Open BUZZASSIST_CANVAS_URL in the current host's in-app browser now. For Codex/Claude Code, use the host in-app browser tool; do not use the OS/default browser unless the user explicitly asks.");
+    if (targetIncludesLocalBrowserHost()) {
+      console.log("For Claude Code, Cursor, or Antigravity, open BUZZASSIST_CANVAS_URL in the host in-app browser. Do not use the OS/default browser unless the user explicitly asks.");
+    }
   }
   if (tunnelStatus?.publicUrl) {
     console.log(`BUZZASSIST_TUNNEL_URL=${tunnelStatus.publicUrl}`);

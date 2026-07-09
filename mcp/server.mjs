@@ -3,10 +3,11 @@ import { copyFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/prom
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { registerAppResource, registerAppTool } from "@modelcontextprotocol/ext-apps/server";
 import { generateKeyBetween } from "fractional-indexing";
+import { z } from "zod";
 import {
   DEFAULT_MEDIA_BATCH_CHUNK_SIZE,
   IMAGE_MODELS,
@@ -37,10 +38,21 @@ import { isFalImageModel, isFalVideoModel, previewFalImageRequest, previewFalVid
 import { generateSubtitleSrt, normalizeSubtitleHoldSeconds, renderSrt } from "../lib/subtitleGeneration.mjs";
 import { startChatBridgeWorker } from "../lib/chatBridge.mjs";
 import { readServerDiscovery } from "../lib/canvasServerRuntime.mjs";
+import {
+  canvasAttachmentBundleToMcpResult,
+  createCanvasAttachmentBundle,
+  listCanvasAttachmentBundles,
+} from "../lib/canvasAttachmentBundle.mjs";
+import {
+  BUZZASSIST_WIDGET_MIME_TYPE,
+  BUZZASSIST_WIDGET_URI,
+  buzzAssistWidgetResourceMetadata,
+  createBuzzAssistWidgetHtml,
+} from "../lib/buzzassistWidgetResource.mjs";
 import { tmpdir } from "node:os";
 
 const SERVER_NAME = "BuzzAssist Excalidraw Plugin Tools";
-const SERVER_VERSION = "0.1.4";
+const SERVER_VERSION = "0.1.5";
 const TOOL_READ_ME = "read_me";
 const TOOL_CREATE_VIEW = "create_view";
 const TOOL_GET_SELECTION = "get_excalidraw_selection";
@@ -59,6 +71,10 @@ const TOOL_SILENCE_CUT_VIDEO = "silence_cut_excalidraw_video";
 const TOOL_CANVAS_TUNNEL_START = "buzzassist_canvas_tunnel_start";
 const TOOL_CANVAS_TUNNEL_STATUS = "buzzassist_canvas_tunnel_status";
 const TOOL_CANVAS_TUNNEL_STOP = "buzzassist_canvas_tunnel_stop";
+const TOOL_RENDER_BUZZASSIST_WIDGET = "render_buzzassist_canvas_widget";
+const TOOL_PREPARE_CANVAS_ATTACHMENTS = "prepare_canvas_attachments";
+const TOOL_READ_CANVAS_ATTACHMENT_BUNDLE = "read_canvas_attachment_bundle";
+const TOOL_LIST_CANVAS_ATTACHMENT_BUNDLES = "list_canvas_attachment_bundles";
 const IMAGE_MODEL_IDS = IMAGE_MODELS.map((model) => model.id);
 const VIDEO_MODEL_IDS = VIDEO_MODELS.map((model) => model.id);
 const CANVAS_FILE_NAME = "excalidraw-canvas.json";
@@ -70,6 +86,8 @@ const MEDIA_GENERATION_AGENT_INSTRUCTIONS = [
   "Generation/subtitle/silence-cut tools require confirmedSettings=true unless the user's request already specified all relevant settings; use payloadPreview or read_me for workflow details.",
   "Canvas tools auto-start the local static canvas server and write canvas/.server.json with the dynamic URL and HTTP tool endpoint bearer token.",
   "For phone/mobile access to the exact same full Excalidraw UI, use buzzassist_canvas_tunnel_start/status/stop. This starts an ngrok Canvas Tunnel with a generated access URL; Remote Canvas is not required for same-UI access.",
+  "For Codex/Claude Desktop interactive UI, use render_buzzassist_canvas_widget. It returns a native MCP Apps widget that renders the BuzzAssist canvas directly, backed by the local canvas server, and can send follow-up instructions through the host bridge when supported.",
+  "To attach selected canvas images/videos/SRT/XML into the current chat, use prepare_canvas_attachments or read_canvas_attachment_bundle. Do not rely on OS GUI paste automation for media attachments.",
 ].join(" ");
 
 // Project-common 用語辞書 (canvas/subtitle-glossary.json) merges into every
@@ -124,6 +142,36 @@ async function fetchCanvasClientStatus(info) {
   const baseUrl = String(info.url || "").replace(/\/$/, "");
   if (!baseUrl) return null;
   return fetchJsonQuick(`${baseUrl}/api/canvas-clients`, 1500, info.token);
+}
+
+async function ensureCanvasServer(args = {}) {
+  let info = await readCanvasServerInfo(args);
+  let status = await fetchCanvasClientStatus(info);
+  if (status) return { info, status };
+
+  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const child = spawn(process.execPath, ["scripts/serve-canvas.mjs", resolveProjectDir(args)], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      EXCALIDRAW_ALLOW_WIDGET_ORIGINS: "1",
+      EXCALIDRAW_CANVAS_DIR: resolveCanvasDir(args),
+      EXCALIDRAW_PROJECT_DIR: resolveProjectDir(args),
+    },
+    detached: true,
+    stdio: "ignore",
+    shell: process.platform === "win32",
+  });
+  child.unref();
+
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline && !status) {
+    await new Promise((resolveSleep) => setTimeout(resolveSleep, 1000));
+    info = await readCanvasServerInfo(args);
+    status = await fetchCanvasClientStatus(info);
+  }
+
+  return { info, status };
 }
 
 function runQuick(command, commandArgs, timeoutMs = 8000) {
@@ -292,27 +340,8 @@ async function ensureCanvasVisible(args = {}) {
   canvasAutoOpenAttempted = true;
   if (/^(1|true|yes)$/i.test(String(process.env.EXCALIDRAW_NO_AUTO_OPEN || ""))) return;
   try {
-    let info = await readCanvasServerInfo(args);
-    let baseUrl = String(info.url || "").replace(/\/$/, "");
-    let status = await fetchCanvasClientStatus(info);
-    if (!status) {
-      const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-      const child = spawn(process.execPath, ["scripts/serve-canvas.mjs", resolveProjectDir(args)], {
-        cwd: repoRoot,
-        env: { ...process.env, EXCALIDRAW_CANVAS_DIR: resolveCanvasDir(args), EXCALIDRAW_PROJECT_DIR: resolveProjectDir(args) },
-        detached: true,
-        stdio: "ignore",
-        shell: process.platform === "win32",
-      });
-      child.unref();
-      const deadline = Date.now() + 15_000;
-      while (Date.now() < deadline && !status) {
-        await new Promise((resolveSleep) => setTimeout(resolveSleep, 1000));
-        info = await readCanvasServerInfo(args);
-        baseUrl = String(info.url || "").replace(/\/$/, "");
-        status = await fetchCanvasClientStatus(info);
-      }
-    }
+    const { info, status } = await ensureCanvasServer(args);
+    const baseUrl = String(info.url || "").replace(/\/$/, "");
     if (baseUrl) lastCanvasBaseUrl = baseUrl;
     if (status && Number(status.clients) === 0) {
       await openCanvasWindow(baseUrl);
@@ -326,6 +355,153 @@ function canvasHintText() {
   const port = Number(process.env.EXCALIDRAW_PORT ?? 43219);
   const baseUrl = lastCanvasBaseUrl || nonEmptyString(process.env.EXCALIDRAW_CANVAS_URL) || `http://127.0.0.1:${port}`;
   return ` Canvas: ${baseUrl}`;
+}
+
+async function widgetStructuredContent(args = {}) {
+  const { info, status } = await ensureCanvasServer(args);
+  const canvasUrl = String(info?.url || "").replace(/\/$/, "");
+  const tunnel = await readJsonIfExists(join(resolveCanvasDir(args), ".canvas-tunnel.json"), null);
+  if (canvasUrl) lastCanvasBaseUrl = canvasUrl;
+  return {
+    version: 1,
+    widget: "buzzassist-canvas-widget",
+    rendering: "native-widget",
+    title: nonEmptyString(args.title) || "BuzzAssist Canvas",
+    preferredDisplayMode: nonEmptyString(args.displayMode) || "fullscreen",
+    projectDir: resolveProjectDir(args),
+    canvasDir: resolveCanvasDir(args),
+    canvasUrl,
+    localCanvasUrl: canvasUrl,
+    canvasStatus: status || null,
+    mcpUrl: info?.mcpUrl || null,
+    tunnel: tunnel || null,
+  };
+}
+
+function widgetToolResultMetadata(widgetData) {
+  return {
+    "openai/outputTemplate": BUZZASSIST_WIDGET_URI,
+    widgetData,
+  };
+}
+
+function readWidgetResource(uri) {
+  if (uri !== BUZZASSIST_WIDGET_URI) {
+    throw new Error(`Unknown resource: ${uri}`);
+  }
+  const metadata = buzzAssistWidgetResourceMetadata();
+  return {
+    contents: [
+      {
+        uri: BUZZASSIST_WIDGET_URI,
+        mimeType: BUZZASSIST_WIDGET_MIME_TYPE,
+        text: createBuzzAssistWidgetHtml({ version: SERVER_VERSION }),
+        _meta: metadata._meta,
+      },
+    ],
+  };
+}
+
+function describeZodType(schema, type) {
+  return nonEmptyString(schema?.description) ? type.describe(schema.description) : type;
+}
+
+function zodTypeFromJsonSchema(schema = {}) {
+  if (!schema || typeof schema !== "object") return z.any();
+  if (Array.isArray(schema.enum) && schema.enum.length > 0 && schema.enum.every((value) => typeof value === "string")) {
+    return describeZodType(schema, z.enum(schema.enum));
+  }
+  if (Array.isArray(schema.type)) {
+    const options = schema.type.map((type) => zodTypeFromJsonSchema({ ...schema, type })).filter(Boolean);
+    return describeZodType(schema, options.length > 1 ? z.union(options) : options[0] || z.any());
+  }
+  switch (schema.type) {
+    case "string":
+      return describeZodType(schema, z.string());
+    case "integer":
+      return describeZodType(schema, z.number().int());
+    case "number":
+      return describeZodType(schema, z.number());
+    case "boolean":
+      return describeZodType(schema, z.boolean());
+    case "array":
+      return describeZodType(schema, z.array(zodTypeFromJsonSchema(schema.items || {})));
+    case "object": {
+      const shape = jsonSchemaToZodShape(schema);
+      const objectSchema = z.object(shape);
+      return describeZodType(schema, schema.additionalProperties === false ? objectSchema.strict() : objectSchema.passthrough());
+    }
+    default:
+      return describeZodType(schema, z.any());
+  }
+}
+
+function jsonSchemaToZodShape(schema = {}) {
+  const properties = schema && typeof schema === "object" ? schema.properties || {} : {};
+  const required = new Set(Array.isArray(schema.required) ? schema.required : []);
+  const shape = {};
+  for (const [key, value] of Object.entries(properties)) {
+    const type = zodTypeFromJsonSchema(value);
+    shape[key] = required.has(key) ? type : type.optional();
+  }
+  return shape;
+}
+
+function toolConfigForMcpServer(definition) {
+  return {
+    title: definition.title,
+    description: definition.description,
+    inputSchema: zodTypeFromJsonSchema(definition.inputSchema || { type: "object", properties: {} }),
+    annotations: definition.annotations,
+    _meta: definition._meta,
+  };
+}
+
+function toolErrorResult(error) {
+  return {
+    content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
+    isError: true,
+  };
+}
+
+function registerBuzzAssistWidget(server) {
+  const metadata = buzzAssistWidgetResourceMetadata();
+  registerAppResource(
+    server,
+    "buzzassist-canvas-widget",
+    BUZZASSIST_WIDGET_URI,
+    {
+      title: metadata.title,
+      description: metadata.description,
+      _meta: metadata._meta,
+    },
+    async () => readWidgetResource(BUZZASSIST_WIDGET_URI),
+  );
+
+  const widgetDefinition = toolDefinitions().find((tool) => tool.name === TOOL_RENDER_BUZZASSIST_WIDGET);
+  if (!widgetDefinition) throw new Error(`${TOOL_RENDER_BUZZASSIST_WIDGET} definition is missing`);
+  registerAppTool(
+    server,
+    TOOL_RENDER_BUZZASSIST_WIDGET,
+    toolConfigForMcpServer(widgetDefinition),
+    async (input = {}) => {
+      try {
+        const widgetData = await widgetStructuredContent(input);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Rendered BuzzAssist canvas widget. Local canvas: ${widgetData.canvasUrl || "unavailable"}`,
+            },
+          ],
+          structuredContent: widgetData,
+          _meta: widgetToolResultMetadata(widgetData),
+        };
+      } catch (error) {
+        return toolErrorResult(error);
+      }
+    },
+  );
 }
 
 // AskUserQuestion enforcement: generation tools refuse to run until the agent
@@ -1292,6 +1468,38 @@ function toolDefinitions() {
       },
     },
     {
+      name: TOOL_RENDER_BUZZASSIST_WIDGET,
+      title: "Render BuzzAssist Canvas Widget",
+      description: "Open the native BuzzAssist MCP Apps widget for Codex or Claude Desktop. The widget renders the local BuzzAssist canvas directly, can start/check the phone tunnel, and can send follow-up instructions through the host bridge when supported.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          projectDir: { type: "string", description: "Absolute project directory containing canvas/." },
+          canvasDir: { type: "string", description: "Absolute canvas directory. Overrides projectDir." },
+          title: { type: "string", description: "Optional widget title." },
+          displayMode: { type: "string", enum: ["inline", "fullscreen"], description: "Preferred display mode. Defaults to fullscreen." },
+        },
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      _meta: {
+        ui: {
+          resourceUri: BUZZASSIST_WIDGET_URI,
+          visibility: ["model", "app"],
+        },
+        "ui/resourceUri": BUZZASSIST_WIDGET_URI,
+        "openai/outputTemplate": BUZZASSIST_WIDGET_URI,
+        "openai/widgetAccessible": true,
+        "openai/toolInvocation/invoking": "Opening BuzzAssist canvas widget...",
+        "openai/toolInvocation/invoked": "BuzzAssist canvas widget ready",
+      },
+    },
+    {
       name: TOOL_CREATE_VIEW,
       title: "Create Excalidraw View",
       description: "Official-compatible create_view tool. Writes Excalidraw-like elements into the project-local canvas used by the browser UI.",
@@ -1324,6 +1532,70 @@ function toolDefinitions() {
         properties: {
           projectDir: { type: "string", description: "Absolute project directory containing canvas/." },
           canvasDir: { type: "string", description: "Absolute canvas directory. Overrides projectDir." },
+        },
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    {
+      name: TOOL_PREPARE_CANVAS_ATTACHMENTS,
+      title: "Attach Selected Canvas Media",
+      description: "Create a BuzzAssist attachment bundle from the current canvas selection and return images/resources/text into this current chat. Supports images, videos, audio, SRT, XML, and text/script assets.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          projectDir: { type: "string", description: "Absolute project directory containing canvas/." },
+          canvasDir: { type: "string", description: "Absolute canvas directory. Overrides projectDir." },
+          note: { type: "string", description: "Optional note to store with the bundle." },
+          maxInlineImageBytes: { type: "number", description: "Maximum image bytes to inline into the tool result. Larger files are returned as resource links only." },
+          maxInlineTextBytes: { type: "number", description: "Maximum text bytes to inline for SRT/XML/text files." },
+        },
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    {
+      name: TOOL_READ_CANVAS_ATTACHMENT_BUNDLE,
+      title: "Read Canvas Attachment Bundle",
+      description: "Read a BuzzAssist attachment bundle created from the canvas UI and return its images/resources/text into this current chat. Use bundleId='latest' for the most recent bundle.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          bundleId: { type: "string", description: "Attachment bundle id from the canvas UI, or 'latest'." },
+          projectDir: { type: "string", description: "Absolute project directory containing canvas/." },
+          canvasDir: { type: "string", description: "Absolute canvas directory. Overrides projectDir." },
+          maxInlineImageBytes: { type: "number", description: "Maximum image bytes to inline into the tool result. Larger files are returned as resource links only." },
+          maxInlineTextBytes: { type: "number", description: "Maximum text bytes to inline for SRT/XML/text files." },
+        },
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    {
+      name: TOOL_LIST_CANVAS_ATTACHMENT_BUNDLES,
+      title: "List Canvas Attachment Bundles",
+      description: "List recent BuzzAssist attachment bundles prepared from the canvas.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          projectDir: { type: "string", description: "Absolute project directory containing canvas/." },
+          canvasDir: { type: "string", description: "Absolute canvas directory. Overrides projectDir." },
+          limit: { type: "number", description: "Maximum bundles to return. Defaults to 10." },
         },
         additionalProperties: false,
       },
@@ -2274,6 +2546,20 @@ async function handleToolCall(params, progress = () => {}) {
     };
   }
 
+  if (params?.name === TOOL_RENDER_BUZZASSIST_WIDGET) {
+    const widgetData = await widgetStructuredContent(params.arguments ?? {});
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Rendered BuzzAssist canvas widget. Local canvas: ${widgetData.canvasUrl || "unavailable"}`,
+        },
+      ],
+      structuredContent: widgetData,
+      _meta: widgetToolResultMetadata(widgetData),
+    };
+  }
+
   if (params?.name === TOOL_READ_ME) {
     return {
       content: [{ type: "text", text: OFFICIAL_EXCALIDRAW_README }],
@@ -2309,6 +2595,32 @@ async function handleToolCall(params, progress = () => {}) {
     return {
       content: [{ type: "text", text: summary }],
       structuredContent: { selection, selectionFile, sceneFile: resolveCanvasFile(args), sceneElementCount: scene.elements.length },
+    };
+  }
+
+  if (params?.name === TOOL_PREPARE_CANVAS_ATTACHMENTS) {
+    const args = params.arguments ?? {};
+    const bundle = await createCanvasAttachmentBundle({ ...args, source: "mcp-selection" });
+    return canvasAttachmentBundleToMcpResult({ ...args, bundleId: bundle.id });
+  }
+
+  if (params?.name === TOOL_READ_CANVAS_ATTACHMENT_BUNDLE) {
+    const args = params.arguments ?? {};
+    return canvasAttachmentBundleToMcpResult(args);
+  }
+
+  if (params?.name === TOOL_LIST_CANVAS_ATTACHMENT_BUNDLES) {
+    const args = params.arguments ?? {};
+    const bundles = await listCanvasAttachmentBundles(args);
+    const summary =
+      bundles.length === 0
+        ? "No BuzzAssist canvas attachment bundles found."
+        : bundles
+            .map((bundle) => `${bundle.id} — ${bundle.assets.length} asset(s) — ${bundle.createdAt}`)
+            .join("\n");
+    return {
+      content: [{ type: "text", text: summary }],
+      structuredContent: { bundles },
     };
   }
 
@@ -2425,28 +2737,31 @@ try {
   process.stderr.write(`[chat-bridge] failed to start: ${error?.message}\n`);
 }
 
-const server = new Server(
+const server = new McpServer(
   {
     name: SERVER_NAME,
     version: SERVER_VERSION,
   },
   {
-    capabilities: { tools: {} },
     instructions: MEDIA_GENERATION_AGENT_INSTRUCTIONS,
   },
 );
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: toolDefinitions() }));
-server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
-  try {
-    return await handleToolCall(request.params, createProgressReporter(extra));
-  } catch (error) {
-    return {
-      content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
-      isError: true,
-    };
-  }
-});
+registerBuzzAssistWidget(server);
+for (const definition of toolDefinitions()) {
+  if (definition.name === TOOL_RENDER_BUZZASSIST_WIDGET) continue;
+  server.registerTool(
+    definition.name,
+    toolConfigForMcpServer(definition),
+    async (args = {}, extra) => {
+      try {
+        return await handleToolCall({ name: definition.name, arguments: args }, createProgressReporter(extra));
+      } catch (error) {
+        return toolErrorResult(error);
+      }
+    },
+  );
+}
 
 const transport = new StdioServerTransport();
 await server.connect(transport);

@@ -24,6 +24,7 @@ import { silenceCutVideo } from './lib/tempoCut.mjs'
 import { getLovartAuthStatus, getLovartModelCosts, saveLovartCredentials } from './lib/lovartMediaGeneration.mjs'
 import { bridgeWorkerAlive, canDriveGui, pasteIntoChatApp, sendChatMessage } from './lib/chatBridge.mjs'
 import { getOrCreateMcpToken, rejectDisallowedOrigin, rejectRemoteOperator, rejectMissingBearer, setLocalCorsHeaders, writeServerDiscovery } from './lib/canvasServerRuntime.mjs'
+import { canvasAttachmentBundleToMcpResult, createCanvasAttachmentBundle, listCanvasAttachmentBundles, readCanvasAttachmentBundle } from './lib/canvasAttachmentBundle.mjs'
 import { tmpdir } from 'node:os'
 
 const projectDir = resolve(process.env.EXCALIDRAW_PROJECT_DIR ?? process.cwd())
@@ -36,6 +37,7 @@ const canvasAssetsRoute = '/excalidraw-assets/'
 const defaultPort = Number(process.env.EXCALIDRAW_PORT ?? 43219)
 const defaultHost = process.env.EXCALIDRAW_HOST || '127.0.0.1'
 const mcpToken = getOrCreateMcpToken()
+const widgetBuild = /^(1|true|yes)$/i.test(String(process.env.BUZZASSIST_WIDGET_BUILD || ''))
 
 const mimeTypes = new Map([
   ['.apng', 'image/apng'],
@@ -505,6 +507,9 @@ const TOOL_INSERT_IMAGE = 'insert_excalidraw_image'
 const TOOL_INSERT_VIDEO = 'insert_excalidraw_video'
 const TOOL_GENERATE_IMAGE = 'generate_excalidraw_image'
 const TOOL_GENERATE_VIDEO = 'generate_excalidraw_video'
+const TOOL_PREPARE_CANVAS_ATTACHMENTS = 'prepare_canvas_attachments'
+const TOOL_READ_CANVAS_ATTACHMENT_BUNDLE = 'read_canvas_attachment_bundle'
+const TOOL_LIST_CANVAS_ATTACHMENT_BUNDLES = 'list_canvas_attachment_bundles'
 
 function mcpToolDefinitions() {
   return [
@@ -553,6 +558,64 @@ function mcpToolDefinitions() {
       inputSchema: {
         type: 'object',
         properties: {},
+        additionalProperties: false
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      }
+    },
+    {
+      name: TOOL_PREPARE_CANVAS_ATTACHMENTS,
+      title: 'Attach Selected Canvas Media',
+      description: 'Create a BuzzAssist attachment bundle from the current canvas selection and return images/resources/text into this current chat.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          note: { type: 'string' },
+          maxInlineImageBytes: { type: 'number' },
+          maxInlineTextBytes: { type: 'number' }
+        },
+        additionalProperties: false
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      }
+    },
+    {
+      name: TOOL_READ_CANVAS_ATTACHMENT_BUNDLE,
+      title: 'Read Canvas Attachment Bundle',
+      description: "Read a BuzzAssist attachment bundle created from the canvas UI. Use bundleId='latest' for the most recent bundle.",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          bundleId: { type: 'string' },
+          maxInlineImageBytes: { type: 'number' },
+          maxInlineTextBytes: { type: 'number' }
+        },
+        additionalProperties: false
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      }
+    },
+    {
+      name: TOOL_LIST_CANVAS_ATTACHMENT_BUNDLES,
+      title: 'List Canvas Attachment Bundles',
+      description: 'List recent BuzzAssist canvas attachment bundles.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          limit: { type: 'number' }
+        },
         additionalProperties: false
       },
       annotations: {
@@ -734,6 +797,25 @@ async function callLocalMcpTool(name, args = {}) {
     return mcpToolResponse(
       selection.selectedElements?.length ? `${selection.selectedElements.length} selected element(s).` : 'No Excalidraw elements are currently selected.',
       { selection, selectionFile, sceneFile: canvasFile, sceneElementCount: scene.elements.length }
+    )
+  }
+
+  if (name === TOOL_PREPARE_CANVAS_ATTACHMENTS) {
+    const bundle = await createCanvasAttachmentBundle({ ...localArgs, source: 'http-mcp-selection' })
+    return canvasAttachmentBundleToMcpResult({ ...localArgs, bundleId: bundle.id })
+  }
+
+  if (name === TOOL_READ_CANVAS_ATTACHMENT_BUNDLE) {
+    return canvasAttachmentBundleToMcpResult(localArgs)
+  }
+
+  if (name === TOOL_LIST_CANVAS_ATTACHMENT_BUNDLES) {
+    const bundles = await listCanvasAttachmentBundles(localArgs)
+    return mcpToolResponse(
+      bundles.length
+        ? bundles.map((bundle) => `${bundle.id} — ${bundle.assets.length} asset(s) — ${bundle.createdAt}`).join('\n')
+        : 'No BuzzAssist canvas attachment bundles found.',
+      { bundles }
     )
   }
 
@@ -1697,6 +1779,64 @@ function configureCanvasServer(server) {
 
       // Send a message to a local AI chat app (Claude Code desktop / Codex).
       // The browser canvas cannot reach those apps, so the dev server bridges:
+      server.middlewares.use('/api/agent-attachments', async (req, res) => {
+        try {
+          if (req.method === 'GET') {
+            const bundle = await readCanvasAttachmentBundle({ canvasDir, bundleId: 'latest' }).catch((error) => {
+              if (error?.code === 'ENOENT') return null
+              if (/no such file or directory/i.test(String(error?.message || ''))) return null
+              throw error
+            })
+            if (!bundle) {
+              sendJson(res, 200, { bundleId: null, assetCount: 0, assets: [], prompt: '' })
+              return
+            }
+            sendJson(res, 200, {
+              bundleId: bundle.id,
+              createdAt: bundle.createdAt,
+              assetCount: bundle.assets.length,
+              assets: bundle.assets.map((asset) => ({
+                name: asset.name,
+                kind: asset.kind,
+                mimeType: asset.mimeType,
+                size: asset.size
+              })),
+              prompt: bundle.usage?.tool ? `BuzzAssistのキャンバス添付 ${bundle.id} を読んで。` : ''
+            })
+            return
+          }
+          if (req.method !== 'POST') {
+            res.statusCode = 405
+            res.setHeader('allow', 'GET, POST')
+            res.end()
+            return
+          }
+          const body = JSON.parse((await readRequestBody(req)) || '{}')
+          const bundle = await createCanvasAttachmentBundle({
+            canvasDir,
+            projectDir,
+            assets: Array.isArray(body.assets) ? body.assets : [],
+            note: typeof body.note === 'string' ? body.note : '',
+            source: 'canvas-ui'
+          })
+          const prompt = `BuzzAssistのキャンバス添付 ${bundle.id} を読んで。`
+          sendJson(res, 200, {
+            bundleId: bundle.id,
+            createdAt: bundle.createdAt,
+            assetCount: bundle.assets.length,
+            assets: bundle.assets.map((asset) => ({
+              name: asset.name,
+              kind: asset.kind,
+              mimeType: asset.mimeType,
+              size: asset.size
+            })),
+            prompt
+          })
+        } catch (error) {
+          sendJson(res, 400, { error: error.message })
+        }
+      })
+
       // copy the text to the clipboard, activate the app, then paste + Enter
       // via System Events. If keystrokes are blocked (no Accessibility
       // permission) the text is still on the clipboard for a manual paste.
@@ -2153,5 +2293,20 @@ export default defineConfig({
   server: {
     host: '127.0.0.1',
     port: defaultPort
-  }
+  },
+  build: widgetBuild
+    ? {
+        outDir: process.env.BUZZASSIST_WIDGET_OUT_DIR || 'dist-widget',
+        emptyOutDir: true,
+        assetsInlineLimit: Number.MAX_SAFE_INTEGER,
+        cssCodeSplit: false,
+        rollupOptions: {
+          output: {
+            inlineDynamicImports: true,
+            entryFileNames: 'assets/index.js',
+            assetFileNames: 'assets/[name][extname]'
+          }
+        }
+      }
+    : undefined
 })
