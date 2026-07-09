@@ -44,8 +44,22 @@ test("setup CLI configures only Cursor when --agent cursor is used", async () =>
   const stdout = await runSetup("cursor");
   assert.match(stdout, /Agent target: Cursor/);
   assert.match(stdout, /Codex: not touched/);
+  assert.match(stdout, /Claude Desktop: not touched/);
   assert.match(stdout, /Claude Code: not touched/);
   assert.match(stdout, /Cursor: configured/);
+  assert.match(stdout, /Antigravity: not touched/);
+});
+
+test("setup CLI configures only Claude Desktop when --agent claude-desktop is used", async () => {
+  const stdout = await runSetup("claude-desktop");
+  assert.match(stdout, /Agent target: Claude Desktop/);
+  assert.match(stdout, /Configuring Claude Desktop/);
+  assert.match(stdout, /Would write .*claude_desktop_config\.json/);
+  assert.match(stdout, /BUZZASSIST_WIDGET_TOOL=render_buzzassist_canvas_widget/);
+  assert.match(stdout, /Codex: not touched/);
+  assert.match(stdout, /Claude Desktop: configured/);
+  assert.match(stdout, /Claude Code: not touched/);
+  assert.match(stdout, /Cursor: not touched/);
   assert.match(stdout, /Antigravity: not touched/);
 });
 
@@ -53,6 +67,7 @@ test("setup CLI configures only Antigravity when --agent antigravity is used", a
   const stdout = await runSetup("antigravity");
   assert.match(stdout, /Agent target: Antigravity/);
   assert.match(stdout, /Codex: not touched/);
+  assert.match(stdout, /Claude Desktop: not touched/);
   assert.match(stdout, /Claude Code: not touched/);
   assert.match(stdout, /Cursor: not touched/);
   assert.match(stdout, /Antigravity: configured/);

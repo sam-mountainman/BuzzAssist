@@ -91,6 +91,14 @@ function isTunnelCanvasRuntime() {
   return !isLocalCanvasHostname(window.location.hostname)
 }
 
+function widgetCanvasBaseUrl() {
+  if (typeof window === 'undefined') return ''
+  const direct = String(window.__BUZZASSIST_WIDGET_CANVAS_BASE_URL__ || '').trim()
+  if (direct) return direct
+  const payload = window.__BUZZASSIST_WIDGET_DATA__ || window.openai?.toolOutput || window.openai?.rawToolResult?._meta?.widgetData || {}
+  return String(payload.canvasUrl || payload.localCanvasUrl || '').trim()
+}
+
 function isNarrowCanvasViewport() {
   return typeof window !== 'undefined' && Number(window.innerWidth) > 0 && Number(window.innerWidth) <= 900
 }
@@ -146,6 +154,14 @@ function canvasRequestInfo(input) {
   try {
     const url = new URL(raw, window.location.href)
     const sameOrigin = url.origin === window.location.origin
+    const widgetBase = widgetCanvasBaseUrl()
+    if (
+      widgetBase &&
+      (url.pathname.startsWith('/api/') || url.pathname.startsWith(CANVAS_ASSETS_ROUTE))
+    ) {
+      const target = new URL(`${url.pathname}${url.search}${url.hash}`, widgetBase)
+      return { url: target.href, sameOrigin: false }
+    }
     const localCanvasUrl =
       (url.protocol === 'http:' || url.protocol === 'https:') &&
       isLocalCanvasHostname(url.hostname) &&
@@ -671,6 +687,105 @@ function saveAssetWithPicker(assetUrl, fileName = '') {
   return saveUrlWithPicker(assetUrl, suggestedName, downloadUrlWithAttachment(assetUrl))
 }
 
+function uniqueDownloadAssets(assets = []) {
+  const seen = new Set()
+  const items = []
+  for (const asset of assets) {
+    const assetUrl = normalizeCanvasAssetUrl(asset?.assetUrl || asset?.url || '')
+    if (!assetUrl) continue
+    const fileName = canvasLeafFileName(asset?.fileName || asset?.name) || assetFileNameFromUrl(assetUrl) || 'download'
+    const key = `${assetUrl}\n${fileName}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    items.push({ assetUrl, fileName })
+  }
+  return items
+}
+
+function archiveUrlForDownloadAssets(assets = []) {
+  const params = new URLSearchParams()
+  for (const asset of assets) {
+    const fileName = assetFileNameFromUrl(asset?.assetUrl || '')
+    if (fileName) params.append('file', fileName)
+  }
+  const query = params.toString()
+  return query ? `/api/assets/archive?${query}` : ''
+}
+
+function saveDownloadAssetsWithPicker(assets = []) {
+  const items = uniqueDownloadAssets(assets)
+  if (items.length === 0) return false
+  if (items.length === 1) return saveAssetWithPicker(items[0].assetUrl, items[0].fileName)
+  const archiveUrl = archiveUrlForDownloadAssets(items)
+  if (archiveUrl) return saveUrlWithPicker(archiveUrl, 'excalidraw-assets.zip', archiveUrl)
+  for (const item of items) triggerAssetDownload(item.assetUrl, item.fileName)
+  return false
+}
+
+async function createAgentAttachmentBundle(assets = []) {
+  const items = uniqueDownloadAssets(assets)
+  if (items.length === 0) throw new Error('添付できるアセットがありません。')
+  const response = await canvasFetch('/api/agent-attachments', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ assets: items })
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(payload.error || `添付bundleの作成に失敗しました (${response.status})`)
+  const prompt = payload.prompt || `BuzzAssistのキャンバス添付 ${payload.bundleId || 'latest'} を読んで。`
+  let copied = false
+  try {
+    await navigator.clipboard.writeText(prompt)
+    copied = true
+  } catch {
+    // The bundle is still usable via read_canvas_attachment_bundle.
+  }
+  return { ...payload, prompt, copied }
+}
+
+function hostFollowUpSender() {
+  if (typeof window === 'undefined') return null
+  if (typeof window.buzzassistMcp?.sendFollowUpMessage === 'function') {
+    return (message) => window.buzzassistMcp.sendFollowUpMessage(message)
+  }
+  if (typeof window.openai?.sendFollowUpMessage === 'function') {
+    return (message) => window.openai.sendFollowUpMessage(message)
+  }
+  if (window.parent && window.parent !== window) {
+    return (message) => sendFollowUpThroughParentWidget(message)
+  }
+  return null
+}
+
+function sendFollowUpThroughParentWidget(message) {
+  return new Promise((resolve, reject) => {
+    const id = `buzzassist-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const timer = window.setTimeout(() => {
+      window.removeEventListener('message', onMessage)
+      reject(new Error('親widgetからの送信応答がありません。'))
+    }, 12000)
+    function onMessage(event) {
+      const data = event.data
+      if (!data || data.type !== 'buzzassist:sendFollowUpMessage:result' || data.id !== id) return
+      window.clearTimeout(timer)
+      window.removeEventListener('message', onMessage)
+      if (data.error) reject(new Error(data.error))
+      else resolve(data.result || { ok: true, sent: true })
+    }
+    window.addEventListener('message', onMessage)
+    window.parent.postMessage({ type: 'buzzassist:sendFollowUpMessage', id, message }, '*')
+  })
+}
+
+async function sendFollowUpThroughHostBridge(message) {
+  const prompt = String(message || '').trim()
+  if (!prompt) return null
+  const sender = hostFollowUpSender()
+  if (!sender) return null
+  await sender({ prompt, content: [{ type: 'text', text: prompt }] })
+  return { ok: true, sent: true, copied: true, via: 'host-bridge', message: prompt }
+}
+
 function assetFileNameFromUrl(assetUrl) {
   if (!assetUrl) return ''
   try {
@@ -984,6 +1099,14 @@ function DownloadIcon({ size = 13 }) {
       <path d="M12 4v11" />
       <path d="M7 10l5 5 5-5" />
       <path d="M5 20h14" />
+    </svg>
+  )
+}
+
+function AttachIcon({ size = 13 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21.4 11.6l-8.5 8.5a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 1 1-2.8-2.8l8.5-8.5" />
     </svg>
   )
 }
@@ -3610,6 +3733,10 @@ export default function App() {
   const [subtitlePreviewOverlays, setSubtitlePreviewOverlays] = useState([])
   const [subtitleScrollOffsets, setSubtitleScrollOffsets] = useState({})
   const [managedSelectionActive, setManagedSelectionActive] = useState(false)
+  const [bulkDownloading, setBulkDownloading] = useState(false)
+  const [agentAttachStatus, setAgentAttachStatus] = useState('')
+  const [agentChatComposer, setAgentChatComposer] = useState(null)
+  const agentChatInputRef = useRef(null)
   const [lovartAuth, setLovartAuth] = useState(null)
   const [lovartKeySaving, setLovartKeySaving] = useState(false)
   const [lovartKeyEditing, setLovartKeyEditing] = useState(false)
@@ -3642,7 +3769,7 @@ export default function App() {
       if (!app) {
         setChatSendStatus('copied')
         window.setTimeout(() => setChatSendStatus(''), 2600)
-        return
+        return { ok: true, status: 'copied', message }
       }
       // Step 3: attach into the chat app (open -a) / activate it.
       const response = await canvasFetch('/api/chat/send', {
@@ -3662,12 +3789,82 @@ export default function App() {
         setChatSendStatus('error')
       }
       if (payload.error) console.warn('chat send fallback:', payload.error)
+      return {
+        ok: Boolean(payload.sent || payload.attached || payload.copied),
+        status: payload.sent ? 'sent' : payload.attached ? 'attached' : payload.copied ? (payload.error ? 'copied-fallback' : 'copied') : 'error',
+        ...payload
+      }
     } catch (error) {
       console.warn('chat send failed:', error)
       setChatSendStatus('error')
+      return { ok: false, status: 'error', error: error.message }
+    } finally {
+      window.setTimeout(() => setChatSendStatus(''), 3200)
     }
-    window.setTimeout(() => setChatSendStatus(''), 3200)
   }, [])
+
+  useEffect(() => {
+    if (!agentChatComposer) return
+    const id = window.requestAnimationFrame(() => {
+      agentChatInputRef.current?.focus?.()
+      agentChatInputRef.current?.select?.()
+    })
+    return () => window.cancelAnimationFrame(id)
+  }, [agentChatComposer?.id])
+
+  const sendAgentChatComposer = useCallback(async () => {
+    const composer = agentChatComposer
+    if (!composer || composer.status === 'preparing' || composer.status === 'sending') return
+    const assets = uniqueDownloadAssets(composer.assets)
+    if (assets.length === 0) {
+      setAgentChatComposer((current) => current?.id === composer.id ? { ...current, status: 'error', statusText: '送信できる素材がありません' } : current)
+      return
+    }
+    const note = String(composer.text || '').trim()
+    setAgentAttachStatus('preparing')
+    setAgentChatComposer((current) => current?.id === composer.id ? { ...current, status: 'preparing', statusText: '素材を準備中…' } : current)
+    try {
+      const result = await createAgentAttachmentBundle(assets)
+      const message = note ? `${note}\n\n${result.prompt}` : result.prompt
+      setAgentAttachStatus('sending')
+      setAgentChatComposer((current) => current?.id === composer.id ? { ...current, status: 'sending', statusText: 'チャットへ送信中…' } : current)
+      let sent = null
+      try {
+        sent = await sendFollowUpThroughHostBridge(message)
+      } catch (error) {
+        console.warn('host bridge follow-up failed:', error)
+      }
+      if (!sent?.sent) {
+        sent = await sendToChatApp({
+          app: 'codex',
+          autoSend: true,
+          text: message
+        })
+      }
+      const status = sent?.sent ? 'sent' : sent?.copied ? 'queued' : (result.copied ? 'ready' : 'ready-no-copy')
+      const statusText = status === 'sent'
+        ? 'チャットへ送信しました'
+        : status === 'queued'
+          ? '送信待ちです。読み取り文はコピー済みです'
+          : status === 'ready'
+            ? '読み取り文をコピーしました'
+            : 'bundleを作成しました'
+      setAgentAttachStatus(status)
+      setAgentChatComposer((current) => current?.id === composer.id ? { ...current, status, statusText } : current)
+      if (status === 'sent' || status === 'queued') {
+        window.setTimeout(() => {
+          setAgentChatComposer((current) => current?.id === composer.id ? null : current)
+        }, 1200)
+      }
+    } catch (error) {
+      console.warn('agent chat composer send failed:', error)
+      setAgentAttachStatus('error')
+      setAgentChatComposer((current) => current?.id === composer.id ? { ...current, status: 'error', statusText: error.message || 'チャットへ送信できませんでした' } : current)
+    } finally {
+      window.setTimeout(() => setAgentAttachStatus(''), 2600)
+    }
+  }, [agentChatComposer, sendToChatApp])
+
   const [silenceCutNotice, setSilenceCutNotice] = useState('')
   // Project-common 用語辞書 (canvas/subtitle-glossary.json), edited from the
   // SRT panel's 用語 pill and merged server-side into every transcription.
@@ -6705,6 +6902,23 @@ export default function App() {
         MOBILE_IMAGE_PREVIEW_OVERLAY_MAX_ITEMS
       )
     : []
+  const selectedCanvasDownloadOverlays = (() => {
+    const selectedXmlOutputs = frameOverlays
+      .filter((overlay) => overlay.isSelected && overlay.kind === 'silenceCut' && overlay.outputAsset?.url)
+      .map((overlay) => ({
+        ...overlay,
+        assetType: 'xml',
+        assetUrl: overlay.outputAsset.url,
+        fileName: overlay.outputAsset.name || assetFileNameFromUrl(overlay.outputAsset.url) || 'jetcut.xml'
+      }))
+    const mediaByKey = new Map()
+    for (const overlay of [...selectedImageOverlays.filter((item) => item.isSelected && item.assetUrl), ...selectedXmlOutputs]) {
+      const key = `${overlay.id || ''}\n${overlay.assetUrl || ''}`
+      if (!mediaByKey.has(key)) mediaByKey.set(key, overlay)
+    }
+    return Array.from(mediaByKey.values())
+  })()
+  const selectedCanvasDownloadAssets = uniqueDownloadAssets(selectedCanvasDownloadOverlays)
   // One canonical entry per model; the execution route (Codex / Hermes /
   // BuzzAssist / Lovart) is chosen per model in the settings row and mapped
   // to the concrete backend id stored in frameForm.
@@ -7125,13 +7339,183 @@ export default function App() {
                 <div className="lovart-image-header-name">
                   <span className="lovart-image-header-name-text">{img.fileName}</span>
                 </div>
-              {img.pixelWidth > 0 && img.pixelHeight > 0 && img.width >= 90 ? (
-                <div className="lovart-image-header-size">{img.pixelWidth} × {img.pixelHeight}</div>
-              ) : null}
+              <div className="lovart-image-header-actions">
+                {img.pixelWidth > 0 && img.pixelHeight > 0 && img.width >= 90 ? (
+                  <div className="lovart-image-header-size">{img.pixelWidth} × {img.pixelHeight}</div>
+                ) : null}
+              </div>
             </div>
           </div>
         )
       })}
+      {selectedCanvasDownloadOverlays.length > 0 ? (() => {
+        const boundsLeft = Math.min(...selectedCanvasDownloadOverlays.map((overlay) => overlay.left))
+        const boundsRight = Math.max(...selectedCanvasDownloadOverlays.map((overlay) => overlay.left + overlay.width))
+        const boundsTop = Math.min(...selectedCanvasDownloadOverlays.map((overlay) => overlay.top))
+        const single = selectedCanvasDownloadAssets.length === 1
+        const downloadTitle = single
+          ? `${selectedCanvasDownloadAssets[0]?.fileName || 'asset'} をダウンロード`
+          : `${selectedCanvasDownloadAssets.length}件をZIPでダウンロード`
+        const attachTitle = single
+          ? `${selectedCanvasDownloadAssets[0]?.fileName || 'asset'} をチャットへ送る`
+          : `${selectedCanvasDownloadAssets.length}件をチャットへ送る`
+        const attachStatusText =
+          agentChatComposer
+            ? '送信内容を入力中'
+            : agentAttachStatus === 'preparing' || agentAttachStatus === 'sending'
+            ? 'チャットへ送信中...'
+            : agentAttachStatus === 'sent'
+              ? 'チャットへ送信しました'
+              : agentAttachStatus === 'queued'
+                ? '送信待ちです。チャット欄に貼り付けできるよう読み取り文もコピーしました'
+                : agentAttachStatus === 'ready'
+                  ? '読み取り文をコピーしました'
+                  : agentAttachStatus === 'ready-no-copy'
+                    ? 'bundleを作成しました。チャットで latest を読んでください'
+                    : agentAttachStatus === 'error'
+                      ? 'チャットへ送信できませんでした'
+                      : attachTitle
+        const openChatComposer = () => {
+          const viewportWidth = Math.max(320, window.innerWidth || 1024)
+          const viewportHeight = Math.max(320, window.innerHeight || 768)
+          const popupWidth = Math.min(380, viewportWidth - 24)
+          const popupHeight = 176
+          const centerX = Math.round((boundsLeft + boundsRight) / 2)
+          const left = clamp(centerX, 12 + popupWidth / 2, viewportWidth - 12 - popupWidth / 2)
+          const preferredTop = Math.round(boundsTop - popupHeight - 14)
+          const top = clamp(preferredTop, 12, viewportHeight - popupHeight - 12)
+          const fileNames = selectedCanvasDownloadAssets.map((asset) => asset.fileName).filter(Boolean)
+          const defaultText = single
+            ? `${fileNames[0] || 'この素材'}について確認して。`
+            : `選択した${selectedCanvasDownloadAssets.length}件の素材について確認して。`
+          setAgentChatComposer({
+            id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            left,
+            top,
+            width: popupWidth,
+            assets: selectedCanvasDownloadAssets,
+            text: defaultText,
+            status: '',
+            statusText: ''
+          })
+        }
+        return (
+          <div
+            className="lovart-selection-toolbar"
+            style={{
+              left: `${Math.round((boundsLeft + boundsRight) / 2)}px`,
+              top: `${Math.max(12, Math.round(boundsTop - 48))}px`
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="lovart-selection-toolbar-btn"
+              disabled={agentAttachStatus === 'preparing' || agentAttachStatus === 'sending' || selectedCanvasDownloadAssets.length === 0}
+              title={attachStatusText}
+              aria-label={attachStatusText}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                openChatComposer()
+              }}
+            >
+              <AttachIcon size={15} />
+              {selectedCanvasDownloadAssets.length > 1 ? <span className="lovart-selection-toolbar-count">{agentAttachStatus === 'preparing' || agentAttachStatus === 'sending' ? '...' : selectedCanvasDownloadAssets.length}</span> : null}
+            </button>
+            <button
+              type="button"
+              className="lovart-selection-toolbar-btn"
+              disabled={bulkDownloading || selectedCanvasDownloadAssets.length === 0}
+              title={bulkDownloading ? '開始中…' : downloadTitle}
+              aria-label={bulkDownloading ? '開始中…' : downloadTitle}
+              onClick={async (event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                setBulkDownloading(true)
+                try {
+                  await saveDownloadAssetsWithPicker(selectedCanvasDownloadAssets)
+                } finally {
+                  window.setTimeout(() => setBulkDownloading(false), 350)
+                }
+              }}
+            >
+              <DownloadIcon size={15} />
+              {!single ? <span className="lovart-selection-toolbar-count">{bulkDownloading ? '…' : selectedCanvasDownloadAssets.length}</span> : null}
+            </button>
+          </div>
+        )
+      })() : null}
+      {agentChatComposer ? (
+        <div
+          className="lovart-agent-chat-popover"
+          style={{
+            left: `${Math.round(agentChatComposer.left)}px`,
+            top: `${Math.round(agentChatComposer.top)}px`,
+            width: `${Math.round(agentChatComposer.width || 360)}px`
+          }}
+          onPointerDown={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="lovart-agent-chat-head">
+            <div>
+              <div className="lovart-agent-chat-title">チャットへ送る</div>
+              <div className="lovart-agent-chat-subtitle">{agentChatComposer.assets?.length || 0}件の選択素材を添付bundleとして渡します</div>
+            </div>
+            <button
+              type="button"
+              className="lovart-agent-chat-close"
+              aria-label="閉じる"
+              onClick={() => setAgentChatComposer(null)}
+            >
+              ×
+            </button>
+          </div>
+          <textarea
+            ref={agentChatInputRef}
+            className="lovart-agent-chat-input"
+            value={agentChatComposer.text || ''}
+            placeholder="修正内容や依頼を書いてください"
+            disabled={agentChatComposer.status === 'preparing' || agentChatComposer.status === 'sending'}
+            onChange={(event) => {
+              const value = event.target.value
+              setAgentChatComposer((current) => current ? { ...current, text: value, statusText: '' } : current)
+            }}
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                event.preventDefault()
+                sendAgentChatComposer()
+              }
+            }}
+          />
+          <div className="lovart-agent-chat-foot">
+            <div className={`lovart-agent-chat-status${agentChatComposer.status === 'error' ? ' is-error' : ''}`}>
+              {agentChatComposer.statusText || '⌘/Ctrl + Enter でも送信できます'}
+            </div>
+            <div className="lovart-agent-chat-actions">
+              <button
+                type="button"
+                className="lovart-agent-chat-secondary"
+                disabled={agentChatComposer.status === 'preparing' || agentChatComposer.status === 'sending'}
+                onClick={() => setAgentChatComposer(null)}
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                className="lovart-agent-chat-primary"
+                disabled={agentChatComposer.status === 'preparing' || agentChatComposer.status === 'sending'}
+                onClick={sendAgentChatComposer}
+              >
+                {agentChatComposer.status === 'preparing' || agentChatComposer.status === 'sending' ? '送信中...' : '送信'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <div ref={hoverOverlayRef} className="lovart-hover-border" style={{ display: 'none' }} />
 
       {expandedVideoPlayback ? (

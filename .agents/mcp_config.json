@@ -3,7 +3,7 @@
     "buzzassist": {
       "command": "node",
       "args": [
-        "${workspaceFolder}/mcp/server.mjs"
+        "${workspaceFolder}/scripts/start-mcp.mjs"
       ],
       "env": {
         "EXCALIDRAW_PROJECT_DIR": "${workspaceFolder}",

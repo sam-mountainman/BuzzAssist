@@ -51,6 +51,7 @@ test("generator chrome stays below native Excalidraw toolbar and above backdrop"
   const videoFrameTray = zIndexForSelector(css, ".lovart-prompt-wrap.has-video-menu .lovart-video-frame-tray");
   const videoSettings = zIndexForSelector(css, ".lovart-video-settings");
   const utilityMenu = zIndexForSelector(css, ".lovart-menu.lovart-utility-pop");
+  const canvasPickerBar = zIndexForSelector(css, ".lovart-canvas-picker-bar");
 
   assert.equal(backdrop, 20);
   assert.equal(rail, 120);
@@ -63,6 +64,7 @@ test("generator chrome stays below native Excalidraw toolbar and above backdrop"
   assert.equal(videoSettings, 100);
   assert.equal(utilityMenu, 100);
   assert.equal(slotButton, 101);
+  assert.equal(canvasPickerBar, 140);
   assert.ok(backdrop < panel);
   assert.ok(panel < menu);
   assert.ok(menu < slotMenu);
@@ -70,5 +72,6 @@ test("generator chrome stays below native Excalidraw toolbar and above backdrop"
   assert.ok(slotButton < rail);
   for (const selector of nativeToolbarSelectors) {
     assert.ok(slotButton < zIndexForSelector(css, selector), `${selector} should cover generator menus`);
+    assert.ok(zIndexForSelector(css, selector) < canvasPickerBar, `${selector} should stay below the active canvas picker bar`);
   }
 });
