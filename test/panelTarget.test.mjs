@@ -48,6 +48,8 @@ test("selected canvas media exposes download controls and archives multi-select"
 
   assert.match(source, /function saveDownloadAssetsWithPicker\(assets = \[\]\) \{/);
   assert.match(source, /async function createAgentAttachmentBundle\(assets = \[\]\) \{/);
+  assert.match(source, /async function writeImageAssetToClipboard\(asset\) \{/);
+  assert.match(source, /const copySelectedCanvasAssets = useCallback\(async \(assets = \[\]\) => \{/);
   assert.match(source, /function archiveUrlForDownloadAssets\(assets = \[\]\) \{/);
   assert.match(source, /`\/api\/assets\/archive\?\$\{query\}`/);
   assert.match(source, /const selectedCanvasDownloadOverlays = \(\(\) => \{/);
@@ -67,9 +69,12 @@ test("selected canvas media exposes download controls and archives multi-select"
   assert.match(source, /sendToChatApp\(\{\s*app: 'codex',\s*autoSend: true,\s*text: message\s*\}\)/);
   assert.match(source, /agentAttachStatus === 'sent'/);
   assert.match(source, /agentAttachStatus === 'queued'/);
+  assert.match(source, /agentAttachStatus === 'image-copied'/);
+  assert.match(source, /copySelectedCanvasAssets\(selectedCanvasDownloadAssets\)/);
   assert.match(source, /saveDownloadAssetsWithPicker\(selectedCanvasDownloadAssets\)/);
   assert.match(styles, /\.lovart-selection-toolbar/);
   assert.match(styles, /\.lovart-selection-toolbar-btn/);
+  assert.match(styles, /\.lovart-selection-toolbar-btn\.is-success/);
   assert.match(styles, /\.lovart-agent-chat-popover/);
   assert.match(styles, /\.lovart-agent-chat-input/);
 });

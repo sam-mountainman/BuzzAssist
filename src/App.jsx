@@ -697,7 +697,12 @@ function uniqueDownloadAssets(assets = []) {
     const key = `${assetUrl}\n${fileName}`
     if (seen.has(key)) continue
     seen.add(key)
-    items.push({ assetUrl, fileName })
+    items.push({
+      assetUrl,
+      fileName,
+      kind: asset?.kind || asset?.assetType || '',
+      mimeType: asset?.mimeType || ''
+    })
   }
   return items
 }
@@ -735,12 +740,106 @@ async function createAgentAttachmentBundle(assets = []) {
   const prompt = payload.prompt || `BuzzAssistのキャンバス添付 ${payload.bundleId || 'latest'} を読んで。`
   let copied = false
   try {
-    await navigator.clipboard.writeText(prompt)
+    await writeTextToClipboard(prompt)
     copied = true
   } catch {
     // The bundle is still usable via read_canvas_attachment_bundle.
   }
   return { ...payload, prompt, copied }
+}
+
+async function writeTextToClipboard(text) {
+  const value = String(text ?? '')
+  if (!value) return
+  try {
+    if (navigator.clipboard?.writeText) {
+      await withTimeout(navigator.clipboard.writeText(value), 1500, 'クリップボードへのコピーが応答しませんでした。')
+      return
+    }
+  } catch {
+    // Fall through to the legacy selection-based copy path.
+  }
+  const textarea = document.createElement('textarea')
+  textarea.value = value
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  textarea.style.top = '0'
+  document.body.appendChild(textarea)
+  textarea.focus()
+  textarea.select()
+  try {
+    if (!document.execCommand?.('copy')) throw new Error('copy command returned false')
+  } finally {
+    textarea.remove()
+  }
+}
+
+function isClipboardImageAsset(asset) {
+  const kind = String(asset?.kind || asset?.assetType || '').toLowerCase()
+  const mimeType = String(asset?.mimeType || '').toLowerCase()
+  const fileName = String(asset?.fileName || asset?.name || asset?.assetUrl || '').toLowerCase()
+  return kind === 'image' || mimeType.startsWith('image/') || /\.(png|jpe?g|webp|gif|avif)$/i.test(fileName)
+}
+
+function isClipboardVideoAsset(asset) {
+  const kind = String(asset?.kind || asset?.assetType || '').toLowerCase()
+  const mimeType = String(asset?.mimeType || '').toLowerCase()
+  const fileName = String(asset?.fileName || asset?.name || asset?.assetUrl || '').toLowerCase()
+  return kind === 'video' || mimeType.startsWith('video/') || /\.(mp4|mov|webm|m4v)$/i.test(fileName)
+}
+
+function canvasToPngBlob(canvas) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob)
+      else reject(new Error('画像をPNGへ変換できませんでした。'))
+    }, 'image/png')
+  })
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  let timer = 0
+  const timeout = new Promise((_, reject) => {
+    timer = window.setTimeout(() => reject(new Error(message)), timeoutMs)
+  })
+  return Promise.race([promise, timeout]).finally(() => window.clearTimeout(timer))
+}
+
+async function imageBlobToPngBlob(blob) {
+  const bitmap = await createImageBitmap(blob)
+  try {
+    const canvas = document.createElement('canvas')
+    canvas.width = bitmap.width
+    canvas.height = bitmap.height
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('画像変換用のCanvasを作成できませんでした。')
+    context.drawImage(bitmap, 0, 0)
+    return await canvasToPngBlob(canvas)
+  } finally {
+    bitmap.close?.()
+  }
+}
+
+async function writeImageAssetToClipboard(asset) {
+  if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+    throw new Error('このブラウザーは画像の実体コピーに対応していません。')
+  }
+  const response = await canvasFetch(asset.assetUrl)
+  if (!response.ok) throw new Error(`画像を読み込めませんでした (${response.status})`)
+  const sourceBlob = await response.blob()
+  const sourceType = sourceBlob.type || asset.mimeType || 'image/png'
+  if (sourceType === 'image/png' || ClipboardItem.supports?.(sourceType)) {
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ [sourceType]: sourceBlob })])
+      return { mimeType: sourceType, converted: false }
+    } catch (error) {
+      if (sourceType === 'image/png') throw error
+    }
+  }
+  const pngBlob = await imageBlobToPngBlob(sourceBlob)
+  await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })])
+  return { mimeType: 'image/png', converted: true }
 }
 
 function hostFollowUpSender() {
@@ -3735,6 +3834,8 @@ export default function App() {
   const [managedSelectionActive, setManagedSelectionActive] = useState(false)
   const [bulkDownloading, setBulkDownloading] = useState(false)
   const [agentAttachStatus, setAgentAttachStatus] = useState('')
+  const [agentAttachStatusText, setAgentAttachStatusText] = useState('')
+  const agentAttachResetTimerRef = useRef(0)
   const [agentChatComposer, setAgentChatComposer] = useState(null)
   const agentChatInputRef = useRef(null)
   const [lovartAuth, setLovartAuth] = useState(null)
@@ -3812,6 +3913,18 @@ export default function App() {
     return () => window.cancelAnimationFrame(id)
   }, [agentChatComposer?.id])
 
+  const scheduleAgentAttachStatusReset = useCallback((delay = 2600) => {
+    window.clearTimeout(agentAttachResetTimerRef.current)
+    agentAttachResetTimerRef.current = window.setTimeout(() => {
+      setAgentAttachStatus('')
+      setAgentAttachStatusText('')
+    }, delay)
+  }, [])
+
+  useEffect(() => () => {
+    window.clearTimeout(agentAttachResetTimerRef.current)
+  }, [])
+
   const sendAgentChatComposer = useCallback(async () => {
     const composer = agentChatComposer
     if (!composer || composer.status === 'preparing' || composer.status === 'sending') return
@@ -3861,9 +3974,47 @@ export default function App() {
       setAgentAttachStatus('error')
       setAgentChatComposer((current) => current?.id === composer.id ? { ...current, status: 'error', statusText: error.message || 'チャットへ送信できませんでした' } : current)
     } finally {
-      window.setTimeout(() => setAgentAttachStatus(''), 2600)
+      scheduleAgentAttachStatusReset(2600)
     }
-  }, [agentChatComposer, sendToChatApp])
+  }, [agentChatComposer, sendToChatApp, scheduleAgentAttachStatusReset])
+
+  const copySelectedCanvasAssets = useCallback(async (assets = []) => {
+    const items = uniqueDownloadAssets(assets)
+    if (items.length === 0) return
+    window.clearTimeout(agentAttachResetTimerRef.current)
+    setAgentChatComposer(null)
+    setAgentAttachStatus('preparing')
+    setAgentAttachStatusText('コピー中...')
+    try {
+      const single = items.length === 1 ? items[0] : null
+      if (single && isClipboardImageAsset(single)) {
+        try {
+          await withTimeout(writeImageAssetToClipboard(single), 2500, '画像の実体コピーが応答しませんでした。')
+          setAgentAttachStatus('image-copied')
+          setAgentAttachStatusText('画像をコピーしました')
+          return
+        } catch (error) {
+          console.warn('image clipboard copy failed; falling back to attachment bundle:', error)
+        }
+      }
+      const result = await createAgentAttachmentBundle(items)
+      if (result.copied) {
+        setAgentAttachStatus('bundle-copied')
+        setAgentAttachStatusText(single && isClipboardVideoAsset(single)
+          ? '動画bundleをコピーしました'
+          : 'bundleをコピーしました')
+      } else {
+        setAgentAttachStatus('ready-no-copy')
+        setAgentAttachStatusText('bundleを作成しました')
+      }
+    } catch (error) {
+      console.warn('canvas asset clipboard copy failed:', error)
+      setAgentAttachStatus('error')
+      setAgentAttachStatusText(error.message || 'コピーできませんでした')
+    } finally {
+      scheduleAgentAttachStatusReset(2200)
+    }
+  }, [scheduleAgentAttachStatusReset])
 
   const [silenceCutNotice, setSilenceCutNotice] = useState('')
   // Project-common 用語辞書 (canvas/subtitle-glossary.json), edited from the
@@ -7357,48 +7508,31 @@ export default function App() {
           ? `${selectedCanvasDownloadAssets[0]?.fileName || 'asset'} をダウンロード`
           : `${selectedCanvasDownloadAssets.length}件をZIPでダウンロード`
         const attachTitle = single
-          ? `${selectedCanvasDownloadAssets[0]?.fileName || 'asset'} をチャットへ送る`
-          : `${selectedCanvasDownloadAssets.length}件をチャットへ送る`
+          ? `${selectedCanvasDownloadAssets[0]?.fileName || 'asset'} をコピー`
+          : `${selectedCanvasDownloadAssets.length}件をbundleとしてコピー`
+        const attachDone = ['image-copied', 'bundle-copied', 'ready', 'ready-no-copy', 'queued', 'sent'].includes(agentAttachStatus)
+        const attachLabel = agentAttachStatus === 'ready-no-copy' ? '作成済' : 'コピー済'
         const attachStatusText =
-          agentChatComposer
+          agentAttachStatusText ||
+          (agentChatComposer
             ? '送信内容を入力中'
             : agentAttachStatus === 'preparing' || agentAttachStatus === 'sending'
-            ? 'チャットへ送信中...'
+            ? 'コピー中...'
             : agentAttachStatus === 'sent'
               ? 'チャットへ送信しました'
-              : agentAttachStatus === 'queued'
-                ? '送信待ちです。チャット欄に貼り付けできるよう読み取り文もコピーしました'
-                : agentAttachStatus === 'ready'
-                  ? '読み取り文をコピーしました'
-                  : agentAttachStatus === 'ready-no-copy'
-                    ? 'bundleを作成しました。チャットで latest を読んでください'
-                    : agentAttachStatus === 'error'
-                      ? 'チャットへ送信できませんでした'
-                      : attachTitle
-        const openChatComposer = () => {
-          const viewportWidth = Math.max(320, window.innerWidth || 1024)
-          const viewportHeight = Math.max(320, window.innerHeight || 768)
-          const popupWidth = Math.min(380, viewportWidth - 24)
-          const popupHeight = 176
-          const centerX = Math.round((boundsLeft + boundsRight) / 2)
-          const left = clamp(centerX, 12 + popupWidth / 2, viewportWidth - 12 - popupWidth / 2)
-          const preferredTop = Math.round(boundsTop - popupHeight - 14)
-          const top = clamp(preferredTop, 12, viewportHeight - popupHeight - 12)
-          const fileNames = selectedCanvasDownloadAssets.map((asset) => asset.fileName).filter(Boolean)
-          const defaultText = single
-            ? `${fileNames[0] || 'この素材'}について確認して。`
-            : `選択した${selectedCanvasDownloadAssets.length}件の素材について確認して。`
-          setAgentChatComposer({
-            id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-            left,
-            top,
-            width: popupWidth,
-            assets: selectedCanvasDownloadAssets,
-            text: defaultText,
-            status: '',
-            statusText: ''
-          })
-        }
+            : agentAttachStatus === 'queued'
+              ? '送信待ちです。チャット欄に貼り付けできるよう読み取り文もコピーしました'
+            : agentAttachStatus === 'ready'
+              ? '読み取り文をコピーしました'
+            : agentAttachStatus === 'image-copied'
+              ? '画像をコピーしました'
+            : agentAttachStatus === 'bundle-copied'
+              ? 'bundleをコピーしました'
+            : agentAttachStatus === 'ready-no-copy'
+              ? 'bundleを作成しました。チャットで latest を読んでください'
+            : agentAttachStatus === 'error'
+              ? 'チャットへ送信できませんでした'
+                      : attachTitle)
         return (
           <div
             className="lovart-selection-toolbar"
@@ -7412,18 +7546,24 @@ export default function App() {
           >
             <button
               type="button"
-              className="lovart-selection-toolbar-btn"
+              className={`lovart-selection-toolbar-btn${attachDone ? ' is-success' : ''}${agentAttachStatus === 'error' ? ' is-error' : ''}`}
               disabled={agentAttachStatus === 'preparing' || agentAttachStatus === 'sending' || selectedCanvasDownloadAssets.length === 0}
               title={attachStatusText}
               aria-label={attachStatusText}
               onClick={(event) => {
                 event.preventDefault()
                 event.stopPropagation()
-                openChatComposer()
+                copySelectedCanvasAssets(selectedCanvasDownloadAssets)
               }}
             >
-              <AttachIcon size={15} />
-              {selectedCanvasDownloadAssets.length > 1 ? <span className="lovart-selection-toolbar-count">{agentAttachStatus === 'preparing' || agentAttachStatus === 'sending' ? '...' : selectedCanvasDownloadAssets.length}</span> : null}
+              {attachDone ? <span className="lovart-selection-toolbar-check" aria-hidden="true">✓</span> : <AttachIcon size={15} />}
+              {agentAttachStatus === 'preparing' || agentAttachStatus === 'sending' ? (
+                <span className="lovart-selection-toolbar-count">...</span>
+              ) : attachDone ? (
+                <span className="lovart-selection-toolbar-label">{attachLabel}</span>
+              ) : selectedCanvasDownloadAssets.length > 1 ? (
+                <span className="lovart-selection-toolbar-count">{selectedCanvasDownloadAssets.length}</span>
+              ) : null}
             </button>
             <button
               type="button"
