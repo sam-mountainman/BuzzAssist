@@ -16,10 +16,14 @@ test("generated media labels resolve to their backing result for panel selection
   const helper = source.match(/function panelMediaTargetIdFromSelection\(selectedIds, elementsById\) \{\n([\s\S]*?)\n\}/);
   assert.ok(helper, "Missing panelMediaTargetIdFromSelection");
 
+  assert.match(helper[1], /if \(selectedIds\.length !== 1\) return ''/);
   assert.match(helper[1], /if \(isPanelMediaTargetElement\(direct\)\) return id/);
   assert.match(helper[1], /const labelFor = direct\?\.customData\?\.codexVideoLabelFor/);
   assert.match(helper[1], /if \(isPanelMediaTargetElement\(elementsById\.get\(labelFor\)\)\) return labelFor/);
-  assert.match(source, /const selectedResultId = panelMediaTargetIdFromSelection\(selectedIds, elementsById\)/);
+  assert.match(source, /const selectedResultId = selectedSingleId \? panelMediaTargetIdFromSelection\(selectedIds, elementsById\) : ''/);
+  assert.match(source, /const selectedSingleId = selectedIds\.length === 1 \? selectedIds\[0\] : ''/);
+  assert.match(source, /selectedSingleId && isGeneratorFrame\(elementsById\.get\(selectedSingleId\)\) \? selectedSingleId : ''/);
+  assert.match(source, /if \(selectedIds\.length <= 1 && pending && isGeneratorFrame\(elementsById\.get\(pending\.id\)\)\) \{/);
 });
 
 test("canvas picker resolves media labels and keeps picking on invalid asset types", async () => {

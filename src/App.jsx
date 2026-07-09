@@ -2258,6 +2258,7 @@ function isPanelMediaTargetElement(element) {
 }
 
 function panelMediaTargetIdFromSelection(selectedIds, elementsById) {
+  if (selectedIds.length !== 1) return ''
   for (const id of selectedIds) {
     const direct = elementsById.get(id)
     if (isPanelMediaTargetElement(direct)) return id
@@ -4446,10 +4447,11 @@ export default function App() {
     else refreshOverlayStates(scene)
     const elementsById = new Map(scene.elements.map((element) => [element.id, element]))
     const selectedIds = getSelectedIds(scene.appState)
-    const selectedResultId = panelMediaTargetIdFromSelection(selectedIds, elementsById)
+    const selectedSingleId = selectedIds.length === 1 ? selectedIds[0] : ''
+    const selectedResultId = selectedSingleId ? panelMediaTargetIdFromSelection(selectedIds, elementsById) : ''
     const selectedFrameId = selectedResultId
       ? ''
-      : selectedIds.find((id) => isGeneratorFrame(elementsById.get(id))) ?? ''
+      : (selectedSingleId && isGeneratorFrame(elementsById.get(selectedSingleId)) ? selectedSingleId : '')
     const pendingWrite = pendingFrameFormWriteRef.current
     if (pendingWrite) {
       const pendingTargetId = pendingWrite.frameId || pendingWrite.result?.elementId || ''
@@ -4503,7 +4505,7 @@ export default function App() {
     }
 
     const pending = pendingPanelFrameRef.current
-    if (pending && isGeneratorFrame(elementsById.get(pending.id))) {
+    if (selectedIds.length <= 1 && pending && isGeneratorFrame(elementsById.get(pending.id))) {
       activeFrameIdRef.current = pending.id
       lastFocusedFrameIdRef.current = pending.id
       selectedGeneratedResultRef.current = null
