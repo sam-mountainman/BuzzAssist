@@ -1451,6 +1451,21 @@ body {
   background: #f3f0ff;
 }
 
+.lovart-selection-toolbar-btn.is-success {
+  color: #ffffff;
+  background: #16a34a;
+}
+
+.lovart-selection-toolbar-btn.is-success:hover:not(:disabled) {
+  color: #ffffff;
+  background: #15803d;
+}
+
+.lovart-selection-toolbar-btn.is-error {
+  color: #ffffff;
+  background: #dc2626;
+}
+
 .lovart-selection-toolbar-btn:disabled {
   color: #9ca3af;
   cursor: default;
@@ -1459,6 +1474,18 @@ body {
 .lovart-selection-toolbar-count {
   font-size: 12px;
   font-weight: 600;
+}
+
+.lovart-selection-toolbar-check {
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.lovart-selection-toolbar-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
 }
 
 .lovart-agent-chat-popover {
