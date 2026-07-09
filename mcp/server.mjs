@@ -86,7 +86,7 @@ const MEDIA_GENERATION_AGENT_INSTRUCTIONS = [
   "Generation/subtitle/silence-cut tools require confirmedSettings=true unless the user's request already specified all relevant settings; use payloadPreview or read_me for workflow details.",
   "Canvas tools auto-start the local static canvas server and write canvas/.server.json with the dynamic URL and HTTP tool endpoint bearer token.",
   "For phone/mobile access to the exact same full Excalidraw UI, use buzzassist_canvas_tunnel_start/status/stop. This starts an ngrok Canvas Tunnel with a generated access URL; Remote Canvas is not required for same-UI access.",
-  "For Codex/Claude Desktop interactive UI, use render_buzzassist_canvas_widget. It returns a native MCP Apps widget that renders the BuzzAssist canvas directly, backed by the local canvas server, and can send follow-up instructions through the host bridge when supported.",
+  "For Codex and Claude Code interactive UI, open the local BUZZASSIST_CANVAS_URL in the host in-app browser/browser tool and use MCP tools for stable reads/writes. render_buzzassist_canvas_widget remains an experimental MCP Apps entrypoint only; do not use it for normal Codex or Claude Code work unless the user explicitly asks to test the widget.",
   "To attach selected canvas images/videos/SRT/XML into the current chat, use prepare_canvas_attachments or read_canvas_attachment_bundle. Do not rely on OS GUI paste automation for media attachments.",
 ].join(" ");
 
@@ -1470,7 +1470,7 @@ function toolDefinitions() {
     {
       name: TOOL_RENDER_BUZZASSIST_WIDGET,
       title: "Render BuzzAssist Canvas Widget",
-      description: "Open the native BuzzAssist MCP Apps widget for Codex or Claude Desktop. The widget renders the local BuzzAssist canvas directly, can start/check the phone tunnel, and can send follow-up instructions through the host bridge when supported.",
+      description: "Experimental MCP Apps widget for BuzzAssist. Use BUZZASSIST_CANVAS_URL in the host in-app browser for normal Codex and Claude Code work; call this only when the user explicitly asks to test the widget.",
       inputSchema: {
         type: "object",
         properties: {

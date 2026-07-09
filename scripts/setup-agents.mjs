@@ -392,8 +392,8 @@ async function refreshManagedPluginSource() {
         note: "Official open-source Excalidraw MCP App from excalidraw/excalidraw-mcp. Use for prompt-to-diagram Excalidraw generation and interactive MCP App rendering.",
       },
       buzzassist_mcp: {
-        title: "BuzzAssist Canvas Widget MCP",
-        description: "Render and control the native BuzzAssist Codex widget without opening a localhost page.",
+        title: "BuzzAssist Local Canvas MCP",
+        description: "Start and control the project-local BuzzAssist Excalidraw canvas.",
         command: process.execPath,
         args: [join(managedPluginRoot, "scripts", "start-mcp.mjs")],
         cwd: managedPluginRoot,
@@ -403,7 +403,7 @@ async function refreshManagedPluginSource() {
           EXCALIDRAW_PROJECT_DIR: projectDir,
           EXCALIDRAW_CANVAS_DIR: canvasDir,
         },
-        note: "Primary local MCP server. It auto-starts the local canvas server, writes canvas/.server.json, and renders the native BuzzAssist widget.",
+        note: "Primary local MCP server. It auto-starts the local canvas server and writes canvas/.server.json with the local canvas URL.",
       },
     },
   });
@@ -610,7 +610,7 @@ async function setupClaudeDesktop(pluginDir) {
   if (dryRun) console.log(`Would write ${configPath}`);
   else await writeJson(configPath, config);
 
-  console.log("Claude Desktop uses the native MCP Apps widget. Restart Claude Desktop, then call render_buzzassist_canvas_widget.");
+  console.log("Claude Desktop config was written. The native widget entrypoint is experimental; use the local canvas URL for normal work.");
   return { ok: true, configPath };
 }
 
@@ -732,11 +732,11 @@ async function setupAgent(agent, pluginDir) {
 }
 
 function targetIncludesWidgetHost() {
-  return targetAgents.includes("codex") || targetAgents.includes("claude-desktop");
+  return targetAgents.includes("claude-desktop");
 }
 
 function targetIncludesLocalBrowserHost() {
-  return targetAgents.some((agent) => ["claude", "cursor", "antigravity"].includes(agent));
+  return targetAgents.some((agent) => ["codex", "claude", "cursor", "antigravity"].includes(agent));
 }
 
 async function readDiscovery() {
@@ -903,14 +903,14 @@ async function main() {
   }
   if (targetIncludesWidgetHost()) {
     console.log("BUZZASSIST_WIDGET_TOOL=render_buzzassist_canvas_widget");
-    console.log("For Codex and Claude Desktop, open the native widget with render_buzzassist_canvas_widget. Do not open BUZZASSIST_CANVAS_URL for desktop unless the user explicitly asks for the fallback local browser.");
+    console.log("Native widget is experimental. Use BUZZASSIST_CANVAS_URL for normal desktop work unless the user explicitly asks to test the widget.");
   }
   if (discovery?.url) {
     console.log(`BUZZASSIST_CANVAS_URL=${discovery.url}`);
     console.log(`BUZZASSIST_CANVAS_CHECK=${canvasCheck?.ok ? "ok" : "needs-attention"}`);
     console.log(`BUZZASSIST_CANVAS_DISCOVERY=${join(canvasDir, ".server.json")}`);
     if (targetIncludesLocalBrowserHost()) {
-      console.log("For Claude Code, Cursor, or Antigravity, open BUZZASSIST_CANVAS_URL in the host in-app browser. Do not use the OS/default browser unless the user explicitly asks.");
+      console.log("For Codex, Claude Code, Cursor, or Antigravity, open BUZZASSIST_CANVAS_URL in the host in-app browser. Do not use the OS/default browser unless the user explicitly asks.");
     }
   }
   if (tunnelStatus?.publicUrl) {
