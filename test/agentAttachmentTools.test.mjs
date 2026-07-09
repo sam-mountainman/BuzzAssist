@@ -9,6 +9,7 @@ import {
   canvasAttachmentBundleToMcpResult,
   createCanvasAttachmentBundle,
 } from "../lib/canvasAttachmentBundle.mjs";
+import { createBuzzAssistWidgetHtml } from "../lib/buzzassistWidgetResource.mjs";
 
 class MemoryTransport {
   peer = null;
@@ -76,7 +77,7 @@ test("plugin MCP exposes a Codex and Claude Desktop widget entrypoint", async ()
   assert.match(mcpSource, /registerAppTool/);
   assert.match(mcpSource, /openai\/outputTemplate/);
   assert.match(mcpSource, /openai\/widgetAccessible/);
-  assert.match(widgetSource, /ui:\/\/widget\/buzzassist\/canvas\.html/);
+  assert.match(widgetSource, /ui:\/\/widget\/buzzassist\/canvas-inline\.html/);
   assert.match(widgetSource, /RESOURCE_MIME_TYPE/);
   assert.match(widgetSource, /text\/html;profile=mcp-app|BUZZASSIST_WIDGET_MIME_TYPE/);
   assert.match(widgetSource, /sendMessage/);
@@ -84,7 +85,9 @@ test("plugin MCP exposes a Codex and Claude Desktop widget entrypoint", async ()
   assert.match(widgetSource, /window\.buzzassistMcp = api/);
   assert.match(widgetSource, /api\.sendFollowUpMessage/);
   assert.match(widgetSource, /contentFromMessage\(message, prompt\)/);
-  assert.match(widgetSource, /<iframe/);
+  assert.match(widgetSource, /createBuzzAssistStaticCanvasWidgetHtml/);
+  assert.match(widgetSource, /createBuzzAssistWidgetLauncherHtml/);
+  assert.match(widgetSource, /BUZZASSIST_WIDGET_LAUNCHER/);
   assert.match(widgetSource, /buzzassist:sendFollowUpMessage/);
   assert.match(widgetSource, /prepare_canvas_attachments/);
   assert.match(widgetSource, /resource_link/);
@@ -93,6 +96,22 @@ test("plugin MCP exposes a Codex and Claude Desktop widget entrypoint", async ()
   assert.match(widgetSource, /buzzassist_canvas_tunnel_start/);
   assert.match(readme, /render_buzzassist_canvas_widget/);
   assert.match(readme, /Claude Codeはwidget描画を持たない/);
+});
+
+test("native widget defaults to the inlined canvas app instead of a localhost iframe shell", () => {
+  const previous = process.env.BUZZASSIST_WIDGET_LAUNCHER;
+  delete process.env.BUZZASSIST_WIDGET_LAUNCHER;
+  try {
+    const html = createBuzzAssistWidgetHtml({ version: "0.1.5" });
+    assert.match(html, /__BUZZASSIST_NATIVE_WIDGET__/);
+    assert.match(html, /__BUZZASSIST_SET_WIDGET_DATA__/);
+    assert.match(html, /window\.fetch/);
+    assert.doesNotMatch(html, /id="canvasFrame"/);
+    assert.ok(Buffer.byteLength(html) > 1024 * 1024, "default widget should inline the canvas app bundle");
+  } finally {
+    if (previous === undefined) delete process.env.BUZZASSIST_WIDGET_LAUNCHER;
+    else process.env.BUZZASSIST_WIDGET_LAUNCHER = previous;
+  }
 });
 
 test("MCP Apps host bridge receives canvas assets as message content blocks", async () => {

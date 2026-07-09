@@ -264,7 +264,7 @@ list_canvas_attachment_bundles
 
 Codex と Claude Desktop では、通常のローカルURLを直接開くのではなく、`render_buzzassist_canvas_widget` でMCP Apps widget内にキャンバス本体を表示します。
 
-このwidgetは `ui://widget/buzzassist/canvas.html` としてホスト内に表示されます。普通のWeb URLではありません。ローカルCanvasサーバーは裏側の実行基盤として起動しますが、Codex / Claude Desktop上ではキャンバスUI自体がwidget内に出ます。
+このwidgetは `ui://widget/buzzassist/canvas-inline.html` としてホスト内に表示されます。普通のWeb URLではありません。ローカルCanvasサーバーは裏側の実行基盤として起動しますが、Codex / Claude Desktop上ではキャンバスUI自体がwidget内に出ます。
 
 できること:
 
