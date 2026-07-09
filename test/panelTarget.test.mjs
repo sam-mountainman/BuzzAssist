@@ -53,6 +53,7 @@ test("selected canvas media exposes download controls and archives multi-select"
   assert.match(source, /async function writeImageAssetToClipboard\(asset\) \{/);
   assert.match(source, /function isNativeChatFileAsset\(asset\) \{/);
   assert.match(source, /const copySelectedCanvasAssets = useCallback\(async \(assets = \[\]\) => \{/);
+  assert.match(source, /items\.length > 1 \|\| items\.some\(isNativeChatFileAsset\)/);
   assert.match(source, /function archiveUrlForDownloadAssets\(assets = \[\]\) \{/);
   assert.match(source, /`\/api\/assets\/archive\?\$\{query\}`/);
   assert.match(source, /const selectedCanvasDownloadOverlays = \(\(\) => \{/);
@@ -77,6 +78,7 @@ test("selected canvas media exposes download controls and archives multi-select"
   assert.match(source, /setAgentAttachStatus\('attached'\)/);
   assert.match(source, /動画をチャットに添付しました/);
   assert.match(source, /チャットへ添付/);
+  assert.match(source, /selectedCanvasDownloadAssets\.length > 1 \|\| selectedCanvasDownloadAssets\.some\(isNativeChatFileAsset\)/);
   assert.match(source, /添付中\.\.\./);
   assert.match(source, /添付済/);
   assert.match(source, /copySelectedCanvasAssets\(selectedCanvasDownloadAssets\)/);

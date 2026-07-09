@@ -4018,7 +4018,7 @@ export default function App() {
     if (items.length === 0) return
     window.clearTimeout(agentAttachResetTimerRef.current)
     setAgentChatComposer(null)
-    const shouldAttachToChat = items.some(isNativeChatFileAsset)
+    const shouldAttachToChat = items.length > 1 || items.some(isNativeChatFileAsset)
     setAgentAttachStatus('preparing')
     setAgentAttachStatusText(shouldAttachToChat ? '添付中...' : 'コピー中...')
     try {
@@ -7555,14 +7555,14 @@ export default function App() {
         const downloadTitle = single
           ? `${selectedCanvasDownloadAssets[0]?.fileName || 'asset'} をダウンロード`
           : `${selectedCanvasDownloadAssets.length}件をZIPでダウンロード`
+        const shouldAttachSelectionToChat = selectedCanvasDownloadAssets.length > 1 || selectedCanvasDownloadAssets.some(isNativeChatFileAsset)
         const attachTitle = single
-          ? (selectedCanvasDownloadAssets.some(isNativeChatFileAsset)
+          ? (shouldAttachSelectionToChat
               ? `${selectedCanvasDownloadAssets[0]?.fileName || 'asset'} をチャットへ添付`
               : `${selectedCanvasDownloadAssets[0]?.fileName || 'asset'} をコピー`)
-          : (selectedCanvasDownloadAssets.some(isNativeChatFileAsset)
+          : (shouldAttachSelectionToChat
               ? `${selectedCanvasDownloadAssets.length}件をチャットへ添付`
               : `${selectedCanvasDownloadAssets.length}件をbundleとしてコピー`)
-        const shouldAttachSelectionToChat = selectedCanvasDownloadAssets.some(isNativeChatFileAsset)
         const attachDone = ['image-copied', 'bundle-copied', 'ready', 'ready-no-copy', 'queued', 'sent', 'attached'].includes(agentAttachStatus)
         const attachLabel = agentAttachStatus === 'ready-no-copy'
           ? '作成済'
