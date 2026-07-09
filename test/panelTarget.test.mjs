@@ -76,6 +76,8 @@ test("selected canvas media exposes download controls and archives multi-select"
   assert.match(source, /agentAttachStatus === 'image-copied'/);
   assert.match(source, /setAgentAttachStatus\('attached'\)/);
   assert.match(source, /動画をチャットに添付しました/);
+  assert.match(source, /チャットへ添付/);
+  assert.match(source, /添付中\.\.\./);
   assert.match(source, /添付済/);
   assert.match(source, /copySelectedCanvasAssets\(selectedCanvasDownloadAssets\)/);
   assert.match(source, /saveDownloadAssetsWithPicker\(selectedCanvasDownloadAssets\)/);

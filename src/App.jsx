@@ -4018,8 +4018,9 @@ export default function App() {
     if (items.length === 0) return
     window.clearTimeout(agentAttachResetTimerRef.current)
     setAgentChatComposer(null)
+    const shouldAttachToChat = items.some(isNativeChatFileAsset)
     setAgentAttachStatus('preparing')
-    setAgentAttachStatusText('コピー中...')
+    setAgentAttachStatusText(shouldAttachToChat ? '添付中...' : 'コピー中...')
     try {
       const single = items.length === 1 ? items[0] : null
       if (single && isClipboardImageAsset(single)) {
@@ -4032,7 +4033,7 @@ export default function App() {
           console.warn('image clipboard copy failed; falling back to attachment bundle:', error)
         }
       }
-      if (items.some(isNativeChatFileAsset)) {
+      if (shouldAttachToChat) {
         try {
           await attachAssetsToCodexChat(items)
           setAgentAttachStatus('attached')
@@ -7555,8 +7556,13 @@ export default function App() {
           ? `${selectedCanvasDownloadAssets[0]?.fileName || 'asset'} をダウンロード`
           : `${selectedCanvasDownloadAssets.length}件をZIPでダウンロード`
         const attachTitle = single
-          ? `${selectedCanvasDownloadAssets[0]?.fileName || 'asset'} をコピー`
-          : `${selectedCanvasDownloadAssets.length}件をbundleとしてコピー`
+          ? (selectedCanvasDownloadAssets.some(isNativeChatFileAsset)
+              ? `${selectedCanvasDownloadAssets[0]?.fileName || 'asset'} をチャットへ添付`
+              : `${selectedCanvasDownloadAssets[0]?.fileName || 'asset'} をコピー`)
+          : (selectedCanvasDownloadAssets.some(isNativeChatFileAsset)
+              ? `${selectedCanvasDownloadAssets.length}件をチャットへ添付`
+              : `${selectedCanvasDownloadAssets.length}件をbundleとしてコピー`)
+        const shouldAttachSelectionToChat = selectedCanvasDownloadAssets.some(isNativeChatFileAsset)
         const attachDone = ['image-copied', 'bundle-copied', 'ready', 'ready-no-copy', 'queued', 'sent', 'attached'].includes(agentAttachStatus)
         const attachLabel = agentAttachStatus === 'ready-no-copy'
           ? '作成済'
@@ -7568,7 +7574,7 @@ export default function App() {
           (agentChatComposer
             ? '送信内容を入力中'
             : agentAttachStatus === 'preparing' || agentAttachStatus === 'sending'
-            ? 'コピー中...'
+            ? (shouldAttachSelectionToChat ? '添付中...' : 'コピー中...')
             : agentAttachStatus === 'sent'
               ? 'チャットへ送信しました'
             : agentAttachStatus === 'attached'
