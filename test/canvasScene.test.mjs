@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import {
   insertExcalidrawImage,
@@ -23,11 +23,14 @@ const ONE_BY_ONE_PNG = Buffer.from(
 );
 
 test("resolveCanvasDir prefers explicit canvasDir", () => {
-  assert.equal(resolveCanvasDir({ canvasDir: "/tmp/custom-canvas", projectDir: "/tmp/project" }), "/tmp/custom-canvas");
+  assert.equal(
+    resolveCanvasDir({ canvasDir: "/tmp/custom-canvas", projectDir: "/tmp/project" }),
+    resolve("/tmp/custom-canvas"),
+  );
 });
 
 test("resolveCanvasDir maps projectDir to project canvas directory", () => {
-  assert.equal(resolveCanvasDir({ projectDir: "/tmp/project" }), "/tmp/project/canvas");
+  assert.equal(resolveCanvasDir({ projectDir: "/tmp/project" }), join(resolve("/tmp/project"), "canvas"));
 });
 
 test("writeCanvasFocusRequest stores a one-shot selection and viewport request", async () => {
