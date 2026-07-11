@@ -5,7 +5,7 @@ import {
 } from '@excalidraw/excalidraw'
 import '@excalidraw/excalidraw/index.css'
 import { generateKeyBetween } from 'fractional-indexing'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   IMAGE_MODEL_FAMILIES,
   MEDIA_ROUTES,
@@ -18,6 +18,7 @@ import {
   videoFamilyForModel
 } from '../lib/modelCatalog.mjs'
 import { estimateCreditsForJob } from '../lib/mediaCredits.mjs'
+import { getLovartImageSettings, getLovartVideoSettings } from '../lib/lovartModelSettings.mjs'
 import { providerIconDataUri } from './providerIcons.js'
 
 const CANVAS_ENDPOINT = '/api/canvas'
@@ -64,6 +65,10 @@ const SUBTITLE_CARD_WIDTH = 205
 const SUBTITLE_CARD_HEIGHT = 364
 const COLLAPSED_FREEDRAW_MAX_DIMENSION = 1
 const TEXT_ATTACHMENT_EXTENSIONS = new Set(['txt', 'md', 'markdown'])
+const VIDEO_FILE_EXTENSIONS = new Set(['avi', 'm4v', 'mkv', 'mov', 'mp4', 'webm'])
+const AUDIO_FILE_EXTENSIONS = new Set(['aac', 'flac', 'm4a', 'mp3', 'ogg', 'opus', 'wav'])
+const AUDIO_REFERENCE_ACCEPT = '.aac,.flac,.m4a,.mp3,.ogg,.opus,.wav,audio/aac,audio/flac,audio/mpeg,audio/ogg,audio/opus,audio/wav'
+const HERMES_GROK_SETUP_PROMPT = 'https://github.com/sam-mountainman/grok-cli-tools\nセットアップして'
 const VIDEO_POSTER_FALLBACK_DATA_URL =
   'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjgwIDcyMCI+PHJlY3Qgd2lkdGg9IjEyODAiIGhlaWdodD0iNzIwIiBmaWxsPSIjMTExODI3Ii8+PHBhdGggZD0iTTU2MCAyNTB2MjIwbDE5MC0xMTB6IiBmaWxsPSIjZmZmIiBvcGFjaXR5PSIuOSIvPjwvc3ZnPg=='
 const CANVAS_ASSET_PLACEHOLDER_DATA_URL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=='
@@ -105,6 +110,14 @@ function isNarrowCanvasViewport() {
 
 function isMemoryConstrainedCanvasRuntime() {
   return isTunnelCanvasRuntime() && (isTouchLikeDevice() || isNarrowCanvasViewport())
+}
+
+function isLocalMediaRoute(routeId) {
+  return routeId === 'codex' || routeId === 'hermes'
+}
+
+function isHermesSetupRequired(status) {
+  return Boolean(status && (!status.installed || status.session === 'logged-out'))
 }
 
 // Touch devices have no hover, so the desktop hover-to-play preview never
@@ -239,6 +252,9 @@ const DEFAULT_FRAME_FORM = {
   videoAspectRatio: '16:9',
   quality: 'auto',
   imageSize: '1K',
+  imageCount: 1,
+  imageVersion: '',
+  imageDetailRendering: false,
   duration: '5',
   resolution: '720p',
   imageReferences: [],
@@ -346,7 +362,16 @@ const IMAGE_ASPECTS = {
   '3:4': { baseWidth: 928, baseHeight: 1232 },
   '2:3': { baseWidth: 896, baseHeight: 1344 },
   '5:4': { baseWidth: 1280, baseHeight: 1024 },
-  '4:5': { baseWidth: 1024, baseHeight: 1280 }
+  '4:5': { baseWidth: 1024, baseHeight: 1280 },
+  // Wide banner / tall column ratios (Nano Banana 2 and Luma Uni-1).
+  '2:1': { baseWidth: 1440, baseHeight: 720 },
+  '1:2': { baseWidth: 720, baseHeight: 1440 },
+  '3:1': { baseWidth: 1728, baseHeight: 576 },
+  '1:3': { baseWidth: 576, baseHeight: 1728 },
+  '4:1': { baseWidth: 2048, baseHeight: 512 },
+  '1:4': { baseWidth: 512, baseHeight: 2048 },
+  '8:1': { baseWidth: 2944, baseHeight: 368 },
+  '1:8': { baseWidth: 368, baseHeight: 2944 }
 }
 
 const VIDEO_ASPECTS = {
@@ -360,11 +385,11 @@ const VIDEO_ASPECTS = {
   '21:9': { width: 378, height: 162 }
 }
 
-// Lovart-routed models: only what the API actually controls gets a
-// settings UI. Shared families reuse their BuzzAssist/local variant's
-// gating; Lovart-only models fall back to the generic baseline (aspect +
-// duration) because Lovart's OpenAPI takes tool selection + prompt text
-// only — model-specific knobs beyond that are not API-controllable.
+// Lovart-routed models get their settings from lib/lovartModelSettings.mjs
+// (per-model options mirroring the underlying model's fal.ai parameters,
+// delivered to Lovart as verified prompt hints). Non-Lovart routes keep
+// their structured-parameter gating below; shared families reuse their
+// BuzzAssist/local variant's gating.
 function resolveGatingImageModel(model) {
   if (!String(model || '').startsWith('lovart-')) return model
   const family = imageFamilyForModel(model)
@@ -383,6 +408,8 @@ const VIDEO_DURATION_CHOICES = {
 }
 
 function getVideoDurationChoices(model) {
+  const lovart = getLovartVideoSettings(model)
+  if (lovart) return lovart.durationChoices
   return VIDEO_DURATION_CHOICES[resolveGatingVideoModel(model)] ?? null
 }
 
@@ -453,30 +480,58 @@ function getImageQualityOptions(model) {
 }
 
 function getAvailableImageSizes(model) {
-  // Lovart's API cannot set an output size — the picker only shows on
-  // routes where size is a real parameter.
-  if (String(model || '').startsWith('lovart-')) return ['1K']
+  const lovart = getLovartImageSettings(model)
+  if (lovart) return lovart.sizes
   return IMAGE_MODEL_SIZES[resolveGatingImageModel(model)] ?? ['1K']
 }
 
-const MIDJOURNEY_ASPECT_RATIO_OPTIONS = ['16:9', '4:3', '1:1', '3:4', '9:16', '2:3', '3:2']
-
 function getAvailableImageAspectRatios(model) {
-  if (resolveGatingImageModel(model) === 'lovart-midjourney') return MIDJOURNEY_ASPECT_RATIO_OPTIONS
+  const lovart = getLovartImageSettings(model)
+  if (lovart) return lovart.aspects
   return isGrokImageModel(model) ? Object.keys(GROK_IMAGE_ASPECT_RATIO_OPTIONS) : Object.keys(IMAGE_ASPECTS)
 }
 
+// 複数枚生成の上限（Lovartルートのみ。1なら枚数UI非表示）。
+function getMaxImageCount(model) {
+  return getLovartImageSettings(model)?.maxImages ?? 1
+}
+
+// Midjourneyのモデルバージョン選択（v8.1/v7/niji/niji7）。他モデルはnull。
+function getImageVersionOptions(model) {
+  return getLovartImageSettings(model)?.versions ?? null
+}
+
+// Midjourneyの高精細レンダリングトグル。
+function supportsDetailRendering(model) {
+  return getLovartImageSettings(model)?.detailRendering === true
+}
+
+function getVideoResolutionOptions(model) {
+  const lovart = getLovartVideoSettings(model)
+  if (lovart) return lovart.resolutions ?? []
+  return supportsResolutionSelection(model) ? ['480p', '720p'] : []
+}
+
 function supportsResolutionSelection(model) {
-  if (String(model || '').startsWith('lovart-')) return false
+  const lovart = getLovartVideoSettings(model)
+  if (lovart) return (lovart.resolutions?.length ?? 0) > 1
   return isSeedanceModel(model) || isGrokVideoModel(model)
 }
 
 function supportsGenerateAudio(model) {
-  if (String(model || '').startsWith('lovart-')) return false
+  const lovart = getLovartVideoSettings(model)
+  if (lovart) return lovart.audio === 'toggle'
   return isSeedanceModel(model)
 }
 
+// Gemini Omni Flash などトグル不可・常時音声のモデル。
+function isAudioAlwaysOn(model) {
+  return getLovartVideoSettings(model)?.audio === 'always'
+}
+
 function getVideoAspectRatioOptions(model) {
+  const lovart = getLovartVideoSettings(model)
+  if (lovart) return lovart.aspects ?? []
   if (isSeedanceModel(model)) return SEEDANCE_VIDEO_ASPECT_RATIO_OPTIONS
   if (isGrokVideoModel(model)) return GROK_VIDEO_ASPECT_RATIO_OPTIONS
   return VIDEO_ASPECT_RATIO_OPTIONS
@@ -497,6 +552,8 @@ function getAvailableVideoModes(model, tab) {
 }
 
 function getVideoDurationRange(model) {
+  const lovart = getLovartVideoSettings(model)
+  if (lovart?.durationRange) return lovart.durationRange
   model = resolveGatingVideoModel(model)
   if (isSeedanceModel(model)) return { min: 4, max: 15, step: 1 }
   if (isGrokVideoModel(model)) return { min: 1, max: 15, step: 1 }
@@ -505,6 +562,12 @@ function getVideoDurationRange(model) {
 }
 
 function getAvailableVideoTabs(model) {
+  // Lovart models without reference support on fal (Seedance 1.5 Pro,
+  // Hailuo 2.3, Veo 3, Kling 2.6) get keyframe only.
+  const lovart = getLovartVideoSettings(model)
+  if (lovart) {
+    return lovart.maxReferenceImages > 0 || lovart.maxReferenceVideos > 0 ? ['keyframe', 'reference'] : ['keyframe']
+  }
   model = resolveGatingVideoModel(model)
   return ['keyframe', model === 'kling-v2-6' || model === 'kling-v3' ? 'motion' : 'reference']
 }
@@ -550,7 +613,23 @@ function normalizeVideoAspectRatioForModel(model, value) {
 }
 
 function supportsAudioReference(model) {
-  return model === 'seedance-2' || model === 'seedance-2-fast'
+  const lovart = getLovartVideoSettings(model)
+  if (lovart) return lovart.maxReferenceAudios > 0
+  const family = videoFamilyForModel(model)
+  return family?.id === 'seedance-2' || family?.id === 'seedance-2-fast'
+}
+
+// 参照素材の上限。Lovartモデルはfal.ai仕様準拠（NB系14/Seedream10/Flux9/…）、
+// それ以外は従来どおり3。
+function getImageReferenceLimit(model) {
+  return getLovartImageSettings(model)?.maxReferences ?? 3
+}
+
+function getVideoReferenceLimit(model, kind) {
+  const lovart = getLovartVideoSettings(model)
+  if (!lovart) return 3
+  const limit = kind === 'video' ? lovart.maxReferenceVideos : kind === 'audio' ? lovart.maxReferenceAudios : lovart.maxReferenceImages
+  return Math.max(1, limit)
 }
 
 function getVideoFrameSlotMediaKind(tab, target) {
@@ -560,6 +639,11 @@ function getVideoFrameSlotMediaKind(tab, target) {
 }
 
 function canUseVideoFrameTarget(model, tab, target) {
+  const lovart = getLovartVideoSettings(model)
+  if (lovart) {
+    if (tab === 'keyframe' && target === 'end') return lovart.endFrame !== false
+    return true
+  }
   if (!isGrokVideoModel(model)) return true
   if (tab === 'keyframe' && target === 'end') return false
   if (tab === 'reference' && target === 'start') return false
@@ -593,11 +677,20 @@ function getFileAssetKind(file) {
   const ext = fileExtensionFromName(file?.name)
   if (mimeType.startsWith('image/')) return 'image'
   if (mimeType.startsWith('video/')) return 'video'
+  if (VIDEO_FILE_EXTENSIONS.has(ext)) return 'video'
   if (mimeType.startsWith('audio/')) return 'audio'
+  if (AUDIO_FILE_EXTENSIONS.has(ext)) return 'audio'
   if (ext === 'xml' || mimeType === 'application/xml' || mimeType === 'text/xml') return 'xml'
   if (ext === 'srt' || mimeType === 'application/x-subrip') return 'srt'
   if (TEXT_ATTACHMENT_EXTENSIONS.has(ext) || mimeType === 'text/plain' || mimeType === 'text/markdown') return 'script'
   return ''
+}
+
+function isAudioReferenceUploadFile(file) {
+  const ext = fileExtensionFromName(file?.name)
+  if (VIDEO_FILE_EXTENSIONS.has(ext)) return false
+  if (AUDIO_FILE_EXTENSIONS.has(ext)) return true
+  return String(file?.type || '').toLowerCase().startsWith('audio/')
 }
 
 function isAttachableCanvasFile(file) {
@@ -605,6 +698,7 @@ function isAttachableCanvasFile(file) {
 }
 
 function getUploadTargetAccept(target) {
+  if (target === 'videoReferenceAudios') return AUDIO_REFERENCE_ACCEPT
   // Subtitle sources accept video too: ffmpeg extracts the audio track
   // server-side before transcription (desktop-app behavior).
   if (target === 'subtitleAudio') return 'audio/*,video/*'
@@ -661,6 +755,11 @@ async function saveUrlWithPicker(url, fileName = 'download', fallbackUrl = url) 
     try {
       const handle = await window.showSaveFilePicker({
         suggestedName,
+        // Always open in the OS Downloads folder (macOS and Windows).
+        // Chromium prefers the directory remembered for a picker `id` over
+        // startIn, so a fresh id per save keeps startIn winning every time.
+        id: `dl-${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`.slice(0, 32),
+        startIn: 'downloads',
         types: filePickerTypesForName(suggestedName)
       })
       const response = await canvasFetch(url)
@@ -707,6 +806,19 @@ function uniqueDownloadAssets(assets = []) {
   return items
 }
 
+function canvasAssetSelectionKey(assets = []) {
+  return assets
+    .map((asset) => {
+      const id = typeof asset?.id === 'string' ? asset.id : ''
+      const assetUrl = normalizeCanvasAssetUrl(asset?.assetUrl || asset?.url || '')
+      const fileName = canvasLeafFileName(asset?.fileName || asset?.name) || assetFileNameFromUrl(assetUrl) || ''
+      return `${id}\n${assetUrl}\n${fileName}`
+    })
+    .filter((key) => key !== '\n\n')
+    .sort()
+    .join('\n---\n')
+}
+
 function archiveUrlForDownloadAssets(assets = []) {
   const params = new URLSearchParams()
   for (const asset of assets) {
@@ -717,14 +829,44 @@ function archiveUrlForDownloadAssets(assets = []) {
   return query ? `/api/assets/archive?${query}` : ''
 }
 
-function saveDownloadAssetsWithPicker(assets = []) {
+// Downloads open the browser's native save dialog immediately (filename
+// pre-filled, 保存 to confirm) — same dialog as the silence-cut XML save
+// button. Browsers without showSaveFilePicker fall back to a plain download.
+async function saveDownloadAssetsWithPicker(assets = []) {
   const items = uniqueDownloadAssets(assets)
   if (items.length === 0) return false
-  if (items.length === 1) return saveAssetWithPicker(items[0].assetUrl, items[0].fileName)
+  if (items.length === 1) {
+    return saveAssetWithPicker(items[0].assetUrl, items[0].fileName)
+  }
   const archiveUrl = archiveUrlForDownloadAssets(items)
-  if (archiveUrl) return saveUrlWithPicker(archiveUrl, 'excalidraw-assets.zip', archiveUrl)
+  if (archiveUrl) {
+    return saveUrlWithPicker(archiveUrl, 'excalidraw-assets.zip', downloadUrlWithAttachment(archiveUrl))
+  }
   for (const item of items) triggerAssetDownload(item.assetUrl, item.fileName)
-  return false
+  return true
+}
+
+// Preferred download path for local operators: the dev server shows the OS
+// save panel itself with Downloads as the default location, because the
+// in-app browser ignores showSaveFilePicker's startIn hint (verified: the
+// hint is passed but the panel still opens elsewhere). A cancelled panel
+// means "do nothing"; tunnel/remote operators get a 403 here and fall back
+// to the browser-side picker/download.
+async function downloadAssetsViaServerDialog(assets = []) {
+  const items = uniqueDownloadAssets(assets)
+  if (items.length === 0) return false
+  try {
+    const response = await canvasFetch('/api/assets/save-dialog', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ assets: items })
+    })
+    const payload = await response.json().catch(() => ({}))
+    if (response.ok && (payload.ok || payload.cancelled)) return Boolean(payload.ok)
+  } catch (error) {
+    console.warn('server save dialog failed:', error)
+  }
+  return saveDownloadAssetsWithPicker(assets)
 }
 
 async function createAgentAttachmentBundle(assets = []) {
@@ -748,50 +890,67 @@ async function createAgentAttachmentBundle(assets = []) {
   return { ...payload, prompt, copied }
 }
 
-async function attachAssetsToCodexChat(assets = []) {
+async function copyAssetFilesToSystemClipboard(assets = []) {
   const items = uniqueDownloadAssets(assets)
-  if (items.length === 0) throw new Error('添付できるアセットがありません。')
-  const response = await canvasFetch('/api/chat/send', {
+  if (items.length === 0) throw new Error('コピーできるアセットがありません。')
+  const response = await canvasFetch('/api/assets/clipboard', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      app: 'codex',
-      text: '',
-      assetItems: items,
-      autoSend: false
-    })
+    body: JSON.stringify({ assets: items })
   })
   const payload = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(payload.error || `Codexへの添付に失敗しました (${response.status})`)
-  if (!payload.attached) throw new Error(payload.error || 'Codexへファイルを添付できませんでした。')
+  if (!response.ok || !payload.copied) {
+    throw new Error(payload.error || `ファイルのコピーに失敗しました (${response.status})`)
+  }
   return { ...payload, items }
 }
 
 async function writeTextToClipboard(text) {
   const value = String(text ?? '')
   if (!value) return
+  let systemCopyError = null
+  try {
+    const response = await canvasFetch('/api/text/clipboard', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: value })
+    })
+    const payload = await response.json().catch(() => ({}))
+    if (response.ok && payload.copied) return
+    systemCopyError = new Error(payload.error || `システムクリップボードへのコピーに失敗しました (${response.status})`)
+  } catch (error) {
+    systemCopyError = error
+  }
+  let browserCopyError = null
   try {
     if (navigator.clipboard?.writeText) {
       await withTimeout(navigator.clipboard.writeText(value), 1500, 'クリップボードへのコピーが応答しませんでした。')
       return
     }
-  } catch {
+  } catch (error) {
+    browserCopyError = error
     // Fall through to the legacy selection-based copy path.
   }
-  const textarea = document.createElement('textarea')
-  textarea.value = value
-  textarea.setAttribute('readonly', '')
-  textarea.style.position = 'fixed'
-  textarea.style.left = '-9999px'
-  textarea.style.top = '0'
-  document.body.appendChild(textarea)
-  textarea.focus()
-  textarea.select()
   try {
-    if (!document.execCommand?.('copy')) throw new Error('copy command returned false')
-  } finally {
-    textarea.remove()
+    const textarea = document.createElement('textarea')
+    textarea.value = value
+    textarea.setAttribute('readonly', '')
+    textarea.style.position = 'fixed'
+    textarea.style.left = '-9999px'
+    textarea.style.top = '0'
+    document.body.appendChild(textarea)
+    textarea.focus()
+    textarea.select()
+    try {
+      if (!document.execCommand?.('copy')) throw new Error('copy command returned false')
+      return
+    } finally {
+      textarea.remove()
+    }
+  } catch (error) {
+    browserCopyError = error
   }
+  throw new Error(systemCopyError?.message || browserCopyError?.message || 'クリップボードへのコピーに失敗しました。')
 }
 
 function isClipboardImageAsset(asset) {
@@ -1071,15 +1230,26 @@ function LovartGeneratorToolIcon() {
 // with NO programmatic input.click() — which some webviews block, making
 // "アップロード" appear to do nothing. onOpen runs on pointer-down (before the
 // dialog) to remember the target frame; onChange gets the file input event.
-function FileUploadLabel({ accept, multiple = false, className = '', title, onOpen, onChange, children }) {
+function FileUploadLabel({ accept, multiple = false, className = '', title, onOpen, onChange, children, ...labelProps }) {
+  const openNotifiedRef = useRef(false)
+  const notifyOpen = () => {
+    if (openNotifiedRef.current) return
+    openNotifiedRef.current = true
+    onOpen?.()
+  }
+  const finishPicker = (event) => {
+    openNotifiedRef.current = false
+    onChange?.(event)
+  }
   return (
     <label
+      {...labelProps}
       className={className}
       title={title}
       // border-box: <label> defaults to content-box (buttons are border-box),
       // so width:100% + padding would overflow the menu without this.
       style={{ position: 'relative', boxSizing: 'border-box', overflow: 'hidden' }}
-      onPointerDown={(event) => { event.stopPropagation(); onOpen?.() }}
+      onPointerDown={(event) => { event.stopPropagation(); notifyOpen() }}
     >
       {/* The input overlays the label, so a tap IS a native file-input click —
           no programmatic .click() that embedded webviews may block. */}
@@ -1088,8 +1258,9 @@ function FileUploadLabel({ accept, multiple = false, className = '', title, onOp
         accept={accept}
         multiple={multiple}
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', margin: 0, padding: 0, opacity: 0, cursor: 'pointer' }}
-        onClick={(event) => { event.stopPropagation(); onOpen?.() }}
-        onChange={onChange}
+        onClick={(event) => { event.stopPropagation(); notifyOpen() }}
+        onChange={finishPicker}
+        onCancel={finishPicker}
       />
       {children}
     </label>
@@ -1241,6 +1412,15 @@ function AttachIcon({ size = 13 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M21.4 11.6l-8.5 8.5a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 1 1-2.8-2.8l8.5-8.5" />
+    </svg>
+  )
+}
+
+function RefineSparkleIcon({ size = 15 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z" />
+      <path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z" />
     </svg>
   )
 }
@@ -1727,6 +1907,21 @@ async function hydrateSceneAssetBackedFiles(scene, options = {}) {
   return { ...scene, files }
 }
 
+// 生成完了直後のシーンに含まれる「生成結果」画像のfileIdを、置換元フレーム
+// （codexAnchorElementId）から特定する。適用前に先行ハイドレートすることで
+// 灰色フレームを見せずに結果を即表示するために使う。
+function generatedResultFileIds(scene, anchorIds) {
+  const fileIds = new Set()
+  if (!anchorIds || anchorIds.size === 0) return fileIds
+  for (const element of scene?.elements ?? []) {
+    if (element?.type !== 'image' || element.isDeleted || !element.fileId) continue
+    if (element.customData?.codexMediaKind === 'video') continue
+    const anchor = element.customData?.codexAnchorElementId
+    if (anchor && anchorIds.has(anchor)) fileIds.add(element.fileId)
+  }
+  return fileIds
+}
+
 async function hydrateSceneAssetBackedFilesWithTimeout(scene, options = {}, timeoutMs = 1200) {
   let timeoutId = 0
   try {
@@ -1832,6 +2027,70 @@ function createScene(elements, appState, files) {
     appState: serializableAppState(appState),
     files: normalizedFiles
   }
+}
+
+// Element-drag fast path detector: returns the uniform {dx, dy} scene-space
+// delta plus the moved element ids when the ONLY change since the last
+// overlay rebuild is that some elements moved by one identical delta (same
+// size/angle, everything else byte-stable). This covers dragging a selection
+// together with its grouped companions — video label elements, generator
+// frame members — which move without being selected themselves. Resize,
+// rotate, alt-duplicate, or any other edit returns null and takes the full
+// rebuild path.
+function detectUniformSelectionDrag(elements, appState, baseline) {
+  const selected = appState.selectedElementIds || {}
+  const selectedIds = []
+  for (const key in selected) {
+    if (selected[key]) selectedIds.push(key)
+  }
+  if (selectedIds.length === 0) return null
+  if (selectedIds.slice().sort().join(',') !== baseline.selectionKey) return null
+  if (elements.length !== baseline.geometry.size) return null
+  let dx = null
+  let dy = null
+  const movedIds = []
+  for (const element of elements) {
+    const base = baseline.geometry.get(element.id)
+    if (!base) return null
+    if (element.width !== base.width || element.height !== base.height || (element.angle || 0) !== base.angle) return null
+    const elementDx = element.x - base.x
+    const elementDy = element.y - base.y
+    if (elementDx === 0 && elementDy === 0) {
+      // Stationary elements must be untouched — a version bump without a
+      // position change means some other property was edited.
+      if ((element.version || 0) !== base.version) return null
+      continue
+    }
+    if (dx === null) {
+      dx = elementDx
+      dy = elementDy
+    } else if (Math.abs(elementDx - dx) > 0.001 || Math.abs(elementDy - dy) > 0.001) {
+      return null
+    }
+    movedIds.push(element.id)
+  }
+  // A zero delta is a plain click — let the slow path run its click logic.
+  if (dx === null) return null
+  return { dx, dy, movedIds }
+}
+
+// Cheap per-onChange signature of scene content + selection + zoom (NOT
+// scroll). When two consecutive onChange calls share a signature but scroll
+// moved, the change is a pure viewport pan and the overlay layer can be
+// translated with one CSS transform instead of rebuilding every overlay and
+// re-rendering React on each frame.
+function viewportPanSignature(elements, appState, zoomValue) {
+  let v = elements.length >>> 0
+  for (let i = 0; i < elements.length; i += 1) {
+    const el = elements[i]
+    v = ((v * 31) + (el.version || 0) + (el.isDeleted ? 1 : 0)) >>> 0
+  }
+  const selected = appState.selectedElementIds || {}
+  let sel = ''
+  for (const key in selected) {
+    if (selected[key]) sel += `${key},`
+  }
+  return `${v}|${sel}|${zoomValue}`
 }
 
 // Stable fingerprint of a scene's content (elements + files), independent of
@@ -2268,6 +2527,10 @@ function isCanvasAttachableElement(element) {
   )
 }
 
+function isCanvasShortcutCloneableElement(element) {
+  return Boolean(!element?.isDeleted && (isGeneratorFrame(element) || isCanvasAttachableElement(element)))
+}
+
 function isPanelMediaTargetElement(element) {
   return Boolean(!element?.isDeleted && isGeneratedResult(element))
 }
@@ -2391,10 +2654,10 @@ function normalizeAssetList(value) {
       const displayURL = url || path || ''
       const rawThumbnail = typeof item.thumbnail === 'string' ? item.thumbnail : ''
       const thumbnail = rawThumbnail.startsWith('data:image/')
-        ? displayURL || rawThumbnail
+        ? rawThumbnail
         : rawThumbnail && !rawThumbnail.startsWith('data:')
         ? item.thumbnail
-        : displayURL
+        : ''
       return {
         ...item,
         dataURL: '',
@@ -2742,6 +3005,83 @@ function isRenderableVideoPosterDataURL(dataURL) {
   return typeof dataURL === 'string' && dataURL.startsWith('data:image/')
 }
 
+function assetPreviewLookupKeys(value) {
+  if (typeof value !== 'string') return []
+  const raw = value.trim()
+  if (!raw || raw.startsWith('data:') || raw.startsWith('blob:')) return []
+  const keys = new Set()
+  const normalizedAssetUrl = normalizeCanvasAssetUrl(raw)
+  if (normalizedAssetUrl) {
+    keys.add(normalizedAssetUrl.split('?')[0])
+  }
+  const withoutQuery = raw.split('?')[0].split('#')[0]
+  if (withoutQuery) keys.add(withoutQuery)
+  const leaf = canvasLeafFileName(raw)
+  if (leaf) {
+    keys.add(leaf)
+    keys.add(`${CANVAS_ASSETS_ROUTE}${encodeURIComponent(leaf)}`)
+  }
+  return Array.from(keys)
+}
+
+function isVideoFileReference(value) {
+  if (typeof value !== 'string') return false
+  return /\.(mp4|m4v|mov|webm|avi|mkv)(?:[?#].*)?$/i.test(value.trim())
+}
+
+function buildVideoPosterByAssetUrl(scene = {}) {
+  const map = new Map()
+  const files = scene.files ?? {}
+  for (const element of scene.elements ?? []) {
+    if (!isCanvasVideoElement(element)) continue
+    const file = element.fileId ? files[element.fileId] : null
+    const poster = isRenderableVideoPosterDataURL(file?.dataURL) ? file.dataURL : ''
+    if (!poster) continue
+    const customData = element.customData ?? {}
+    const candidates = [
+      assetUrlFromElement(element),
+      customData.generatorAssetUrl,
+      customData.codexAssetPath,
+      customData.generatorAssetPath,
+      customData.codexFileName,
+      file?.name
+    ]
+    for (const candidate of candidates) {
+      for (const key of assetPreviewLookupKeys(candidate)) {
+        if (!map.has(key)) map.set(key, poster)
+      }
+    }
+  }
+  return map
+}
+
+function videoPosterForAsset(asset, posterByAssetUrl) {
+  if (!posterByAssetUrl || typeof posterByAssetUrl.get !== 'function') return ''
+  const candidates = [asset?.url, asset?.path, asset?.thumbnail, asset?.name]
+  for (const candidate of candidates) {
+    for (const key of assetPreviewLookupKeys(candidate)) {
+      const poster = posterByAssetUrl.get(key)
+      if (isRenderableVideoPosterDataURL(poster)) return poster
+    }
+  }
+  return ''
+}
+
+function assetPreviewImageSrc(asset, posterByAssetUrl = null) {
+  const thumbnail = typeof asset?.thumbnail === 'string' ? asset.thumbnail : ''
+  if (isRenderableVideoPosterDataURL(thumbnail)) return thumbnail
+  const dataURL = typeof asset?.dataURL === 'string' ? asset.dataURL : ''
+  if (isRenderableVideoPosterDataURL(dataURL)) return dataURL
+  if (asset?.kind === 'video') {
+    const poster = videoPosterForAsset(asset, posterByAssetUrl)
+    if (poster) return poster
+    if (thumbnail && !thumbnail.startsWith('data:') && !isVideoFileReference(thumbnail)) return thumbnail
+    return VIDEO_POSTER_FALLBACK_DATA_URL
+  }
+  if (thumbnail && !thumbnail.startsWith('data:')) return thumbnail
+  return typeof asset?.url === 'string' ? asset.url : ''
+}
+
 function formatPlaybackDuration(seconds) {
   const value = Number(seconds)
   if (!Number.isFinite(value) || value <= 0) return ''
@@ -2774,7 +3114,7 @@ function assetReferenceFromElement(element, files = {}) {
     path,
     url,
     dataURL: kind === 'image' ? dataURL : '',
-    thumbnail: previewDataURL || url,
+    thumbnail: previewDataURL || (kind === 'video' ? '' : url),
     duration: kind === 'video' ? Number(customData.codexVideoDuration) || 0 : Number(customData.codexAssetDuration) || undefined,
     pixelWidth: pixelSize.width,
     pixelHeight: pixelSize.height
@@ -2887,6 +3227,10 @@ function frameFormFromElement(element) {
     aspectRatio: customData.generatorAspectRatio || customData.codexGenerationAspectRatio || DEFAULT_FRAME_FORM.aspectRatio,
     videoAspectRatio: customData.videoAspectRatio || customData.codexGenerationAspectRatio || DEFAULT_FRAME_FORM.videoAspectRatio,
     quality: customData.generatorImageQuality || customData.codexGenerationQuality || DEFAULT_FRAME_FORM.quality,
+    imageSize: customData.generatorImageSize || DEFAULT_FRAME_FORM.imageSize,
+    imageCount: clamp(Math.round(finiteNumberOr(customData.generatorImageCount, DEFAULT_FRAME_FORM.imageCount)), 1, 6),
+    imageVersion: typeof customData.generatorImageVersion === 'string' ? customData.generatorImageVersion : DEFAULT_FRAME_FORM.imageVersion,
+    imageDetailRendering: customData.generatorImageDetailRendering === true,
     duration: customData.videoDuration || customData.codexGenerationDuration || DEFAULT_FRAME_FORM.duration,
     resolution: customData.videoResolution || customData.codexGenerationResolution || DEFAULT_FRAME_FORM.resolution,
     imageReferences,
@@ -3006,21 +3350,24 @@ function frameCustomDataFromForm(kind, form) {
         generatorModel: form.imageModel,
         generatorAspectRatio: form.aspectRatio,
         generatorImageQuality: form.quality,
-        generatorImageSize: '1K',
+        generatorImageSize: form.imageSize || '1K',
+        generatorImageCount: form.imageCount || 1,
+        generatorImageVersion: form.imageVersion || '',
+        generatorImageDetailRendering: form.imageDetailRendering === true,
         generatorReferenceImages: normalizeAssetList(form.imageReferences)
       }
 }
 
 function mergeAssetIntoForm(form, target, asset) {
-  if (target === 'imageReferences') return { ...form, imageReferences: [...normalizeAssetList(form.imageReferences), asset].slice(-3) }
+  if (target === 'imageReferences') return { ...form, imageReferences: [...normalizeAssetList(form.imageReferences), asset].slice(-getImageReferenceLimit(form.imageModel)) }
   if (target === 'videoStartFrame') return { ...form, videoStartFrame: asset }
   if (target === 'videoEndFrame') return { ...form, videoEndFrame: asset }
-  if (target === 'videoReferenceVideos') return { ...form, videoReferenceVideos: [...normalizeAssetList(form.videoReferenceVideos), asset].slice(-3) }
-  if (target === 'videoReferenceAudios') return { ...form, videoReferenceAudios: [...normalizeAssetList(form.videoReferenceAudios), asset].slice(-3) }
+  if (target === 'videoReferenceVideos') return { ...form, videoReferenceVideos: [...normalizeAssetList(form.videoReferenceVideos), asset].slice(-getVideoReferenceLimit(form.videoModel, 'video')) }
+  if (target === 'videoReferenceAudios') return { ...form, videoReferenceAudios: [...normalizeAssetList(form.videoReferenceAudios), asset].slice(-getVideoReferenceLimit(form.videoModel, 'audio')) }
   if (target === 'subtitleAudio') return { ...form, subtitleAudio: asset }
   if (target === 'subtitleScript') return { ...form, subtitleScriptText: String(asset?.text || '').trim(), subtitleScriptName: asset?.name || 'script.txt' }
   if (target === 'silenceCutVideo') return { ...form, silenceCutVideo: asset }
-  return { ...form, videoReferenceImages: [...normalizeAssetList(form.videoReferenceImages), asset].slice(-3) }
+  return { ...form, videoReferenceImages: [...normalizeAssetList(form.videoReferenceImages), asset].slice(-getVideoReferenceLimit(form.videoModel, 'image')) }
 }
 
 function snapshotSelectedGeneratedResult(result) {
@@ -3377,6 +3724,7 @@ function SubtitleCanvasOverlay({ overlay, scrollOffset }) {
   return (
     <div
       className="lovart-subtitle-preview-overlay"
+      data-overlay-anchor={overlay.id}
       style={{
         left: `${overlay.left}px`,
         top: `${overlay.top}px`,
@@ -3512,6 +3860,7 @@ function CanvasImagePreviewOverlay({ image }) {
   return (
     <div
       className="lovart-image-preview-overlay"
+      data-overlay-anchor={image.id}
       style={{
         left: `${image.left}px`,
         top: `${image.top}px`,
@@ -3622,7 +3971,7 @@ function VideoCanvasOverlay({ video, isHovered, onExpand }) {
   // mirroring Youtube-AGI's videoLayer (z1) / overlay portal (z3) split.
   return (
     <>
-    <div className="lovart-video-playback-overlay" style={placementStyle} ref={containerRef}>
+    <div className="lovart-video-playback-overlay" data-overlay-anchor={video.id} style={placementStyle} ref={containerRef}>
       {isRenderableVideoPosterDataURL(video.posterDataURL) ? (
         <img className="lovart-video-playback-media" src={video.posterDataURL} draggable={false} alt="" />
       ) : null}
@@ -3844,6 +4193,45 @@ function fittedGeneratorZoom(kind, size, viewportWidth, viewportHeight, desiredZ
   return Math.max(0.2, Math.min(desiredZoom, fit))
 }
 
+// Resize a generator around its existing center, then keep the resized frame
+// and the prompt panel below it inside the current viewport. Aspect-ratio
+// changes must never make the frame grow from its top-left corner.
+function centeredGeneratorResize(frame, size, appState, kind) {
+  const centerX = (Number(frame.x) || 0) + (Number(frame.width) || 0) / 2
+  const centerY = (Number(frame.y) || 0) + (Number(frame.height) || 0) / 2
+  const x = centerX - size.width / 2
+  const y = centerY - size.height / 2
+  const viewportWidth = Number(appState?.width) || 0
+  const viewportHeight = Number(appState?.height) || 0
+  const currentZoom = Number(appState?.zoom?.value ?? appState?.zoom) || 1
+  if (viewportWidth <= 0 || viewportHeight <= 0) {
+    return { x, y, appState }
+  }
+
+  const zoom = fittedGeneratorZoom(kind, size, viewportWidth, viewportHeight, currentZoom)
+  const oldCenterScreenX = (centerX + (Number(appState.scrollX) || 0)) * currentZoom
+  const oldCenterScreenY = (centerY + (Number(appState.scrollY) || 0)) * currentZoom
+  const halfWidth = (size.width * zoom) / 2
+  const halfHeight = (size.height * zoom) / 2
+  const minCenterX = GENERATOR_FRAME_EDGE_MARGIN + halfWidth
+  const maxCenterX = viewportWidth - GENERATOR_FRAME_EDGE_MARGIN - halfWidth
+  const minCenterY = GENERATOR_FRAME_TOP_RESERVE + halfHeight + 8
+  const maxCenterY = viewportHeight - generatorPanelReserveFor(kind) - halfHeight - 8
+  const targetCenterX = clamp(oldCenterScreenX, minCenterX, Math.max(minCenterX, maxCenterX))
+  const targetCenterY = clamp(oldCenterScreenY, minCenterY, Math.max(minCenterY, maxCenterY))
+
+  return {
+    x,
+    y,
+    appState: {
+      ...appState,
+      zoom: { ...(typeof appState.zoom === 'object' ? appState.zoom : {}), value: zoom },
+      scrollX: targetCenterX / zoom - centerX,
+      scrollY: targetCenterY / zoom - centerY
+    }
+  }
+}
+
 function frameSizeFor(kind, form) {
   if (kind === 'video') return VIDEO_ASPECTS[form.videoAspectRatio] ?? VIDEO_ASPECTS['16:9']
   if (kind === 'subtitle') return { width: 205, height: 364 }
@@ -3896,15 +4284,22 @@ export default function App() {
   const [subtitleScrollOffsets, setSubtitleScrollOffsets] = useState({})
   const [managedSelectionActive, setManagedSelectionActive] = useState(false)
   const [bulkDownloading, setBulkDownloading] = useState(false)
+  // Synchronous double-click guard: React state updates too late to stop a
+  // rapid second click from opening a second folder dialog.
+  const bulkDownloadInFlightRef = useRef(false)
   const [agentAttachStatus, setAgentAttachStatus] = useState('')
   const [agentAttachStatusText, setAgentAttachStatusText] = useState('')
   const agentAttachResetTimerRef = useRef(0)
+  const agentAttachTargetKeyRef = useRef('')
+  const agentAttachCopyTokenRef = useRef(0)
   const [agentChatComposer, setAgentChatComposer] = useState(null)
   const agentChatInputRef = useRef(null)
   const [lovartAuth, setLovartAuth] = useState(null)
   const [lovartKeySaving, setLovartKeySaving] = useState(false)
   const [lovartKeyEditing, setLovartKeyEditing] = useState(false)
   const [hermesStatus, setHermesStatus] = useState(null)
+  const [hermesSetupDialog, setHermesSetupDialog] = useState(null)
+  const [hermesSetupChecking, setHermesSetupChecking] = useState(false)
   const [chatSendStatus, setChatSendStatus] = useState('')
 
   // Bridge to the local Claude Code / Codex app. Files attach natively via
@@ -3967,6 +4362,66 @@ export default function App() {
     }
   }, [])
 
+  const copyHermesGrokSetupPrompt = useCallback(async () => {
+    setChatSendStatus('sending')
+    try {
+      await writeTextToClipboard(HERMES_GROK_SETUP_PROMPT)
+      setChatSendStatus('setup-copied')
+    } catch (error) {
+      console.warn('Hermes setup prompt copy failed:', error)
+      setChatSendStatus('error')
+    } finally {
+      window.setTimeout(() => setChatSendStatus(''), 3200)
+    }
+  }, [])
+
+  const handleHermesSetupPromptPointerDown = useCallback((event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    copyHermesGrokSetupPrompt()
+  }, [copyHermesGrokSetupPrompt])
+
+  const openHermesSetupDialog = useCallback((status) => {
+    const installed = Boolean(status?.installed)
+    setOpenMenu(null)
+    setGenerationError('')
+    setHermesSetupDialog({
+      installed,
+      session: status?.session || 'logged-out',
+      error: status?.error || '',
+      title: installed ? 'Grokにログイン' : 'Grok CLIをセットアップ',
+      message: installed
+        ? '実行先Grokを使うには、`grok login` でxAIにログインしてください。'
+        : '実行先Grokを使うには、Grok CLI Toolsのセットアップが必要です。'
+    })
+  }, [])
+
+  const closeHermesSetupDialog = useCallback(() => {
+    setHermesSetupDialog(null)
+  }, [])
+
+  const refreshHermesStatus = useCallback(async () => {
+    setHermesSetupChecking(true)
+    try {
+      const response = await canvasFetch('/api/hermes/status')
+      const status = await response.json().catch(() => ({}))
+      setHermesStatus(status)
+      if (isHermesSetupRequired(status)) {
+        openHermesSetupDialog(status)
+        return false
+      }
+      setHermesSetupDialog(null)
+      return true
+    } catch (error) {
+      const status = { installed: false, session: 'logged-out', error: error.message }
+      setHermesStatus(status)
+      openHermesSetupDialog(status)
+      return false
+    } finally {
+      setHermesSetupChecking(false)
+    }
+  }, [openHermesSetupDialog])
+
   useEffect(() => {
     if (!agentChatComposer) return
     const id = window.requestAnimationFrame(() => {
@@ -3979,6 +4434,7 @@ export default function App() {
   const scheduleAgentAttachStatusReset = useCallback((delay = 2600) => {
     window.clearTimeout(agentAttachResetTimerRef.current)
     agentAttachResetTimerRef.current = window.setTimeout(() => {
+      agentAttachTargetKeyRef.current = ''
       setAgentAttachStatus('')
       setAgentAttachStatusText('')
     }, delay)
@@ -3987,6 +4443,28 @@ export default function App() {
   useEffect(() => () => {
     window.clearTimeout(agentAttachResetTimerRef.current)
   }, [])
+
+  const selectedCanvasCopyTargetKey = useMemo(() => canvasAssetSelectionKey([
+    ...selectedImageOverlays.filter((item) => item.isSelected && item.assetUrl),
+    ...subtitlePreviewOverlays.filter((overlay) => overlay.isSelected && overlay.assetUrl),
+    ...frameOverlays
+      .filter((overlay) => overlay.isSelected && overlay.kind === 'silenceCut' && overlay.outputAsset?.url)
+      .map((overlay) => ({
+        id: overlay.id,
+        assetUrl: overlay.outputAsset.url,
+        fileName: overlay.outputAsset.name || assetFileNameFromUrl(overlay.outputAsset.url) || 'jetcut.xml'
+      }))
+  ]), [frameOverlays, selectedImageOverlays, subtitlePreviewOverlays])
+
+  useEffect(() => {
+    const copiedTargetKey = agentAttachTargetKeyRef.current
+    if (!copiedTargetKey || copiedTargetKey === selectedCanvasCopyTargetKey) return
+    agentAttachCopyTokenRef.current += 1
+    agentAttachTargetKeyRef.current = ''
+    window.clearTimeout(agentAttachResetTimerRef.current)
+    setAgentAttachStatus('')
+    setAgentAttachStatusText('')
+  }, [selectedCanvasCopyTargetKey])
 
   const sendAgentChatComposer = useCallback(async () => {
     const composer = agentChatComposer
@@ -4044,36 +4522,44 @@ export default function App() {
   const copySelectedCanvasAssets = useCallback(async (assets = []) => {
     const items = uniqueDownloadAssets(assets)
     if (items.length === 0) return
+    const targetKey = canvasAssetSelectionKey(assets)
+    const copyToken = agentAttachCopyTokenRef.current + 1
+    agentAttachCopyTokenRef.current = copyToken
+    agentAttachTargetKeyRef.current = targetKey
+    const isCurrentCopyTarget = () => (
+      agentAttachCopyTokenRef.current === copyToken &&
+      agentAttachTargetKeyRef.current === targetKey
+    )
     window.clearTimeout(agentAttachResetTimerRef.current)
     setAgentChatComposer(null)
-    const shouldAttachToChat = items.length > 1 || items.some(isNativeChatFileAsset)
     setAgentAttachStatus('preparing')
-    setAgentAttachStatusText(shouldAttachToChat ? '添付中...' : 'コピー中...')
+    setAgentAttachStatusText('コピー中...')
     try {
       const single = items.length === 1 ? items[0] : null
       if (single && isClipboardImageAsset(single)) {
         try {
           await withTimeout(writeImageAssetToClipboard(single), 2500, '画像の実体コピーが応答しませんでした。')
+          if (!isCurrentCopyTarget()) return
           setAgentAttachStatus('image-copied')
           setAgentAttachStatusText('画像をコピーしました')
           return
         } catch (error) {
-          console.warn('image clipboard copy failed; falling back to attachment bundle:', error)
+          console.warn('image clipboard copy failed; falling back to file clipboard:', error)
         }
       }
-      if (shouldAttachToChat) {
-        try {
-          await attachAssetsToCodexChat(items)
-          setAgentAttachStatus('attached')
-          setAgentAttachStatusText(single && isClipboardVideoAsset(single)
-            ? '動画をチャットに添付しました'
-            : `${items.length}件をチャットに添付しました`)
-          return
-        } catch (error) {
-          console.warn('codex file attachment failed; falling back to attachment bundle:', error)
-        }
+      try {
+        const copied = await copyAssetFilesToSystemClipboard(items)
+        if (!isCurrentCopyTarget()) return
+        setAgentAttachStatus('file-copied')
+        setAgentAttachStatusText(copied.fileCount === 1
+          ? `${single?.fileName || 'ファイル'}をコピーしました`
+          : `${copied.fileCount || items.length}件をコピーしました`)
+        return
+      } catch (error) {
+        console.warn('file clipboard copy failed; falling back:', error)
       }
       const result = await createAgentAttachmentBundle(items)
+      if (!isCurrentCopyTarget()) return
       if (result.copied) {
         setAgentAttachStatus('bundle-copied')
         setAgentAttachStatusText(single && isClipboardVideoAsset(single)
@@ -4084,11 +4570,12 @@ export default function App() {
         setAgentAttachStatusText('bundleを作成しました')
       }
     } catch (error) {
+      if (!isCurrentCopyTarget()) return
       console.warn('canvas asset clipboard copy failed:', error)
       setAgentAttachStatus('error')
       setAgentAttachStatusText(error.message || 'コピーできませんでした')
     } finally {
-      scheduleAgentAttachStatusReset(2200)
+      if (isCurrentCopyTarget()) scheduleAgentAttachStatusReset(3200)
     }
   }, [scheduleAgentAttachStatusReset])
 
@@ -4145,7 +4632,20 @@ export default function App() {
   const [videoFrameBtnsHovered, setVideoFrameBtnsHovered] = useState(false)
   const [utilityTrayHovered, setUtilityTrayHovered] = useState(false)
   const [generationError, setGenerationError] = useState('')
+  const [buzzAssistLoginDialog, setBuzzAssistLoginDialog] = useState(null)
+  const [buzzAssistBillingDismissedFor, setBuzzAssistBillingDismissedFor] = useState('')
+  // 新しい生成を始める（エラーが消える）たびにダッシュボード誘導の抑止を解除。
+  useEffect(() => {
+    if (!generationError) setBuzzAssistBillingDismissedFor('')
+  }, [generationError])
+  const [buzzAssistLoginBusy, setBuzzAssistLoginBusy] = useState(false)
   const [generatingFrameIds, setGeneratingFrameIds] = useState(() => new Set())
+  // SSE経由のシーン適用（安定コールバック内）から現在の生成中フレームを参照
+  // するためのミラー。
+  const generatingFrameIdsRef = useRef(generatingFrameIds)
+  useEffect(() => {
+    generatingFrameIdsRef.current = generatingFrameIds
+  }, [generatingFrameIds])
   const [capabilities, setCapabilities] = useState(null)
   const [canvasPicker, setCanvasPicker] = useState(null)
   const latestSceneRef = useRef(DEFAULT_SCENE)
@@ -4155,6 +4655,7 @@ export default function App() {
   const previousGeneratorFrameIdsRef = useRef(new Set())
   const justCreatedFrameIdRef = useRef('')
   const copiedGeneratorFrameRef = useRef(null)
+  const copiedCanvasShortcutRef = useRef(null)
   const lastFocusedFrameIdRef = useRef('')
   const lastCreatedFrameGeoRef = useRef(null)
   const lastCreatedViewRef = useRef(null)
@@ -4165,11 +4666,15 @@ export default function App() {
   const suppressNextChangeRef = useRef(false)
   const canvasPickerRef = useRef(null)
   const canvasPickerFrameIdRef = useRef('')
+  const attachmentPanelLockRef = useRef(null)
+  const attachmentPanelLockTokenRef = useRef(0)
+  const attachmentPanelInteractionRef = useRef(false)
   const consumeCanvasPickerSelectionRef = useRef(null)
   const toolbarMediaInputRef = useRef(null)
   const toolbarMediaPickerActiveRef = useRef(false)
   const hoverOverlayRef = useRef(null)
   const menuBackdropRef = useRef(null)
+  const buzzAssistLoginRequestRef = useRef(null)
   const videoFrameUploadTargetRef = useRef('start')
   const pendingGeneratorUploadFrameIdRef = useRef('')
   const pendingGeneratorUploadResultRef = useRef(null)
@@ -4184,6 +4689,22 @@ export default function App() {
   const lastSyncedFingerprintRef = useRef('')
   const pendingOverlaySceneRef = useRef(null)
   const overlayRefreshFrameRef = useRef(0)
+  // Pan fast path: overlays are positioned in viewport px at build time; a
+  // pure pan translates these DOM layers instead of rebuilding them per
+  // frame. Two layers: media previews under the interactive canvas, frame
+  // chrome and the selection toolbar above it.
+  const overlayLayerRef = useRef(null)
+  const overlayUnderLayerRef = useRef(null)
+  const overlayViewportBaselineRef = useRef(null)
+  const pendingOverlayViewportRef = useRef(null)
+  const lastPanSignatureRef = useRef('')
+  const lastPanScrollRef = useRef(null)
+  const panSettleRebuildTimerRef = useRef(0)
+  // Element-drag fast path: while the pointer is down and only the selected
+  // elements move, their overlay DOM nodes get a CSS `translate` instead of a
+  // per-frame rebuild. Tracked nodes are cleared on every overlay rebuild.
+  const canvasPointerDownRef = useRef(false)
+  const dragOverlayNodesRef = useRef(null)
   const assetHydrationTimerRef = useRef(0)
   const hydratedFileBufferRef = useRef(new Map())
   const hydratedFlushTimerRef = useRef(0)
@@ -4378,6 +4899,30 @@ export default function App() {
   )
 
   const refreshOverlayStates = useCallback((scene) => {
+    const sceneAppState = scene.appState ?? {}
+    // Baseline for the pan/drag fast paths: viewport plus per-element
+    // geometry/version, captured at build time. The drag detector compares
+    // EVERY element against this so grouped companions (video labels, frame
+    // members) that move with the selection stay on the fast path.
+    const selectedBaselineIds = new Set(getSelectedIds(sceneAppState))
+    const geometry = new Map()
+    for (const element of scene.elements) {
+      geometry.set(element.id, {
+        x: element.x,
+        y: element.y,
+        width: element.width,
+        height: element.height,
+        angle: element.angle || 0,
+        version: element.version || 0
+      })
+    }
+    pendingOverlayViewportRef.current = {
+      scrollX: Number(sceneAppState.scrollX) || 0,
+      scrollY: Number(sceneAppState.scrollY) || 0,
+      zoom: Number(sceneAppState.zoom?.value ?? sceneAppState.zoom) || 1,
+      selectionKey: [...selectedBaselineIds].sort().join(','),
+      geometry
+    }
     setFrameOverlays(buildFrameOverlays(scene))
     setSelectedImageOverlays(buildSelectedImageOverlays(scene))
     setVideoPlaybackOverlays(buildVideoPlaybackOverlays(scene))
@@ -4404,7 +4949,45 @@ export default function App() {
     )
   }, [])
 
+  // A generating placeholder is status UI, not an editable selection. Keep
+  // Excalidraw's native selection handles off it even if an onChange/SSE echo
+  // briefly restores the selection after generation has started.
+  useLayoutEffect(() => {
+    if (!api || generatingFrameIds.size === 0) return
+    const currentAppState = api.getAppState?.() ?? {}
+    const selectedElementIds = Object.fromEntries(
+      Object.entries(currentAppState.selectedElementIds ?? {}).filter(
+        ([id, selected]) => selected && !generatingFrameIds.has(id)
+      )
+    )
+    if (Object.keys(selectedElementIds).length === Object.keys(currentAppState.selectedElementIds ?? {}).length) return
+    const elements = api.getSceneElementsIncludingDeleted()
+    const nextAppState = { ...currentAppState, selectedElementIds }
+    suppressNextChangeRef.current = true
+    api.updateScene({
+      appState: { selectedElementIds },
+      captureUpdate: CaptureUpdateAction.NEVER
+    })
+    const nextScene = createScene(elements, nextAppState, api.getFiles())
+    latestSceneRef.current = nextScene
+    refreshOverlayStates(nextScene)
+  }, [api, generatingFrameIds, refreshOverlayStates])
+
   const scheduleOverlayRefresh = useCallback((scene) => {
+    // A drag translate is still applied (drag just ended or was superseded):
+    // rebuild synchronously so the fresh positions and the translate reset
+    // land in the SAME commit. Deferring to rAF lets an in-between commit
+    // render the prompt panel at its new live position while the stale drag
+    // translate is still attached — a visible one-frame double offset.
+    if (dragOverlayNodesRef.current) {
+      if (overlayRefreshFrameRef.current) {
+        window.cancelAnimationFrame(overlayRefreshFrameRef.current)
+        overlayRefreshFrameRef.current = 0
+      }
+      pendingOverlaySceneRef.current = null
+      refreshOverlayStates(scene)
+      return
+    }
     pendingOverlaySceneRef.current = scene
     if (overlayRefreshFrameRef.current) return
     overlayRefreshFrameRef.current = window.requestAnimationFrame(() => {
@@ -4415,12 +4998,81 @@ export default function App() {
     })
   }, [refreshOverlayStates])
 
+  // Adopt the freshly built overlay positions: reset the pan translation in
+  // the same paint as the React commit so overlays never jump.
+  useLayoutEffect(() => {
+    const pending = pendingOverlayViewportRef.current
+    if (!pending) return
+    pendingOverlayViewportRef.current = null
+    overlayViewportBaselineRef.current = pending
+    for (const layer of [overlayLayerRef.current, overlayUnderLayerRef.current]) {
+      if (layer) layer.style.transform = ''
+    }
+    // Rebuilt overlays carry fresh positions — drop any drag translation.
+    const tracked = dragOverlayNodesRef.current
+    if (tracked) {
+      dragOverlayNodesRef.current = null
+      for (const node of tracked.nodes) {
+        if (node.isConnected) node.style.translate = ''
+      }
+    }
+  }, [frameOverlays, selectedImageOverlays, videoPlaybackOverlays, subtitlePreviewOverlays])
+
+  // Pointer state for the element-drag fast path. Capture phase so the flag
+  // flips before Excalidraw's own pointerup commit fires onChange.
+  useEffect(() => {
+    const handleDown = (event) => {
+      if (event.isPrimary !== false) canvasPointerDownRef.current = true
+    }
+    const handleUp = () => {
+      canvasPointerDownRef.current = false
+    }
+    window.addEventListener('pointerdown', handleDown, true)
+    window.addEventListener('pointerup', handleUp, true)
+    window.addEventListener('pointercancel', handleUp, true)
+    window.addEventListener('blur', handleUp)
+    return () => {
+      window.removeEventListener('pointerdown', handleDown, true)
+      window.removeEventListener('pointerup', handleUp, true)
+      window.removeEventListener('pointercancel', handleUp, true)
+      window.removeEventListener('blur', handleUp)
+    }
+  }, [])
+
+  // Translate the moved elements' overlay nodes (plus the toolbar and prompt
+  // panel, which anchor to the selection) without touching React.
+  const applySelectionDragTranslation = useCallback((dxPx, dyPx, movedIds) => {
+    const movedKey = movedIds.join(',')
+    let tracked = dragOverlayNodesRef.current
+    if (!tracked || tracked.movedKey !== movedKey) {
+      if (tracked) {
+        for (const node of tracked.nodes) {
+          if (node.isConnected) node.style.translate = ''
+        }
+      }
+      const movedSet = new Set(movedIds)
+      const nodes = []
+      for (const node of document.querySelectorAll('[data-overlay-anchor]')) {
+        if (movedSet.has(node.dataset.overlayAnchor)) nodes.push(node)
+      }
+      const toolbar = document.querySelector('.lovart-selection-toolbar')
+      if (toolbar) nodes.push(toolbar)
+      const panel = document.querySelector('.lovart-ai-panel')
+      if (panel) nodes.push(panel)
+      tracked = { movedKey, nodes }
+      dragOverlayNodesRef.current = tracked
+    }
+    const translate = dxPx || dyPx ? `${dxPx}px ${dyPx}px` : ''
+    for (const node of tracked.nodes) node.style.translate = translate
+  }, [])
+
   useEffect(() => () => {
     if (overlayRefreshFrameRef.current) {
       window.cancelAnimationFrame(overlayRefreshFrameRef.current)
       overlayRefreshFrameRef.current = 0
     }
     window.clearTimeout(assetHydrationTimerRef.current)
+    window.clearTimeout(panSettleRebuildTimerRef.current)
     pendingOverlaySceneRef.current = null
   }, [])
 
@@ -4475,6 +5127,59 @@ export default function App() {
       const selectedTargetId = selectedFrameId || selectedResultId || ''
       if (pendingTargetId !== selectedTargetId) flushPendingFrameFormWrite()
     }
+
+    const restoreAttachmentLockedTarget = () => {
+      const attachmentLock = attachmentPanelLockRef.current
+      if (!attachmentLock) return false
+      if (Date.now() > attachmentLock.expiresAt) {
+        attachmentPanelLockRef.current = null
+        attachmentPanelInteractionRef.current = false
+        return false
+      }
+      if (attachmentLock.frameId && isGeneratorFrame(elementsById.get(attachmentLock.frameId))) {
+        const lockedFrame = elementsById.get(attachmentLock.frameId)
+        const frameChanged = activeFrameIdRef.current !== attachmentLock.frameId
+        activeFrameIdRef.current = attachmentLock.frameId
+        lastFocusedFrameIdRef.current = attachmentLock.frameId
+        selectedGeneratedResultRef.current = null
+        setActiveFrameId(attachmentLock.frameId)
+        setPendingPanelFrame(null)
+        setSelectedGeneratedResult(null)
+        setActiveFrameKind(getGeneratorKind(lockedFrame))
+        if (frameChanged) setFrameForm(frameFormFromElement(lockedFrame))
+        return true
+      }
+      if (attachmentLock.selectedGeneratedResult?.elementId && isPanelMediaTargetElement(elementsById.get(attachmentLock.selectedGeneratedResult.elementId))) {
+        const lockedResultElement = elementsById.get(attachmentLock.selectedGeneratedResult.elementId)
+        const kind = panelMediaKindFromElement(lockedResultElement)
+        const geometry = getElementGeometry(lockedResultElement)
+        const placement = getFrameViewportPlacement(geometry, scene.appState)
+        const nextResult = {
+          ...attachmentLock.selectedGeneratedResult,
+          id: attachmentLock.selectedGeneratedResult.id || `result:${lockedResultElement.id}`,
+          elementId: lockedResultElement.id,
+          kind,
+          ...geometry,
+          ...placement
+        }
+        const resultChanged = selectedGeneratedResultRef.current?.elementId !== lockedResultElement.id
+        activeFrameIdRef.current = ''
+        selectedGeneratedResultRef.current = nextResult
+        setActiveFrameId('')
+        setPendingPanelFrame(null)
+        setSelectedGeneratedResult(nextResult)
+        setActiveFrameKind(kind)
+        if (resultChanged) setFrameForm(frameFormFromElement(lockedResultElement))
+        return true
+      }
+      return false
+    }
+
+    // Native file dialogs temporarily clear Excalidraw selection, and canvas
+    // reference picking selects the referenced asset. During either operation,
+    // keep the original editor target pinned so its panel never disappears or
+    // switches to the referenced result.
+    if ((attachmentPanelInteractionRef.current || canvasPickerRef.current) && restoreAttachmentLockedTarget()) return
 
     if (selectedFrameId) {
       const selectedFrame = elementsById.get(selectedFrameId)
@@ -4531,6 +5236,8 @@ export default function App() {
       setSelectedGeneratedResult(null)
       return
     }
+
+    if (restoreAttachmentLockedTarget()) return
 
     if (activeFrameIdRef.current || selectedGeneratedResultRef.current) {
       activeFrameIdRef.current = ''
@@ -4635,6 +5342,29 @@ export default function App() {
       hydratedFlushTimerRef.current = window.setTimeout(flushHydratedFiles, 140)
     }
   }, [api, flushHydratedFiles])
+
+  // 生成結果のアセットをシーン適用前にExcalidraw本体へ注入する。
+  // applyRemoteSceneはファイルを必ずプレースホルダー化し直すため、シーン側を
+  // 先にハイドレートしても打ち消される — Excalidrawのfilesストアに直接
+  // addFilesしておけば、要素が現れた瞬間から画像が表示される。
+  const prehydrateResultFiles = useCallback(async (scene, fileIds, timeoutMs = 8000) => {
+    if (!api || !(fileIds instanceof Set) || fileIds.size === 0) return
+    const records = []
+    let timeoutId = 0
+    try {
+      await Promise.race([
+        hydrateAssetBackedFiles(scene?.files ?? {}, (file) => {
+          records.push(file)
+        }, { onlyFileIds: fileIds }),
+        new Promise((resolve) => {
+          timeoutId = window.setTimeout(resolve, timeoutMs)
+        })
+      ])
+    } finally {
+      window.clearTimeout(timeoutId)
+    }
+    if (records.length > 0) api.addFiles(records)
+  }, [api])
 
   const scheduleVisibleAssetHydration = useCallback((scene) => {
     if (!api || !scene) return
@@ -4757,6 +5487,96 @@ export default function App() {
     (elements, appState, files) => {
       const shouldSkipChangeEffects = suppressNextChangeRef.current
       if (suppressNextChangeRef.current) suppressNextChangeRef.current = false
+
+      // Pure pan/scroll fast path: when only the viewport moved (same
+      // content, selection, zoom; no panel/picker/remote-apply in flight),
+      // translate the overlay DOM layer and skip the per-frame scene rebuild,
+      // overlay re-render, and selection save entirely.
+      {
+        const zoomValue = Number(appState.zoom?.value ?? appState.zoom) || 1
+        const scrollX = Number(appState.scrollX) || 0
+        const scrollY = Number(appState.scrollY) || 0
+        const previousScroll = lastPanScrollRef.current
+        const scrollMoved = !previousScroll || previousScroll.x !== scrollX || previousScroll.y !== scrollY
+        lastPanScrollRef.current = { x: scrollX, y: scrollY }
+        const baseline = overlayViewportBaselineRef.current
+        const panEligible =
+          baseline &&
+          scrollMoved &&
+          zoomValue === baseline.zoom &&
+          !applyingRemoteRef.current &&
+          !canvasPickerRef.current &&
+          !activeFrameIdRef.current &&
+          !selectedGeneratedResultRef.current &&
+          !pendingPanelFrameRef.current &&
+          !isTunnelCanvasRuntime()
+        if (panEligible) {
+          const signature = viewportPanSignature(elements, appState, zoomValue)
+          if (signature === lastPanSignatureRef.current) {
+            const dx = (scrollX - baseline.scrollX) * baseline.zoom
+            const dy = (scrollY - baseline.scrollY) * baseline.zoom
+            const panTransform = dx || dy ? `translate(${dx}px, ${dy}px)` : ''
+            for (const layer of [overlayLayerRef.current, overlayUnderLayerRef.current]) {
+              if (layer) layer.style.transform = panTransform
+            }
+            const previousScene = latestSceneRef.current
+            if (previousScene) {
+              const pannedScene = { ...previousScene, appState: serializableAppState(appState) }
+              latestSceneRef.current = pannedScene
+              // A rebuild queued by an earlier slow-path change must use the
+              // freshest viewport, or overlays land one pan step behind.
+              if (overlayRefreshFrameRef.current && pendingOverlaySceneRef.current) {
+                pendingOverlaySceneRef.current = pannedScene
+              }
+              scheduleVisibleAssetHydration(pannedScene)
+              scheduleCanvasSave(pannedScene)
+              // Overlay rects stay stale while the layers are only CSS-
+              // translated; once the pan settles, rebuild so coordinate
+              // consumers (SRT wheel-scroll hit test, etc.) see true
+              // positions again and the translate resets to zero.
+              window.clearTimeout(panSettleRebuildTimerRef.current)
+              panSettleRebuildTimerRef.current = window.setTimeout(() => {
+                const settledScene = latestSceneRef.current
+                if (settledScene) scheduleOverlayRefresh(settledScene)
+              }, 160)
+            }
+            return
+          }
+          lastPanSignatureRef.current = signature
+        } else {
+          lastPanSignatureRef.current = ''
+        }
+      }
+
+      // Element-drag fast path: while the pointer is down and only the
+      // selected elements moved by one uniform delta (no resize/rotate, no
+      // other edits, viewport still), translate just their overlay nodes and
+      // skip the per-frame scene rebuild, overlay re-render, and saves. The
+      // pointerup commit takes the slow path and persists the final scene.
+      if (
+        !shouldSkipChangeEffects &&
+        canvasPointerDownRef.current &&
+        !applyingRemoteRef.current &&
+        !canvasPickerRef.current &&
+        !isTunnelCanvasRuntime()
+      ) {
+        const dragBaseline = overlayViewportBaselineRef.current
+        const zoomValue = Number(appState.zoom?.value ?? appState.zoom) || 1
+        if (
+          dragBaseline?.geometry?.size > 0 &&
+          dragBaseline.selectionKey &&
+          zoomValue === dragBaseline.zoom &&
+          (Number(appState.scrollX) || 0) === dragBaseline.scrollX &&
+          (Number(appState.scrollY) || 0) === dragBaseline.scrollY
+        ) {
+          const drag = detectUniformSelectionDrag(elements, appState, dragBaseline)
+          if (drag) {
+            applySelectionDragTranslation(drag.dx * zoomValue, drag.dy * zoomValue, drag.movedIds)
+            return
+          }
+        }
+      }
+
       let workingElements = [...elements]
 
       if (!shouldSkipChangeEffects && api) {
@@ -4903,7 +5723,7 @@ export default function App() {
         const point = lastPointerDownCanvasRef.current
         if (!hasRelevantSelection && point && Date.now() - point.time < 1200) {
           const hit = workingElements
-            .filter((el) => isGeneratorFrame(el) && !el.isDeleted)
+            .filter((el) => isGeneratorFrame(el) && !el.isDeleted && !generatingFrameIdsRef.current.has(el.id))
             .reverse()
             .find((el) => scenePointInElement(point, el))
           if (hit && hit.id !== activeFrameIdRef.current) {
@@ -4931,7 +5751,7 @@ export default function App() {
         scheduleCanvasSave(scene)
       }
     },
-    [api, refreshOverlayStates, scheduleCanvasSave, scheduleOverlayRefresh, scheduleSelectionSave, scheduleVisibleAssetHydration, syncGeneratorUi]
+    [api, applySelectionDragTranslation, refreshOverlayStates, scheduleCanvasSave, scheduleOverlayRefresh, scheduleSelectionSave, scheduleVisibleAssetHydration, syncGeneratorUi]
   )
 
   const applyRemoteScene = useCallback(
@@ -4952,13 +5772,43 @@ export default function App() {
       previousGeneratorFrameIdsRef.current = new Set(normalized.elements.filter(isGeneratorFrame).map((element) => element.id))
       const currentAppState = api.getAppState?.() ?? {}
       const shouldApplyViewport = options.applyViewport === true
+      const focusElementIds = [...new Set((Array.isArray(options.focusElementIds) ? options.focusElementIds : [])
+        .filter((id) => typeof id === 'string' && normalized.elements.some((element) => element.id === id && !element.isDeleted)))]
+      const focusedElements = normalized.elements.filter((element) => focusElementIds.includes(element.id))
+      let focusedViewportState = null
+      if (shouldApplyViewport && focusedElements.length > 0) {
+        const bounds = focusedElements.map(getElementGeometry).reduce((combined, geometry) => ({
+          x: Math.min(combined.x, geometry.x),
+          y: Math.min(combined.y, geometry.y),
+          right: Math.max(combined.right, geometry.x + geometry.width),
+          bottom: Math.max(combined.bottom, geometry.y + geometry.height)
+        }), { x: Infinity, y: Infinity, right: -Infinity, bottom: -Infinity })
+        const zoom = currentAppState.zoom?.value || 1
+        const { width, height } = viewportSize(currentAppState)
+        const centerX = (bounds.x + bounds.right) / 2
+        const centerY = (bounds.y + bounds.bottom) / 2
+        focusedViewportState = {
+          scrollX: width / (2 * zoom) - centerX,
+          scrollY: height / (2 * zoom) - centerY,
+          zoom: currentAppState.zoom ?? { value: zoom }
+        }
+      }
+      const requestedSelectedElementIds = options.applySelection
+        ? (focusElementIds.length > 0
+            ? Object.fromEntries(focusElementIds.map((id) => [id, true]))
+            : normalized.appState.selectedElementIds ?? {})
+        : currentAppState.selectedElementIds ?? {}
+      const nextSelectedElementIds = Object.fromEntries(
+        Object.entries(requestedSelectedElementIds).filter(
+          ([id, selected]) => selected && !generatingFrameIdsRef.current.has(id)
+        )
+      )
       const nextAppState = {
         ...normalized.appState,
         // Never apply the remote selection — keep the user's live selection so
         // a refresh can't deselect the frame they're working in.
-        selectedElementIds: options.applySelection
-          ? normalized.appState.selectedElementIds ?? {}
-          : currentAppState.selectedElementIds ?? {},
+        selectedElementIds: nextSelectedElementIds,
+        ...(focusedViewportState || {}),
         ...(!shouldApplyViewport
           ? {
               scrollX: currentAppState.scrollX,
@@ -5029,16 +5879,44 @@ export default function App() {
   useEffect(() => {
     if (!api || !('EventSource' in window)) return undefined
 
-    async function loadRemoteCanvas() {
+    async function loadRemoteCanvas(event) {
       try {
+        let eventPayload = {}
+        try {
+          eventPayload = event?.data ? JSON.parse(event.data) : {}
+        } catch {
+          eventPayload = {}
+        }
+        const focusElementIds = Array.isArray(eventPayload.focusElementIds) ? eventPayload.focusElementIds : []
+        const shouldApplyFocus = eventPayload.applySelection === true || eventPayload.applyViewport === true || focusElementIds.length > 0
+        // Echo of our own save, recognized from the event payload alone: skip
+        // the whole-scene download + parse entirely. Events without a
+        // fingerprint (older servers, external writers) still fetch below.
+        if (
+          !shouldApplyFocus &&
+          typeof eventPayload.fingerprint === 'string' &&
+          eventPayload.fingerprint &&
+          eventPayload.fingerprint === lastSyncedFingerprintRef.current
+        ) return
         const response = await canvasFetch(CANVAS_ENDPOINT)
         if (!response.ok) throw new Error(`Failed to refresh canvas: ${response.status}`)
         const payload = await response.json()
         // Ignore the echo of our own save (and the duplicate file-watcher
         // broadcast): if the content matches what we last synced, do nothing.
         const fingerprint = sceneFingerprint(normalizeScene(payload.scene))
-        if (fingerprint === lastSyncedFingerprintRef.current) return
-        applyRemoteScene(payload.scene)
+        if (fingerprint === lastSyncedFingerprintRef.current && !shouldApplyFocus) return
+        // 生成中フレームを置き換える結果画像は、シーン適用前にアセットを
+        // Excalidraw本体へ注入しておく（灰色フレームを見せないため）。
+        // その間はフレームがGenerating...表示のまま残る。
+        const resultFileIds = generatedResultFileIds(payload.scene, generatingFrameIdsRef.current)
+        if (resultFileIds.size > 0) {
+          await prehydrateResultFiles(payload.scene, resultFileIds)
+        }
+        applyRemoteScene(payload.scene, {
+          applySelection: eventPayload.applySelection === true,
+          applyViewport: eventPayload.applyViewport === true,
+          focusElementIds
+        })
       } catch (error) {
         console.error(error)
       }
@@ -5050,129 +5928,173 @@ export default function App() {
       console.warn('Codex Excalidraw live refresh disconnected.', error)
     }
     return () => events.close()
-  }, [api, applyRemoteScene])
+  }, [api, applyRemoteScene, prehydrateResultFiles])
 
   useEffect(() => {
     if (!api) return undefined
-    const getClipboardSourceFrame = () => {
+    const getClipboardSceneState = () => {
       const appState = api.getAppState?.() ?? {}
       const latestScene = latestSceneRef.current
-      const selectedIds = new Set([
-        ...getSelectedIds(appState),
-        ...getSelectedIds(latestScene?.appState ?? {})
-      ])
-      const fallbackIds = [activeFrameIdRef.current, lastFocusedFrameIdRef.current].filter(Boolean)
       const elementsById = new Map()
       for (const element of latestScene?.elements ?? []) elementsById.set(element.id, element)
-      for (const element of api.getSceneElementsIncludingDeleted()) elementsById.set(element.id, element)
-      const frames = [...elementsById.values()]
-        .filter((element) => isGeneratorFrame(element) && !element.isDeleted)
-      const explicitFrame = frames
-        .find((element) =>
-          (selectedIds.has(element.id) || fallbackIds.includes(element.id))
-        )
-      if (explicitFrame) return explicitFrame
-      return frames
-        .sort((a, b) => (Number(b.updated) || 0) - (Number(a.updated) || 0))[0] ?? null
+      const liveElements = api.getSceneElementsIncludingDeleted()
+      for (const element of liveElements) elementsById.set(element.id, element)
+      return { appState, latestScene, liveElements, elementsById }
     }
-    const storeClipboardSourceFrame = () => {
-      const selectedFrame = getClipboardSourceFrame()
-      if (!selectedFrame) {
+
+    const resolveShortcutCloneableElement = (id, elementsById) => {
+      const direct = elementsById.get(id)
+      if (isCanvasShortcutCloneableElement(direct)) return direct
+      const labelFor = direct?.customData?.codexVideoLabelFor
+      const labeledElement = elementsById.get(labelFor)
+      return isCanvasShortcutCloneableElement(labeledElement) ? labeledElement : null
+    }
+
+    const getClipboardSourceElements = () => {
+      const { appState, latestScene, liveElements, elementsById } = getClipboardSceneState()
+      const selectedIds = [...new Set([
+        ...getSelectedIds(appState),
+        ...getSelectedIds(latestScene?.appState ?? {})
+      ])]
+      const selectedElements = []
+      const seen = new Set()
+      for (const id of selectedIds) {
+        const element = resolveShortcutCloneableElement(id, elementsById)
+        if (!element || seen.has(element.id)) continue
+        seen.add(element.id)
+        selectedElements.push(element)
+      }
+      if (selectedElements.length > 0) {
+        const sceneOrder = new Map(liveElements.map((element, index) => [element.id, index]))
+        return selectedElements.sort((a, b) => (sceneOrder.get(a.id) ?? 0) - (sceneOrder.get(b.id) ?? 0))
+      }
+      if (selectedIds.length > 0) return []
+      for (const id of [activeFrameIdRef.current, lastFocusedFrameIdRef.current]) {
+        const element = resolveShortcutCloneableElement(id, elementsById)
+        if (element) return [element]
+      }
+      return []
+    }
+
+    const storeCanvasShortcutClipboard = () => {
+      const sourceElements = getClipboardSourceElements()
+      if (sourceElements.length === 0) {
+        copiedCanvasShortcutRef.current = null
         copiedGeneratorFrameRef.current = null
-        return copiedGeneratorFrameRef.current
+        return null
       }
-      const selectedKind = getGeneratorKind(selectedFrame)
-      const liveForm = selectedFrame.id === activeFrameIdRef.current ? frameForm : frameFormFromElement(selectedFrame)
-      copiedGeneratorFrameRef.current = {
-        ...selectedFrame,
-        customData: {
-          ...(selectedFrame.customData ?? {}),
-          ...frameCustomDataFromForm(selectedKind, liveForm)
+      const elements = sourceElements.map((element) => {
+        if (!isGeneratorFrame(element)) return { ...element, customData: { ...(element.customData ?? {}) } }
+        const kind = getGeneratorKind(element)
+        const liveForm = element.id === activeFrameIdRef.current ? frameForm : frameFormFromElement(element)
+        return {
+          ...element,
+          customData: {
+            ...(element.customData ?? {}),
+            ...frameCustomDataFromForm(kind, liveForm)
+          }
         }
+      })
+      copiedCanvasShortcutRef.current = {
+        elements,
+        sourceKey: elements.map((element) => element.id).join('|')
       }
-      return copiedGeneratorFrameRef.current
+      copiedGeneratorFrameRef.current = elements.find(isGeneratorFrame) ?? null
+      return copiedCanvasShortcutRef.current
     }
-    const handleClipboardShortcut = (event) => {
-      if (event.type === 'copy') {
-        if (isEditableTarget(document.activeElement)) return false
-        return Boolean(storeClipboardSourceFrame())
-      }
-      if (event.type === 'paste') {
-        if (isEditableTarget(document.activeElement)) return false
-        if (!copiedGeneratorFrameRef.current) storeClipboardSourceFrame()
-        if (!copiedGeneratorFrameRef.current) return false
-        return pasteCopiedFrame()
-      }
-      if (event.type !== 'keydown') return false
-      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return false
-      const key = event.key.toLowerCase()
-      if (key === 'c') return Boolean(storeClipboardSourceFrame())
-      if (key === 'v' && !isEditableTarget(document.activeElement)) {
-        if (!copiedGeneratorFrameRef.current) storeClipboardSourceFrame()
-        if (!copiedGeneratorFrameRef.current) return false
-        return pasteCopiedFrame()
-      }
-      return false
-    }
-    const pasteCopiedFrame = () => {
-      const copiedFrame = copiedGeneratorFrameRef.current || storeClipboardSourceFrame()
-      if (!copiedFrame) return false
+
+    const pasteCanvasShortcutClipboard = () => {
+      const clipboard = copiedCanvasShortcutRef.current || storeCanvasShortcutClipboard()
+      const copiedElements = clipboard?.elements ?? []
+      if (copiedElements.length === 0) return false
       const pasteTime = Date.now()
       const lastPaste = lastGeneratorPasteRef.current
-      if (lastPaste.sourceId === copiedFrame.id && pasteTime - lastPaste.time < 250) {
+      if (lastPaste.sourceId === clipboard.sourceKey && pasteTime - lastPaste.time < 250) {
         return true
       }
       const currentElements = api.getSceneElementsIncludingDeleted()
-      const copiedX = Number(copiedFrame.x) || 0
-      const copiedY = Number(copiedFrame.y) || 0
-      const copiedWidth = Math.max(1, Number(copiedFrame.width) || 1)
-      const copiedHeight = Math.max(1, Number(copiedFrame.height) || 1)
-      const sameRowTolerance = copiedHeight * 0.5
+      const bounds = copiedElements.reduce((acc, element) => {
+        const geometry = getElementGeometry(element)
+        acc.left = Math.min(acc.left, geometry.x)
+        acc.top = Math.min(acc.top, geometry.y)
+        acc.right = Math.max(acc.right, geometry.x + geometry.width)
+        acc.bottom = Math.max(acc.bottom, geometry.y + geometry.height)
+        return acc
+      }, { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity })
+      const copiedWidth = Math.max(1, bounds.right - bounds.left)
+      const copiedHeight = Math.max(1, bounds.bottom - bounds.top)
+      const sameRowTolerance = Math.max(24, copiedHeight * 0.5)
       const sameRowElements = currentElements.filter((element) => {
         if (!element || element.isDeleted) return false
         const y = Number(element.y) || 0
-        return Math.abs(y - copiedY) < sameRowTolerance
+        return Math.abs(y - bounds.top) < sameRowTolerance
       })
       const rowRight = sameRowElements.length > 0
         ? Math.max(...sameRowElements.map((element) => (Number(element.x) || 0) + Math.max(1, Number(element.width) || 1)))
-        : copiedX + copiedWidth
-      const newX = Math.round(rowRight + 14)
-      const newY = Math.round(copiedY)
-      const copiedKind = getGeneratorKind(copiedFrame)
-      const copiedForm = frameFormFromElement(copiedFrame)
-      // No job targets the new id — inheriting codexGenerating would leave the
-      // pasted frame stuck on the Generating... overlay forever.
-      const pastedCustomData = { ...(copiedFrame.customData ?? {}) }
-      delete pastedCustomData.codexGenerating
-      const newFrame = {
-        ...copiedFrame,
-        id: crypto.randomUUID(),
-        x: newX,
-        y: newY,
-        index: chooseIndex(currentElements),
-        version: 1,
-        versionNonce: Math.floor(Math.random() * 2 ** 31),
-        seed: Math.floor(Math.random() * 2 ** 31),
-        updated: pasteTime,
-        customData: pastedCustomData
+        : bounds.right
+      const shiftX = Math.round(rowRight + 14 - bounds.left)
+      const groupIdMap = new Map()
+      const remapGroupId = (groupId) => {
+        if (!groupIdMap.has(groupId)) groupIdMap.set(groupId, crypto.randomUUID())
+        return groupIdMap.get(groupId)
       }
-      lastGeneratorPasteRef.current = { time: pasteTime, sourceId: copiedFrame.id, frameId: newFrame.id }
-      activeFrameIdRef.current = newFrame.id
-      lastFocusedFrameIdRef.current = newFrame.id
-      setActiveFrameId(newFrame.id)
-      setActiveFrameKind(copiedKind)
-      setFrameForm(copiedForm)
+      const newElements = []
+      for (const copiedElement of copiedElements) {
+        const pastedCustomData = { ...(copiedElement.customData ?? {}) }
+        delete pastedCustomData.codexGenerating
+        const nextElement = {
+          ...copiedElement,
+          id: crypto.randomUUID(),
+          x: Math.round((Number(copiedElement.x) || 0) + shiftX),
+          y: Math.round(Number(copiedElement.y) || 0),
+          groupIds: Array.isArray(copiedElement.groupIds) ? copiedElement.groupIds.map(remapGroupId) : [],
+          index: chooseIndex([...currentElements, ...newElements]),
+          version: 1,
+          versionNonce: Math.floor(Math.random() * 2 ** 31),
+          seed: Math.floor(Math.random() * 2 ** 31),
+          updated: pasteTime,
+          customData: pastedCustomData
+        }
+        newElements.push(nextElement)
+      }
+      const selectedElementIds = Object.fromEntries(newElements.map((element) => [element.id, true]))
+      const singleElement = newElements.length === 1 ? newElements[0] : null
+      lastGeneratorPasteRef.current = { time: pasteTime, sourceId: clipboard.sourceKey, frameId: singleElement?.id || '' }
+      if (newElements.some(isGeneratorFrame)) justCreatedFrameIdRef.current = newElements.find(isGeneratorFrame)?.id || ''
+
+      activeFrameIdRef.current = ''
+      selectedGeneratedResultRef.current = null
+      setActiveFrameId('')
       setPendingPanelFrame(null)
       setSelectedGeneratedResult(null)
       setOpenMenu(null)
-      const applyPastedFrame = () => {
+      if (singleElement && isGeneratorFrame(singleElement)) {
+        const copiedKind = getGeneratorKind(singleElement)
+        activeFrameIdRef.current = singleElement.id
+        lastFocusedFrameIdRef.current = singleElement.id
+        setActiveFrameId(singleElement.id)
+        setActiveFrameKind(copiedKind)
+        setFrameForm(frameFormFromElement(singleElement))
+      } else if (singleElement && isPanelMediaTargetElement(singleElement)) {
+        const kind = panelMediaKindFromElement(singleElement)
+        const geometry = getElementGeometry(singleElement)
+        const placement = getFrameViewportPlacement(geometry, api.getAppState?.() ?? {})
+        const nextResult = { id: `result:${singleElement.id}`, elementId: singleElement.id, kind, ...geometry, ...placement }
+        selectedGeneratedResultRef.current = nextResult
+        setSelectedGeneratedResult(nextResult)
+        setActiveFrameKind(kind)
+        setFrameForm(frameFormFromElement(singleElement))
+      }
+
+      const applyPastedElements = () => {
         const liveElements = api.getSceneElementsIncludingDeleted()
-        const liveWithoutDuplicate = liveElements.filter((element) => element.id !== newFrame.id)
-        const nextElements = [...liveWithoutDuplicate, newFrame]
-        const nextAppState = { ...api.getAppState(), selectedElementIds: { [newFrame.id]: true } }
+        const newIds = new Set(newElements.map((element) => element.id))
+        const liveWithoutDuplicates = liveElements.filter((element) => !newIds.has(element.id))
+        const nextElements = [...liveWithoutDuplicates, ...newElements]
+        const nextAppState = { ...api.getAppState(), selectedElementIds }
         api.updateScene({
           elements: nextElements,
-          appState: { selectedElementIds: { [newFrame.id]: true } },
+          appState: { selectedElementIds },
           captureUpdate: CaptureUpdateAction.IMMEDIATELY
         })
         const nextScene = createScene(nextElements, nextAppState, api.getFiles())
@@ -5181,10 +6103,31 @@ export default function App() {
         scheduleCanvasSave(nextScene)
         scheduleSelectionSave(nextScene)
       }
-      applyPastedFrame()
-      window.setTimeout(applyPastedFrame, 0)
-      window.setTimeout(applyPastedFrame, 80)
+      applyPastedElements()
+      window.setTimeout(applyPastedElements, 0)
+      window.setTimeout(applyPastedElements, 80)
       return true
+    }
+
+    const handleClipboardShortcut = (event) => {
+      if (event.type === 'copy') {
+        if (isEditableTarget(document.activeElement)) return false
+        return Boolean(storeCanvasShortcutClipboard())
+      }
+      if (event.type === 'paste') {
+        if (isEditableTarget(document.activeElement)) return false
+        if (!copiedCanvasShortcutRef.current) storeCanvasShortcutClipboard()
+        return copiedCanvasShortcutRef.current ? pasteCanvasShortcutClipboard() : false
+      }
+      if (event.type !== 'keydown') return false
+      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return false
+      const key = event.key.toLowerCase()
+      if (key === 'c') return Boolean(storeCanvasShortcutClipboard())
+      if (key === 'v' && !isEditableTarget(document.activeElement)) {
+        if (!copiedCanvasShortcutRef.current) storeCanvasShortcutClipboard()
+        return copiedCanvasShortcutRef.current ? pasteCanvasShortcutClipboard() : false
+      }
+      return false
     }
     const onKeyDown = (event) => {
       if (
@@ -5493,6 +6436,11 @@ export default function App() {
 
       const kind = getGeneratorKind(frame)
       const size = frameSizeFor(kind, nextForm)
+      const currentAppState = api.getAppState()
+      const geometryChanged = size.width !== frame.width || size.height !== frame.height
+      const resized = geometryChanged
+        ? centeredGeneratorResize(frame, size, currentAppState, kind)
+        : { x: frame.x, y: frame.y, appState: currentAppState }
       const customData = {
         ...(frame.customData ?? {}),
         ...frameCustomDataFromForm(kind, nextForm),
@@ -5507,6 +6455,8 @@ export default function App() {
         element.id === frame.id
           ? {
               ...element,
+              x: resized.x,
+              y: resized.y,
               width: size.width,
               height: size.height,
               customData,
@@ -5516,14 +6466,24 @@ export default function App() {
             }
           : element
       )
-      window.setTimeout(() => {
-        suppressNextChangeRef.current = true
-        api.updateScene({
-          elements: nextElements,
-          captureUpdate: CaptureUpdateAction.NEVER
-        })
-      }, 0)
-      const nextScene = createScene(nextElements, api.getAppState(), api.getFiles())
+      // Geometry and panel placement must commit in one paint; deferring this
+      // used to show the panel at the new ratio while the frame was still at
+      // its old top-left-anchored geometry for one frame.
+      suppressNextChangeRef.current = true
+      api.updateScene({
+        elements: nextElements,
+        ...(geometryChanged
+          ? {
+              appState: {
+                scrollX: resized.appState.scrollX,
+                scrollY: resized.appState.scrollY,
+                zoom: resized.appState.zoom
+              }
+            }
+          : {}),
+        captureUpdate: CaptureUpdateAction.NEVER
+      })
+      const nextScene = createScene(nextElements, resized.appState, api.getFiles())
       latestSceneRef.current = nextScene
       refreshOverlayStates(nextScene)
       scheduleCanvasSave(nextScene)
@@ -5589,8 +6549,20 @@ export default function App() {
 
   const updateFrameForm = useCallback(
     (key, value) => {
-      let nextForm = null
       const immediateFrameId = FRAME_GEOMETRY_FORM_KEYS.has(key) ? activeFrameIdRef.current : ''
+      if (immediateFrameId) {
+        const nextForm = { ...frameForm, [key]: value }
+        const pending = pendingFrameFormWriteRef.current
+        if (pending) {
+          window.clearTimeout(pending.timer)
+          pendingFrameFormWriteRef.current = null
+        }
+        setFrameForm(nextForm)
+        updateActiveFrameElementRef.current?.(nextForm, immediateFrameId)
+        setGenerationError('')
+        return
+      }
+      let nextForm = null
       setFrameForm((current) => {
         const next = { ...current, [key]: value }
         nextForm = next
@@ -5598,26 +6570,29 @@ export default function App() {
       })
       window.setTimeout(() => {
         if (!nextForm) return
-        if (immediateFrameId) {
-          const pending = pendingFrameFormWriteRef.current
-          if (pending) {
-            window.clearTimeout(pending.timer)
-            pendingFrameFormWriteRef.current = null
-          }
-          updateActiveFrameElementRef.current?.(nextForm, immediateFrameId)
-          return
-        }
         scheduleFrameFormWrite(nextForm)
       }, 0)
       setGenerationError('')
     },
-    [scheduleFrameFormWrite]
+    [frameForm, scheduleFrameFormWrite]
   )
 
   const patchFrameForm = useCallback(
     (patch) => {
-      let nextForm = null
       const immediateFrameId = formPatchAffectsFrameGeometry(patch) ? activeFrameIdRef.current : ''
+      if (immediateFrameId) {
+        const nextForm = { ...frameForm, ...patch }
+        const pending = pendingFrameFormWriteRef.current
+        if (pending) {
+          window.clearTimeout(pending.timer)
+          pendingFrameFormWriteRef.current = null
+        }
+        setFrameForm(nextForm)
+        updateActiveFrameElementRef.current?.(nextForm, immediateFrameId)
+        setGenerationError('')
+        return
+      }
+      let nextForm = null
       setFrameForm((current) => {
         const next = { ...current, ...patch }
         nextForm = next
@@ -5625,20 +6600,11 @@ export default function App() {
       })
       window.setTimeout(() => {
         if (!nextForm) return
-        if (immediateFrameId) {
-          const pending = pendingFrameFormWriteRef.current
-          if (pending) {
-            window.clearTimeout(pending.timer)
-            pendingFrameFormWriteRef.current = null
-          }
-          updateActiveFrameElementRef.current?.(nextForm, immediateFrameId)
-          return
-        }
         scheduleFrameFormWrite(nextForm)
       }, 0)
       setGenerationError('')
     },
-    [scheduleFrameFormWrite]
+    [frameForm, scheduleFrameFormWrite]
   )
 
     // Stream the file straight to disk with constant memory and no size cap —
@@ -5799,6 +6765,63 @@ export default function App() {
     return lastFocusedFrameIdRef.current || ''
   }, [])
 
+  const pinAttachmentPanelTarget = useCallback((frameId = '', selectedGeneratedResult = null, ttlMs = 30000) => {
+    const normalizedFrameId = frameId || ''
+    const normalizedResult = normalizedFrameId ? null : snapshotSelectedGeneratedResult(selectedGeneratedResult)
+    const token = attachmentPanelLockTokenRef.current + 1
+    attachmentPanelLockTokenRef.current = token
+    attachmentPanelInteractionRef.current = true
+    attachmentPanelLockRef.current = {
+      token,
+      frameId: normalizedFrameId,
+      selectedGeneratedResult: normalizedResult,
+      expiresAt: Date.now() + ttlMs
+    }
+    if (normalizedFrameId) {
+      activeFrameIdRef.current = normalizedFrameId
+      lastFocusedFrameIdRef.current = normalizedFrameId
+      selectedGeneratedResultRef.current = null
+      setActiveFrameId(normalizedFrameId)
+      setSelectedGeneratedResult(null)
+    } else if (normalizedResult?.elementId) {
+      activeFrameIdRef.current = ''
+      selectedGeneratedResultRef.current = normalizedResult
+      setActiveFrameId('')
+      setSelectedGeneratedResult(normalizedResult)
+      setActiveFrameKind(normalizedResult.kind)
+    }
+    return { token, frameId: normalizedFrameId, selectedGeneratedResult: normalizedResult }
+  }, [])
+
+  const beginAttachmentPanelLock = useCallback(() => {
+    const frameId = getAttachmentDestinationFrameId()
+    const selectedGeneratedResult = frameId ? null : snapshotSelectedGeneratedResult(selectedGeneratedResultRef.current)
+    return pinAttachmentPanelTarget(frameId, selectedGeneratedResult)
+  }, [getAttachmentDestinationFrameId, pinAttachmentPanelTarget])
+
+  const releaseAttachmentPanelLockSoon = useCallback((delay = 1400) => {
+    const token = attachmentPanelLockRef.current?.token
+    if (!token) {
+      attachmentPanelInteractionRef.current = false
+      return
+    }
+    window.setTimeout(() => {
+      if (attachmentPanelLockRef.current?.token === token) {
+        attachmentPanelLockRef.current = null
+        attachmentPanelInteractionRef.current = false
+      }
+    }, delay)
+  }, [])
+
+  useEffect(() => {
+    const releaseAfterNativePicker = () => {
+      if (!attachmentPanelInteractionRef.current || canvasPickerRef.current) return
+      releaseAttachmentPanelLockSoon(1800)
+    }
+    window.addEventListener('focus', releaseAfterNativePicker)
+    return () => window.removeEventListener('focus', releaseAfterNativePicker)
+  }, [releaseAttachmentPanelLockSoon])
+
   const addAssetToFrame = useCallback(
     (target, assetOrAssets, frameIdOverride, options = {}) => {
       const assets = (Array.isArray(assetOrAssets) ? assetOrAssets : [assetOrAssets]).filter(Boolean)
@@ -5842,42 +6865,42 @@ export default function App() {
   )
 
   const openCanvasPicker = useCallback((target) => {
-    const frameId = getAttachmentDestinationFrameId()
-    const selectedGeneratedResult = frameId ? null : snapshotSelectedGeneratedResult(selectedGeneratedResultRef.current)
+    if (target === 'videoReferenceAudios') {
+      setGenerationError('音声リファレンスは音声ファイルを直接アップロードしてください。')
+      setOpenMenu(null)
+      return
+    }
+    const { frameId, selectedGeneratedResult } = beginAttachmentPanelLock()
     canvasPickerFrameIdRef.current = frameId
     canvasPickerRef.current = { target, frameId, selectedGeneratedResult }
     setCanvasPicker({ target, frameId, selectedGeneratedResult })
     setOpenMenu(null)
-  }, [getAttachmentDestinationFrameId])
+  }, [beginAttachmentPanelLock])
 
   const rememberGeneratorUploadFrame = useCallback(() => {
-    const frameId = getAttachmentDestinationFrameId()
+    const { frameId, selectedGeneratedResult } = beginAttachmentPanelLock()
     pendingGeneratorUploadFrameIdRef.current = frameId
-    pendingGeneratorUploadResultRef.current = frameId ? null : snapshotSelectedGeneratedResult(selectedGeneratedResultRef.current)
-  }, [getAttachmentDestinationFrameId])
+    pendingGeneratorUploadResultRef.current = selectedGeneratedResult
+  }, [beginAttachmentPanelLock])
 
   const restoreGeneratorUploadFrame = useCallback(() => {
     const frameId = pendingGeneratorUploadFrameIdRef.current
     if (frameId) {
-      activeFrameIdRef.current = frameId
-      lastFocusedFrameIdRef.current = frameId
+      pinAttachmentPanelTarget(frameId, null)
     } else if (pendingGeneratorUploadResultRef.current?.elementId) {
       const selectedResult = pendingGeneratorUploadResultRef.current
-      activeFrameIdRef.current = ''
-      selectedGeneratedResultRef.current = selectedResult
-      setActiveFrameId('')
-      setSelectedGeneratedResult(selectedResult)
-      setActiveFrameKind(selectedResult.kind)
+      pinAttachmentPanelTarget('', selectedResult)
     }
     return frameId
-  }, [])
+  }, [pinAttachmentPanelTarget])
 
-  const closeCanvasPicker = useCallback(() => {
+  const closeCanvasPicker = useCallback((options = {}) => {
     canvasPickerRef.current = null
     canvasPickerFrameIdRef.current = ''
     setCanvasPicker(null)
     setOpenMenu(null)
-  }, [])
+    if (!options.keepPanelLock) releaseAttachmentPanelLockSoon(0)
+  }, [releaseAttachmentPanelLockSoon])
 
   useEffect(() => {
     if (!canvasPicker) return undefined
@@ -5949,6 +6972,9 @@ export default function App() {
       }
       const selected = selectedCanvasAttachableElementFromScene(scene)
       if (!selected) return keepPickingWithError('キャンバス上の画像・動画・ファイルを選択してください。')
+      if (picker.selectedGeneratedResult?.elementId && selected.id === picker.selectedGeneratedResult.elementId) {
+        return keepPickingWithError('この生成結果自身は参照に追加できません。')
+      }
       const asset = assetReferenceFromElement(selected, scene.files)
       if (!asset) return keepPickingWithError('選択した素材を参照できません。')
       if (['videoStartFrame', 'videoEndFrame', 'videoReferenceImages'].includes(picker.target) && asset.kind !== 'image') {
@@ -5975,17 +7001,28 @@ export default function App() {
       }
       setGenerationError('')
       const restoreFrameId = picker.frameId || canvasPickerFrameIdRef.current || ''
+      const restoreResult = picker.selectedGeneratedResult || null
       const applyPickedAsset = (pickedAsset) => {
-        if (restoreFrameId) activeFrameIdRef.current = restoreFrameId
+        if (restoreFrameId) {
+          activeFrameIdRef.current = restoreFrameId
+        } else if (restoreResult?.elementId) {
+          activeFrameIdRef.current = ''
+          selectedGeneratedResultRef.current = restoreResult
+          setActiveFrameId('')
+          setSelectedGeneratedResult(restoreResult)
+          setActiveFrameKind(restoreResult.kind)
+        }
         addAssetToFrame(picker.target, pickedAsset, restoreFrameId || undefined, {
-          selectedGeneratedResult: picker.selectedGeneratedResult || null
+          selectedGeneratedResult: restoreResult
         })
-        closeCanvasPicker()
-        if (api && restoreFrameId) {
+        closeCanvasPicker({ keepPanelLock: true })
+        releaseAttachmentPanelLockSoon()
+        const restoreElementId = restoreFrameId || restoreResult?.elementId || ''
+        if (api && restoreElementId) {
           window.setTimeout(() => {
             suppressNextChangeRef.current = true
             api.updateScene({
-              appState: { selectedElementIds: { [restoreFrameId]: true } },
+              appState: { selectedElementIds: { [restoreElementId]: true } },
               captureUpdate: CaptureUpdateAction.NEVER
             })
           }, 0)
@@ -5996,7 +7033,8 @@ export default function App() {
           .then(applyPickedAsset)
           .catch((error) => {
             setGenerationError(error.message || '台本ファイルを読み込めません。')
-            closeCanvasPicker()
+            closeCanvasPicker({ keepPanelLock: true })
+            releaseAttachmentPanelLockSoon()
           })
         return true
       }
@@ -6005,7 +7043,8 @@ export default function App() {
           .then(applyPickedAsset)
           .catch((error) => {
             setGenerationError(error.message)
-            closeCanvasPicker()
+            closeCanvasPicker({ keepPanelLock: true })
+            releaseAttachmentPanelLockSoon()
           })
       } else {
         applyPickedAsset(asset)
@@ -6015,12 +7054,15 @@ export default function App() {
     return () => {
       consumeCanvasPickerSelectionRef.current = null
     }
-  }, [addAssetToFrame, api, closeCanvasPicker, readTextAsset, uploadAssetDataURL])
+  }, [addAssetToFrame, api, closeCanvasPicker, readTextAsset, releaseAttachmentPanelLockSoon, uploadAssetDataURL])
 
   const onImageUploadChange = useCallback(async (event) => {
     const files = Array.from(event.target.files || [])
     event.target.value = ''
-    if (files.length === 0) return
+    if (files.length === 0) {
+      releaseAttachmentPanelLockSoon()
+      return
+    }
     const uploadSelectedResult = pendingGeneratorUploadResultRef.current
     const uploadFrameId = restoreGeneratorUploadFrame() || activeFrameIdRef.current
     try {
@@ -6032,15 +7074,20 @@ export default function App() {
       addAssetToFrame('imageReferences', assets, uploadFrameId, {
         selectedGeneratedResult: uploadFrameId ? null : uploadSelectedResult
       })
+      releaseAttachmentPanelLockSoon()
     } catch (error) {
       setGenerationError(error.message)
+      releaseAttachmentPanelLockSoon()
     }
-  }, [addAssetToFrame, restoreGeneratorUploadFrame, uploadAssetFile])
+  }, [addAssetToFrame, releaseAttachmentPanelLockSoon, restoreGeneratorUploadFrame, uploadAssetFile])
 
   const onVideoFrameUploadChange = useCallback(async (event) => {
     const files = Array.from(event.target.files || [])
     event.target.value = ''
-    if (files.length === 0) return
+    if (files.length === 0) {
+      releaseAttachmentPanelLockSoon()
+      return
+    }
     const target = videoFrameUploadTargetRef.current
     const expectedKind = getUploadTargetKind(target)
     // Pin the destination now: large files upload for a long time and the
@@ -6049,7 +7096,22 @@ export default function App() {
     const uploadFrameId = restoreGeneratorUploadFrame() || activeFrameIdRef.current
     setGenerationError('')
     try {
-      const uploaded = await Promise.all(files.map(uploadAssetFile))
+      const uploadableFiles = files.filter((file) => {
+        const fileKind = getFileAssetKind(file)
+        if (target === 'videoReferenceAudios') return isAudioReferenceUploadFile(file)
+        return (
+          fileKind === expectedKind ||
+          (target === 'subtitleAudio' && fileKind === 'video') ||
+          (target === 'silenceCutVideo' && (fileKind === 'video' || fileKind === 'xml'))
+        )
+      })
+      if (uploadableFiles.length === 0) {
+        const need = expectedKind === 'video' ? '動画' : expectedKind === 'audio' ? '音声' : '画像'
+        setGenerationError(`この枠には${need}ファイルを追加してください。`)
+        releaseAttachmentPanelLockSoon()
+        return
+      }
+      const uploaded = await Promise.all(uploadableFiles.map(uploadAssetFile))
       const assets = uploaded.filter(
         (asset) =>
           asset.kind === expectedKind ||
@@ -6061,15 +7123,18 @@ export default function App() {
         // silently doing nothing.
         const need = expectedKind === 'video' ? '動画' : expectedKind === 'audio' ? '音声' : '画像'
         setGenerationError(`この枠には${need}ファイルを追加してください。`)
+        releaseAttachmentPanelLockSoon()
         return
       }
       addAssetToFrame(target, assets, uploadFrameId, {
         selectedGeneratedResult: uploadFrameId ? null : uploadSelectedResult
       })
+      releaseAttachmentPanelLockSoon()
     } catch (error) {
       setGenerationError(error.message || 'アップロードに失敗しました。')
+      releaseAttachmentPanelLockSoon()
     }
-  }, [addAssetToFrame, restoreGeneratorUploadFrame, uploadAssetFile])
+  }, [addAssetToFrame, releaseAttachmentPanelLockSoon, restoreGeneratorUploadFrame, uploadAssetFile])
 
   // Shared media inserter for both the toolbar media tool (#9) and drag-and-drop.
   // `atPoint` (scene coords) sets where placement starts; defaults to viewport center.
@@ -6619,31 +7684,111 @@ export default function App() {
     [insertGeneratorFrame]
   )
 
-  // BuzzAssist-billed generations require a login. The login endpoint opens
-  // the browser auth window and blocks until sign-in completes, so pressing
-  // generate while logged out flows straight into the auth screen and the
-  // generation continues automatically after sign-in (BuzzAssist behavior).
-  const ensureBuzzAssistLoggedIn = useCallback(async () => {
-    try {
-      const status = await (await canvasFetch('/api/buzzassist/auth-status')).json()
-      if (status?.loggedIn) return true
-    } catch {
-      // status probe failed — fall through to the login flow
-    }
-    setGenerationError('BuzzAssistのログイン画面を開きました。ブラウザでサインインすると自動で続行します…')
+  const closeBuzzAssistLoginDialog = useCallback((result) => {
+    const pending = buzzAssistLoginRequestRef.current
+    buzzAssistLoginRequestRef.current = null
+    setBuzzAssistLoginBusy(false)
+    setBuzzAssistLoginDialog(null)
+    pending?.resolve(Boolean(result))
+  }, [])
+
+  const beginBuzzAssistLogin = useCallback(async () => {
+    setBuzzAssistLoginBusy(true)
+    setBuzzAssistLoginDialog((current) => (current ? { ...current, error: '' } : current))
     try {
       const response = await canvasFetch('/api/buzzassist/login', { method: 'POST' })
       const payload = await response.json().catch(() => ({}))
       if (response.ok && payload.ok) {
         setGenerationError('')
-        return true
+        closeBuzzAssistLoginDialog(true)
+        return
       }
-      setGenerationError(payload.error || 'BuzzAssistのログインに失敗しました。')
+      setBuzzAssistLoginDialog((current) => current
+        ? { ...current, error: payload.error || 'BuzzAssistのログインに失敗しました。' }
+        : current
+      )
     } catch (error) {
-      setGenerationError(`BuzzAssistのログインに失敗しました: ${error.message}`)
+      setBuzzAssistLoginDialog((current) => current
+        ? { ...current, error: `BuzzAssistのログインに失敗しました: ${error.message}` }
+        : current
+      )
+    } finally {
+      setBuzzAssistLoginBusy(false)
     }
-    return false
+  }, [closeBuzzAssistLoginDialog])
+
+  // Every generation route still needs a BuzzAssist account gate. The concrete
+  // work can run on Codex, Hermes, BuzzAssist, Lovart, or local ffmpeg, but the
+  // product surface should behave like the desktop BuzzAssist app: if the user
+  // is logged out, ask them to sign in before continuing the requested job.
+  const ensureBuzzAssistLoggedIn = useCallback(async (options = {}) => {
+    try {
+      const status = await (await canvasFetch('/api/buzzassist/auth-status')).json()
+      if (status?.loggedIn) return true
+    } catch {
+      // Status probe failed — show the login dialog and let the login endpoint
+      // surface any concrete failure.
+    }
+
+    if (buzzAssistLoginRequestRef.current?.promise) {
+      return buzzAssistLoginRequestRef.current.promise
+    }
+
+    let resolveRequest = () => {}
+    const promise = new Promise((resolve) => {
+      resolveRequest = resolve
+    })
+    buzzAssistLoginRequestRef.current = { promise, resolve: resolveRequest }
+    setGenerationError('')
+    setOpenMenu(null)
+    setBuzzAssistLoginDialog({
+      message: options.message || '生成を続けるにはBuzzAssistへのログインが必要です。',
+      detail: options.detail || 'ログイン後、この生成を自動で続行します。',
+      error: ''
+    })
+    return promise
   }, [])
+
+  // 複数枚生成: アンカーの右へ残り枚数分のGenerating...フレームを複製する。
+  // サーバーは各フレームを1枚ずつの結果で置き換える。
+  const spawnExtraGeneratingFrames = useCallback((anchorElement, anchorId, count) => {
+    if (!api || !anchorElement || count <= 0) return []
+    const baseElements = api.getSceneElementsIncludingDeleted()
+    const anchorLive = baseElements.find((element) => element.id === anchorId) ?? anchorElement
+    const frameGap = 24
+    const clones = convertToExcalidrawElements(
+      Array.from({ length: count }, (_, i) => ({
+        type: 'rectangle',
+        x: Math.round(anchorLive.x + (anchorLive.width + frameGap) * (i + 1)),
+        y: Math.round(anchorLive.y),
+        width: anchorLive.width,
+        height: anchorLive.height,
+        strokeColor: GENERATOR_FRAME_BORDER_COLOR,
+        backgroundColor: GENERATOR_FRAME_FILL_COLOR,
+        fillStyle: 'solid',
+        strokeStyle: 'solid',
+        strokeWidth: GENERATOR_FRAME_STROKE_WIDTH,
+        roughness: 0,
+        customData: { ...(anchorLive.customData ?? {}), role: 'frame' }
+      })),
+      { regenerateIds: true }
+    )
+    let elementsWithClones = baseElements
+    const cloneElements = []
+    for (const clone of clones) {
+      const nextClone = { ...clone, index: chooseIndex(elementsWithClones) }
+      cloneElements.push(nextClone)
+      elementsWithClones = [...elementsWithClones, nextClone]
+    }
+    suppressNextChangeRef.current = true
+    api.updateScene({ elements: elementsWithClones, captureUpdate: CaptureUpdateAction.NEVER })
+    const sceneWithClones = createScene(elementsWithClones, api.getAppState(), api.getFiles())
+    latestSceneRef.current = sceneWithClones
+    refreshOverlayStates(sceneWithClones)
+    const ids = cloneElements.map((element) => element.id)
+    setGeneratingFrameIds((current) => new Set([...current, ...ids]))
+    return ids
+  }, [api, refreshOverlayStates])
 
   const runFrameGeneration = useCallback(async () => {
     if (!api) return
@@ -6670,21 +7815,21 @@ export default function App() {
     if (kind === 'video' && savedForm.videoModel === 'grok-imagine-video-hermes') {
       if (savedForm.videoTab === 'keyframe') {
         if (savedForm.videoEndFrame) {
-          setGenerationError('Grok Imagine(Hermes) は終了フレーム指定に未対応です。開始画像のみ指定できます。')
+          setGenerationError('Grok Imagine(Grok) は終了フレーム指定に未対応です。開始画像のみ指定できます。')
           return
         }
         if (savedForm.videoStartFrame?.kind === 'video') {
-          setGenerationError('Grok Imagine(Hermes) の開始フレームには画像を指定してください。')
+          setGenerationError('Grok Imagine(Grok) の開始フレームには画像を指定してください。')
           return
         }
       }
       if (savedForm.videoTab === 'reference') {
         if (savedVideoReferenceImages.length > 7) {
-          setGenerationError('Grok Imagine(Hermes) のリファレンス画像は最大7枚までです。')
+          setGenerationError('Grok Imagine(Grok) のリファレンス画像は最大7枚までです。')
           return
         }
         if ((Number.parseInt(savedForm.duration, 10) || 0) > 10) {
-          setGenerationError('Grok Imagine(Hermes) のリファレンス動画生成は最大10秒までです。')
+          setGenerationError('Grok Imagine(Grok) のリファレンス動画生成は最大10秒までです。')
           return
         }
         if (savedVideoReferenceImages.length === 0 && savedVideoReferenceVideos.length === 0) {
@@ -6694,11 +7839,77 @@ export default function App() {
       }
     }
     const generationModel = kind === 'video' ? savedForm.videoModel : savedForm.imageModel
-    const requiresBuzzAssist =
-      [...(capabilities?.imageModels ?? []), ...(capabilities?.videoModels ?? [])].find(
-        (entry) => entry.id === generationModel
-      )?.requiresBuzzAssist === true
-    if (requiresBuzzAssist && !(await ensureBuzzAssistLoggedIn())) return
+    const generationFamily = kind === 'video'
+      ? videoFamilyForModel(savedForm.videoModel)
+      : imageFamilyForModel(savedForm.imageModel)
+    const generationRouteId = routeIdForModel(generationFamily, generationModel)
+    const generationRouteLabel = MEDIA_ROUTES.find((route) => route.id === generationRouteId)?.label || '選択中の実行先'
+    const generationKindLabel = kind === 'video' ? '動画生成' : '画像生成'
+    // Paint Generating... before any auth/status/network await. Previously the
+    // button appeared idle for the whole preflight round trip.
+    const optimisticGenerationId = anchorElementId
+    const originalSelectedElementIds = {
+      ...(api.getAppState?.()?.selectedElementIds ?? scene.appState?.selectedElementIds ?? {})
+    }
+    const applyTransientSelection = (selectedElementIds) => {
+      const elements = api.getSceneElementsIncludingDeleted()
+      const appState = { ...api.getAppState(), selectedElementIds }
+      suppressNextChangeRef.current = true
+      api.updateScene({
+        appState: { selectedElementIds },
+        captureUpdate: CaptureUpdateAction.NEVER
+      })
+      const transientScene = createScene(elements, appState, api.getFiles())
+      latestSceneRef.current = transientScene
+      refreshOverlayStates(transientScene)
+    }
+    setOpenMenu(null)
+    setGenerationError('')
+    setGeneratingFrameIds((current) => new Set(current).add(optimisticGenerationId))
+    lastPointerDownCanvasRef.current = null
+    // Remove both Excalidraw's native selection border and our selected
+    // overlay in the same paint as Generating.... Leaving this until after
+    // preflight made the outer frame linger intermittently.
+    applyTransientSelection({})
+    // 複数枚指定は送信と同時に（プリフライトを待たずに）Generating...フレーム
+    // を右へ並べる。再生成時は新フレーム作成後に並べる。
+    const requestedImageCount = kind === 'image'
+      ? Math.min(Number(savedForm.imageCount) || 1, getMaxImageCount(savedForm.imageModel))
+      : 1
+    let extraFrameIds = []
+    if (!isRegeneratingResult && requestedImageCount > 1) {
+      extraFrameIds = spawnExtraGeneratingFrames(anchorElement, anchorElementId, requestedImageCount - 1)
+    }
+    const clearOptimisticGeneration = () => {
+      setGeneratingFrameIds((current) => {
+        const next = new Set(current)
+        next.delete(optimisticGenerationId)
+        for (const extraId of extraFrameIds) next.delete(extraId)
+        return next
+      })
+      if (extraFrameIds.length > 0) {
+        const cleanedElements = api.getSceneElementsIncludingDeleted().map((element) =>
+          extraFrameIds.includes(element.id) ? { ...element, isDeleted: true } : element
+        )
+        suppressNextChangeRef.current = true
+        api.updateScene({ elements: cleanedElements, captureUpdate: CaptureUpdateAction.NEVER })
+        const cleanedScene = createScene(cleanedElements, api.getAppState(), api.getFiles())
+        latestSceneRef.current = cleanedScene
+        refreshOverlayStates(cleanedScene)
+        extraFrameIds = []
+      }
+      applyTransientSelection(originalSelectedElementIds)
+    }
+    if (generationRouteId === 'hermes' && !(await refreshHermesStatus())) {
+      clearOptimisticGeneration()
+      return
+    }
+    if (!(await ensureBuzzAssistLoggedIn({
+      message: `${generationRouteLabel}で${generationKindLabel}を続けるにはBuzzAssistへのログインが必要です。`
+    }))) {
+      clearOptimisticGeneration()
+      return
+    }
 
     // Regenerating from a selected result works like the desktop app: keep the
     // original untouched and spawn a fresh generator frame (viewport center,
@@ -6708,31 +7919,33 @@ export default function App() {
     let retryFrameId = ''
     if (isRegeneratingResult) {
       const created = insertGeneratorFrame(kind, savedForm, { selectFrame: false, openPanel: false })
-      if (!created?.frame) return
+      if (!created?.frame) {
+        clearOptimisticGeneration()
+        return
+      }
       retryFrameId = created.frame.id
       generationAnchorId = retryFrameId
       generationAnchorElement = created.frame
+      setGeneratingFrameIds((current) => {
+        const next = new Set(current)
+        next.delete(optimisticGenerationId)
+        next.add(retryFrameId)
+        return next
+      })
     }
 
     if (!isRegeneratingResult) updateActiveFrameElement(savedForm)
-    setOpenMenu(null)
-    setGenerationError('')
-    setGeneratingFrameIds((current) => new Set(current).add(generationAnchorId))
     setPendingPanelFrame(null)
     setSelectedGeneratedResult(null)
     activeFrameIdRef.current = ''
     setActiveFrameId('')
-    if (api) {
-      window.setTimeout(() => {
-        suppressNextChangeRef.current = true
-        api.updateScene({
-          appState: { selectedElementIds: {} },
-          captureUpdate: CaptureUpdateAction.NEVER
-        })
-      }, 0)
-    }
 
     let keepGeneratingFrame = false
+
+    // 複数枚指定の再生成では、新しいフレームの右にクローンを並べる。
+    if (requestedImageCount > 1 && extraFrameIds.length === 0) {
+      extraFrameIds = spawnExtraGeneratingFrames(generationAnchorElement, generationAnchorId, requestedImageCount - 1)
+    }
 
     try {
       await saveCanvas(latestSceneRef.current)
@@ -6743,9 +7956,10 @@ export default function App() {
           ? {
               prompt,
               model: savedForm.videoModel,
-              aspectRatio: savedForm.videoAspectRatio,
+              // Models without an aspect parameter (e.g. Hailuo) get no hint.
+              aspectRatio: getVideoAspectRatioOptions(savedForm.videoModel).length > 0 ? savedForm.videoAspectRatio : undefined,
               duration: savedForm.duration,
-              resolution: savedForm.resolution,
+              resolution: getVideoResolutionOptions(savedForm.videoModel).length > 0 ? savedForm.resolution : undefined,
               mode: normalizeVideoModeForContext(savedForm.videoModel, savedForm.videoTab, savedForm.videoMode),
               useReference: savedForm.videoTab === 'reference',
               useMotion: savedForm.videoTab === 'motion',
@@ -6764,7 +7978,16 @@ export default function App() {
                     : [],
               referenceVideos: savedForm.videoTab === 'reference' ? savedVideoReferenceVideos.map((asset) => asset.dataURL || asset.url).filter(Boolean) : [],
               motionOrientation: savedForm.videoTab === 'motion' ? 'image' : undefined,
-              generateAudio: savedForm.videoGenerateAudio !== false,
+              // Lovart routes: always-on-audio models must not receive a
+              // "silent video" hint, and no-audio models don't need one.
+              // Other routes keep sending the raw toggle as before.
+              generateAudio: !String(savedForm.videoModel).startsWith('lovart-')
+                ? savedForm.videoGenerateAudio !== false
+                : isAudioAlwaysOn(savedForm.videoModel)
+                  ? true
+                  : supportsGenerateAudio(savedForm.videoModel)
+                    ? savedForm.videoGenerateAudio !== false
+                    : undefined,
               selectCreated: true,
               anchorElementId: generationAnchorId,
               placement: 'replace',
@@ -6782,6 +8005,10 @@ export default function App() {
               aspectRatio: savedForm.aspectRatio,
               quality: savedForm.quality,
               imageSize: savedForm.imageSize,
+              imageCount: requestedImageCount,
+              extraAnchorElementIds: extraFrameIds,
+              modelVersion: getImageVersionOptions(savedForm.imageModel)?.includes(savedForm.imageVersion) ? savedForm.imageVersion : undefined,
+              detailRendering: supportsDetailRendering(savedForm.imageModel) && savedForm.imageDetailRendering === true,
               referenceImagePaths: normalizeAssetList(savedForm.imageReferences)
                 .filter((asset) => asset.kind === 'image')
                 .map((asset) => asset.path)
@@ -6818,6 +8045,7 @@ export default function App() {
           setGeneratingFrameIds((current) => {
             const next = new Set(current)
             next.delete(generationAnchorId)
+            for (const extraId of extraFrameIds) next.delete(extraId)
             return next
           })
         }, 10 * 60 * 1000)
@@ -6826,15 +8054,43 @@ export default function App() {
       const canvasResponse = await canvasFetch(CANVAS_ENDPOINT)
       if (canvasResponse.ok) {
         const canvasPayload = await canvasResponse.json()
+        let nextScene = canvasPayload.scene
+        // 結果アセットを適用前にExcalidraw本体へ注入して、灰色フレームを
+        // 見せずに完成画像を即表示する（Generating...はこの間表示されたまま）。
+        const resultFileIds = new Set(
+          [payload.fileId, ...((Array.isArray(payload.extras) ? payload.extras : []).map((extra) => extra.fileId))].filter(Boolean)
+        )
+        if (resultFileIds.size > 0) {
+          await prehydrateResultFiles(nextScene, resultFileIds)
+        }
+        // サーバーが要求枚数より少なく返した場合、残ったプレースホルダー
+        // フレームは削除する。
+        const consumedExtras = Array.isArray(payload.extras) ? payload.extras.length : 0
+        const leftoverFrameIds = extraFrameIds.slice(consumedExtras)
+        if (leftoverFrameIds.length > 0 && Array.isArray(nextScene?.elements)) {
+          nextScene = {
+            ...nextScene,
+            elements: nextScene.elements.map((element) =>
+              leftoverFrameIds.includes(element.id) ? { ...element, isDeleted: true } : element
+            )
+          }
+        }
         // After generation the server replaces the frame with the result and
         // selects it; apply that selection so the result's panel opens.
-        applyRemoteScene(canvasPayload.scene, { force: true, applySelection: true })
+        applyRemoteScene(nextScene, { force: true, applySelection: true })
+        if (leftoverFrameIds.length > 0) scheduleCanvasSave(latestSceneRef.current)
       }
     } catch (error) {
       setGenerationError(error.message)
       if (api) {
         const currentElements = api.getSceneElementsIncludingDeleted()
         let nextElements = currentElements
+        // 失敗したら複製したプレースホルダーフレームは片付ける。
+        if (extraFrameIds.length > 0) {
+          nextElements = nextElements.map((element) =>
+            extraFrameIds.includes(element.id) ? { ...element, isDeleted: true } : element
+          )
+        }
         let selectedElementIds = {}
         if (isRegeneratingResult && selectedResult?.elementId) {
           // Desktop parity: a failed retry removes the freshly created frame
@@ -6878,11 +8134,13 @@ export default function App() {
         setGeneratingFrameIds((current) => {
           const next = new Set(current)
           next.delete(generationAnchorId)
+          next.delete(optimisticGenerationId)
+          for (const extraId of extraFrameIds) next.delete(extraId)
           return next
         })
       }
     }
-  }, [api, applyRemoteScene, capabilities, ensureBuzzAssistLoggedIn, frameForm, generatingFrameIds, insertGeneratorFrame, refreshOverlayStates, saveCanvas, scheduleCanvasSave, scheduleSelectionSave, selectedGeneratedResult, updateActiveFrameElement])
+  }, [api, applyRemoteScene, ensureBuzzAssistLoggedIn, frameForm, generatingFrameIds, insertGeneratorFrame, prehydrateResultFiles, refreshHermesStatus, refreshOverlayStates, saveCanvas, scheduleCanvasSave, scheduleSelectionSave, selectedGeneratedResult, spawnExtraGeneratingFrames, updateActiveFrameElement])
 
   // Generation for utility frames. SRT replaces the frame with an SRT card;
   // silence cut keeps the frame selected and downloads a Premiere XML.
@@ -6911,8 +8169,10 @@ export default function App() {
       return
     }
 
-    const needsCloud = kind === 'subtitle' || savedForm.silenceCutModel === 'elevenlabs-scribe-v2'
-    if (needsCloud && !(await ensureBuzzAssistLoggedIn())) return
+    const utilityLabel = kind === 'subtitle' ? 'SRT生成' : '無音カット'
+    if (!(await ensureBuzzAssistLoggedIn({
+      message: `${utilityLabel}を続けるにはBuzzAssistへのログインが必要です。`
+    }))) return
 
     updateActiveFrameElement(savedForm)
     setOpenMenu(null)
@@ -7105,8 +8365,15 @@ export default function App() {
       const overlays = subtitlePreviewOverlaysRef.current
       if (!overlays || overlays.length === 0) return
       const rootRect = root.getBoundingClientRect()
-      const pointX = event.clientX - rootRect.left
-      const pointY = event.clientY - rootRect.top
+      // Overlay rects are captured at the last rebuild; during/after a pan
+      // the layer is only CSS-translated, so compensate the hit test with the
+      // live translation or the wheel misses the card at its visual position.
+      const layerTransform = overlayLayerRef.current?.style.transform || ''
+      const translateMatch = /translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)/.exec(layerTransform)
+      const layerDx = translateMatch ? Number(translateMatch[1]) : 0
+      const layerDy = translateMatch ? Number(translateMatch[2]) : 0
+      const pointX = event.clientX - rootRect.left - layerDx
+      const pointY = event.clientY - rootRect.top - layerDy
       const hit = [...overlays].reverse().find((overlay) =>
         pointX >= overlay.left && pointX <= overlay.left + overlay.width &&
         pointY >= overlay.top && pointY <= overlay.top + overlay.height
@@ -7147,7 +8414,10 @@ export default function App() {
 
   const livePanelTarget = buildPanelTargetFromScene(latestSceneRef.current, activeFrameId, selectedGeneratedResult)
   const activeOverlay = frameOverlays.find((overlay) => overlay.id === activeFrameId)
-  const isCurrentFrameGenerating = activeFrameId ? generatingFrameIds.has(activeFrameId) : false
+  const currentGenerationTargetId = activeFrameId || selectedGeneratedResult?.elementId || ''
+  const isCurrentFrameGenerating = currentGenerationTargetId
+    ? generatingFrameIds.has(currentGenerationTargetId)
+    : false
   const activePanelTarget = livePanelTarget ?? activeOverlay ?? selectedGeneratedResult
   const showPromptPanel = Boolean(activePanelTarget && !isCurrentFrameGenerating)
   const memoryConstrainedCanvas = isMemoryConstrainedCanvasRuntime()
@@ -7167,14 +8437,30 @@ export default function App() {
         assetUrl: overlay.outputAsset.url,
         fileName: overlay.outputAsset.name || assetFileNameFromUrl(overlay.outputAsset.url) || 'jetcut.xml'
       }))
+    // SRT cards get the same attach/download toolbar, plus the AI-refine action.
+    const selectedSrtCards = subtitlePreviewOverlays
+      .filter((overlay) => overlay.isSelected && overlay.assetUrl)
+      .map((overlay) => ({
+        ...overlay,
+        assetType: 'srt',
+        fileName: overlay.fileName || assetFileNameFromUrl(overlay.assetUrl) || 'subtitles.srt'
+      }))
     const mediaByKey = new Map()
-    for (const overlay of [...selectedImageOverlays.filter((item) => item.isSelected && item.assetUrl), ...selectedXmlOutputs]) {
+    for (const overlay of [...selectedImageOverlays.filter((item) => item.isSelected && item.assetUrl), ...selectedXmlOutputs, ...selectedSrtCards]) {
       const key = `${overlay.id || ''}\n${overlay.assetUrl || ''}`
       if (!mediaByKey.has(key)) mediaByKey.set(key, overlay)
     }
     return Array.from(mediaByKey.values())
   })()
   const selectedCanvasDownloadAssets = uniqueDownloadAssets(selectedCanvasDownloadOverlays)
+  const selectedRefinableSrtAsset = selectedCanvasDownloadAssets.length === 1 && /\.srt$/i.test(selectedCanvasDownloadAssets[0]?.fileName || '')
+    ? selectedCanvasDownloadAssets[0]
+    : null
+  // Silence-cut XMLs get the same agent-review affordance: the plan sidecar
+  // (canvas/.silence-cut-plans/) carries every cut candidate for the agent.
+  const selectedRefinableSilenceCutAsset = selectedCanvasDownloadAssets.length === 1 && /\.xml$/i.test(selectedCanvasDownloadAssets[0]?.fileName || '')
+    ? selectedCanvasDownloadAssets[0]
+    : null
   // One canonical entry per model; the execution route (Codex / Hermes /
   // BuzzAssist / Lovart) is chosen per model in the settings row and mapped
   // to the concrete backend id stored in frameForm.
@@ -7184,6 +8470,83 @@ export default function App() {
   const activeMediaRouteId = activeFrameKind === 'video'
     ? routeIdForModel(activeVideoFamily, frameForm.videoModel) ?? defaultRouteIdFor(activeVideoFamily)
     : routeIdForModel(activeImageFamily, frameForm.imageModel) ?? defaultRouteIdFor(activeImageFamily)
+  const showHermesSetupPromptInline = activeMediaRouteId === 'hermes' && /Hermes/i.test(String(generationError || ''))
+  // 生成エラーのうち、外部ページでしか解決できないものはエラー文言から検知
+  // してモーダル＋インラインボタンで誘導する（デスクトップ版
+  // buzzAssistPlanGate と同じ導線）。
+  const buzzAssistDashboardUrl = capabilities?.bridges?.buzzassist?.dashboardUrl || 'https://buzzassist.ai/dashboard'
+  const generationErrorAction = (() => {
+    const message = String(generationError || '')
+    if (!message) return null
+    if (/Lovartのクレジットまたはプランが不足|Lovartが(動画|画像)を返しませんでした/.test(message)) {
+      return {
+        key: 'lovart-plan',
+        eyebrow: 'Lovart Plan',
+        title: 'Lovartのプラン・クレジットを確認',
+        body: 'Lovartが生成を完了できませんでした。プランやクレジットの制限が原因の可能性があります。',
+        detail: 'Lovartの料金ページでクレジット残高の追加やプランのアップグレードを確認すると続行できます。',
+        actionLabel: 'プランを見る',
+        inlineLabel: 'Lovartのプランを確認',
+        url: 'https://www.lovart.ai/ja/pricing'
+      }
+    }
+    if (/Grokのレート制限に達しました/.test(message)) {
+      return {
+        key: 'grok-rate-limit',
+        eyebrow: 'Grok Plan',
+        title: 'Grokのレート制限に達しました',
+        body: 'Grok Imagineの利用上限に到達しました。時間をおくと再試行できます。',
+        detail: 'すぐに続けるには、SuperGrokプランまたはX Premiumへのアップグレードで上限を増やせます。',
+        actionLabel: 'SuperGrokプランを見る',
+        inlineLabel: 'SuperGrokプランを見る',
+        url: 'https://grok.com/plans',
+        secondaryActionLabel: 'X Premiumに登録',
+        secondaryUrl: 'https://x.com/i/premium_sign_up'
+      }
+    }
+    if (/BuzzAssistのクレジットまたはプランが不足|insufficient_credits/.test(message)) {
+      return {
+        key: 'buzzassist-credits',
+        eyebrow: 'BuzzAssist Credits',
+        title: 'クレジットが不足しています',
+        body: 'この生成に必要なBuzzAssistクレジットが足りません。',
+        detail: 'ダッシュボードでクレジットを追加するか、プランをアップグレードすると続行できます。',
+        actionLabel: 'ダッシュボードを開く',
+        inlineLabel: 'ダッシュボードでクレジット追加',
+        url: buzzAssistDashboardUrl
+      }
+    }
+    if (/実行先ChatGPT \(Codex\)を利用できません/.test(message)) {
+      return {
+        key: 'codex-install',
+        eyebrow: 'ChatGPT (Codex)',
+        title: 'ChatGPT (Codex) が見つかりません',
+        body: '実行先ChatGPTを使うには、ChatGPTデスクトップアプリまたはCodexが必要です。',
+        detail: 'インストールしてサインインすると、GPT Image 2をChatGPTアカウントの利用枠で生成できます。',
+        actionLabel: 'Codexを入手',
+        inlineLabel: 'Codexのインストールページを開く',
+        url: 'https://chatgpt.com/ja-JP/codex/'
+      }
+    }
+    if (/ChatGPTの生成上限に達しました/.test(message)) {
+      return {
+        key: 'chatgpt-limit',
+        eyebrow: 'ChatGPT Plan',
+        title: 'ChatGPTの生成上限に達しました',
+        body: 'ChatGPTアカウントの画像生成上限に到達しました。',
+        detail: '時間をおいて再試行するか、プランをアップグレードすると上限を増やせます。',
+        actionLabel: 'プランを見る',
+        inlineLabel: 'ChatGPTプランをアップグレード',
+        url: 'https://chatgpt.com/ja-JP/pricing/?openaicom_referred=true'
+      }
+    }
+    return null
+  })()
+  const showGenerationErrorDialog = Boolean(generationErrorAction) && buzzAssistBillingDismissedFor !== generationError
+  const dismissGenerationErrorDialog = () => setBuzzAssistBillingDismissedFor(generationError)
+  // The dialog/inline actions are real <a href> links (not window.open):
+  // native link navigation is the only mechanism every in-app browser and
+  // webview honors on a user click.
   const imageModelLabel = activeImageFamily?.label ?? frameForm.imageModel
   const videoModelLabel = activeVideoFamily?.label ?? frameForm.videoModel
 
@@ -7192,19 +8555,27 @@ export default function App() {
     if (kind === 'video') {
       // Youtube-AGI normalizes every dependent setting when the model changes.
       const nextTab = normalizeVideoTabForModel(concreteId, frameForm.videoTab)
+      const nextResolutions = getVideoResolutionOptions(concreteId)
       patchFrameForm({
         videoModel: concreteId,
         videoTab: nextTab,
         videoMode: normalizeVideoModeForContext(concreteId, nextTab, frameForm.videoMode),
         duration: normalizeVideoDurationForModel(concreteId, frameForm.duration),
-        videoAspectRatio: normalizeVideoAspectRatioForModel(concreteId, frameForm.videoAspectRatio)
+        videoAspectRatio: normalizeVideoAspectRatioForModel(concreteId, frameForm.videoAspectRatio),
+        ...(nextResolutions.length > 0 && !nextResolutions.includes(frameForm.resolution)
+          ? { resolution: nextResolutions.includes('720p') ? '720p' : nextResolutions[0] }
+          : {})
       })
     } else {
+      const versionOptions = getImageVersionOptions(concreteId)
       patchFrameForm({
         imageModel: concreteId,
         aspectRatio: getAvailableImageAspectRatios(concreteId).includes(frameForm.aspectRatio) ? frameForm.aspectRatio : '1:1',
         quality: getImageQualityOptions(concreteId).some(([value]) => value === frameForm.quality) ? frameForm.quality : 'auto',
-        imageSize: getAvailableImageSizes(concreteId).includes(frameForm.imageSize) ? frameForm.imageSize : getAvailableImageSizes(concreteId)[0]
+        imageSize: getAvailableImageSizes(concreteId).includes(frameForm.imageSize) ? frameForm.imageSize : getAvailableImageSizes(concreteId)[0],
+        imageCount: Math.min(Number(frameForm.imageCount) || 1, getMaxImageCount(concreteId)),
+        imageVersion: versionOptions?.includes(frameForm.imageVersion) ? frameForm.imageVersion : '',
+        imageDetailRendering: supportsDetailRendering(concreteId) ? frameForm.imageDetailRendering === true : false
       })
     }
   }
@@ -7214,9 +8585,9 @@ export default function App() {
     try {
       if (activeFrameKind === 'image') {
         const model = frameForm.imageModel
+        if (isLocalMediaRoute(activeMediaRouteId)) return 0
         // Lovart consumes Lovart-side credits, not BuzzAssist credits → 0 here.
         if (String(model).startsWith('lovart-')) return 0
-        if (model === 'gpt-image-2-codex') return 0
         return estimateCreditsForJob({
           kind: 'image',
           model,
@@ -7229,8 +8600,8 @@ export default function App() {
       }
       if (activeFrameKind === 'video') {
         const model = frameForm.videoModel
+        if (isLocalMediaRoute(activeMediaRouteId)) return 0
         if (String(model).startsWith('lovart-')) return 0
-        if (model === 'grok-imagine-video-hermes') return 0
         return estimateCreditsForJob({
           kind: 'video',
           model,
@@ -7266,6 +8637,8 @@ export default function App() {
   const videoReferenceImages = normalizeAssetList(frameForm.videoReferenceImages)
   const videoReferenceVideos = normalizeAssetList(frameForm.videoReferenceVideos)
   const videoReferenceAudios = normalizeAssetList(frameForm.videoReferenceAudios)
+  const videoPosterByAssetUrl = buildVideoPosterByAssetUrl(latestSceneRef.current)
+  const previewImageSrcForAsset = (asset) => assetPreviewImageSrc(asset, videoPosterByAssetUrl)
   const videoFrameMenuOpen = openMenu && (
     openMenu === 'videoStartFrame' ||
     openMenu === 'videoEndFrame' ||
@@ -7328,6 +8701,189 @@ export default function App() {
         }}
         onChange={handleChange}
       />
+      {buzzAssistLoginDialog ? (
+        <div
+          className="buzzassist-login-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="buzzassist-login-title"
+          onPointerDown={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="buzzassist-login-card">
+            <button
+              type="button"
+              className="buzzassist-login-close"
+              aria-label="閉じる"
+              disabled={buzzAssistLoginBusy}
+              onClick={() => closeBuzzAssistLoginDialog(false)}
+            >
+              <CloseIcon />
+            </button>
+            <div className="buzzassist-login-eyebrow">BuzzAssist Account</div>
+            <h2 id="buzzassist-login-title">BuzzAssistにログイン</h2>
+            <p>{buzzAssistLoginDialog.message}</p>
+            <p className="buzzassist-login-detail">{buzzAssistLoginDialog.detail}</p>
+            {buzzAssistLoginDialog.error ? (
+              <div className="buzzassist-login-error">{buzzAssistLoginDialog.error}</div>
+            ) : null}
+            <div className="buzzassist-login-actions">
+              <button
+                type="button"
+                className="buzzassist-login-secondary"
+                disabled={buzzAssistLoginBusy}
+                onClick={() => closeBuzzAssistLoginDialog(false)}
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                className="buzzassist-login-primary"
+                disabled={buzzAssistLoginBusy}
+                onClick={beginBuzzAssistLogin}
+              >
+                {buzzAssistLoginBusy ? 'ログイン中...' : 'ログインして続行'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {showGenerationErrorDialog ? (
+        <div
+          className="buzzassist-login-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="generation-error-action-title"
+          onPointerDown={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="buzzassist-login-card">
+            <button
+              type="button"
+              className="buzzassist-login-close"
+              aria-label="閉じる"
+              onClick={dismissGenerationErrorDialog}
+            >
+              <CloseIcon />
+            </button>
+            <div className="buzzassist-login-eyebrow">{generationErrorAction.eyebrow}</div>
+            <h2 id="generation-error-action-title">{generationErrorAction.title}</h2>
+            <p>{generationErrorAction.body}</p>
+            <p className="buzzassist-login-detail">{generationErrorAction.detail}</p>
+            <div className="buzzassist-login-actions">
+              <button
+                type="button"
+                className="buzzassist-login-secondary"
+                onClick={dismissGenerationErrorDialog}
+              >
+                あとで
+              </button>
+              {generationErrorAction.secondaryActionLabel ? (
+                <a
+                  className="buzzassist-login-secondary"
+                  href={generationErrorAction.secondaryUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={dismissGenerationErrorDialog}
+                >
+                  {generationErrorAction.secondaryActionLabel}
+                </a>
+              ) : null}
+              <a
+                className="buzzassist-login-primary"
+                href={generationErrorAction.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={dismissGenerationErrorDialog}
+              >
+                {generationErrorAction.actionLabel}
+              </a>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {hermesSetupDialog ? (
+        <div
+          className="buzzassist-login-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="hermes-setup-title"
+          onPointerDown={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="buzzassist-login-card hermes-setup-card">
+            <button
+              type="button"
+              className="buzzassist-login-close"
+              aria-label="閉じる"
+              disabled={hermesSetupChecking}
+              onClick={closeHermesSetupDialog}
+            >
+              <CloseIcon />
+            </button>
+            <div className="buzzassist-login-eyebrow">Grok</div>
+            <h2 id="hermes-setup-title">{hermesSetupDialog.title}</h2>
+            <p>{hermesSetupDialog.message}</p>
+            <div className="hermes-setup-state">
+              <span className={`hermes-setup-chip${hermesSetupDialog.installed ? ' is-ok' : ''}`}>
+                <span className="hermes-setup-chip-dot" aria-hidden="true" />
+                Grok CLI: {hermesSetupDialog.installed ? '検出済み' : '未インストール'}
+              </span>
+              <span className={`hermes-setup-chip${hermesSetupDialog.session === 'logged-in' ? ' is-ok' : ''}`}>
+                <span className="hermes-setup-chip-dot" aria-hidden="true" />
+                Grokログイン: {hermesSetupDialog.session === 'logged-in' ? '済み' : '未ログイン'}
+              </span>
+            </div>
+            <ol className="hermes-setup-steps">
+              <li>
+                <span className="hermes-setup-step-num" aria-hidden="true">1</span>
+                <span>下のプロンプトをコピーする</span>
+              </li>
+              <li>
+                <span className="hermes-setup-step-num" aria-hidden="true">2</span>
+                <span>AIエージェント（Claude Code / Codexなど）のチャットに貼り付けて実行する</span>
+              </li>
+              <li>
+                <span className="hermes-setup-step-num" aria-hidden="true">3</span>
+                <span>実行が終わったら「再確認」を押す</span>
+              </li>
+            </ol>
+            <div className="hermes-setup-prompt-box">
+              <div className="hermes-setup-prompt-box-header">
+                <span className="hermes-setup-prompt-box-title">セットアッププロンプト</span>
+                <button
+                  type="button"
+                  className={`hermes-setup-copy${chatSendStatus === 'setup-copied' ? ' is-copied' : ''}`}
+                  onPointerDown={handleHermesSetupPromptPointerDown}
+                  onClick={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                  }}
+                >
+                  {chatSendStatus === 'setup-copied' ? '✓ コピーしました' : 'プロンプトをコピー'}
+                </button>
+              </div>
+              <pre className="hermes-setup-prompt">{HERMES_GROK_SETUP_PROMPT}</pre>
+            </div>
+            {hermesSetupDialog.error && !/was not found/i.test(hermesSetupDialog.error) ? (
+              <div className="buzzassist-login-error">{hermesSetupDialog.error}</div>
+            ) : null}
+            <div className="buzzassist-login-actions hermes-setup-actions">
+              <button
+                type="button"
+                className="buzzassist-login-primary"
+                disabled={hermesSetupChecking}
+                onClick={refreshHermesStatus}
+              >
+                {hermesSetupChecking ? '確認中...' : '再確認'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {api ? (
         <div className="lovart-ai-rail">
           <button
@@ -7405,6 +8961,28 @@ export default function App() {
         </div>
       ) : null}
 
+      {/* Canvas-anchored overlays live in two zero-size layers so a pure pan
+          translates them (handleChange fast path) instead of re-rendering
+          every overlay per frame. Two layers because the stacking interleaves
+          with Excalidraw's canvases: media previews sit UNDER the interactive
+          canvas (z-2, so selection borders paint above them) while frames,
+          headers, and the toolbar sit ABOVE it. Keep position-fixed UI
+          (modals, backdrop, panel) OUTSIDE — a transformed ancestor would
+          re-anchor them. */}
+      <div ref={overlayUnderLayerRef} className="lovart-canvas-overlay-layer is-under-canvas">
+        {imagePreviewOverlays.map((image) => (
+          <CanvasImagePreviewOverlay key={image.id} image={image} />
+        ))}
+        {videoPlaybackOverlays.map((video) => (
+          <VideoCanvasOverlay
+            key={video.id}
+            video={video}
+            isHovered={hoveredVideoPlaybackId === video.id}
+            onExpand={setExpandedVideoPlayback}
+          />
+        ))}
+      </div>
+      <div ref={overlayLayerRef} className="lovart-canvas-overlay-layer is-above-canvas">
       {frameOverlays.map((overlay) => {
         const isGenerating = generatingFrameIds.has(overlay.id) || overlay.remoteGenerating
         const isVideo = overlay.kind === 'video'
@@ -7424,7 +9002,8 @@ export default function App() {
         return (
           <div
             key={overlay.id}
-            className={`lovart-frame-overlay${overlay.isSelected ? ' is-selected' : ''}`}
+            data-overlay-anchor={overlay.id}
+            className={`lovart-frame-overlay${overlay.isSelected ? ' is-selected' : ''}${isGenerating ? ' is-generating' : ''}`}
             style={{
               left: `${overlay.left}px`,
               top: `${overlay.top}px`,
@@ -7557,29 +9136,21 @@ export default function App() {
     )
   })}
 
-      {imagePreviewOverlays.map((image) => (
-        <CanvasImagePreviewOverlay key={image.id} image={image} />
-      ))}
-
-      {videoPlaybackOverlays.map((video) => (
-        <VideoCanvasOverlay
-          key={video.id}
-          video={video}
-          isHovered={hoveredVideoPlaybackId === video.id}
-          onExpand={setExpandedVideoPlayback}
-        />
-      ))}
-
       {subtitlePreviewOverlays.map((overlay) => (
         <SubtitleCanvasOverlay key={overlay.id} overlay={overlay} scrollOffset={subtitleScrollOffsets[overlay.id] || 0} />
       ))}
 
       {selectedImageOverlays.map((img) => {
+        // SRT cards draw their own header (file name + line count) inside
+        // SubtitleCanvasOverlay — rendering this one too made the two labels
+        // overprint (e.g. "820 × 3656" colliding with "36 行").
+        if (img.assetType === 'srt') return null
         const { headerFontSize, headerOffset } = getMediaHeaderMetrics(img.width)
         if (img.width < 28) return null
         return (
           <div
             key={img.id}
+            data-overlay-anchor={img.id}
             style={{
               position: 'absolute',
               left: `${img.left}px`,
@@ -7612,43 +9183,20 @@ export default function App() {
         const downloadTitle = single
           ? `${selectedCanvasDownloadAssets[0]?.fileName || 'asset'} をダウンロード`
           : `${selectedCanvasDownloadAssets.length}件をZIPでダウンロード`
-        const shouldAttachSelectionToChat = selectedCanvasDownloadAssets.length > 1 || selectedCanvasDownloadAssets.some(isNativeChatFileAsset)
-        const attachTitle = single
-          ? (shouldAttachSelectionToChat
-              ? `${selectedCanvasDownloadAssets[0]?.fileName || 'asset'} をチャットへ添付`
-              : `${selectedCanvasDownloadAssets[0]?.fileName || 'asset'} をコピー`)
-          : (shouldAttachSelectionToChat
-              ? `${selectedCanvasDownloadAssets.length}件をチャットへ添付`
-              : `${selectedCanvasDownloadAssets.length}件をbundleとしてコピー`)
-        const attachDone = ['image-copied', 'bundle-copied', 'ready', 'ready-no-copy', 'queued', 'sent', 'attached'].includes(agentAttachStatus)
-        const attachLabel = agentAttachStatus === 'ready-no-copy'
-          ? '作成済'
-          : agentAttachStatus === 'attached'
-            ? '添付済'
-            : 'コピー済'
-        const attachStatusText =
-          agentAttachStatusText ||
-          (agentChatComposer
-            ? '送信内容を入力中'
-            : agentAttachStatus === 'preparing' || agentAttachStatus === 'sending'
-            ? (shouldAttachSelectionToChat ? '添付中...' : 'コピー中...')
-            : agentAttachStatus === 'sent'
-              ? 'チャットへ送信しました'
-            : agentAttachStatus === 'attached'
-              ? 'チャットへ添付しました'
-            : agentAttachStatus === 'queued'
-              ? '送信待ちです。チャット欄に貼り付けできるよう読み取り文もコピーしました'
-            : agentAttachStatus === 'ready'
-              ? '読み取り文をコピーしました'
-            : agentAttachStatus === 'image-copied'
-              ? '画像をコピーしました'
-            : agentAttachStatus === 'bundle-copied'
-              ? 'bundleをコピーしました'
-            : agentAttachStatus === 'ready-no-copy'
-              ? 'bundleを作成しました。チャットで latest を読んでください'
+        const copyTitle = single
+          ? `${selectedCanvasDownloadAssets[0]?.fileName || 'asset'} をチャット貼り付け用にコピー`
+          : `${selectedCanvasDownloadAssets.length}件をチャット貼り付け用にコピー`
+        const copyBusy = agentAttachStatus === 'preparing' || agentAttachStatus === 'sending'
+        const copyDone = ['file-copied', 'image-copied', 'bundle-copied', 'ready', 'ready-no-copy'].includes(agentAttachStatus)
+        const copyToastText = copyBusy
+          ? 'コピー中…'
+          : copyDone
+            ? (agentAttachStatusText || 'コピーしました')
             : agentAttachStatus === 'error'
-              ? 'チャットへ送信できませんでした'
-                      : attachTitle)
+              ? (agentAttachStatusText || 'コピーに失敗しました')
+              : ''
+        // The buttons keep their icons after a click — copy feedback lives in
+        // a transient toast under the toolbar, never in the button itself.
         return (
           <div
             className="lovart-selection-toolbar"
@@ -7662,22 +9210,18 @@ export default function App() {
           >
             <button
               type="button"
-              className={`lovart-selection-toolbar-btn${attachDone ? ' is-success' : ''}${agentAttachStatus === 'error' ? ' is-error' : ''}`}
-              disabled={agentAttachStatus === 'preparing' || agentAttachStatus === 'sending' || selectedCanvasDownloadAssets.length === 0}
-              title={attachStatusText}
-              aria-label={attachStatusText}
+              className="lovart-selection-toolbar-btn"
+              disabled={copyBusy || selectedCanvasDownloadAssets.length === 0}
+              title={copyTitle}
+              aria-label={copyTitle}
               onClick={(event) => {
                 event.preventDefault()
                 event.stopPropagation()
                 copySelectedCanvasAssets(selectedCanvasDownloadAssets)
               }}
             >
-              {attachDone ? <span className="lovart-selection-toolbar-check" aria-hidden="true">✓</span> : <AttachIcon size={15} />}
-              {agentAttachStatus === 'preparing' || agentAttachStatus === 'sending' ? (
-                <span className="lovart-selection-toolbar-count">...</span>
-              ) : attachDone ? (
-                <span className="lovart-selection-toolbar-label">{attachLabel}</span>
-              ) : selectedCanvasDownloadAssets.length > 1 ? (
+              <AttachIcon size={15} />
+              {selectedCanvasDownloadAssets.length > 1 ? (
                 <span className="lovart-selection-toolbar-count">{selectedCanvasDownloadAssets.length}</span>
               ) : null}
             </button>
@@ -7685,93 +9229,126 @@ export default function App() {
               type="button"
               className="lovart-selection-toolbar-btn"
               disabled={bulkDownloading || selectedCanvasDownloadAssets.length === 0}
-              title={bulkDownloading ? '開始中…' : downloadTitle}
-              aria-label={bulkDownloading ? '開始中…' : downloadTitle}
+              title={downloadTitle}
+              aria-label={downloadTitle}
               onClick={async (event) => {
                 event.preventDefault()
                 event.stopPropagation()
+                if (bulkDownloadInFlightRef.current) return
+                bulkDownloadInFlightRef.current = true
                 setBulkDownloading(true)
                 try {
-                  await saveDownloadAssetsWithPicker(selectedCanvasDownloadAssets)
+                  await downloadAssetsViaServerDialog(selectedCanvasDownloadAssets)
                 } finally {
-                  window.setTimeout(() => setBulkDownloading(false), 350)
+                  bulkDownloadInFlightRef.current = false
+                  setBulkDownloading(false)
                 }
               }}
             >
               <DownloadIcon size={15} />
-              {!single ? <span className="lovart-selection-toolbar-count">{bulkDownloading ? '…' : selectedCanvasDownloadAssets.length}</span> : null}
+              {!single ? (
+                <span className="lovart-selection-toolbar-count">{selectedCanvasDownloadAssets.length}</span>
+              ) : null}
             </button>
+            {selectedRefinableSrtAsset ? (
+              <button
+                type="button"
+                className="lovart-selection-toolbar-btn"
+                title="AIで意味区切りを検収（依頼文をコピー）"
+                aria-label="AIで意味区切りを検収（依頼文をコピー）"
+                onClick={async (event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  // The refinement itself runs in the host agent (zero API
+                  // cost): copy a self-contained request it can act on via
+                  // the refine_excalidraw_subtitles MCP tool. The SRT itself
+                  // rides along as an agent-attachment bundle so a single
+                  // paste hands the agent both the request and the file —
+                  // the clipboard cannot carry text and a file at once.
+                  const srtName = selectedRefinableSrtAsset.fileName
+                  const basePrompt = `キャンバスの字幕「${srtName}」をAI検収して、日本語として自然な意味のまとまりで改行・分割し直して。漢字の誤変換やフィラーも文脈で修正して。手順: canvas/.subtitle-words/ の単語サイドカー（${srtName}.json）を読み、意味区切りごとに単語インデックスのキュー計画を作って refine_excalidraw_subtitles ツールを呼ぶこと。タイミングは単語アンカー基準なので音ズレはしない。`
+                  let prompt = basePrompt
+                  let bundled = false
+                  try {
+                    const bundle = await createAgentAttachmentBundle([selectedRefinableSrtAsset])
+                    if (bundle?.bundleId) {
+                      bundled = true
+                      prompt = `${basePrompt}\nSRT本体はキャンバス添付バンドル ${bundle.bundleId} に入っている（read_canvas_attachment_bundle で読める）。`
+                    }
+                  } catch {
+                    // Remote operator or bundle failure — the prompt alone is
+                    // still fully actionable (the tool reads files from disk).
+                  }
+                  try {
+                    await writeTextToClipboard(prompt)
+                    setAgentAttachStatus('ready')
+                    setAgentAttachStatusText(bundled
+                      ? '検収依頼をコピーしました（SRT添付付き） — エージェントに貼り付けてください'
+                      : '検収依頼をコピーしました — エージェントに貼り付けてください')
+                  } catch {
+                    setAgentAttachStatus('error')
+                    setAgentAttachStatusText('依頼文をコピーできませんでした')
+                  }
+                  scheduleAgentAttachStatusReset(3600)
+                }}
+              >
+                <RefineSparkleIcon size={15} />
+              </button>
+            ) : null}
+            {selectedRefinableSilenceCutAsset ? (
+              <button
+                type="button"
+                className="lovart-selection-toolbar-btn"
+                title="AIでカット候補を検収（依頼文をコピー）"
+                aria-label="AIでカット候補を検収（依頼文をコピー）"
+                onClick={async (event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  // Same zero-cost agent-review pattern as the SRT ✨ button:
+                  // the plan sidecar carries every cut candidate with reason
+                  // and confidence, and refine_excalidraw_silence_cut rebuilds
+                  // the XML in place from the reviewed decisions.
+                  const xmlName = selectedRefinableSilenceCutAsset.fileName
+                  const basePrompt = `キャンバスの無音カットXML「${xmlName}」をAI検収して。手順: canvas/.silence-cut-plans/ のプランサイドカー（${xmlName}.json）を読み、candidates（id・start・end・type・reason・confidence・text）を1件ずつ確認して、誤検出（指示語の「あの」、演出の間、本編の言葉がリテイク扱いされたもの等）をveto、正しいカットを承認し、refine_excalidraw_silence_cut ツールに decisions を渡してXMLを再構築すること。未言及の候補は元のカットのまま維持される。`
+                  let prompt = basePrompt
+                  let bundled = false
+                  try {
+                    const bundle = await createAgentAttachmentBundle([selectedRefinableSilenceCutAsset])
+                    if (bundle?.bundleId) {
+                      bundled = true
+                      prompt = `${basePrompt}\nXML本体はキャンバス添付バンドル ${bundle.bundleId} に入っている（read_canvas_attachment_bundle で読める）。`
+                    }
+                  } catch {
+                    // Bundle failure — the prompt alone is fully actionable.
+                  }
+                  try {
+                    await writeTextToClipboard(prompt)
+                    setAgentAttachStatus('ready')
+                    setAgentAttachStatusText(bundled
+                      ? '検収依頼をコピーしました（XML添付付き） — エージェントに貼り付けてください'
+                      : '検収依頼をコピーしました — エージェントに貼り付けてください')
+                  } catch {
+                    setAgentAttachStatus('error')
+                    setAgentAttachStatusText('依頼文をコピーできませんでした')
+                  }
+                  scheduleAgentAttachStatusReset(3600)
+                }}
+              >
+                <RefineSparkleIcon size={15} />
+              </button>
+            ) : null}
+            {copyToastText ? (
+              <div
+                className={`lovart-selection-toolbar-status${agentAttachStatus === 'error' ? ' is-error' : copyDone ? ' is-success' : ''}`}
+                role="status"
+              >
+                {copyDone ? `✓ ${copyToastText}` : copyToastText}
+              </div>
+            ) : null}
           </div>
         )
       })() : null}
-      {agentChatComposer ? (
-        <div
-          className="lovart-agent-chat-popover"
-          style={{
-            left: `${Math.round(agentChatComposer.left)}px`,
-            top: `${Math.round(agentChatComposer.top)}px`,
-            width: `${Math.round(agentChatComposer.width || 360)}px`
-          }}
-          onPointerDown={(event) => event.stopPropagation()}
-          onMouseDown={(event) => event.stopPropagation()}
-          onClick={(event) => event.stopPropagation()}
-        >
-          <div className="lovart-agent-chat-head">
-            <div>
-              <div className="lovart-agent-chat-title">チャットへ送る</div>
-              <div className="lovart-agent-chat-subtitle">{agentChatComposer.assets?.length || 0}件の選択素材を添付bundleとして渡します</div>
-            </div>
-            <button
-              type="button"
-              className="lovart-agent-chat-close"
-              aria-label="閉じる"
-              onClick={() => setAgentChatComposer(null)}
-            >
-              ×
-            </button>
-          </div>
-          <textarea
-            ref={agentChatInputRef}
-            className="lovart-agent-chat-input"
-            value={agentChatComposer.text || ''}
-            placeholder="修正内容や依頼を書いてください"
-            disabled={agentChatComposer.status === 'preparing' || agentChatComposer.status === 'sending'}
-            onChange={(event) => {
-              const value = event.target.value
-              setAgentChatComposer((current) => current ? { ...current, text: value, statusText: '' } : current)
-            }}
-            onKeyDown={(event) => {
-              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-                event.preventDefault()
-                sendAgentChatComposer()
-              }
-            }}
-          />
-          <div className="lovart-agent-chat-foot">
-            <div className={`lovart-agent-chat-status${agentChatComposer.status === 'error' ? ' is-error' : ''}`}>
-              {agentChatComposer.statusText || '⌘/Ctrl + Enter でも送信できます'}
-            </div>
-            <div className="lovart-agent-chat-actions">
-              <button
-                type="button"
-                className="lovart-agent-chat-secondary"
-                disabled={agentChatComposer.status === 'preparing' || agentChatComposer.status === 'sending'}
-                onClick={() => setAgentChatComposer(null)}
-              >
-                キャンセル
-              </button>
-              <button
-                type="button"
-                className="lovart-agent-chat-primary"
-                disabled={agentChatComposer.status === 'preparing' || agentChatComposer.status === 'sending'}
-                onClick={sendAgentChatComposer}
-              >
-                {agentChatComposer.status === 'preparing' || agentChatComposer.status === 'sending' ? '送信中...' : '送信'}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      </div>
       <div ref={hoverOverlayRef} className="lovart-hover-border" style={{ display: 'none' }} />
 
       {expandedVideoPlayback ? (
@@ -7884,7 +9461,7 @@ export default function App() {
               <div className="lovart-ref-row">
                 {imageReferences.map((item) => (
                   <div key={item.id} className="lovart-ref-thumb">
-                    <img src={item.thumbnail || item.dataURL || item.url} alt={item.name || 'reference'} />
+                    <img src={previewImageSrcForAsset(item)} alt={item.name || 'reference'} />
                     {item.kind === 'video' ? <span className="lovart-ref-play" aria-hidden="true">▶</span> : null}
                     <button
                       type="button"
@@ -7938,7 +9515,7 @@ export default function App() {
                   >
                     {slotAsset ? (
                       <>
-                        <img className="lovart-slot-thumb" src={slotAsset.thumbnail || slotAsset.dataURL || slotAsset.url} alt={slotAsset.name || slot} />
+                        <img className="lovart-slot-thumb" src={previewImageSrcForAsset(slotAsset)} alt={slotAsset.name || slot} />
                         {slotAsset.kind === 'video' ? <span className="lovart-slot-play">▶</span> : null}
                       </>
                     ) : (
@@ -8009,10 +9586,8 @@ export default function App() {
                 {frameForm.videoTab === 'reference' ? (
                   <>
                     {supportsAudioReference(frameForm.videoModel) ? (
-                      <div className="lovart-video-slot audio">
+                      <div className="lovart-video-slot audio lovart-menu-wrap">
                         <FileUploadLabel
-                          className="lovart-add-frame-btn audio"
-                          title="音声"
                           accept={getUploadTargetAccept('videoReferenceAudios')}
                           multiple
                           onOpen={() => {
@@ -8021,6 +9596,9 @@ export default function App() {
                             videoFrameUploadTargetRef.current = 'videoReferenceAudios'
                           }}
                           onChange={(event) => { setOpenMenu(null); onVideoFrameUploadChange(event) }}
+                          data-lovart-trigger="video-frame-audio"
+                          className="lovart-add-frame-btn audio"
+                          title="音声"
                         >
                           <span className="lovart-add-plus">+</span>
                           <span className="lovart-add-label">音声</span>
@@ -8029,7 +9607,7 @@ export default function App() {
                     ) : null}
                     {[...videoReferenceVideos, ...videoReferenceImages].map((asset) => (
                       <div key={asset.id} className={`lovart-ref-card ${asset.kind}`}>
-                        <img src={asset.thumbnail || asset.dataURL || asset.url} alt={asset.name || 'reference'} />
+                        <img src={previewImageSrcForAsset(asset)} alt={asset.name || 'reference'} />
                         {asset.kind === 'video' ? <span className="lovart-slot-play">▶</span> : null}
                         <button
                           type="button"
@@ -8069,7 +9647,44 @@ export default function App() {
               </div>
             ) : null}
           </div>
-          {generationError ? <div className="lovart-error">{generationError}</div> : null}
+          {generationError ? (
+            <div className="lovart-error">
+              <div>{generationError}</div>
+              {generationErrorAction ? (
+                <div className="lovart-error-actions">
+                  <a
+                    className="lovart-error-action"
+                    href={generationErrorAction.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    {generationErrorAction.inlineLabel}
+                  </a>
+                </div>
+              ) : null}
+              {showHermesSetupPromptInline ? (
+                <div className="lovart-error-actions">
+                  <button
+                    type="button"
+                    className="lovart-error-action"
+                    onPointerDown={handleHermesSetupPromptPointerDown}
+                    onClick={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                    }}
+                  >
+                    セットアッププロンプトをコピー
+                  </button>
+                  <span>
+                    {chatSendStatus === 'setup-copied'
+                      ? 'コピーしました'
+                      : 'AIエージェントのチャットに貼り付けてください'}
+                  </span>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <div className="lovart-ai-bottom">
             <div className="lovart-ai-left">
               {activeFrameKind === 'video' ? (
@@ -8165,9 +9780,10 @@ export default function App() {
                       <button
                         type="button"
                         key={route.id}
-                        onClick={() => {
+                        onClick={async () => {
                           applyMediaModelSelection(activeFrameKind, activeMediaFamily.routes[route.id])
                           setOpenMenu(null)
+                          if (route.id === 'hermes') await refreshHermesStatus()
                         }}
                       >
                         <span className="lovart-model-icon"><ModelProviderIcon provider={route.icon} /></span>
@@ -8239,44 +9855,9 @@ export default function App() {
                           </>
                         ) : null}
                     </div>
-                    {(activeMediaFamily?.routes?.hermes && hermesStatus && (!hermesStatus.installed || hermesStatus.session === 'logged-out')) ? (
-                      <div className="lovart-key-form">
-                        <div className="lovart-key-status">
-                          {hermesStatus.installed
-                            ? 'Hermes は未ログインです（X の OAuth が必要）'
-                            : 'Hermes Agent が未インストールです'}
-                        </div>
-                        <div className="lovart-key-send-row">
-                          {[['claude', 'Claude Code に依頼'], ['codex', 'Codex に依頼']].map(([app, label]) => (
-                            <button
-                              type="button"
-                              key={app}
-                              className="lovart-key-save"
-                              onClick={() => {
-                                sendToChatApp({
-                                  app,
-                                  autoSend: true,
-                                  text: 'Hermes Agent で Grok Imagine を使えるようにセットアップして。excalidraw MCP の setup_hermes_grok ツールを実行して、必要なら hermes auth add xai-oauth のブラウザOAuthを完了させて。'
-                                })
-                              }}
-                            >
-                              {label}
-                            </button>
-                          ))}
-                        </div>
-                        <div className="lovart-key-hint">
-                          {chatSendStatus === 'sent'
-                            ? '送信しました — チャット側でセットアップが始まります'
-                            : chatSendStatus === 'attached'
-                              ? 'チャットに依頼を添付しました — Enterで送信してください'
-                              : chatSendStatus === 'copied' || chatSendStatus === 'copied-fallback'
-                                ? '依頼文をコピーしました — チャットに⌘Vで貼り付けて送信してください'
-                                : chatSendStatus === 'sending'
-                                  ? '送信中…'
-                                  : 'ワンクリックでチャットに依頼を送って setup_hermes_grok を実行させます'}
-                        </div>
-                      </div>
-                    ) : null}
+                    {/* Hermes setup lives in the dedicated dialog (opened on
+                        route selection / generation) — no inline setup block
+                        in the route menu. */}
                   </div>
                 ) : null}
               </div>
@@ -8323,27 +9904,42 @@ export default function App() {
             <div className="lovart-ai-right">
               {activeFrameKind === 'image' ? (
                 <>
-                  {usesImageQualitySelection(frameForm.imageModel) || getAvailableImageSizes(frameForm.imageModel).length > 1 ? (
+                  {(() => {
+                    const imageModel = frameForm.imageModel
+                    const showQuality = usesImageQualitySelection(imageModel)
+                    const sizeOptions = getAvailableImageSizes(imageModel)
+                    const maxCount = getMaxImageCount(imageModel)
+                    const versionOptions = getImageVersionOptions(imageModel)
+                    const showDetailToggle = supportsDetailRendering(imageModel)
+                    if (!showQuality && sizeOptions.length <= 1 && maxCount <= 1 && !versionOptions && !showDetailToggle) return null
+                    const activeCount = Math.min(Number(frameForm.imageCount) || 1, maxCount)
+                    const summary = [
+                      versionOptions ? frameForm.imageVersion || versionOptions[0] : null,
+                      showQuality
+                        ? getImageQualityOptions(imageModel).find(([value]) => value === frameForm.quality)?.[1] ?? 'Auto'
+                        : sizeOptions.length > 1
+                          ? frameForm.imageSize ?? sizeOptions[0]
+                          : null,
+                      isGrokImageModel(imageModel) ? frameForm.imageSize ?? '1K' : null,
+                      maxCount > 1 ? `${activeCount}枚` : null
+                    ].filter(Boolean).join('・')
+                    return (
                   <div className="lovart-menu-wrap">
                     <button
                       type="button"
                       className="lovart-pill"
+                      data-lovart-tooltip="画像設定"
                       onClick={() => setOpenMenu((current) => (current === 'quality' ? null : 'quality'))}
                     >
-                      <span>
-                        {usesImageQualitySelection(frameForm.imageModel)
-                          ? getImageQualityOptions(frameForm.imageModel).find(([value]) => value === frameForm.quality)?.[1] ?? 'Auto'
-                          : frameForm.imageSize ?? '1K'}
-                        {isGrokImageModel(frameForm.imageModel) ? `・${frameForm.imageSize ?? '1K'}` : ''}
-                      </span>
+                      <span>{summary}</span>
                       <ChevronIcon />
                     </button>
                     {openMenu === 'quality' ? (
-                      <div className="lovart-menu" data-lovart-menu="quality">
-                        {usesImageQualitySelection(frameForm.imageModel) ? (
+                      <div className="lovart-menu lovart-image-settings" data-lovart-menu="quality">
+                        {showQuality ? (
                           <>
                             <div className="lovart-menu-header">品質</div>
-                            {getImageQualityOptions(frameForm.imageModel).map(([value, label]) => (
+                            {getImageQualityOptions(imageModel).map(([value, label]) => (
                               <button
                                 type="button"
                                 key={value}
@@ -8358,10 +9954,10 @@ export default function App() {
                             ))}
                           </>
                         ) : null}
-                        {getAvailableImageSizes(frameForm.imageModel).length > 1 ? (
+                        {sizeOptions.length > 1 ? (
                           <>
                             <div className="lovart-menu-header">サイズ</div>
-                            {getAvailableImageSizes(frameForm.imageModel).map((size) => (
+                            {sizeOptions.map((size) => (
                               <button
                                 type="button"
                                 key={size}
@@ -8376,10 +9972,59 @@ export default function App() {
                             ))}
                           </>
                         ) : null}
+                        {versionOptions ? (
+                          <>
+                            <div className="lovart-menu-header">モデル</div>
+                            <div className="lovart-menu-grid count">
+                              {versionOptions.map((version) => (
+                                <button
+                                  type="button"
+                                  key={version}
+                                  className={(frameForm.imageVersion || versionOptions[0]) === version ? 'is-selected' : ''}
+                                  onClick={() => updateFrameForm('imageVersion', version)}
+                                >
+                                  <span>{version}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        ) : null}
+                        {showDetailToggle ? (
+                          <div className="lovart-audio-row">
+                            <div className="lovart-menu-header">高精細レンダリング</div>
+                            <button
+                              type="button"
+                              className={`lovart-audio-toggle${frameForm.imageDetailRendering ? ' is-on' : ''}`}
+                              onClick={() => updateFrameForm('imageDetailRendering', !frameForm.imageDetailRendering)}
+                              aria-pressed={frameForm.imageDetailRendering === true}
+                              aria-label="高精細レンダリング"
+                            >
+                              <span />
+                            </button>
+                          </div>
+                        ) : null}
+                        {maxCount > 1 ? (
+                          <>
+                            <div className="lovart-menu-header">枚数</div>
+                            <div className="lovart-menu-grid count">
+                              {Array.from({ length: maxCount }, (_, i) => i + 1).map((count) => (
+                                <button
+                                  type="button"
+                                  key={count}
+                                  className={activeCount === count ? 'is-selected' : ''}
+                                  onClick={() => updateFrameForm('imageCount', count)}
+                                >
+                                  <span>{count}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>
-                  ) : null}
+                    )
+                  })()}
                   <div className="lovart-menu-wrap">
                     <button
                       type="button"
@@ -8407,10 +10052,14 @@ export default function App() {
                             <span className="lovart-ratio-icon">
                               <span
                                 className="lovart-ratio-shape"
-                                style={{
-                                  width: ratio === '16:9' ? 16 : ratio === '9:16' ? 8 : 12,
-                                  height: ratio === '9:16' ? 16 : ratio === '16:9' ? 8 : 12
-                                }}
+                                style={(() => {
+                                  const [rw, rh] = ratio.split(':').map(Number)
+                                  const scale = 16 / Math.max(rw, rh)
+                                  return {
+                                    width: Math.max(3, Math.round(rw * scale)),
+                                    height: Math.max(3, Math.round(rh * scale))
+                                  }
+                                })()}
                               />
                             </span>
                             <span>{ratio}</span>
@@ -8437,9 +10086,10 @@ export default function App() {
                         const modePrefix = modes.length > 0
                           ? `${VIDEO_MODE_OPTIONS.find(([value]) => value === activeMode)?.[1] ?? ''}・`
                           : ''
-                        const aspect = frameForm.videoAspectRatio === 'auto' ? 'Auto' : frameForm.videoAspectRatio
+                        const hasAspect = getVideoAspectRatioOptions(frameForm.videoModel).length > 0
+                        const aspect = hasAspect ? `${frameForm.videoAspectRatio === 'auto' ? 'Auto' : frameForm.videoAspectRatio}・` : ''
                         const resolution = supportsResolutionSelection(frameForm.videoModel) ? `・${frameForm.resolution}` : ''
-                        return `${modePrefix}${aspect}・${frameForm.duration}s${resolution}`
+                        return `${modePrefix}${aspect}${frameForm.duration}s${resolution}`
                       })()}
                     </span>
                     <ChevronIcon />
@@ -8463,6 +10113,8 @@ export default function App() {
                           </div>
                         </>
                       ) : null}
+                      {getVideoAspectRatioOptions(frameForm.videoModel).length > 0 ? (
+                      <>
                       <div className="lovart-menu-header">Size</div>
                       <div className="lovart-menu-grid">
                         {getVideoAspectRatioOptions(frameForm.videoModel).map((ratio) => (
@@ -8483,6 +10135,8 @@ export default function App() {
                           </button>
                         ))}
                       </div>
+                      </>
+                      ) : null}
                       <div className="lovart-setting-row">
                         <div className="lovart-menu-header">Duration</div>
                         {getVideoDurationChoices(frameForm.videoModel) ? null : <span>{frameForm.duration}s</span>}
@@ -8522,7 +10176,7 @@ export default function App() {
                         <>
                           <div className="lovart-menu-header">Quality</div>
                           <div className="lovart-menu-grid compact">
-                            {['480p', '720p'].map((resolution) => (
+                            {getVideoResolutionOptions(frameForm.videoModel).map((resolution) => (
                               <button
                                 type="button"
                                 key={resolution}
@@ -8547,6 +10201,11 @@ export default function App() {
                           >
                             <span />
                           </button>
+                        </div>
+                      ) : isAudioAlwaysOn(frameForm.videoModel) ? (
+                        <div className="lovart-audio-row">
+                          <div className="lovart-menu-header">オーディオ</div>
+                          <span className="lovart-audio-always">常時オン</span>
                         </div>
                       ) : null}
                     </div>
@@ -8594,10 +10253,29 @@ export default function App() {
           setOpenMenu(null)
           const file = event.target.files?.[0]
           event.target.value = ''
-          if (!file) return
-          file.text().then((text) =>
-            patchFrameForm({ subtitleScriptText: text.trim(), subtitleScriptName: file.name })
-          )
+          if (!file) {
+            releaseAttachmentPanelLockSoon()
+            return
+          }
+          const uploadSelectedResult = pendingGeneratorUploadResultRef.current
+          const uploadFrameId = restoreGeneratorUploadFrame() || activeFrameIdRef.current
+          file.text()
+            .then((text) => {
+              addAssetToFrame('subtitleScript', {
+                id: crypto.randomUUID(),
+                kind: 'script',
+                name: file.name,
+                mimeType: file.type || 'text/plain',
+                text
+              }, uploadFrameId, {
+                selectedGeneratedResult: uploadFrameId ? null : uploadSelectedResult
+              })
+              releaseAttachmentPanelLockSoon()
+            })
+            .catch((error) => {
+              setGenerationError(error.message || '台本ファイルを読み込めません。')
+              releaseAttachmentPanelLockSoon()
+            })
         }
         const canGenerate = isSilencePanel
           ? Boolean(frameForm.silenceCutVideo)
@@ -8708,7 +10386,11 @@ export default function App() {
                           <UploadIcon />
                           <span>動画をアップロード</span>
                         </FileUploadLabel>
-                        <button type="button" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setOpenMenu(null); openCanvasPicker('silenceCutVideo') }}>
+                        <button
+                          type="button"
+                          data-lovart-canvas-pick-target="silenceCutVideo"
+                          onClick={(event) => { event.preventDefault(); event.stopPropagation(); setOpenMenu(null); openCanvasPicker('silenceCutVideo') }}
+                        >
                           <CanvasPickIcon />
                           <span>キャンバスから選択</span>
                         </button>
@@ -8797,7 +10479,11 @@ export default function App() {
                           <UploadIcon />
                           <span>音声・動画をアップロード</span>
                         </FileUploadLabel>
-                        <button type="button" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setOpenMenu(null); openCanvasPicker('subtitleAudio') }}>
+                        <button
+                          type="button"
+                          data-lovart-canvas-pick-target="subtitleAudio"
+                          onClick={(event) => { event.preventDefault(); event.stopPropagation(); setOpenMenu(null); openCanvasPicker('subtitleAudio') }}
+                        >
                           <CanvasPickIcon />
                           <span>キャンバスから選択</span>
                         </button>
@@ -8846,12 +10532,13 @@ export default function App() {
                       </button>
                     )}
                     {openMenu === 'subtitle-script-source' ? (
-                      <div className="lovart-menu lovart-slot-menu" data-lovart-menu="subtitle-script-source">
-                        <FileUploadLabel
-                          className="lovart-upload-label"
-                          accept=".txt,.md,.markdown,text/plain,text/markdown"
-                          onChange={handleScriptFileChange}
-                        >
+	                      <div className="lovart-menu lovart-slot-menu" data-lovart-menu="subtitle-script-source">
+	                        <FileUploadLabel
+	                          className="lovart-upload-label"
+	                          accept=".txt,.md,.markdown,text/plain,text/markdown"
+	                          onOpen={rememberGeneratorUploadFrame}
+	                          onChange={handleScriptFileChange}
+	                        >
                           <UploadIcon />
                           <span>台本をアップロード</span>
                         </FileUploadLabel>
@@ -8874,7 +10561,24 @@ export default function App() {
               )}
             </div>
           </div>
-          {generationError ? <div className="lovart-error">{generationError}</div> : null}
+          {generationError ? (
+            <div className="lovart-error">
+              <div>{generationError}</div>
+              {generationErrorAction ? (
+                <div className="lovart-error-actions">
+                  <a
+                    className="lovart-error-action"
+                    href={generationErrorAction.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    {generationErrorAction.inlineLabel}
+                  </a>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           {isSilencePanel && silenceCutNotice && !generationError ? (
             <div className="lovart-notice">
               <span>{silenceCutNotice}</span>

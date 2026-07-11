@@ -16,7 +16,7 @@ test("canvas managed overlays stay visible when media and generator frames overl
   const imageOverlayBuilder = sliceBetween(source, "function buildSelectedImageOverlays", "function buildVideoPlaybackOverlays");
   const videoOverlayBuilder = sliceBetween(source, "function buildVideoPlaybackOverlays", "function buildSubtitlePreviewOverlays");
   const subtitleOverlayBuilder = sliceBetween(source, "function buildSubtitlePreviewOverlays", "// Fetched SRT text");
-  const frameRenderer = sliceBetween(source, "{frameOverlays.map", "{videoPlaybackOverlays.map");
+  const frameRenderer = sliceBetween(source, "{frameOverlays.map", "{subtitlePreviewOverlays.map");
   const imageHeaderRenderer = sliceBetween(source, "{selectedImageOverlays.map", "<div ref={hoverOverlayRef}");
   const subtitleRenderer = sliceBetween(source, "function SubtitleCanvasOverlay", "function VideoCanvasOverlay");
 

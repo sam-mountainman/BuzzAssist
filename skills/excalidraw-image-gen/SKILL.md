@@ -1,6 +1,6 @@
 ---
 name: excalidraw-image-gen
-description: Generate or insert a bitmap into the local BuzzAssist canvas. Use when the user asks to create, fill, replace, or place an AI-generated image on the Excalidraw canvas using GPT Image 2(Codex), Grok Imagine(Hermes), or BuzzAssist cloud models (Nano Banana 2, GPT Image 2 API, Seedream 5.0 Lite, Grok Imagine API — require the buzzassist_login plugin tool), or Lovart models (Midjourney, Flux.2 Max, Nano Banana Pro, Ideogram 4 — require LOVART_ACCESS_KEY/SECRET_KEY or ~/.lovart/credentials.json).
+description: Generate or insert a bitmap into the local BuzzAssist canvas. Use when the user asks to create, fill, replace, or place an AI-generated image on the Excalidraw canvas using GPT Image 2(Codex), Grok Imagine(Grok), or BuzzAssist cloud models (Nano Banana 2, GPT Image 2 API, Seedream 5.0 Lite, Grok Imagine API — require the buzzassist_login plugin tool), or Lovart models (Midjourney, Flux.2 Max, Nano Banana Pro, Ideogram 4 — require LOVART_ACCESS_KEY/SECRET_KEY or ~/.lovart/credentials.json).
 ---
 
 # Excalidraw Image Gen
@@ -33,7 +33,7 @@ AI holders are rectangle elements with:
 `generate_excalidraw_image` / `generate_excalidraw_images_batch` は `confirmedSettings: true` なしの呼び出しを拒否します（`payloadPreview` を除く）。ユーザーのメッセージで全設定が明示されていない限り、生成前に AskUserQuestion を1回だけ出して確認してください:
 
 - モデル（GPT-Image-2.0 / Grok Imagine / NanoBanana 2 / Seedream v5 Lite / Midjourney …）
-- 実行先（同じモデルが複数の実行先を持つ場合。例: GPT Image 2 → Codex / BuzzAssist / Lovart、Grok Imagine → Hermes / BuzzAssist）
+- 実行先（同じモデルが複数の実行先を持つ場合。例: GPT Image 2 → Codex / BuzzAssist / Lovart、Grok Imagine → Grok / BuzzAssist）
 - アスペクト比（1:1 / 16:9 / 9:16 …）と品質（Auto / Low / Medium / High）
 - 推奨デフォルト: GPT-Image-2.0 (Codex)・1:1・Auto — 選択肢には（推奨）を付ける
 
@@ -60,7 +60,7 @@ AI holders are rectangle elements with:
 }
 ```
 
-Use `"model": "grok-imagine-image-hermes"` when the user requests Grok Imagine(Hermes).
+Use `"model": "grok-imagine-image-hermes"` when the user requests Grok Imagine(Grok).
 
 4. If the user supplies an existing image path, insert it with the plugin `insert_excalidraw_image` tool:
 

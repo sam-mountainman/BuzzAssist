@@ -26,7 +26,7 @@ function zIndexForSelector(css, selector) {
   return zIndex(rule);
 }
 
-test("generator chrome stays below native Excalidraw toolbar and above backdrop", async () => {
+test("generator chrome stays above native Excalidraw toolbar and below active picker", async () => {
   const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   const nativeToolbarSelectors = [
     ".lovart-ai-root .excalidraw .layer-ui__wrapper",
@@ -37,7 +37,7 @@ test("generator chrome stays below native Excalidraw toolbar and above backdrop"
     ".lovart-ai-root .excalidraw [class*=\"popover\"]"
   ];
   for (const selector of nativeToolbarSelectors) {
-    assert.equal(zIndexForSelector(css, selector), 120, `${selector} should stay above generator chrome`);
+    assert.equal(zIndexForSelector(css, selector), 120, `${selector} should stay below generator input chrome`);
   }
 
   const backdrop = zIndexForSelector(css, ".lovart-menu-backdrop");
@@ -54,8 +54,8 @@ test("generator chrome stays below native Excalidraw toolbar and above backdrop"
   const canvasPickerBar = zIndexForSelector(css, ".lovart-canvas-picker-bar");
 
   assert.equal(backdrop, 20);
-  assert.equal(rail, 120);
-  assert.equal(panel, 30);
+  assert.equal(rail, 135);
+  assert.equal(panel, 130);
   assert.equal(menu, 40);
   assert.equal(menuWrap, 30);
   assert.equal(videoMenuWrap, 40);
@@ -66,12 +66,26 @@ test("generator chrome stays below native Excalidraw toolbar and above backdrop"
   assert.equal(slotButton, 101);
   assert.equal(canvasPickerBar, 140);
   assert.ok(backdrop < panel);
-  assert.ok(panel < menu);
   assert.ok(menu < slotMenu);
   assert.ok(slotMenu < slotButton);
-  assert.ok(slotButton < rail);
+  assert.ok(panel < rail);
+  assert.ok(rail < canvasPickerBar);
   for (const selector of nativeToolbarSelectors) {
-    assert.ok(slotButton < zIndexForSelector(css, selector), `${selector} should cover generator menus`);
+    assert.ok(zIndexForSelector(css, selector) < panel, `${selector} should not block generator input actions`);
     assert.ok(zIndexForSelector(css, selector) < canvasPickerBar, `${selector} should stay below the active canvas picker bar`);
   }
+});
+
+test("BuzzAssist login modal stays above canvas and generator chrome", async () => {
+  const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+
+  const loginModal = zIndexForSelector(css, ".buzzassist-login-modal");
+  const rail = zIndexForSelector(css, ".lovart-ai-rail");
+  const panel = zIndexForSelector(css, ".lovart-ai-panel");
+  const canvasPickerBar = zIndexForSelector(css, ".lovart-canvas-picker-bar");
+
+  assert.equal(loginModal, 220);
+  assert.ok(loginModal > rail);
+  assert.ok(loginModal > panel);
+  assert.ok(loginModal > canvasPickerBar);
 });

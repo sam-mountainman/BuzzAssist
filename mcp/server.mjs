@@ -26,16 +26,18 @@ import {
   OFFICIAL_EXCALIDRAW_README,
   createExcalidrawView,
   insertExcalidrawImage as insertExcalidrawImageMedia,
+  insertExcalidrawSilenceCutResult,
   insertExcalidrawSubtitle,
   insertExcalidrawVideo as insertExcalidrawVideoMedia,
   clearFrameGeneratingFlags,
   insertGeneratorFrameBatch,
   performCanvasMaintenance,
+  writeCanvasFocusRequest,
 } from "../lib/canvasScene.mjs";
-import { silenceCutVideo } from "../lib/tempoCut.mjs";
+import { refineSilenceCutFromPlan, silenceCutVideo } from "../lib/tempoCut.mjs";
 import { estimateCreditsForJob } from "../lib/mediaCredits.mjs";
 import { isFalImageModel, isFalVideoModel, previewFalImageRequest, previewFalVideoRequest } from "../lib/falMediaGeneration.mjs";
-import { generateSubtitleSrt, normalizeSubtitleHoldSeconds, renderSrt } from "../lib/subtitleGeneration.mjs";
+import { generateSubtitleSrt, normalizeSubtitleHoldSeconds, refineSubtitleFromPlan, renderSrt, writeSubtitleWordsSidecar } from "../lib/subtitleGeneration.mjs";
 import { startChatBridgeWorker } from "../lib/chatBridge.mjs";
 import { readServerDiscovery } from "../lib/canvasServerRuntime.mjs";
 import {
@@ -52,7 +54,7 @@ import {
 import { tmpdir } from "node:os";
 
 const SERVER_NAME = "BuzzAssist Excalidraw Plugin Tools";
-const SERVER_VERSION = "0.1.5";
+const SERVER_VERSION = "0.1.6";
 const TOOL_READ_ME = "read_me";
 const TOOL_CREATE_VIEW = "create_view";
 const TOOL_GET_SELECTION = "get_excalidraw_selection";
@@ -67,7 +69,9 @@ const TOOL_BUZZASSIST_AUTH_STATUS = "buzzassist_auth_status";
 const TOOL_SETUP_HERMES = "setup_hermes_grok";
 const TOOL_GENERATE_SUBTITLES = "generate_excalidraw_subtitles";
 const TOOL_GENERATE_SUBTITLES_BATCH = "generate_excalidraw_subtitles_batch";
+const TOOL_REFINE_SUBTITLES = "refine_excalidraw_subtitles";
 const TOOL_SILENCE_CUT_VIDEO = "silence_cut_excalidraw_video";
+const TOOL_REFINE_SILENCE_CUT = "refine_excalidraw_silence_cut";
 const TOOL_CANVAS_TUNNEL_START = "buzzassist_canvas_tunnel_start";
 const TOOL_CANVAS_TUNNEL_STATUS = "buzzassist_canvas_tunnel_status";
 const TOOL_CANVAS_TUNNEL_STOP = "buzzassist_canvas_tunnel_stop";
@@ -89,6 +93,30 @@ const MEDIA_GENERATION_AGENT_INSTRUCTIONS = [
   "For Codex and Claude Code interactive UI, open the local BUZZASSIST_CANVAS_URL in the host in-app browser/browser tool and use MCP tools for stable reads/writes. render_buzzassist_canvas_widget remains an experimental MCP Apps entrypoint only; do not use it for normal Codex or Claude Code work unless the user explicitly asks to test the widget.",
   "To attach selected canvas images/videos/SRT/XML into the current chat, use prepare_canvas_attachments or read_canvas_attachment_bundle. Do not rely on OS GUI paste automation for media attachments.",
 ].join(" ");
+
+function collectFocusElementIds(value, output = new Set()) {
+  if (!value || typeof value !== "object") return [...output];
+  if (typeof value.elementId === "string" && value.elementId) output.add(value.elementId);
+  if (Array.isArray(value)) {
+    for (const item of value) collectFocusElementIds(item, output);
+  } else {
+    for (const key of ["results", "placement", "placements", "items"]) {
+      const nested = value[key];
+      if (nested && typeof nested === "object") collectFocusElementIds(nested, output);
+    }
+  }
+  return [...output];
+}
+
+async function requestCanvasFocus(args = {}, result) {
+  if (args.dryRun === true || args.payloadPreview === true) return null;
+  const elementIds = collectFocusElementIds(result);
+  if (elementIds.length === 0) return null;
+  return writeCanvasFocusRequest(args, elementIds, {
+    applySelection: true,
+    applyViewport: true,
+  });
+}
 
 // Project-common 用語辞書 (canvas/subtitle-glossary.json) merges into every
 // SRT / scribe-cut transcription, matching the BuzzAssist desktop app.
@@ -519,9 +547,9 @@ const SETTINGS_CONFIRMATION_TOOLS = new Map([
 
 const SETTINGS_QUESTION_GUIDES = {
   image:
-    "model (GPT-Image-2.0 / Grok Imagine / NanoBanana 2 / Seedream v5 Lite / Midjourney …), 実行先 (execution route) whenever the chosen model can run on more than one of Codex(local) / Hermes(local) / BuzzAssist API / Lovart (e.g. GPT Image 2 → Codex or BuzzAssist or Lovart; Grok Imagine → Hermes or BuzzAssist), aspect ratio (1:1 / 16:9 / 9:16 …), and quality (Auto / Low / Medium / High). Recommended defaults: GPT-Image-2.0 (Codex), 1:1, Auto.",
+    "model (GPT-Image-2.0 / Grok Imagine / NanoBanana 2 / Seedream v5 Lite / Midjourney …), 実行先 (execution route) whenever the chosen model can run on more than one of Codex(local) / Grok(local) / BuzzAssist API / Lovart (e.g. GPT Image 2 → Codex or BuzzAssist or Lovart; Grok Imagine → Grok or BuzzAssist), aspect ratio (model-specific: 1:1 / 16:9 / 9:16 …, Nano Banana 2 also 8:1 banners), size tier when supported (1K/2K/4K), 枚数 imageCount when the Lovart route supports it (Nano Banana up to 4, Seedream up to 6), quality (GPT Image 2: Auto / Low / Medium / High), and for Midjourney the model version (v8.1 / v7 / niji / niji7) plus 高精細レンダリング on/off. Recommended defaults: GPT-Image-2.0 (Codex), 1:1, Auto, 1枚.",
   video:
-    "model (Grok Imagine / Seedance 2 / Kling v3 / Veo 3.1 …), 実行先 (execution route) whenever the chosen model can run on more than one of Hermes(local) / BuzzAssist API / Lovart (e.g. Grok Imagine → Hermes or BuzzAssist; Kling → BuzzAssist or Lovart), aspect ratio (16:9 / 9:16 / 1:1), duration (e.g. 5s / 10s), and resolution (480p / 720p). Recommended defaults: Grok Imagine (Hermes), 16:9, 5s, 720p.",
+    "model (Grok Imagine / Seedance 2 / Kling v3 / Veo 3.1 / Wan 2.6 / Vidu Q2 …), 実行先 (execution route) whenever the chosen model can run on more than one of Grok(local) / BuzzAssist API / Lovart (e.g. Grok Imagine → Grok or BuzzAssist; Kling → BuzzAssist or Lovart), aspect ratio (16:9 / 9:16 / 1:1 …; Hailuo has none), duration (model-specific: Veo 4/6/8s, Wan 5/10/15s, Vidu 2-8s, Seedance 4-15s, Kling 2.6 5/10s), resolution when supported (480p-4K: Seedance 2.0 and Veo 3.1 reach 4K), audio ON/OFF when the model supports it (Seedance/Kling/Veo/Wan; Gemini Omni Flash is always-on), and any start/end frames or reference images/videos. Recommended defaults: Grok Imagine (Grok), 16:9, 5s, 720p, audio ON.",
   subtitle:
     "mode (scripted aligns a provided script / scriptless transcribes), lineCount (1 or 2), and maxCharsPerLine. Recommended defaults: scripted when a script exists (otherwise scriptless), 2 lines, 30 chars.",
   silenceCut:
@@ -532,6 +560,7 @@ function settingsConfirmationErrorText(kind) {
   return (
     "Settings not confirmed — call rejected. Like the BuzzAssist app, confirm the generation settings with the user BEFORE generating: " +
     `ask ONE AskUserQuestion covering ${SETTINGS_QUESTION_GUIDES[kind]} ` +
+    "Ask about every setting the user has NOT explicitly mentioned (実行先・モデル・その他の設定項目); settings the user already stated must be reused as-is and never re-asked. " +
     "Mark the default option with (Recommended) / （推奨）. Skip asking ONLY when the user's own message already specified every one of these settings. " +
     "Then call this tool again with confirmedSettings: true and the chosen values."
   );
@@ -1072,7 +1101,7 @@ function buildGenerationPayloadPreview(kind, args = {}) {
       local: true,
       estimatedCredits: estimate?.credits ?? 0,
       estimatedCostYen: estimate?.estimatedCostYen ?? 0,
-      note: "Local model (Codex/Hermes) — no BuzzAssist credits consumed.",
+      note: "Local model (Codex/Grok) — no BuzzAssist credits consumed.",
     };
   }
   const preview = kind === "image" ? previewFalImageRequest(args) : previewFalVideoRequest(args);
@@ -1098,7 +1127,9 @@ async function generateExcalidrawImage(args = {}) {
     ...args,
     mediaBuffer: media.buffer,
     mimeType: media.mimeType,
-    fileName: args.fileName ?? args.imageName ?? args.image_name ?? media.fileName,
+    // Leave unset when the caller gave no name — canvasScene then assigns
+    // desktop-app-style sequential ImageN names.
+    fileName: args.fileName ?? args.imageName ?? args.image_name,
     customData: {
       codexGeneratedImage: true,
       codexGenerationModel: media.model,
@@ -1134,7 +1165,8 @@ async function generateExcalidrawVideo(args = {}) {
     ...args,
     mediaBuffer: media.buffer,
     mimeType: media.mimeType,
-    fileName: args.fileName ?? args.videoName ?? args.video_name ?? media.fileName,
+    // Unset → canvasScene assigns sequential VideoN names (desktop parity).
+    fileName: args.fileName ?? args.videoName ?? args.video_name,
     aspectRatio: args.aspectRatio ?? args.aspect_ratio,
     duration: args.duration,
     prompt: args.prompt,
@@ -1219,7 +1251,7 @@ async function generateExcalidrawImagesBatch(args = {}) {
           canvasDir: args.canvasDir,
           mediaBuffer: media.buffer,
           mimeType: media.mimeType,
-          fileName: job.fileName ?? job.imageName ?? job.image_name ?? media.fileName,
+          fileName: job.fileName ?? job.imageName ?? job.image_name,
           anchorElementId: frame?.elementId,
           replaceAnchor: Boolean(frame?.elementId),
           matchAnchor: true,
@@ -1364,7 +1396,7 @@ async function generateExcalidrawVideosBatch(args = {}) {
           canvasDir: args.canvasDir,
           mediaBuffer: media.buffer,
           mimeType: media.mimeType,
-          fileName: job.fileName ?? job.videoName ?? job.video_name ?? media.fileName,
+          fileName: job.fileName ?? job.videoName ?? job.video_name,
           anchorElementId: frame?.elementId,
           replaceAnchor: Boolean(frame?.elementId),
           matchAnchor: true,
@@ -1684,7 +1716,7 @@ function toolDefinitions() {
           model: {
             type: "string",
             enum: IMAGE_MODEL_IDS,
-            description: "Defaults to gpt-image-2-codex. Non-Codex/Hermes models are BuzzAssist cloud models and need buzzassist_login.",
+            description: "Defaults to gpt-image-2-codex. Non-Codex/Grok models are BuzzAssist cloud models and need buzzassist_login.",
           },
           projectDir: { type: "string", description: "Absolute project directory containing canvas/." },
           canvasDir: { type: "string", description: "Absolute canvas directory. Overrides projectDir." },
@@ -1694,9 +1726,12 @@ function toolDefinitions() {
           imageName: { type: "string", description: "Alias for fileName." },
           aspectRatio: { type: "string", description: "Aspect ratio such as 1:1, 16:9, or 9:16." },
           aspect_ratio: { type: "string", description: "Alias for aspectRatio." },
-          imageSize: { type: "string", description: "Image size or Hermes resolution hint." },
+          imageSize: { type: "string", description: "Image size or Grok resolution hint (1K/2K)." },
           quality: { type: "string", description: "Quality hint. high maps to Grok quality mode." },
-          referenceImagePaths: { type: "array", items: { type: "string" }, description: "Optional local image references for Hermes image edit." },
+          imageCount: { type: "number", description: "Number of images per generation (Lovart route only; e.g. Nano Banana up to 4, Seedream up to 6)." },
+          modelVersion: { type: "string", description: "Midjourney model version (v8.1 / v7 / niji / niji7). Lovart route only." },
+          detailRendering: { type: "boolean", description: "Midjourney 高精細レンダリング (high-detail rendering). Lovart route only." },
+          referenceImagePaths: { type: "array", items: { type: "string" }, description: "Optional local image references for Grok Imagine image edit." },
           reference_image_paths: { type: "array", items: { type: "string" }, description: "Alias for referenceImagePaths." },
           payloadPreview: { type: "boolean", description: "Return the resolved endpoint, request payload, and estimated BuzzAssist credits without generating." },
           placement: { type: "string", enum: ["right", "left", "below", "replace", "inside"] },
@@ -1746,7 +1781,7 @@ function toolDefinitions() {
           videoName: { type: "string", description: "Alias for fileName." },
           aspectRatio: { type: "string", description: "Aspect ratio such as 16:9, 9:16, or 1:1." },
           aspect_ratio: { type: "string", description: "Alias for aspectRatio." },
-          duration: { type: "string", description: "Duration seconds. Grok Hermes clamps text-to-video to 1-15 seconds." },
+          duration: { type: "string", description: "Duration seconds. Grok Imagine clamps text-to-video to 1-15 seconds." },
           resolution: { type: "string", description: "480p or 720p." },
           generateAudio: { type: "boolean", description: "Whether Grok Imagine should generate audio when supported." },
           generate_audio: { type: "boolean", description: "Alias for generateAudio." },
@@ -1796,12 +1831,12 @@ function toolDefinitions() {
                 model: {
                   type: "string",
                   enum: IMAGE_MODEL_IDS,
-                  description: "Defaults to gpt-image-2-codex. Non-Codex/Hermes models need buzzassist_login.",
+                  description: "Defaults to gpt-image-2-codex. Non-Codex/Grok models need buzzassist_login.",
                 },
                 aspectRatio: { type: "string", description: "Aspect ratio such as 1:1, 16:9, or 9:16." },
-                imageSize: { type: "string", description: "Image size or Hermes resolution hint." },
+                imageSize: { type: "string", description: "Image size or Grok resolution hint (1K/2K)." },
                 quality: { type: "string", description: "Quality hint. high maps to Grok quality mode." },
-                referenceImagePaths: { type: "array", items: { type: "string" }, description: "Optional local image references for Hermes image edit." },
+                referenceImagePaths: { type: "array", items: { type: "string" }, description: "Optional local image references for Grok Imagine image edit." },
                 fileName: { type: "string", description: "Optional destination filename under canvas/assets/." },
                 customData: { type: "object", description: "Additional Excalidraw element customData." },
               },
@@ -1849,7 +1884,7 @@ function toolDefinitions() {
                   description: "Defaults to grok-imagine-video-hermes. Other models need buzzassist_login.",
                 },
                 aspectRatio: { type: "string", description: "Aspect ratio such as 16:9, 9:16, or 1:1." },
-                duration: { type: "string", description: "Duration seconds. Grok Hermes clamps text-to-video to 1-15 seconds." },
+                duration: { type: "string", description: "Duration seconds. Grok Imagine clamps text-to-video to 1-15 seconds." },
                 resolution: { type: "string", description: "480p or 720p." },
                 generateAudio: { type: "boolean", description: "Whether Grok Imagine should generate audio when supported." },
                 referenceImagePaths: { type: "array", items: { type: "string" }, description: "Optional local reference image paths." },
@@ -1933,6 +1968,42 @@ function toolDefinitions() {
       },
     },
     {
+      name: TOOL_REFINE_SUBTITLES,
+      title: "Refine Excalidraw Subtitles",
+      description: "Rebuild an existing SRT card from a word-index cue plan (semantic boundaries, natural Japanese line breaks, kanji/homophone fixes decided by the agent). Read the words sidecar first (wordsFile from generate_excalidraw_subtitles, or canvas/.subtitle-words/<srt>.json), then pass cue ranges here. Timing is taken from the word anchors plus an audio-energy snap, so refined text can never desync from the audio. Free: no cloud call, no credits.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          srtFileName: { type: "string", description: "Existing .srt asset file name under canvas/assets (basename of the assetFile returned at generation time)." },
+          plan: {
+            type: "array",
+            description: "Cue plan in ascending word order. Each cue covers words[startWordIndex..endWordIndex] from the sidecar. Optional `lines` (1-2 strings, top line first) override the display text — use them for kanji fixes and hand-tuned line breaks; omit to let the rule engine wrap the cue.",
+            items: {
+              type: "object",
+              properties: {
+                startWordIndex: { type: "integer", description: "Index into the sidecar words array (inclusive)." },
+                endWordIndex: { type: "integer", description: "Index into the sidecar words array (inclusive)." },
+                lines: { type: "array", items: { type: "string" }, description: "Corrected display lines for this cue (top line first)." },
+              },
+              required: ["startWordIndex", "endWordIndex"],
+              additionalProperties: false,
+            },
+          },
+          anchorElementId: { type: "string", description: "Canvas element id of the SRT card to replace. Defaults to the id stored at generation time." },
+          projectDir: { type: "string", description: "Absolute project directory containing canvas/." },
+          canvasDir: { type: "string", description: "Absolute canvas directory. Overrides projectDir." },
+        },
+        required: ["srtFileName", "plan"],
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    {
       name: TOOL_GENERATE_SUBTITLES_BATCH,
       title: "Generate Excalidraw Subtitles (Batch)",
       description: "Generate Japanese SRT subtitles for many audio/video files and place one SRT card per job. Requires confirmedSettings=true.",
@@ -1975,6 +2046,52 @@ function toolDefinitions() {
         destructiveHint: false,
         idempotentHint: false,
         openWorldHint: true,
+      },
+    },
+    {
+      name: TOOL_REFINE_SILENCE_CUT,
+      title: "Refine Excalidraw Silence Cut",
+      description:
+        "Rebuild a silence-cut Premiere XML from reviewed cut decisions. Read the plan sidecar (canvas/.silence-cut-plans/<xmlFileName>.json; candidates carry id/start/end/type/reason/confidence/text), veto false positives and confirm real cuts, then pass decisions here. Unmentioned candidates keep their original cut. The XML is overwritten in place (same asset URL) without re-running detection or transcription — zero cost.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          xmlFileName: { type: "string", description: "The silence-cut XML file name under canvas/assets (e.g. jetcut-01.xml)." },
+          decisions: {
+            type: "array",
+            description: "Per-candidate verdicts. accept=false drops the cut; start/end override the cut boundaries (seconds).",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                accept: { type: "boolean" },
+                start: { type: "number" },
+                end: { type: "number" },
+              },
+              required: ["id"],
+              additionalProperties: false,
+            },
+          },
+          additions: {
+            type: "array",
+            description: "Extra manual cut ranges in seconds.",
+            items: {
+              type: "object",
+              properties: { start: { type: "number" }, end: { type: "number" } },
+              required: ["start", "end"],
+              additionalProperties: false,
+            },
+          },
+          projectDir: { type: "string" },
+        },
+        required: ["xmlFileName"],
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
       },
     },
     {
@@ -2032,9 +2149,9 @@ function toolDefinitions() {
     },
     {
       name: TOOL_SETUP_HERMES,
-      title: "Setup Hermes Grok",
+      title: "Setup Grok CLI",
       description:
-        "Set up the Hermes route for Grok Imagine: checks the Hermes Agent CLI and, when not logged in, runs `hermes auth add xai-oauth` which opens the browser so the user can complete the X (xAI) OAuth. Call this when the user asks to set up Hermes or a Hermes generation fails with 'Hermes Agent was not found' / 'not logged in'. Blocks up to 10 minutes while the user signs in.",
+        "Set up the Grok route for Grok Imagine: checks the official Grok CLI (installed by https://github.com/sam-mountainman/grok-cli-tools) and, when not logged in, runs `grok login` which opens the browser so the user can sign in with X / SuperGrok. Call this when the user asks to set up Grok or a Grok generation fails with 'Grok CLI was not found' / 'not logged in'. Blocks up to 10 minutes while the user signs in. (Tool name keeps the legacy hermes spelling for compatibility.)",
       inputSchema: {
         type: "object",
         properties: {},
@@ -2275,6 +2392,22 @@ async function generateExcalidrawSubtitles(args = {}) {
         },
       });
 
+  // Words sidecar: lets the host agent refine cue boundaries / line breaks /
+  // kanji later via refine_excalidraw_subtitles with word-anchored timing.
+  let wordsFile = "";
+  if (placement && Array.isArray(generated.words) && generated.words.length > 0) {
+    wordsFile = await writeSubtitleWordsSidecar(resolveCanvasDir(args), basename(placement.assetFile), {
+      words: generated.words,
+      lineCount: generated.lineCount,
+      maxChars: generated.maxChars,
+      model: generated.model,
+      mode: generated.mode,
+      audioPath: nonEmptyString(args.audioPath) || "",
+      durationSeconds: generated.durationSeconds,
+      elementId: placement.elementId,
+    }).catch(() => "");
+  }
+
   return {
     ok: true,
     mode: generated.mode,
@@ -2295,7 +2428,53 @@ async function generateExcalidrawSubtitles(args = {}) {
           bounds: placement.bounds,
         }
       : {}),
+    ...(wordsFile
+      ? {
+          wordsFile,
+          refineHint: "For human-grade semantic line breaks: read wordsFile (JSON; words[i] = {text, start, end}), decide cue boundaries as word-index ranges (break at meaning boundaries — never right after a particle or mid-compound — and fix kanji/homophones in `lines`), then call refine_excalidraw_subtitles with { srtFileName: <assetFile basename>, plan }. Timing stays word-anchored, so refined text can never desync from the audio.",
+        }
+      : {}),
     dryRun: Boolean(args.dryRun),
+  };
+}
+
+// Rebuild an existing SRT card from an agent-authored word-index cue plan.
+// Timing comes from the stored word anchors plus the energy snap, so the
+// refined text can never drift against the audio.
+async function refineExcalidrawSubtitles(args = {}) {
+  const canvasDir = resolveCanvasDir(args);
+  const srtFileName = basename(nonEmptyString(args.srtFileName) || "");
+  if (!srtFileName) throw new Error("srtFileName is required (the existing .srt asset name under canvas/assets).");
+  const refined = await refineSubtitleFromPlan({ canvasDir, srtFileName, plan: args.plan });
+  const placement = await insertExcalidrawSubtitle({
+    projectDir: args.projectDir,
+    canvasDir: args.canvasDir,
+    srtText: refined.srtText,
+    subtitleLines: refined.subtitleLines,
+    fileName: srtFileName.replace(/\.srt$/i, ""),
+    model: refined.sidecar.model,
+    mode: "refined",
+    anchorElementId: nonEmptyString(args.anchorElementId) || refined.sidecar.elementId,
+    replaceAnchor: true,
+    matchAnchor: true,
+  });
+  // Carry the sidecar forward so the refined card can be refined again.
+  const { sidecarPath, ...sidecarPayload } = refined.sidecar;
+  const wordsFile = await writeSubtitleWordsSidecar(canvasDir, basename(placement.assetFile), {
+    ...sidecarPayload,
+    elementId: placement.elementId,
+  }).catch(() => "");
+  return {
+    ok: true,
+    mode: "refined",
+    cueCount: refined.subtitleLines.length,
+    wordsFile,
+    srtPreview: refined.srtText.split("\n").slice(0, 12).join("\n"),
+    elementId: placement.elementId,
+    groupId: placement.groupId,
+    assetFile: placement.assetFile,
+    assetUrl: placement.assetUrl,
+    bounds: placement.bounds,
   };
 }
 
@@ -2345,6 +2524,32 @@ async function silenceCutExcalidrawVideo(args = {}) {
     };
   }
 
+  const placement = await insertExcalidrawSilenceCutResult({
+    canvasDir: resolveCanvasDir(args),
+    assetPath: cut.outputPath,
+    fileName: cut.fileName,
+    assetUrl: `/excalidraw-assets/${encodeURIComponent(cut.fileName)}`,
+    model: cut.model,
+    inputDuration: cut.inputDuration,
+    outputDuration: cut.outputDuration,
+    cutDuration: cut.cutDuration,
+    cutCount: cut.cutCount,
+    clipCount: cut.clipCount,
+    thresholdAuto: cut.thresholdAuto,
+    thresholdDbUsed: cut.thresholdDbUsed,
+    inputAsset: {
+      id: `input-${Date.now().toString(36)}`,
+      name: basename(videoPath),
+      kind: extname(videoPath).toLowerCase() === ".xml" ? "xml" : "video",
+      mimeType: extname(videoPath).toLowerCase() === ".xml" ? "application/xml" : "video/mp4",
+      path: pathResolve(videoPath),
+      url: "",
+      dataURL: "",
+      thumbnail: "",
+      duration: cut.inputDuration,
+    },
+  });
+
   return {
     ok: true,
     model: cut.model,
@@ -2352,7 +2557,13 @@ async function silenceCutExcalidrawVideo(args = {}) {
     ...stats,
     outputPath: cut.outputPath,
     fileName: cut.fileName,
-    assetUrl: `/excalidraw-assets/${cut.fileName}`,
+    assetUrl: placement.assetUrl,
+    elementId: placement.elementId,
+    bounds: placement.bounds,
+    ...(cut.plansFile ? {
+      plansFile: cut.plansFile,
+      refineHint: "For agent review: read plansFile (JSON; candidates[i] = {id, start, end, type, reason, confidence, text}), veto false positives (e.g. demonstrative あの, intentional pauses, content words caught as retakes) and confirm real cuts, then call refine_excalidraw_silence_cut with { xmlFileName: fileName, decisions: [{id, accept, start?, end?}], additions?: [{start, end}] }. Unmentioned candidates keep their cut; the XML is rebuilt in place at zero cost.",
+    } : {}),
     ...(cut.transcription ? { transcription: cut.transcription } : {}),
     dryRun: false,
   };
@@ -2368,7 +2579,9 @@ const CANVAS_AUTO_OPEN_TOOLS = new Set([
   TOOL_GENERATE_VIDEOS_BATCH,
   TOOL_GENERATE_SUBTITLES,
   TOOL_GENERATE_SUBTITLES_BATCH,
+  TOOL_REFINE_SUBTITLES,
   TOOL_SILENCE_CUT_VIDEO,
+  TOOL_REFINE_SILENCE_CUT,
 ]);
 
 async function handleToolCall(params, progress = () => {}) {
@@ -2394,14 +2607,33 @@ async function handleToolCall(params, progress = () => {}) {
     await ensureCanvasVisible(params.arguments ?? {});
   }
   if (params?.name === TOOL_GENERATE_SUBTITLES) {
+    const args = params.arguments ?? {};
     progress(0, 2, "Generating subtitles");
-    const result = await generateExcalidrawSubtitles(params.arguments ?? {});
+    const result = await generateExcalidrawSubtitles(args);
+    await requestCanvasFocus(args, result);
     progress(2, 2, "Subtitles complete");
     return {
       content: [
         {
           type: "text",
           text: `Generated ${result.cueCount} subtitle cue(s) with ${result.model} (${result.mode})${result.dryRun ? " [dry run]" : ""}.${result.dryRun ? "" : canvasHintText()}`,
+        },
+      ],
+      structuredContent: result,
+    };
+  }
+
+  if (params?.name === TOOL_REFINE_SUBTITLES) {
+    const args = params.arguments ?? {};
+    progress(0, 2, "Refining subtitles");
+    const result = await refineExcalidrawSubtitles(args);
+    await requestCanvasFocus(args, result);
+    progress(2, 2, "Subtitles refined");
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Refined ${result.cueCount} subtitle cue(s) with word-anchored timing.${canvasHintText()}`,
         },
       ],
       structuredContent: result,
@@ -2442,6 +2674,7 @@ async function handleToolCall(params, progress = () => {}) {
     }
     progress(jobs.length, jobs.length, "Subtitle batch complete");
     const failed = jobs.length - succeeded;
+    await requestCanvasFocus(args, results);
     return {
       content: [
         {
@@ -2453,9 +2686,36 @@ async function handleToolCall(params, progress = () => {}) {
     };
   }
 
+  if (params?.name === TOOL_REFINE_SILENCE_CUT) {
+    const args = params.arguments ?? {};
+    progress(0, 1, "Rebuilding silence-cut XML from decisions");
+    const refined = await refineSilenceCutFromPlan({
+      canvasDir: resolveCanvasDir(args),
+      xmlFileName: args.xmlFileName,
+      decisions: args.decisions,
+      additions: args.additions,
+    });
+    progress(1, 1, "Silence-cut refined");
+    return {
+      content: [{ type: "text", text: JSON.stringify({
+        ok: true,
+        fileName: refined.fileName,
+        assetUrl: `/excalidraw-assets/${encodeURIComponent(refined.fileName)}`,
+        inputDuration: refined.inputDuration,
+        outputDuration: refined.outputDuration,
+        cutDuration: refined.cutDuration,
+        cutCount: refined.cutCount,
+        clipCount: refined.clipCount,
+        plansFile: refined.plansFile,
+      }) }],
+    };
+  }
+
   if (params?.name === TOOL_SILENCE_CUT_VIDEO) {
+    const args = params.arguments ?? {};
     progress(0, 1, "Building silence-cut XML");
-    const result = await silenceCutExcalidrawVideo(params.arguments ?? {});
+    const result = await silenceCutExcalidrawVideo(args);
+    await requestCanvasFocus(args, result);
     progress(1, 1, "Silence-cut complete");
     return {
       content: [
@@ -2500,9 +2760,11 @@ async function handleToolCall(params, progress = () => {}) {
   }
 
   if (params?.name === TOOL_BUZZASSIST_AUTH_STATUS) {
-    const status = await getBuzzAssistAuthStatus();
+    const status = await getBuzzAssistAuthStatus({ verifyServer: true });
     const summary = status.loggedIn
       ? `ログイン中: ${status.userId ?? "不明なユーザー"}（source: ${status.source}）。${status.expiresSoon ? ` 警告: トークンの有効期限まであと${status.expiresInDays}日です — buzzassist_login で更新してください。` : ""}`
+      : status.serverRejected
+        ? status.message
       : status.expired
         ? "BuzzAssistのログイン有効期限が切れています。buzzassist_login を実行してください。"
         : "BuzzAssistにログインしていません。buzzassist_login を実行してください。";
@@ -2625,7 +2887,9 @@ async function handleToolCall(params, progress = () => {}) {
   }
 
   if (params?.name === TOOL_INSERT_IMAGE) {
-    const result = await insertExcalidrawImage(params.arguments ?? {});
+    const args = params.arguments ?? {};
+    const result = await insertExcalidrawImage(args);
+    await requestCanvasFocus(args, result);
     return {
       content: [
         {
@@ -2638,7 +2902,9 @@ async function handleToolCall(params, progress = () => {}) {
   }
 
   if (params?.name === TOOL_INSERT_VIDEO) {
-    const result = await insertExcalidrawVideo(params.arguments ?? {});
+    const args = params.arguments ?? {};
+    const result = await insertExcalidrawVideo(args);
+    await requestCanvasFocus(args, result);
     return {
       content: [
         {
@@ -2651,8 +2917,10 @@ async function handleToolCall(params, progress = () => {}) {
   }
 
   if (params?.name === TOOL_GENERATE_IMAGE) {
+    const args = params.arguments ?? {};
     progress(0, 1, "Generating image");
-    const result = await generateExcalidrawImage(params.arguments ?? {});
+    const result = await generateExcalidrawImage(args);
+    await requestCanvasFocus(args, result);
     progress(1, 1, "Image generation complete");
     return {
       content: [
@@ -2668,8 +2936,10 @@ async function handleToolCall(params, progress = () => {}) {
   }
 
   if (params?.name === TOOL_GENERATE_VIDEO) {
+    const args = params.arguments ?? {};
     progress(0, 1, "Generating video");
-    const result = await generateExcalidrawVideo(params.arguments ?? {});
+    const result = await generateExcalidrawVideo(args);
+    await requestCanvasFocus(args, result);
     progress(1, 1, "Video generation complete");
     return {
       content: [
@@ -2685,8 +2955,10 @@ async function handleToolCall(params, progress = () => {}) {
   }
 
   if (params?.name === TOOL_GENERATE_IMAGES_BATCH) {
+    const args = params.arguments ?? {};
     progress(0, 1, "Generating image batch");
-    const result = await generateExcalidrawImagesBatch(params.arguments ?? {});
+    const result = await generateExcalidrawImagesBatch(args);
+    await requestCanvasFocus(args, result);
     progress(1, 1, "Image batch complete");
     return {
       content: [
@@ -2700,8 +2972,10 @@ async function handleToolCall(params, progress = () => {}) {
   }
 
   if (params?.name === TOOL_GENERATE_VIDEOS_BATCH) {
+    const args = params.arguments ?? {};
     progress(0, 1, "Generating video batch");
-    const result = await generateExcalidrawVideosBatch(params.arguments ?? {});
+    const result = await generateExcalidrawVideosBatch(args);
+    await requestCanvasFocus(args, result);
     progress(1, 1, "Video batch complete");
     return {
       content: [

@@ -78,7 +78,11 @@ async function resolvePort() {
 
 function run(command, args, options = {}) {
   return new Promise((resolveRun, rejectRun) => {
-    const child = spawn(command, args, { stdio: "inherit", shell: process.platform === "win32", ...options });
+    const child = spawn(command, args, {
+      stdio: "inherit",
+      shell: process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command),
+      ...options,
+    });
     child.on("error", rejectRun);
     child.on("close", (code) => {
       if (code === 0) resolveRun();

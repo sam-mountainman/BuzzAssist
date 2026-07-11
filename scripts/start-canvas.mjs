@@ -13,6 +13,6 @@ const child = spawn(process.execPath, ["scripts/serve-canvas.mjs", ...process.ar
   cwd: repoRoot,
   env: process.env,
   stdio: "inherit",
-  shell: process.platform === "win32",
+  shell: false,
 });
 child.on("exit", (code) => process.exit(code ?? 0));

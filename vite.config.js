@@ -1,8 +1,9 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { createReadStream, createWriteStream, constants as fsConstants } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path'
 import { Readable } from 'node:stream'
 import {
@@ -16,25 +17,26 @@ import {
   normalizeMediaBatchConcurrency,
   runWithConcurrency
 } from './lib/mediaGeneration.mjs'
-import { getBuzzAssistAuthStatus, loginBuzzAssistViaBrowser } from './lib/buzzassistApi.mjs'
-import { OFFICIAL_EXCALIDRAW_README, createExcalidrawView, insertExcalidrawImage, insertExcalidrawSubtitle, insertExcalidrawVideo, insertExcalidrawMediaBatch, performCanvasMaintenance, stripAssetBackedFileDataURLs } from './lib/canvasScene.mjs'
+import { getBuzzAssistAuthStatus, loginBuzzAssistViaBrowser, resolveAuthFilePath } from './lib/buzzassistApi.mjs'
+import { FOCUS_REQUEST_FILE_NAME, OFFICIAL_EXCALIDRAW_README, createExcalidrawView, insertExcalidrawImage, insertExcalidrawSubtitle, insertExcalidrawVideo, insertExcalidrawMediaBatch, performCanvasMaintenance, stripAssetBackedFileDataURLs } from './lib/canvasScene.mjs'
 import { streamZipStore } from './lib/zipStore.mjs'
-import { generateSubtitleSrt } from './lib/subtitleGeneration.mjs'
+import { generateSubtitleSrt, refineSubtitleFromPlan, writeSubtitleWordsSidecar } from './lib/subtitleGeneration.mjs'
 import { silenceCutVideo } from './lib/tempoCut.mjs'
 import { getLovartAuthStatus, getLovartModelCosts, saveLovartCredentials } from './lib/lovartMediaGeneration.mjs'
-import { bridgeWorkerAlive, canDriveGui, pasteIntoChatApp, sendChatMessage } from './lib/chatBridge.mjs'
+import { bridgeWorkerAlive, canDriveGui, runOsascript, runPowershell, sendChatMessage } from './lib/chatBridge.mjs'
 import { getOrCreateMcpToken, rejectDisallowedOrigin, rejectRemoteOperator, rejectMissingBearer, setLocalCorsHeaders, writeServerDiscovery } from './lib/canvasServerRuntime.mjs'
 import { canvasAttachmentBundleToMcpResult, createCanvasAttachmentBundle, listCanvasAttachmentBundles, readCanvasAttachmentBundle } from './lib/canvasAttachmentBundle.mjs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 
 const projectDir = resolve(process.env.EXCALIDRAW_PROJECT_DIR ?? process.cwd())
 const canvasDir = resolve(process.env.EXCALIDRAW_CANVAS_DIR ?? join(projectDir, 'canvas'))
 const canvasFile = join(canvasDir, 'excalidraw-canvas.json')
 const selectionFile = join(canvasDir, 'excalidraw-selection.json')
+const focusRequestFile = join(canvasDir, FOCUS_REQUEST_FILE_NAME)
 const viewStateFile = join(canvasDir, 'excalidraw-view-state.json')
 const canvasAssetsDir = join(canvasDir, 'assets')
 const canvasAssetsRoute = '/excalidraw-assets/'
-const defaultPort = Number(process.env.EXCALIDRAW_PORT ?? 43219)
+const defaultPort = Number(process.env.PORT ?? process.env.EXCALIDRAW_PORT ?? 43219)
 const defaultHost = process.env.EXCALIDRAW_HOST || '127.0.0.1'
 const mcpToken = getOrCreateMcpToken()
 const widgetBuild = /^(1|true|yes)$/i.test(String(process.env.BUZZASSIST_WIDGET_BUILD || ''))
@@ -318,11 +320,33 @@ async function writeJsonAtomic(filePath, payload) {
   }
 }
 
-function broadcastCanvasChanged(paths) {
+// Mirror of the client's sceneFingerprint (src/App.jsx): broadcasting it with
+// canvas-changed lets a client recognize the echo of its own save WITHOUT
+// re-downloading and re-parsing the whole scene JSON.
+function sceneContentFingerprint(scene) {
+  if (!scene || !Array.isArray(scene.elements)) return ''
+  const els = scene.elements
+    .map((e) => `${e.id}:${e.version ?? 0}:${e.versionNonce ?? 0}:${e.isDeleted ? 1 : 0}`)
+    .sort()
+    .join('|')
+  const files = Object.entries(scene.files ?? {})
+    .map(([id, file]) => `${id}:${(file?.dataURL ?? '').length}`)
+    .sort()
+    .join(',')
+  return `${els}#${files}`
+}
+
+function broadcastCanvasChanged(paths, options = {}) {
   const payload = {
     version: ++canvasEventVersion,
     updatedAt: new Date().toISOString(),
-    paths
+    paths,
+    ...(typeof options.fingerprint === 'string' && options.fingerprint ? { fingerprint: options.fingerprint } : {}),
+    ...(Array.isArray(options.focusElementIds) && options.focusElementIds.length > 0
+      ? { focusElementIds: options.focusElementIds }
+      : {}),
+    ...(options.applySelection === true ? { applySelection: true } : {}),
+    ...(options.applyViewport === true ? { applyViewport: true } : {})
   }
 
   for (const client of canvasEventClients) {
@@ -341,11 +365,289 @@ function broadcastCanvasChanged(paths) {
   }
 }
 
+async function consumeCanvasFocusRequest() {
+  try {
+    const request = await readJsonFile(focusRequestFile)
+    await rm(focusRequestFile, { force: true })
+    const elementIds = [...new Set((Array.isArray(request?.elementIds) ? request.elementIds : [])
+      .filter((id) => typeof id === 'string' && id))]
+    if (elementIds.length === 0) return null
+    if (!Number.isFinite(request?.createdAt) || Date.now() - request.createdAt > 30000) return null
+    return {
+      focusElementIds: elementIds,
+      applySelection: request.applySelection !== false,
+      applyViewport: request.applyViewport !== false
+    }
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null
+    console.warn('[canvas-focus] Failed to consume focus request:', error?.message || error)
+    return null
+  }
+}
+
 function localAssetFilePathFromUrl(pathname) {
   if (!pathname.startsWith(canvasAssetsRoute)) return null
   const requestedPath = decodeURIComponent(pathname.slice(canvasAssetsRoute.length))
   const filePath = resolve(canvasAssetsDir, requestedPath)
   return isSafeChildPath(canvasAssetsDir, filePath) ? filePath : null
+}
+
+function resolveClientAssetPath(item) {
+  if (item && typeof item === 'object' && typeof item.path === 'string' && item.path) {
+    const directPath = resolve(item.path)
+    if (isSafeChildPath(canvasAssetsDir, directPath)) return directPath
+  }
+  const rawUrl = item && typeof item === 'object' ? (item.url || item.assetUrl) : item
+  if (!rawUrl) return null
+  try {
+    return localAssetFilePathFromUrl(new URL(String(rawUrl), 'http://127.0.0.1').pathname)
+  } catch {
+    return null
+  }
+}
+
+async function resolveClientAssetPaths(items = []) {
+  const seen = new Set()
+  const paths = []
+  for (const item of items) {
+    const filePath = resolveClientAssetPath(item)
+    if (!filePath || seen.has(filePath)) continue
+    seen.add(filePath)
+    await stat(filePath)
+    paths.push(filePath)
+  }
+  return paths
+}
+
+function appleScriptString(value) {
+  return `"${String(value ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+}
+
+function runJxa(script, timeoutMs = 10_000, env = {}) {
+  return new Promise((resolveJxa) => {
+    const child = spawn('osascript', ['-l', 'JavaScript'], {
+      env: { ...process.env, ...env },
+      stdio: ['pipe', 'pipe', 'pipe']
+    })
+    let stdout = ''
+    let stderr = ''
+    let settled = false
+    const finish = (result) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolveJxa(result)
+    }
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL')
+      finish({ ok: false, stdout, error: 'macOSクリップボード操作が応答しません。' })
+    }, timeoutMs)
+    child.stdout.on('data', (chunk) => { stdout += chunk })
+    child.stderr.on('data', (chunk) => { stderr += chunk })
+    child.on('error', (error) => finish({ ok: false, stdout, error: error.message }))
+    child.on('close', (code) => finish(code === 0 ? { ok: true, stdout: stdout.trim() } : { ok: false, stdout, error: stderr.trim() }))
+    child.stdin.end(script)
+  })
+}
+
+async function copyTextToSystemClipboard(text = '') {
+  const value = String(text ?? '')
+  if (!value) throw new Error('コピーするテキストがありません。')
+  if (process.platform === 'darwin') {
+    const encodedText = Buffer.from(value, 'utf8').toString('base64')
+    const jxaScript = `
+ObjC.import('AppKit')
+ObjC.import('Foundation')
+const env = $.NSProcessInfo.processInfo.environment
+const encoded = ObjC.unwrap(env.objectForKey('BUZZASSIST_CLIPBOARD_TEXT_B64')) || ''
+const data = $.NSData.alloc.initWithBase64EncodedStringOptions(encoded, 0)
+if (!data) throw new Error('Invalid clipboard text payload.')
+const text = $.NSString.alloc.initWithDataEncoding(data, $.NSUTF8StringEncoding)
+const pasteboard = $.NSPasteboard.generalPasteboard
+pasteboard.clearContents
+const ok = pasteboard.setStringForType(text, $.NSPasteboardTypeString)
+if (!ok) throw new Error('NSPasteboard.setStringForType returned false.')
+'ok'
+`
+    const jxa = await runJxa(jxaScript, 8000, { BUZZASSIST_CLIPBOARD_TEXT_B64: encodedText })
+    if (jxa.ok) return { platform: 'darwin', mode: 'nspasteboard' }
+    const fallback = await runOsascript(`set the clipboard to ${appleScriptString(value)}`, 5000)
+    if (!fallback.ok) throw new Error(jxa.error || fallback.error || 'macOSクリップボードへテキストをコピーできませんでした。')
+    return { platform: 'darwin', mode: 'osascript' }
+  }
+  if (process.platform === 'win32') {
+    const encodedText = Buffer.from(value, 'utf8').toString('base64')
+    const script = `
+$ErrorActionPreference = 'Stop'
+$message = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:BUZZASSIST_CLIPBOARD_TEXT_B64))
+Set-Clipboard -Value $message
+`
+    const result = await runPowershell(script, 8000, { BUZZASSIST_CLIPBOARD_TEXT_B64: encodedText })
+    if (!result.ok) throw new Error(result.error || 'Windowsクリップボードへテキストをコピーできませんでした。')
+    return { platform: 'win32', mode: 'set-clipboard' }
+  }
+  throw new Error('このOSではテキストのOSクリップボードコピーに未対応です。')
+}
+
+async function copyFilesToSystemClipboard(filePaths = []) {
+  if (!Array.isArray(filePaths) || filePaths.length === 0) {
+    throw new Error('コピーできるファイルがありません。')
+  }
+  if (process.platform === 'darwin') {
+    const encodedPaths = Buffer.from(JSON.stringify(filePaths), 'utf8').toString('base64')
+    const jxaScript = `
+ObjC.import('AppKit')
+ObjC.import('Foundation')
+const env = $.NSProcessInfo.processInfo.environment
+const encoded = ObjC.unwrap(env.objectForKey('BUZZASSIST_CLIPBOARD_FILES_B64')) || ''
+const data = $.NSData.alloc.initWithBase64EncodedStringOptions(encoded, 0)
+if (!data) throw new Error('Invalid clipboard file payload.')
+const json = $.NSString.alloc.initWithDataEncoding(data, $.NSUTF8StringEncoding)
+const paths = JSON.parse(ObjC.unwrap(json))
+const urls = $.NSMutableArray.array
+for (const path of paths) urls.addObject($.NSURL.fileURLWithPath(path))
+const pasteboard = $.NSPasteboard.generalPasteboard
+pasteboard.clearContents
+const ok = pasteboard.writeObjects(urls)
+pasteboard.setPropertyListForType(paths, 'NSFilenamesPboardType')
+if (!ok) throw new Error('NSPasteboard.writeObjects returned false.')
+'ok'
+`
+    const jxa = await runJxa(jxaScript, 10_000, { BUZZASSIST_CLIPBOARD_FILES_B64: encodedPaths })
+    if (jxa.ok) return { platform: 'darwin', mode: 'nspasteboard' }
+
+    // Fallback for older/macOS-restricted hosts. This writes aliases, which is
+    // enough for Finder-like targets but less reliable in Electron chat inputs.
+    const script = [
+      'set theItems to {}',
+      ...filePaths.map((filePath) => `set end of theItems to (POSIX file ${appleScriptString(filePath)} as alias)`),
+      'set the clipboard to theItems'
+    ].join('\n')
+    const result = await runOsascript(script, 8000)
+    if (!result.ok) throw new Error(jxa.error || result.error || 'macOSクリップボードへファイルをコピーできませんでした。')
+    return { platform: 'darwin', mode: 'alias-fallback' }
+  }
+  if (process.platform === 'win32') {
+    const encodedPaths = Buffer.from(JSON.stringify(filePaths), 'utf8').toString('base64')
+    const script = `
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Windows.Forms
+$json = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:BUZZASSIST_CLIPBOARD_FILES_B64))
+$paths = ConvertFrom-Json $json
+$list = New-Object System.Collections.Specialized.StringCollection
+foreach ($path in $paths) {
+  [void]$list.Add([string]$path)
+}
+[System.Windows.Forms.Clipboard]::SetFileDropList($list)
+`
+    const result = await runPowershell(script, 8000, { BUZZASSIST_CLIPBOARD_FILES_B64: encodedPaths })
+    if (!result.ok) throw new Error(result.error || 'Windowsクリップボードへファイルをコピーできませんでした。')
+    return { platform: 'win32' }
+  }
+  throw new Error('このOSではファイルの実体コピーに未対応です。')
+}
+
+// runPowershell in lib/chatBridge.mjs discards stdout; the save dialog below
+// needs the chosen path back, so this local variant captures it.
+function runPowershellCapture(script, timeoutMs = 10_000, env = {}) {
+  return new Promise((resolvePs) => {
+    const child = spawn('powershell.exe', ['-STA', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
+      env: { ...process.env, ...env }
+    })
+    let stdout = ''
+    let stderr = ''
+    let settled = false
+    const finish = (result) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolvePs(result)
+    }
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL')
+      finish({ ok: false, stdout, error: 'Windowsのダイアログが応答しません。' })
+    }, timeoutMs)
+    child.stdout.on('data', (chunk) => { stdout += chunk })
+    child.stderr.on('data', (chunk) => { stderr += chunk })
+    child.on('error', (error) => finish({ ok: false, stdout, error: error.message }))
+    child.on('close', (code) => finish(code === 0 ? { ok: true, stdout: stdout.trim() } : { ok: false, stdout, error: stderr.trim() }))
+  })
+}
+
+let saveDialogOpen = false
+
+// Cached server-verified BuzzAssist auth status (see /api/buzzassist/auth-status).
+let buzzAssistStatusCacheRef = { key: '', at: 0, status: null }
+
+// Native OS save panel with the Downloads folder as the default location.
+// The in-app browser's showSaveFilePicker ignores the web startIn hint, so
+// the dev server owns the dialog instead. Returns the chosen destination
+// path, or null when the user cancels. OSes without a panel save straight
+// into Downloads.
+async function chooseSaveDestination(fileName) {
+  const defaultDir = join(homedir(), 'Downloads')
+  await mkdir(defaultDir, { recursive: true })
+  if (process.platform === 'darwin') {
+    // NSSavePanel directly (not chooseFileName): extensionHidden=false keeps
+    // the full "name.png" visible in the Save As field regardless of the
+    // Finder "hide extensions" preference.
+    const jxaScript = `
+ObjC.import('Foundation')
+ObjC.import('AppKit')
+const env = $.NSProcessInfo.processInfo.environment
+const defaultDir = ObjC.unwrap(env.objectForKey('BUZZASSIST_SAVE_DEFAULT_DIR')) || ''
+const defaultName = ObjC.unwrap(env.objectForKey('BUZZASSIST_SAVE_DEFAULT_NAME')) || 'download'
+const app = Application.currentApplication()
+app.includeStandardAdditions = true
+app.activate()
+const panel = $.NSSavePanel.savePanel
+panel.title = '保存'
+panel.nameFieldStringValue = $(defaultName)
+panel.directoryURL = $.NSURL.fileURLWithPath($(defaultDir))
+panel.extensionHidden = false
+panel.canCreateDirectories = true
+const response = panel.runModal
+response == 1 ? ObjC.unwrap(panel.URL.path) : '__CANCELLED__'
+`
+    const result = await runJxa(jxaScript, 300_000, {
+      BUZZASSIST_SAVE_DEFAULT_DIR: defaultDir,
+      BUZZASSIST_SAVE_DEFAULT_NAME: fileName
+    })
+    if (result.ok) {
+      const chosen = String(result.stdout || '').trim()
+      if (!chosen || chosen === '__CANCELLED__') return null
+      return chosen
+    }
+    if (/user cancell?ed|-128/i.test(String(result.error || ''))) return null
+    throw new Error(result.error || '保存ダイアログの表示に失敗しました。')
+  }
+  if (process.platform === 'win32') {
+    const script = `
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.SaveFileDialog
+$dialog.InitialDirectory = $env:BUZZASSIST_SAVE_DEFAULT_DIR
+$dialog.FileName = $env:BUZZASSIST_SAVE_DEFAULT_NAME
+$dialog.DefaultExt = $env:BUZZASSIST_SAVE_DEFAULT_EXT
+$dialog.AddExtension = $true
+$dialog.OverwritePrompt = $true
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+  [Console]::Out.WriteLine($dialog.FileName)
+} else {
+  [Console]::Out.WriteLine('__CANCELLED__')
+}
+`
+    const result = await runPowershellCapture(script, 300_000, {
+      BUZZASSIST_SAVE_DEFAULT_DIR: defaultDir,
+      BUZZASSIST_SAVE_DEFAULT_NAME: fileName,
+      BUZZASSIST_SAVE_DEFAULT_EXT: extname(fileName).replace(/^\./, '')
+    })
+    if (!result.ok) throw new Error(result.error || '保存ダイアログの表示に失敗しました。')
+    const chosen = result.stdout.trim()
+    if (!chosen || chosen === '__CANCELLED__') return null
+    return chosen
+  }
+  return join(defaultDir, fileName)
 }
 
 // Downscalable canvas bitmaps: multi-MB originals are fine on localhost but
@@ -456,7 +758,10 @@ async function serveCanvasAsset(req, res, next) {
     // Previews are content-stable for a given (name, width, mtime); let the
     // phone cache them so a reload does not re-download the whole canvas.
     res.setHeader('cache-control', servedPreview ? 'private, max-age=86400' : 'no-cache')
-    res.setHeader('etag', `"${basename(servePath)}-${serveStat.size}-${Math.round(serveStat.mtimeMs)}"`)
+    // Hash the name: raw filenames with non-Latin-1 characters (Japanese
+    // asset names) are invalid in HTTP headers and crash setHeader.
+    const etagName = createHash('sha1').update(basename(servePath)).digest('hex').slice(0, 16)
+    res.setHeader('etag', `"${etagName}-${serveStat.size}-${Math.round(serveStat.mtimeMs)}"`)
     if (url.searchParams.get('download')) {
       res.setHeader('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(basename(filePath))}`)
     }
@@ -1055,15 +1360,24 @@ function configureCanvasServer(server) {
     }
   })
   server.middlewares.use(serveCanvasAsset)
-  server.watcher.add(canvasFile)
+  server.watcher.add([canvasFile, focusRequestFile])
   let canvasWatchTimer = null
-  server.watcher.on('change', (changedPath) => {
-    if (resolve(changedPath) !== canvasFile) return
+  const scheduleCanvasWatchBroadcast = (changedPath) => {
+    const resolvedPath = resolve(changedPath)
+    if (resolvedPath !== canvasFile && resolvedPath !== focusRequestFile) return
     clearTimeout(canvasWatchTimer)
-    canvasWatchTimer = setTimeout(() => {
-      broadcastCanvasChanged([canvasFile])
+    canvasWatchTimer = setTimeout(async () => {
+      const focusRequest = await consumeCanvasFocusRequest()
+      // Fingerprint from the file itself (not a stash) so a coalesced
+      // API-write + MCP-write window can never advertise stale content.
+      const fingerprint = await readJsonFile(canvasFile)
+        .then((scene) => sceneContentFingerprint(scene))
+        .catch(() => '')
+      broadcastCanvasChanged([canvasFile], { ...(focusRequest || {}), fingerprint })
     }, 120)
-  })
+  }
+  server.watcher.on('add', scheduleCanvasWatchBroadcast)
+  server.watcher.on('change', scheduleCanvasWatchBroadcast)
 
       // Bulk download: zips requested canvas assets as a streaming STORE
       // archive. GET supports direct browser downloads; POST is kept for
@@ -1108,6 +1422,75 @@ function configureCanvasServer(server) {
             return
           }
           sendJson(res, 500, { error: error.message })
+        }
+      })
+
+      // Native save panel (default location: Downloads) driven by the dev
+      // server, because the in-app browser ignores showSaveFilePicker's
+      // startIn hint. Single asset saves directly; multi-selection saves a
+      // STORE zip. Local operators only — tunnel/phone clients get the 403
+      // and fall back to a plain browser download.
+      server.middlewares.use('/api/assets/save-dialog', async (req, res) => {
+        if (rejectRemoteOperator(req, res)) return
+        try {
+          if (req.method !== 'POST') {
+            res.statusCode = 405
+            res.setHeader('allow', 'POST')
+            res.end()
+            return
+          }
+          const body = JSON.parse((await readRequestBody(req)) || '{}')
+          const assetItems = Array.isArray(body.assets) ? body.assets : []
+          const assetPaths = await resolveClientAssetPaths(assetItems)
+          if (assetPaths.length === 0) {
+            sendJson(res, 400, { ok: false, error: '保存できるファイルがありません。' })
+            return
+          }
+          // One dialog at a time — a duplicate click while the panel is open
+          // resolves as cancelled instead of stacking dialogs.
+          if (saveDialogOpen) {
+            sendJson(res, 200, { ok: false, cancelled: true, busy: true })
+            return
+          }
+          const single = assetPaths.length === 1
+          const suggestedName = single
+            ? basename(assetPaths[0])
+            : `excalidraw-assets-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.zip`
+          saveDialogOpen = true
+          let destination = null
+          try {
+            destination = await chooseSaveDestination(suggestedName)
+          } finally {
+            saveDialogOpen = false
+          }
+          if (!destination) {
+            sendJson(res, 200, { ok: false, cancelled: true })
+            return
+          }
+          // Belt and braces: if the panel returned a name with no extension
+          // (hidden-extension quirks), append the suggested one.
+          const suggestedExt = extname(suggestedName)
+          if (suggestedExt && !extname(basename(destination))) {
+            destination += suggestedExt
+          }
+          if (single) {
+            await copyFile(assetPaths[0], destination)
+          } else {
+            const entries = []
+            for (const filePath of assetPaths) {
+              const info = await stat(filePath)
+              entries.push({ name: basename(filePath), path: filePath, size: info.size, mtime: info.mtime })
+            }
+            await new Promise((resolveZip, rejectZip) => {
+              const out = createWriteStream(destination)
+              out.on('error', rejectZip)
+              out.on('finish', resolveZip)
+              streamZipStore(entries, out).catch(rejectZip)
+            })
+          }
+          sendJson(res, 200, { ok: true, path: destination, files: assetPaths.map((filePath) => basename(filePath)) })
+        } catch (error) {
+          sendJson(res, 500, { ok: false, error: error.message })
         }
       })
 
@@ -1282,7 +1665,7 @@ function configureCanvasServer(server) {
             await stripAssetBackedFileDataURLs(scene)
             await writeJsonAtomic(canvasFile, scene)
             sendJson(res, 200, { ok: true, path: canvasFile, storage: 'single-file' })
-            broadcastCanvasChanged([canvasFile])
+            broadcastCanvasChanged([canvasFile], { fingerprint: sceneContentFingerprint(scene) })
             return
           }
 
@@ -1313,7 +1696,21 @@ function configureCanvasServer(server) {
             res.end()
             return
           }
-          sendJson(res, 200, await getBuzzAssistAuthStatus())
+          // Server verification costs a buzzassist.ai round trip (~0.3-1.5s)
+          // and the generation gate hits this on every click — cache the
+          // verified status, keyed by the auth file's mtime so any local
+          // login/logout (even from another process) busts it instantly.
+          const cacheKey = await stat(resolveAuthFilePath())
+            .then((info) => `${Math.round(info.mtimeMs)}`)
+            .catch(() => 'no-auth-file')
+          const cached = buzzAssistStatusCacheRef
+          if (cached.status && cached.key === cacheKey && Date.now() - cached.at < 5 * 60_000) {
+            sendJson(res, 200, cached.status)
+            return
+          }
+          const status = await getBuzzAssistAuthStatus({ verifyServer: true })
+          buzzAssistStatusCacheRef = { key: cacheKey, at: Date.now(), status }
+          sendJson(res, 200, status)
         } catch (error) {
           sendJson(res, 500, { error: error.message })
         }
@@ -1385,8 +1782,51 @@ function configureCanvasServer(server) {
                 ...(body.customData && typeof body.customData === 'object' ? body.customData : {})
               }
             })
-            broadcastCanvasChanged([canvasFile, result.assetFile])
-            return { media, result }
+            // Multi-image runs (Lovart imageCount > 1): each extra replaces
+            // one of the placeholder frames the client laid out to the right
+            // of the primary frame; without placeholders they chain to the
+            // right of the previous result.
+            const extraAnchors = Array.isArray(body.extraAnchorElementIds)
+              ? body.extraAnchorElementIds.filter((id) => typeof id === 'string' && id)
+              : []
+            const changedAssets = [result.assetFile]
+            const extras = []
+            let extraAnchorId = result.elementId
+            for (const [extraIndex, extra] of (Array.isArray(media.extraMedia) ? media.extraMedia : []).entries()) {
+              try {
+                const placeholderId = extraAnchors[extraIndex]
+                const extraResult = await insertExcalidrawImage({
+                  canvasDir,
+                  mediaBuffer: extra.buffer,
+                  mimeType: extra.mimeType,
+                  // No explicit name: fall through to the desktop-app-style
+                  // sequential ImageN naming in canvasScene.
+                  fileName: body.fileName ? extra.fileName : undefined,
+                  anchorElementId: placeholderId ?? extraAnchorId,
+                  placement: placeholderId ? 'replace' : 'right',
+                  replaceAnchor: Boolean(placeholderId),
+                  matchAnchor: true,
+                  displayWidth: body.displayWidth,
+                  displayHeight: body.displayHeight,
+                  customData: {
+                    codexGeneratedImage: true,
+                    codexGenerationModel: media.model,
+                    codexGenerationPrompt: body.prompt,
+                    generatorPrompt: body.prompt,
+                    generatorModel: body.model,
+                    generatorAspectRatio: body.aspectRatio ?? body.aspect_ratio,
+                    codexGenerationSource: extra.source
+                  }
+                })
+                changedAssets.push(extraResult.assetFile)
+                extraAnchorId = extraResult.elementId
+                extras.push({ elementId: extraResult.elementId, fileId: extraResult.fileId, assetUrl: extraResult.assetUrl })
+              } catch (extraError) {
+                console.warn('[generate/image] extra image insert failed:', extraError.message)
+              }
+            }
+            broadcastCanvasChanged([canvasFile, ...changedAssets])
+            return { media, result: { ...result, extras } }
           }
 
           if (wantsAsyncGeneration(req, body)) {
@@ -2085,6 +2525,19 @@ function configureCanvasServer(server) {
             margin: body.margin,
             customData: body.customData
           })
+          // Words sidecar: lets a host agent refine cue boundaries / line
+          // breaks / kanji later via /api/subtitles/refine with word-anchored
+          // timing (no audio desync possible).
+          const wordsFile = await writeSubtitleWordsSidecar(canvasDir, basename(placement.assetFile), {
+            words: generated.words,
+            lineCount: generated.lineCount,
+            maxChars: generated.maxChars,
+            model: generated.model,
+            mode: generated.mode,
+            audioPath: body.audioPath || '',
+            durationSeconds: generated.durationSeconds,
+            elementId: placement.elementId
+          }).catch(() => '')
           sendJson(res, 200, {
             ok: true,
             kind: 'subtitle',
@@ -2092,6 +2545,58 @@ function configureCanvasServer(server) {
             mode: generated.mode,
             cueCount: generated.subtitleLines.length,
             credits: generated.credits,
+            wordsFile,
+            ...placement
+          })
+          broadcastCanvasChanged([canvasFile, placement.assetFile])
+        } catch (error) {
+          sendJson(res, 500, { error: error.message })
+        }
+      })
+
+      // Host-agent subtitle refinement: rebuilds an existing SRT card from a
+      // word-index cue plan (semantic boundaries / line breaks / kanji fixes
+      // decided by the agent). Timing comes from the stored word anchors +
+      // energy snap, so refined text can never desync from the audio.
+      server.middlewares.use('/api/subtitles/refine', async (req, res) => {
+        try {
+          if (req.method !== 'POST') {
+            res.statusCode = 405
+            res.setHeader('allow', 'POST')
+            res.end()
+            return
+          }
+          const body = JSON.parse(await readRequestBody(req))
+          const srtFileName = basename(String(body.srtFileName || body.fileName || '').trim())
+          if (!srtFileName) {
+            sendJson(res, 400, { error: 'srtFileName is required (the existing .srt asset name).' })
+            return
+          }
+          const refined = await refineSubtitleFromPlan({ canvasDir, srtFileName, plan: body.plan })
+          const placement = await insertExcalidrawSubtitle({
+            canvasDir,
+            srtText: refined.srtText,
+            subtitleLines: refined.subtitleLines,
+            fileName: srtFileName.replace(/\.srt$/i, ''),
+            model: refined.sidecar.model,
+            mode: 'refined',
+            anchorElementId: body.anchorElementId || refined.sidecar.elementId,
+            replaceAnchor: true,
+            matchAnchor: true,
+            customData: body.customData
+          })
+          // Carry the sidecar forward so the refined card can be refined again.
+          const { sidecarPath, ...sidecarPayload } = refined.sidecar
+          const wordsFile = await writeSubtitleWordsSidecar(canvasDir, basename(placement.assetFile), {
+            ...sidecarPayload,
+            elementId: placement.elementId
+          }).catch(() => '')
+          sendJson(res, 200, {
+            ok: true,
+            kind: 'subtitle',
+            mode: 'refined',
+            cueCount: refined.subtitleLines.length,
+            wordsFile,
             ...placement
           })
           broadcastCanvasChanged([canvasFile, placement.assetFile])
@@ -2146,6 +2651,57 @@ function configureCanvasServer(server) {
           })
         } catch (error) {
           sendJson(res, 500, { error: error.message })
+        }
+      })
+
+      server.middlewares.use('/api/assets/clipboard', async (req, res) => {
+        if (rejectRemoteOperator(req, res)) return
+        try {
+          if (req.method !== 'POST') {
+            res.statusCode = 405
+            res.setHeader('allow', 'POST')
+            res.end()
+            return
+          }
+          const body = JSON.parse((await readRequestBody(req)) || '{}')
+          const assetItems = Array.isArray(body.assets) ? body.assets : []
+          const assetPaths = await resolveClientAssetPaths(assetItems)
+          if (assetPaths.length === 0) {
+            sendJson(res, 400, { copied: false, error: 'コピーできるファイルがありません。' })
+            return
+          }
+          const copied = await copyFilesToSystemClipboard(assetPaths)
+          sendJson(res, 200, {
+            copied: true,
+            platform: copied.platform,
+            mode: copied.mode,
+            fileCount: assetPaths.length,
+            files: assetPaths.map((filePath) => basename(filePath))
+          })
+        } catch (error) {
+          sendJson(res, 400, { copied: false, error: error.message })
+        }
+      })
+
+      server.middlewares.use('/api/text/clipboard', async (req, res) => {
+        if (rejectRemoteOperator(req, res)) return
+        try {
+          if (req.method !== 'POST') {
+            res.statusCode = 405
+            res.setHeader('allow', 'POST')
+            res.end()
+            return
+          }
+          const body = JSON.parse((await readRequestBody(req)) || '{}')
+          const text = typeof body.text === 'string' ? body.text : ''
+          const copied = await copyTextToSystemClipboard(text)
+          sendJson(res, 200, {
+            copied: true,
+            platform: copied.platform,
+            mode: copied.mode
+          })
+        } catch (error) {
+          sendJson(res, 400, { copied: false, error: error.message })
         }
       })
 

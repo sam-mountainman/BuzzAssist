@@ -1,17 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import {
   insertExcalidrawImage,
   insertExcalidrawMediaBatch,
+  insertExcalidrawSilenceCutResult,
   insertExcalidrawSubtitle,
   isSafeChildPath,
   normalizeScene,
   normalizeSubtitleCards,
   resolveCanvasDir,
+  resolveFocusRequestFile,
   sanitizeFileName,
+  writeCanvasFocusRequest,
 } from "../lib/canvasScene.mjs";
 
 const ONE_BY_ONE_PNG = Buffer.from(
@@ -20,11 +23,29 @@ const ONE_BY_ONE_PNG = Buffer.from(
 );
 
 test("resolveCanvasDir prefers explicit canvasDir", () => {
-  assert.equal(resolveCanvasDir({ canvasDir: "/tmp/custom-canvas", projectDir: "/tmp/project" }), "/tmp/custom-canvas");
+  assert.equal(
+    resolveCanvasDir({ canvasDir: "/tmp/custom-canvas", projectDir: "/tmp/project" }),
+    resolve("/tmp/custom-canvas"),
+  );
 });
 
 test("resolveCanvasDir maps projectDir to project canvas directory", () => {
-  assert.equal(resolveCanvasDir({ projectDir: "/tmp/project" }), "/tmp/project/canvas");
+  assert.equal(resolveCanvasDir({ projectDir: "/tmp/project" }), join(resolve("/tmp/project"), "canvas"));
+});
+
+test("writeCanvasFocusRequest stores a one-shot selection and viewport request", async () => {
+  const canvasDir = await mkdtemp(join(tmpdir(), "excalidraw-focus-"));
+  try {
+    const result = await writeCanvasFocusRequest({ canvasDir }, ["image-1", "image-1", "video-2"]);
+    const stored = JSON.parse(await readFile(resolveFocusRequestFile({ canvasDir }), "utf8"));
+    assert.deepEqual(result.elementIds, ["image-1", "video-2"]);
+    assert.deepEqual(stored.elementIds, ["image-1", "video-2"]);
+    assert.equal(stored.applySelection, true);
+    assert.equal(stored.applyViewport, true);
+    assert.equal(typeof stored.requestId, "string");
+  } finally {
+    await rm(canvasDir, { recursive: true, force: true });
+  }
 });
 
 test("sanitizeFileName preserves BuzzAssist-style display names", () => {
@@ -125,6 +146,42 @@ test("batch images persist the same numbered file names in element and file meta
     assert.equal(element.customData.codexMediaKind, "image");
     assert.equal(element.customData.codexFileName, "Image1.png");
     assert.equal(saved.files[result.fileId].name, "Image1.png");
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("silence-cut XML results are inserted as canvas frames with output assets", async () => {
+  const projectDir = await mkdtemp(join(tmpdir(), "excalidraw-silence-cut-result-"));
+  try {
+    const canvasDir = join(projectDir, "canvas");
+    const assetsDir = join(canvasDir, "assets");
+    await mkdir(assetsDir, { recursive: true });
+    const xmlPath = join(assetsDir, "cut.xml");
+    await writeFile(xmlPath, "<xmeml version=\"4\"></xmeml>\n");
+
+    const result = await insertExcalidrawSilenceCutResult({
+      projectDir,
+      assetPath: xmlPath,
+      fileName: "cut.xml",
+      model: "ffmpeg-local",
+      inputDuration: 120,
+      outputDuration: 100,
+      cutDuration: 20,
+      cutCount: 3,
+      clipCount: 4,
+    });
+
+    const saved = JSON.parse(await readFile(join(canvasDir, "excalidraw-canvas.json"), "utf8"));
+    const element = saved.elements.find((item) => item.id === result.elementId);
+
+    assert.equal(element.customData["buzzassist.silenceCutGenerator.frame"], true);
+    assert.equal(element.customData["buzzassist.imageGenerator.frame"], undefined);
+    assert.equal(element.customData.codexGenerating, false);
+    assert.equal(element.customData.silenceCutOutputAsset.name, "cut.xml");
+    assert.equal(element.customData.silenceCutOutputAsset.kind, "xml");
+    assert.equal(element.customData.silenceCutOutputAsset.path, xmlPath);
+    assert.equal(saved.appState.selectedElementIds[result.elementId], true);
   } finally {
     await rm(projectDir, { recursive: true, force: true });
   }

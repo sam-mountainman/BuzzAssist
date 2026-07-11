@@ -5,20 +5,30 @@ import { constants } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
+import { resolveCodexCommand } from "./codex-image-bridge.mjs";
+import {
+  SUPPORTED_SETUP_AGENTS,
+  assertSupportedNodeVersion,
+  claudeDesktopConfigPathForPlatform,
+  commandNameForPlatform,
+  detectSetupAgent,
+  hostInstallHelp,
+  normalizeSetupAgentName,
+} from "../lib/setupAgents.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const pluginName = "buzzassist";
 const marketplaceName = "buzzassist";
 const legacyMarketplaceName = "buzzassist-local";
 const personalMarketplaceName = "personal";
-const homeDir = homedir();
+const homeDir = resolve(process.env.BUZZASSIST_SETUP_HOME || homedir());
 const managedPluginDir = join(homeDir, "plugins", pluginName);
 const managedPluginRoot = join(managedPluginDir, "plugin");
 const personalMarketplacePath = join(homeDir, ".agents", "plugins", "marketplace.json");
 const argv = process.argv.slice(2);
 const packageManifest = JSON.parse(await readFile(join(repoRoot, "package.json"), "utf8"));
 const pluginVersion = packageManifest.version;
-const supportedAgents = ["codex", "claude-desktop", "claude", "cursor", "antigravity"];
+const supportedAgents = SUPPORTED_SETUP_AGENTS;
 const agentLabels = {
   codex: "Codex",
   "claude-desktop": "Claude Desktop",
@@ -57,46 +67,10 @@ function hasArg(name) {
   return argv.includes(name);
 }
 
-function normalizeAgentName(value) {
-  const normalized = String(value || "").trim().toLowerCase().replace(/[_\s]+/g, "-");
-  if (!normalized || normalized === "auto" || normalized === "current") return null;
-  if (["claude-desktop", "claude-app", "claude-desktop-app"].includes(normalized)) return "claude-desktop";
-  if (["claude-code", "claude"].includes(normalized)) return "claude";
-  if (["google-antigravity", "gemini", "antigravity"].includes(normalized)) return "antigravity";
-  if (["cursor", "cursor-ide"].includes(normalized)) return "cursor";
-  if (normalized === "codex") return "codex";
-  throw new Error(`Unsupported agent "${value}". Use one of: ${supportedAgents.join(", ")}.`);
-}
-
-function detectCurrentAgent() {
-  const hints = [
-    process.env.BUZZASSIST_SETUP_AGENT,
-    process.env.BUZZASSIST_AGENT,
-    process.env.BUZZASSIST_HOST,
-    process.env.CURSOR_TRACE_ID,
-    process.env.CURSOR_AGENT,
-    process.env.ANTIGRAVITY,
-    process.env.GEMINI_CLI,
-    process.env.CLAUDE_CODE,
-    process.env.CLAUDECODE,
-    process.env.CODEX,
-    process.env.TERM_PROGRAM,
-    process.env.npm_config_user_agent,
-    process.env._,
-    process.argv.join(" "),
-  ].filter(Boolean).join(" ").toLowerCase();
-
-  if (hints.includes("cursor")) return "cursor";
-  if (hints.includes("antigravity") || hints.includes("gemini")) return "antigravity";
-  if (hints.includes("claude")) return "claude";
-  if (hints.includes("codex")) return "codex";
-  return "codex";
-}
-
 function resolveTargetAgents() {
   if (hasArg("--all-agents")) return [...supportedAgents];
   const explicit = readArg("--agent", readArg("--host", null));
-  return [normalizeAgentName(explicit) || detectCurrentAgent()];
+  return [normalizeSetupAgentName(explicit) || detectSetupAgent({ env: process.env, argv: process.argv })];
 }
 
 if (hasArg("--help") || hasArg("-h")) {
@@ -118,7 +92,7 @@ const canvasDir = resolve(readArg("--canvas-dir", process.env.EXCALIDRAW_CANVAS_
 const ngrokAuthtoken = readArg("--ngrok-authtoken", process.env.BUZZASSIST_NGROK_AUTHTOKEN || process.env.NGROK_AUTHTOKEN || "");
 
 function commandName(name) {
-  return process.platform === "win32" ? `${name}.cmd` : name;
+  return commandNameForPlatform(name);
 }
 
 function shellQuote(value) {
@@ -186,7 +160,10 @@ async function run(command, args, options = {}) {
     const child = spawn(command, args, {
       cwd,
       env,
-      shell: process.platform === "win32",
+      // Windows requires a command shell for .cmd/.bat launchers (npm,
+      // Claude Code), but using one for node.exe or absolute app binaries
+      // breaks paths containing spaces and weakens argument escaping.
+      shell: process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command),
       stdio: inherit ? "inherit" : ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -496,9 +473,12 @@ async function cleanupLegacyCodex(codex) {
 
 async function setupCodex(pluginDir) {
   logStep("Configuring Codex");
-  const codex = commandName("codex");
-  if (!(await commandAvailable(codex))) {
-    console.warn("Codex CLI was not found. Run these commands after installing Codex:");
+  let codex;
+  try {
+    codex = dryRun ? commandName("codex") : await resolveCodexCommand();
+  } catch {
+    console.warn(hostInstallHelp("codex"));
+    console.warn("ChatGPTデスクトップアプリまたはCodex CLIが見つかりません。インストール後に次を実行してください:");
     console.warn(`  ${formatCommand("codex", ["plugin", "marketplace", "add", managedPluginDir])}`);
     console.warn(`  ${formatCommand("codex", ["plugin", "add", `${pluginName}@${marketplaceName}`])}`);
     return { ok: false, skipped: true };
@@ -517,8 +497,13 @@ async function setupCodex(pluginDir) {
   const installed = await run(codex, ["plugin", "add", codexSelector], { allowFailure: true });
   if (!installed.ok) {
     console.warn("Codex plugin install did not complete. Check the Codex CLI output above.");
+    return { ok: false };
   }
-  return { ok: installed.ok };
+  if (dryRun) return { ok: true, dryRun: true };
+  const verified = await run(codex, ["plugin", "list"], { allowFailure: true, log: false, silent: true });
+  const ok = verified.ok && verified.stdout.includes(codexSelector);
+  if (!ok) console.warn(`Codex did not report ${codexSelector} as installed after setup.`);
+  return { ok };
 }
 
 async function cleanupLegacyClaude(claude) {
@@ -540,6 +525,7 @@ async function setupClaude(pluginDir) {
   logStep("Configuring Claude Code");
   const claude = commandName("claude");
   if (!(await commandAvailable(claude))) {
+    console.warn(hostInstallHelp("claude"));
     console.warn("Claude Code CLI was not found. Run these commands after installing Claude Code:");
     console.warn(`  ${formatCommand("claude", ["plugin", "marketplace", "add", managedPluginDir, "--scope", "user"])}`);
     console.warn(`  ${formatCommand("claude", ["plugin", "install", `${pluginName}@${marketplaceName}`, "--scope", "user"])}`);
@@ -571,8 +557,13 @@ async function setupClaude(pluginDir) {
     console.warn(installed.timedOut
       ? "Claude Code plugin install timed out. Check the Claude Code CLI output above."
       : "Claude Code plugin install did not complete. Check the Claude Code CLI output above.");
+    return { ok: false };
   }
-  return { ok: installed.ok };
+  if (dryRun) return { ok: true, dryRun: true };
+  const verified = await run(claude, ["plugin", "list"], { allowFailure: true, log: false, silent: true });
+  const ok = verified.ok && verified.stdout.includes(claudeSelector);
+  if (!ok) console.warn(`Claude Code did not report ${claudeSelector} as installed after setup.`);
+  return { ok };
 }
 
 function localMcpServerConfig(pluginDir, { cursor = false } = {}) {
@@ -590,14 +581,7 @@ function localMcpServerConfig(pluginDir, { cursor = false } = {}) {
 }
 
 function claudeDesktopConfigPath() {
-  if (process.platform === "darwin") {
-    return join(homeDir, "Library", "Application Support", "Claude", "claude_desktop_config.json");
-  }
-  if (process.platform === "win32") {
-    const appData = process.env.APPDATA || join(homeDir, "AppData", "Roaming");
-    return join(appData, "Claude", "claude_desktop_config.json");
-  }
-  return join(homeDir, ".config", "Claude", "claude_desktop_config.json");
+  return claudeDesktopConfigPathForPlatform({ homeDir, env: process.env });
 }
 
 async function setupClaudeDesktop(pluginDir) {
@@ -859,6 +843,7 @@ async function launchCanvasTunnel() {
 }
 
 async function main() {
+  assertSupportedNodeVersion();
   console.log("BuzzAssist setup");
   console.log(`Repository: ${repoRoot}`);
   console.log(`Project dir: ${projectDir}`);
@@ -901,6 +886,10 @@ async function main() {
   if (!hasArg("--all-agents")) {
     console.log("Other agents were intentionally left untouched. Use --all-agents only when the user explicitly asks for every host.");
   }
+  if (targetAgents.some((agent) => agent === "codex" || agent === "claude")) {
+    console.log("BUZZASSIST_HOST_RESTART_REQUIRED=yes");
+    console.log("Start a new Codex task or Claude Code session after setup so the newly installed skills and MCP tools are loaded.");
+  }
   if (targetIncludesWidgetHost()) {
     console.log("BUZZASSIST_WIDGET_TOOL=render_buzzassist_canvas_widget");
     console.log("Native widget is experimental. Use BUZZASSIST_CANVAS_URL for normal desktop work unless the user explicitly asks to test the widget.");
@@ -922,6 +911,14 @@ async function main() {
     }
     console.log(`BUZZASSIST_TUNNEL_CHECK=${tunnelStatus.ok ? "ok" : "needs-attention"}`);
     console.log("Open BUZZASSIST_TUNNEL_ACCESS_URL on the phone to use the same full Excalidraw canvas UI. Basic Auth is only needed when the tunnel was started with --basic-auth.");
+  }
+
+  const failedAgents = targetAgents.filter((agent) => !results[agent]?.ok);
+  if (failedAgents.length > 0) {
+    throw new Error(
+      `BuzzAssist host setup did not complete for: ${failedAgents.map((agent) => agentLabels[agent]).join(", ")}. ` +
+        "Install or update the host shown above, then rerun the same setup command.",
+    );
   }
 }
 

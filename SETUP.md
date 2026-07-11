@@ -1,6 +1,6 @@
 # BuzzAssist セットアップ
 
-このリポジトリは、GitHub URL と「セットアップして」という指示だけで導入できる想定です。手動でプラグインIDを入力する必要はありません。
+このリポジトリは、GitHub URL と「セットアップして」という指示だけで導入できます。手動でプラグインIDを入力する必要はありません。Codexへ依頼した場合はCodexだけ、Claude Codeへ依頼した場合はClaude Codeだけを設定します。
 
 正しいURL:
 
@@ -39,6 +39,7 @@ brew install cloudflared
 Windows:
 
 ```powershell
+winget install Git.Git
 winget install OpenJS.NodeJS.LTS
 winget install Cloudflare.cloudflared
 ```
@@ -63,6 +64,7 @@ npm run tunnel:start -- --project-dir C:\path\to\active\project
 - Antigravity: アクティブプロジェクトに `.agents/mcp_config.json` と `GEMINI.md` 管理ブロックを作成
 - ローカルキャンバスを起動して `BUZZASSIST_CANVAS_URL=...` を出力
 - ブラウザーキャンバスを確認して `BUZZASSIST_CANVAS_CHECK=ok` を出力
+- 対象ホストのplugin listを再確認し、`buzzassist@buzzassist`が見つからなければ非ゼロで終了
 - `--tunnel` 付きなら Cloudflare Canvas Tunnel を起動して `BUZZASSIST_TUNNEL_ACCESS_URL=...` を出力
 
 既定では指定ホスト以外は変更しません。全ホストを明示的に設定する時だけ使います。
