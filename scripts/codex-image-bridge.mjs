@@ -2,12 +2,145 @@
 
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
-import { basename, extname, join } from "node:path";
+import { basename, extname, join, posix, win32 } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_SERVICE_NAME = "excalidraw-codex-image-bridge";
+const CODEX_PROBE_TIMEOUT_MS = 8_000;
+
+export function codexPathCommands(platform = process.platform) {
+  return platform === "win32" ? ["codex.exe", "codex.cmd", "codex"] : ["codex"];
+}
+
+export function codexDesktopCandidates({
+  platform = process.platform,
+  homeDir = os.homedir(),
+  env = process.env,
+} = {}) {
+  if (platform === "darwin") {
+    return [
+      "/Applications/ChatGPT.app/Contents/Resources/codex",
+      posix.join(homeDir, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
+      "/Applications/Codex.app/Contents/Resources/codex",
+      posix.join(homeDir, "Applications", "Codex.app", "Contents", "Resources", "codex"),
+    ];
+  }
+  if (platform === "win32") {
+    return [
+      env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, "Programs", "ChatGPT", "resources", "codex.exe"),
+      env.PROGRAMFILES && win32.join(env.PROGRAMFILES, "ChatGPT", "resources", "codex.exe"),
+      env["PROGRAMFILES(X86)"] && win32.join(env["PROGRAMFILES(X86)"], "ChatGPT", "resources", "codex.exe"),
+    ].filter(Boolean);
+  }
+  return [];
+}
+
+function parseCodexVersion(text) {
+  const match = String(text || "").match(/(?:codex-cli\s+)?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?/i);
+  if (!match) return null;
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+    prerelease: match[4] || "",
+    text: match[0],
+  };
+}
+
+function compareCodexVersions(a, b) {
+  for (const key of ["major", "minor", "patch"]) {
+    if (a[key] !== b[key]) return a[key] - b[key];
+  }
+  if (a.prerelease === b.prerelease) return 0;
+  if (!a.prerelease) return 1;
+  if (!b.prerelease) return -1;
+  return a.prerelease.localeCompare(b.prerelease, undefined, { numeric: true });
+}
+
+function runCommandCapture(command, args = [], timeoutMs = CODEX_PROBE_TIMEOUT_MS) {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, {
+      env: process.env,
+      shell: process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      finish({ ok: false, stdout, stderr, error: "timeout" });
+    }, timeoutMs);
+    child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+    child.on("error", (error) => finish({ ok: false, stdout, stderr, error: error.message }));
+    child.on("close", (code) => finish({ ok: code === 0, code, stdout, stderr }));
+  });
+}
+
+async function probeCodexCommand(command, source) {
+  if (source === "desktop") {
+    try {
+      await access(command);
+    } catch {
+      return null;
+    }
+  }
+  const result = await runCommandCapture(command, ["--version"]);
+  if (!result.ok) return null;
+  const version = parseCodexVersion(`${result.stdout}\n${result.stderr}`);
+  if (!version) return null;
+  return { command, source, version };
+}
+
+export async function resolveCodexCommand() {
+  const explicit = nonEmptyString(process.env.CODEX_COMMAND);
+  if (explicit) return explicit;
+
+  const pathCommands = codexPathCommands();
+  const candidates = [
+    ...pathCommands.map((command) => ({ command, source: "path" })),
+    ...codexDesktopCandidates().map((command) => ({ command, source: "desktop" })),
+  ];
+  const unique = [...new Map(candidates.map((candidate) => [candidate.command, candidate])).values()];
+  const available = (await Promise.all(unique.map(({ command, source }) => probeCodexCommand(command, source))))
+    .filter(Boolean)
+    .sort((a, b) => compareCodexVersions(b.version, a.version));
+  if (available[0]) return available[0].command;
+
+  throw new Error(
+    "実行先ChatGPT (Codex)を利用できません。ChatGPTデスクトップアプリをインストールしてサインインするか、Codex CLIをインストールして `codex login` を実行してください。入手先: https://chatgpt.com/ja-JP/codex/",
+  );
+}
+
+function friendlyCodexError(error, command) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/usage[_ -]?limit|hit your usage|rate[_ -]?limit|too many requests|quota|\b429\b/i.test(message)) {
+    return new Error(
+      "ChatGPTの生成上限に達しました。時間をおいて再試行するか、プランをアップグレードすると上限を増やせます。プラン一覧: https://chatgpt.com/ja-JP/pricing/?openaicom_referred=true",
+    );
+  }
+  if (/requires a newer version of Codex|update.*Codex|unsupported client/i.test(message)) {
+    return new Error(
+      `Codexが古いため画像生成を開始できません。ChatGPTデスクトップアプリを更新するか、Codex CLIを最新版へ更新してください。使用したCodex: ${command}`,
+    );
+  }
+  if (/not logged in|login required|authentication|unauthorized|401/i.test(message)) {
+    return new Error(
+      "ChatGPT (Codex)へのサインインが必要です。ChatGPTデスクトップアプリでサインインするか、ターミナルで `codex login` を実行してください。",
+    );
+  }
+  return error instanceof Error ? error : new Error(message);
+}
 
 function nonEmptyString(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -194,10 +327,12 @@ class CodexAppServerClient {
   }
 
   async start() {
-    const command = process.env.CODEX_COMMAND || "codex";
+    const command = await resolveCodexCommand();
+    this.command = command;
     this.child = spawn(command, ["app-server", "--listen", "stdio://"], {
       cwd: this.cwd,
       env: process.env,
+      shell: process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command),
       stdio: ["pipe", "pipe", "pipe"],
     });
 
@@ -220,16 +355,20 @@ class CodexAppServerClient {
       this.child.once("error", reject);
     });
 
-    await this.request("initialize", {
-      clientInfo: {
-        name: "excalidraw_codex_image_bridge",
-        title: "Excalidraw Codex Image Bridge",
-        version: "1.0.0",
-      },
-      capabilities: {
-        experimentalApi: true,
-      },
-    });
+    try {
+      await this.request("initialize", {
+        clientInfo: {
+          name: "excalidraw_codex_image_bridge",
+          title: "Excalidraw Codex Image Bridge",
+          version: "1.0.0",
+        },
+        capabilities: {
+          experimentalApi: true,
+        },
+      });
+    } catch (error) {
+      throw friendlyCodexError(error, command);
+    }
     this.notify("initialized");
   }
 
@@ -360,24 +499,33 @@ async function generateWithCodex(payload) {
             extractImageResult(imageItem).then((result) => finish(undefined, result), finish);
             return;
           }
-          if (params.turn?.error?.message) finish(new Error(params.turn.error.message));
+          if (params.turn?.error?.message) {
+            finish(friendlyCodexError(new Error(params.turn.error.message), client.command));
+          }
         }
       });
     });
 
-    const started = await client.request("turn/start", {
-      threadId,
-      input,
-      cwd,
-      ...(model ? { model } : {}),
-      effort: process.env.CODEX_IMAGE_BRIDGE_EFFORT || "medium",
-    });
+    let started;
+    try {
+      started = await client.request("turn/start", {
+        threadId,
+        input,
+        cwd,
+        ...(model ? { model } : {}),
+        effort: process.env.CODEX_IMAGE_BRIDGE_EFFORT || "medium",
+      });
+    } catch (error) {
+      throw friendlyCodexError(error, client.command);
+    }
     expectedTurnId = started?.turn?.id || "";
     const initialImageItem = Array.isArray(started?.turn?.items)
       ? started.turn.items.find((item) => item?.type === "imageGeneration")
       : undefined;
     if (initialImageItem) return extractImageResult(initialImageItem);
-    if (started?.turn?.error?.message) throw new Error(started.turn.error.message);
+    if (started?.turn?.error?.message) {
+      throw friendlyCodexError(new Error(started.turn.error.message), client.command);
+    }
     return await resultPromise;
   } finally {
     if (threadId) {
@@ -395,10 +543,12 @@ async function main() {
   process.stdout.write(`${JSON.stringify({ success: true, ...result })}\n`);
 }
 
-main().catch((error) => {
-  process.stdout.write(`${JSON.stringify({
-    success: false,
-    error: error instanceof Error ? error.message : String(error),
-  })}\n`);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    process.stdout.write(`${JSON.stringify({
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    })}\n`);
+    process.exitCode = 1;
+  });
+}

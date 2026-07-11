@@ -51,9 +51,8 @@ body {
   top: 50%;
   left: 14px;
 
-  /* BuzzAssist parity: fixed tool rails stay above the generator prompt so
-     the prompt passes underneath the bars while canvas media stays below. */
-  z-index: 120;
+  /* Keep the rail clickable above Excalidraw chrome while canvas media stays below. */
+  z-index: 135;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -124,6 +123,13 @@ body {
   inset: 0;
   overflow: hidden;
   border-radius: 2px;
+}
+
+/* Cover the generator rectangle's own canvas stroke while it is only a
+   loading placeholder. Selection handles are cleared in App.jsx; extending
+   this overlay by two pixels removes the remaining purple outer outline. */
+.lovart-frame-overlay.is-generating .lovart-frame-inner {
+  inset: -2px;
 }
 
 .lovart-frame-header {
@@ -362,6 +368,276 @@ body {
   border-radius: 999px;
 }
 
+.buzzassist-login-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 220;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgb(15 23 42 / 0.34);
+  backdrop-filter: blur(6px);
+  pointer-events: auto;
+}
+
+.buzzassist-login-card {
+  position: relative;
+  width: min(420px, calc(100vw - 32px));
+  padding: 24px;
+  color: #111827;
+  background: #fff;
+  border: 1px solid rgb(148 163 184 / 0.24);
+  border-radius: 8px;
+  box-shadow: 0 24px 70px rgb(15 23 42 / 0.24);
+}
+
+.buzzassist-login-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  color: #6b7280;
+  cursor: pointer;
+  background: #f5f5f7;
+  border: 0;
+  border-radius: 8px;
+}
+
+.buzzassist-login-close:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.buzzassist-login-eyebrow {
+  margin-bottom: 8px;
+  color: #6d5efc;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.buzzassist-login-card h2 {
+  margin: 0 36px 10px 0;
+  color: #111827;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.buzzassist-login-card p {
+  margin: 0;
+  color: #374151;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.buzzassist-login-card .buzzassist-login-detail {
+  margin-top: 8px;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.buzzassist-login-error {
+  margin-top: 14px;
+  padding: 10px 12px;
+  color: #b91c1c;
+  font-size: 13px;
+  line-height: 1.45;
+  background: #fff1f2;
+  border: 1px solid #fecdd3;
+  border-radius: 8px;
+}
+
+.hermes-setup-card {
+  width: min(520px, calc(100vw - 32px));
+}
+
+.hermes-setup-state {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.hermes-setup-chip {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 10px;
+  color: #9a3412;
+  font-size: 12px;
+  font-weight: 600;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 999px;
+}
+
+.hermes-setup-chip.is-ok {
+  color: #166534;
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.hermes-setup-chip-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  background: #f97316;
+  border-radius: 999px;
+}
+
+.hermes-setup-chip.is-ok .hermes-setup-chip-dot {
+  background: #22c55e;
+}
+
+.hermes-setup-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hermes-setup-steps li {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  color: #374151;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.hermes-setup-step-num {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: #6d5efc;
+  font-size: 11px;
+  font-weight: 800;
+  background: #eef2ff;
+  border-radius: 999px;
+}
+
+.hermes-setup-prompt-box {
+  margin-top: 16px;
+  overflow: hidden;
+  background: #f8f7ff;
+  border: 1px solid #ddd6fe;
+  border-radius: 10px;
+}
+
+.hermes-setup-prompt-box-header {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 8px 8px 14px;
+  border-bottom: 1px solid #e7e2fb;
+}
+
+.hermes-setup-prompt-box-title {
+  color: #6b7280;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.hermes-setup-copy {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  color: #6d5efc;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid #ddd6fe;
+  border-radius: 7px;
+}
+
+.hermes-setup-copy:hover {
+  background: #f5f3ff;
+}
+
+.hermes-setup-copy.is-copied {
+  color: #fff;
+  background: #6d5efc;
+  border-color: #6d5efc;
+}
+
+.hermes-setup-prompt {
+  max-width: 100%;
+  margin: 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  color: #312e81;
+  font: 600 13px/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.hermes-setup-actions {
+  flex-wrap: wrap;
+}
+
+.buzzassist-login-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 22px;
+}
+
+.buzzassist-login-secondary,
+.buzzassist-login-primary {
+  min-width: 112px;
+  height: 42px;
+  padding: 0 16px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 0;
+  border-radius: 8px;
+}
+
+/* Action links (real <a href>) rendered as buttons inside the dialogs. */
+a.buzzassist-login-secondary,
+a.buzzassist-login-primary,
+a.lovart-error-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  text-decoration: none;
+}
+
+.buzzassist-login-secondary {
+  color: #4b5563;
+  background: #f3f4f6;
+}
+
+.buzzassist-login-primary {
+  color: #fff;
+  background: #6d5efc;
+}
+
+.buzzassist-login-secondary:disabled,
+.buzzassist-login-primary:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 .lovart-frame-center {
   position: absolute;
   inset: 0;
@@ -420,7 +696,7 @@ body {
   position: absolute;
   bottom: 12px;
   left: 50%;
-  z-index: 30;
+  z-index: 130;
   box-sizing: border-box;
   width: min(92vw, 500px);
   padding: 12px 14px 10px;
@@ -1104,6 +1380,30 @@ body {
     sans-serif;
 }
 
+.lovart-error-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  color: #6b7280;
+}
+
+.lovart-error-action {
+  border: 1px solid rgba(212, 51, 51, 0.2);
+  border-radius: 12px;
+  background: #fff;
+  color: #b91c1c;
+  padding: 7px 10px;
+  font: 700 12px/1 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  cursor: pointer;
+}
+
+.lovart-error-action:hover {
+  background: #fff5f5;
+}
+
 .lovart-notice {
   display: flex;
   gap: 8px;
@@ -1141,6 +1441,32 @@ body {
   min-width: 312px;
   padding: 10px 12px;
   box-shadow: 0 2px 16px rgb(0 0 0 / 0.1);
+}
+
+/* 画像設定メニュー: 動画設定と同じく右端合わせで開く（右へのはみ出し防止）。 */
+.lovart-image-settings {
+  right: 0;
+  left: auto;
+  min-width: 200px;
+  box-sizing: border-box;
+  padding: 8px 10px;
+}
+
+/* 枚数・バージョンなどの小さな選択肢用のコンパクトグリッド。 */
+.lovart-menu-grid.count {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 0 8px;
+}
+
+.lovart-menu-grid.count button {
+  flex-direction: row;
+  width: auto;
+  height: 28px;
+  min-width: 40px;
+  padding: 0 12px;
+  font-size: 12px;
 }
 
 .lovart-menu-grid {
@@ -1233,6 +1559,16 @@ body {
 
 .lovart-menu .lovart-audio-toggle.is-on span {
   transform: translateX(20px);
+}
+
+/* Always-on audio models (e.g. Gemini Omni Flash): static badge instead of a toggle. */
+.lovart-menu .lovart-audio-always {
+  font-size: 11px;
+  color: #7c3aed;
+  background: rgba(124, 58, 237, 0.1);
+  border-radius: 999px;
+  padding: 2px 10px;
+  white-space: nowrap;
 }
 
 .lovart-duration-slider {
@@ -1416,6 +1752,29 @@ body {
 
 /* Lovart-style floating selection toolbar: appears above the selected media
    bounds and offers chat attachment plus download/archive actions. */
+/* Zero-size anchors for canvas-anchored overlays: they never block canvas
+   hit-testing themselves (0x0), children position/hit-test as before, and a
+   pure pan moves everything with one transform per layer. Split around the
+   Excalidraw interactive canvas (z-index 2): media previews stay under it so
+   selection borders paint on top; frame chrome and the toolbar stay above. */
+.lovart-canvas-overlay-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  will-change: transform;
+}
+
+.lovart-canvas-overlay-layer.is-under-canvas {
+  z-index: 1;
+}
+
+.lovart-canvas-overlay-layer.is-above-canvas {
+  z-index: 3;
+}
+
 .lovart-selection-toolbar {
   position: absolute;
   z-index: 4;
@@ -1451,21 +1810,6 @@ body {
   background: #f3f0ff;
 }
 
-.lovart-selection-toolbar-btn.is-success {
-  color: #ffffff;
-  background: #16a34a;
-}
-
-.lovart-selection-toolbar-btn.is-success:hover:not(:disabled) {
-  color: #ffffff;
-  background: #15803d;
-}
-
-.lovart-selection-toolbar-btn.is-error {
-  color: #ffffff;
-  background: #dc2626;
-}
-
 .lovart-selection-toolbar-btn:disabled {
   color: #9ca3af;
   cursor: default;
@@ -1476,16 +1820,35 @@ body {
   font-weight: 600;
 }
 
-.lovart-selection-toolbar-check {
-  font-size: 13px;
-  font-weight: 800;
-  line-height: 1;
+/* Transient copy feedback under the toolbar — the buttons themselves never
+   change their icons. */
+.lovart-selection-toolbar-status {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  padding: 4px 12px;
+  color: #374151;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  background: #ffffff;
+  border: 1px solid #ececf1;
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgb(17 24 39 / 0.14);
+  transform: translateX(-50%);
 }
 
-.lovart-selection-toolbar-label {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0;
+.lovart-selection-toolbar-status.is-success {
+  color: #15803d;
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.lovart-selection-toolbar-status.is-error {
+  color: #b91c1c;
+  border-color: #fecdd3;
+  background: #fff1f2;
 }
 
 .lovart-agent-chat-popover {

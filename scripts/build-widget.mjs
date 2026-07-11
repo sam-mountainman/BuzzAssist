@@ -24,7 +24,7 @@ const child = spawn(process.execPath, args, {
     BUZZASSIST_WIDGET_OUT_DIR: outDir,
   },
   stdio: "inherit",
-  shell: process.platform === "win32",
+  shell: false,
 });
 
 child.once("exit", (code, signal) => {
