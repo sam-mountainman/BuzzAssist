@@ -255,7 +255,7 @@ const DEFAULT_FRAME_FORM = {
   imageCount: 1,
   imageVersion: '',
   imageDetailRendering: false,
-  duration: '5',
+  duration: '6',
   resolution: '720p',
   imageReferences: [],
   videoTab: 'keyframe',
@@ -404,6 +404,7 @@ function resolveGatingVideoModel(model) {
 
 // Models with a fixed duration menu (buttons) instead of the free slider.
 const VIDEO_DURATION_CHOICES = {
+  'grok-imagine-video-hermes': ['6', '10'],
   'kling-v2-6': ['5', '10']
 }
 
@@ -556,7 +557,8 @@ function getVideoDurationRange(model) {
   if (lovart?.durationRange) return lovart.durationRange
   model = resolveGatingVideoModel(model)
   if (isSeedanceModel(model)) return { min: 4, max: 15, step: 1 }
-  if (isGrokVideoModel(model)) return { min: 1, max: 15, step: 1 }
+  if (model === 'grok-imagine-video-hermes') return { min: 6, max: 10, step: 4 }
+  if (model === 'grok-imagine-video-api') return { min: 1, max: 15, step: 1 }
   if (model === 'kling-v2-6') return { min: 5, max: 10, step: 5 }
   return { min: 3, max: 15, step: 1 }
 }
@@ -3219,11 +3221,16 @@ function frameFormFromElement(element) {
       customData.referenceAudioAssets ??
       []
   )
+  const videoModel = customData.videoModel || customData.codexGenerationModel || DEFAULT_FRAME_FORM.videoModel
+  const videoDuration = normalizeVideoDurationForModel(
+    videoModel,
+    customData.videoDuration || customData.codexGenerationDuration || DEFAULT_FRAME_FORM.duration
+  )
   return {
     ...DEFAULT_FRAME_FORM,
     prompt,
     imageModel: customData.generatorModel || customData.codexGenerationModel || DEFAULT_FRAME_FORM.imageModel,
-    videoModel: customData.videoModel || customData.codexGenerationModel || DEFAULT_FRAME_FORM.videoModel,
+    videoModel,
     aspectRatio: customData.generatorAspectRatio || customData.codexGenerationAspectRatio || DEFAULT_FRAME_FORM.aspectRatio,
     videoAspectRatio: customData.videoAspectRatio || customData.codexGenerationAspectRatio || DEFAULT_FRAME_FORM.videoAspectRatio,
     quality: customData.generatorImageQuality || customData.codexGenerationQuality || DEFAULT_FRAME_FORM.quality,
@@ -3231,7 +3238,7 @@ function frameFormFromElement(element) {
     imageCount: clamp(Math.round(finiteNumberOr(customData.generatorImageCount, DEFAULT_FRAME_FORM.imageCount)), 1, 6),
     imageVersion: typeof customData.generatorImageVersion === 'string' ? customData.generatorImageVersion : DEFAULT_FRAME_FORM.imageVersion,
     imageDetailRendering: customData.generatorImageDetailRendering === true,
-    duration: customData.videoDuration || customData.codexGenerationDuration || DEFAULT_FRAME_FORM.duration,
+    duration: videoDuration,
     resolution: customData.videoResolution || customData.codexGenerationResolution || DEFAULT_FRAME_FORM.resolution,
     imageReferences,
     videoTab: customData.videoTab || DEFAULT_FRAME_FORM.videoTab,
@@ -8607,7 +8614,7 @@ export default function App() {
           model,
           mode: normalizeVideoModeForContext(model, frameForm.videoTab, frameForm.videoMode),
           tab: frameForm.videoTab,
-          duration: Number(frameForm.duration) || 5,
+          duration: Number(frameForm.duration) || 6,
           aspectRatio: frameForm.videoAspectRatio,
           resolution: frameForm.resolution,
           hasStartImage: Boolean(frameForm.videoStartFrame),

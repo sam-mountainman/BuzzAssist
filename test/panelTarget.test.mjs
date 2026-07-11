@@ -37,6 +37,26 @@ test("Hermes route shows zero BuzzAssist credits and exposes setup prompt copy",
   assert.match(source, /if \(route\.id === 'hermes'\) await refreshHermesStatus\(\)/);
 });
 
+test("Grok CLI video settings expose only 6s and 10s while Grok API keeps 1-15s", async () => {
+  const appSource = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const mcpSource = await readFile(new URL("../mcp/server.mjs", import.meta.url), "utf8");
+  const canvasSource = await readFile(new URL("../lib/canvasScene.mjs", import.meta.url), "utf8");
+  const mediaSource = await readFile(new URL("../lib/mediaGeneration.mjs", import.meta.url), "utf8");
+
+  assert.match(appSource, /videoModel: 'grok-imagine-video-hermes'/);
+  assert.match(appSource, /duration: '6'/);
+  assert.match(appSource, /'grok-imagine-video-hermes': \['6', '10'\]/);
+  assert.match(appSource, /if \(model === 'grok-imagine-video-hermes'\) return \{ min: 6, max: 10, step: 4 \}/);
+  assert.match(appSource, /if \(model === 'grok-imagine-video-api'\) return \{ min: 1, max: 15, step: 1 \}/);
+  assert.match(mcpSource, /Grok CLI 6\/10s only, Grok API 1-15s/);
+  assert.match(mcpSource, /Grok CLI accepts only 6 or 10; BuzzAssist\/xAI Grok API accepts 1-15/);
+  assert.match(mcpSource, /duration: job\.duration \?\? "6"/);
+  assert.match(canvasSource, /videoDuration: frame\.duration \?\? "6"/);
+  assert.match(mediaSource, /prompt-only video path is image_gen -> image_to_video/);
+  assert.match(mediaSource, /const startImage = await generateHermesGrokImage/);
+  assert.doesNotMatch(mcpSource, /Grok Imagine clamps text-to-video to 1-15 seconds/);
+});
+
 test("file and canvas attachments pin the original panel without duplicate open notifications", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
 

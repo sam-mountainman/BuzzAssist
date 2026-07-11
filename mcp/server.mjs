@@ -549,7 +549,7 @@ const SETTINGS_QUESTION_GUIDES = {
   image:
     "model (GPT-Image-2.0 / Grok Imagine / NanoBanana 2 / Seedream v5 Lite / Midjourney …), 実行先 (execution route) whenever the chosen model can run on more than one of Codex(local) / Grok(local) / BuzzAssist API / Lovart (e.g. GPT Image 2 → Codex or BuzzAssist or Lovart; Grok Imagine → Grok or BuzzAssist), aspect ratio (model-specific: 1:1 / 16:9 / 9:16 …, Nano Banana 2 also 8:1 banners), size tier when supported (1K/2K/4K), 枚数 imageCount when the Lovart route supports it (Nano Banana up to 4, Seedream up to 6), quality (GPT Image 2: Auto / Low / Medium / High), and for Midjourney the model version (v8.1 / v7 / niji / niji7) plus 高精細レンダリング on/off. Recommended defaults: GPT-Image-2.0 (Codex), 1:1, Auto, 1枚.",
   video:
-    "model (Grok Imagine / Seedance 2 / Kling v3 / Veo 3.1 / Wan 2.6 / Vidu Q2 …), 実行先 (execution route) whenever the chosen model can run on more than one of Grok(local) / BuzzAssist API / Lovart (e.g. Grok Imagine → Grok or BuzzAssist; Kling → BuzzAssist or Lovart), aspect ratio (16:9 / 9:16 / 1:1 …; Hailuo has none), duration (model-specific: Veo 4/6/8s, Wan 5/10/15s, Vidu 2-8s, Seedance 4-15s, Kling 2.6 5/10s), resolution when supported (480p-4K: Seedance 2.0 and Veo 3.1 reach 4K), audio ON/OFF when the model supports it (Seedance/Kling/Veo/Wan; Gemini Omni Flash is always-on), and any start/end frames or reference images/videos. Recommended defaults: Grok Imagine (Grok), 16:9, 5s, 720p, audio ON.",
+    "model (Grok Imagine / Seedance 2 / Kling v3 / Veo 3.1 / Wan 2.6 / Vidu Q2 …), 実行先 (execution route) whenever the chosen model can run on more than one of Grok(local) / BuzzAssist API / Lovart (e.g. Grok Imagine → Grok or BuzzAssist; Kling → BuzzAssist or Lovart), aspect ratio (16:9 / 9:16 / 1:1 …; Hailuo has none), duration (model-specific: Grok CLI 6/10s only, Grok API 1-15s, Veo 4/6/8s, Wan 5/10/15s, Vidu 2-8s, Seedance 4-15s, Kling 2.6 5/10s), resolution when supported (480p-4K: Seedance 2.0 and Veo 3.1 reach 4K), audio ON/OFF when the model supports it (Seedance/Kling/Veo/Wan; Gemini Omni Flash is always-on), and any start/end frames or reference images/videos. Recommended defaults: Grok Imagine (Grok), 16:9, 6s, 720p, audio ON.",
   subtitle:
     "mode (scripted aligns a provided script / scriptless transcribes), lineCount (1 or 2), and maxCharsPerLine. Recommended defaults: scripted when a script exists (otherwise scriptless), 2 lines, 30 chars.",
   silenceCut:
@@ -1356,7 +1356,7 @@ async function generateExcalidrawVideosBatch(args = {}) {
             prompt: job.prompt,
             model: job.model ?? "grok-imagine-video-hermes",
             aspectRatio: job.aspectRatio ?? job.aspect_ratio ?? "16:9",
-            duration: job.duration ?? "5",
+            duration: job.duration ?? "6",
             resolution: job.resolution ?? "720p",
             generateAudio: job.generateAudio ?? job.generate_audio ?? true,
             customData: job.customData,
@@ -1781,7 +1781,7 @@ function toolDefinitions() {
           videoName: { type: "string", description: "Alias for fileName." },
           aspectRatio: { type: "string", description: "Aspect ratio such as 16:9, 9:16, or 1:1." },
           aspect_ratio: { type: "string", description: "Alias for aspectRatio." },
-          duration: { type: "string", description: "Duration seconds. Grok Imagine clamps text-to-video to 1-15 seconds." },
+          duration: { type: "string", description: "Duration seconds. Grok CLI accepts only 6 or 10; BuzzAssist/xAI Grok API accepts 1-15." },
           resolution: { type: "string", description: "480p or 720p." },
           generateAudio: { type: "boolean", description: "Whether Grok Imagine should generate audio when supported." },
           generate_audio: { type: "boolean", description: "Alias for generateAudio." },
@@ -1884,7 +1884,7 @@ function toolDefinitions() {
                   description: "Defaults to grok-imagine-video-hermes. Other models need buzzassist_login.",
                 },
                 aspectRatio: { type: "string", description: "Aspect ratio such as 16:9, 9:16, or 1:1." },
-                duration: { type: "string", description: "Duration seconds. Grok Imagine clamps text-to-video to 1-15 seconds." },
+                duration: { type: "string", description: "Duration seconds. Grok CLI accepts only 6 or 10; BuzzAssist/xAI Grok API accepts 1-15." },
                 resolution: { type: "string", description: "480p or 720p." },
                 generateAudio: { type: "boolean", description: "Whether Grok Imagine should generate audio when supported." },
                 referenceImagePaths: { type: "array", items: { type: "string" }, description: "Optional local reference image paths." },

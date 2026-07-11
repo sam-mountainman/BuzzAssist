@@ -7,6 +7,7 @@ import {
   chunkMediaBatchJobs,
   normalizeMediaBatchColumns,
   normalizeMediaBatchConcurrency,
+  sanitizeGrokVideoDuration,
 } from "../lib/mediaGeneration.mjs";
 
 test("media batch defaults to 10 concurrent jobs in 5 columns", () => {
@@ -34,4 +35,14 @@ test("media batch jobs split 18 requests into 10 then 8", () => {
       { start: 10, count: 8 },
     ],
   );
+});
+
+test("Grok CLI video duration accepts only the native 6s or 10s tool choices", () => {
+  assert.equal(sanitizeGrokVideoDuration(undefined), 6);
+  assert.equal(sanitizeGrokVideoDuration("6"), 6);
+  assert.equal(sanitizeGrokVideoDuration("10"), 10);
+  assert.throws(() => sanitizeGrokVideoDuration("5"), /must be 6 or 10/);
+  assert.throws(() => sanitizeGrokVideoDuration("7"), /must be 6 or 10/);
+  assert.throws(() => sanitizeGrokVideoDuration("15"), /must be 6 or 10/);
+  assert.throws(() => sanitizeGrokVideoDuration("6s"), /must be 6 or 10/);
 });
