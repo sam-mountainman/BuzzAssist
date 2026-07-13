@@ -146,6 +146,27 @@ function nonEmptyString(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+async function resolveBridgeWorkingDirectory(candidate) {
+  const choices = [];
+  const explicit = nonEmptyString(candidate);
+  if (explicit) choices.push(explicit);
+  try {
+    choices.push(process.cwd());
+  } catch {
+    // The parent process may have been upgraded while this task stayed open.
+  }
+  choices.push(os.homedir());
+  for (const directory of [...new Set(choices)]) {
+    try {
+      await access(directory);
+      return directory;
+    } catch {
+      // Try the next stable directory.
+    }
+  }
+  return os.tmpdir();
+}
+
 function readStdin() {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -437,7 +458,7 @@ class CodexAppServerClient {
 
 async function generateWithCodex(payload) {
   const timeoutMs = Number.parseInt(process.env.CODEX_IMAGE_BRIDGE_TIMEOUT_MS || "", 10) || DEFAULT_TIMEOUT_MS;
-  const cwd = process.env.CODEX_IMAGE_BRIDGE_CWD || process.cwd();
+  const cwd = await resolveBridgeWorkingDirectory(process.env.CODEX_IMAGE_BRIDGE_CWD);
   const model = nonEmptyString(process.env.CODEX_IMAGE_BRIDGE_MODEL);
   const tempDir = await mkdtemp(join(os.tmpdir(), "excalidraw-codex-image-"));
   const client = new CodexAppServerClient({ cwd, timeoutMs });

@@ -13,7 +13,7 @@ https://github.com/sam-mountainman/BuzzAssist
 ## まず答え
 
 - **macOS でも Windows でも使えます。** Node.js 20 以上が必要です。macOS/Linux は `./scripts/*.sh` も使えますが、Windows は `node scripts/*.mjs` を使います。
-- **主対象は Codex と Claude Code です。** どちらもローカル `BUZZASSIST_CANVAS_URL` を各ホストの in-app browser / browser tool で開き、MCP tools で安定して読み書きします。native widget は実験扱いで、通常導線では使いません。
+- **主対象は Codex と Claude Code です。** どちらもローカル `BUZZASSIST_CANVAS_URL` を最初に各ホストの in-app browser / browser tool で開き、MCP tools で安定して読み書きします。そのBrowser機能がホストにない場合だけChrome（またはOSの既定ブラウザー）へフォールバックします。native widget は実験扱いで、通常導線では使いません。
 - **スマホや別PCで同じ Excalidraw UI を開く場合は Canvas Tunnel を使います。** 既定は Cloudflare (`cloudflared`) です。PCが起動していて、ローカルのキャンバスサーバーとトンネルが動いている必要があります。
 - **READMEとセットアップ手順は日本語前提です。** コマンド名、モデルID、環境変数だけ英語のままです。
 
@@ -52,6 +52,9 @@ https://github.com/sam-mountainman/BuzzAssist
 ```
 
 `open_buzzassist_canvas` はそのプロジェクト専用のlocalhost URLを返します。
+通常は外部ブラウザーを自動起動しません。エージェントがin-app Browserを
+先に開き、その機能が利用できないホストだけ `openExternalBrowser: true` を
+指定してChrome（利用不可ならOSの既定ブラウザー）を開きます。
 複数プロジェクトを同時に使う場合は空いている別ポートを使います。Canvas
 左側の「生成物フォルダーを開く」ボタンから `canvas/assets/` をFinder /
 Explorerで直接開けます（ローカル画面のみ。Tunnel画面では非表示）。
@@ -84,7 +87,7 @@ BUZZASSIST_TUNNEL_ACCESS_URL=https://<slug>.trycloudflare.com/?t=<generated>
 BUZZASSIST_TUNNEL_CHECK=ok
 ```
 
-Codex と Claude Code では、PC上のエージェント作業は `BUZZASSIST_CANVAS_URL` を in-app browser / browser tool で開きます。スマホや別PCでは `BUZZASSIST_TUNNEL_ACCESS_URL` を開きます。
+Codex と Claude Code では、PC上のエージェント作業は `BUZZASSIST_CANVAS_URL` をまずin-app browser / browser toolで開きます。その機能が利用できない場合だけChromeへフォールバックします。スマホや別PCでは `BUZZASSIST_TUNNEL_ACCESS_URL` を開きます。
 
 ## 対応OS
 
@@ -132,8 +135,8 @@ Node.js 20 以上と `cloudflared` があれば使えます。
 
 | ホスト | 対応 | セットアップ内容 |
 |---|---:|---|
-| Codex | 対応 | `.codex-plugin/plugin.json` とローカル marketplace を使って `buzzassist@buzzassist` を追加。`BUZZASSIST_CANVAS_URL` をCodexのin-app browserで開きます。 |
-| Claude Code | 対応 | `.claude-plugin/plugin.json` とローカル marketplace を使って `buzzassist@buzzassist` を追加。`BUZZASSIST_CANVAS_URL` をClaude Codeのbrowser toolで開きます。 |
+| Codex | 対応 | `.codex-plugin/plugin.json` とローカル marketplace を使って `buzzassist@buzzassist` を追加。`BUZZASSIST_CANVAS_URL` をCodexのin-app browserで先に開き、利用不可時だけChromeへ切り替えます。 |
+| Claude Code | 対応 | `.claude-plugin/plugin.json` とローカル marketplace を使って `buzzassist@buzzassist` を追加。`BUZZASSIST_CANVAS_URL` をClaude Codeのbrowser toolで先に開き、利用不可時だけChromeへ切り替えます。 |
 | Claude Desktop | 実験 | MCP Apps widgetの実験入口は残していますが、通常導線では使いません。 |
 
 重要: セットアップスクリプトは、指定されたホスト以外を勝手に変更しません。
@@ -310,7 +313,7 @@ list_canvas_attachment_bundles
 
 ## Native Widget（実験・通常は使わない）
 
-`render_buzzassist_canvas_widget` は残していますが、Codex / Claude Codeの本線ではありません。通常は `BUZZASSIST_CANVAS_URL` をローカルのin-app browser / browser toolで開きます。
+`render_buzzassist_canvas_widget` は残していますが、Codex / Claude Codeの本線ではありません。通常は `BUZZASSIST_CANVAS_URL` をローカルのin-app browser / browser toolで先に開き、その機能が利用できない時だけChromeへフォールバックします。
 
 このwidgetは `ui://widget/buzzassist/canvas-inline.html` としてホスト内に表示されます。普通のWeb URLではありません。ローカルCanvasサーバーは裏側の実行基盤として起動しますが、ホスト側のMCP Apps実装に依存するため通常導線にはしていません。
 

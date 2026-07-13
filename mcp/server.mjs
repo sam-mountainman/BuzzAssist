@@ -114,13 +114,13 @@ const STAGED_MEDIA_SETTINGS_GUIDE =
   "For GPT Image 2 on the ChatGPT/Codex route and Grok Imagine on the local Grok route, image count is 1-10; local Grok video count is also 1-10. Each output is an independent generation and count should be represented as repeated batch jobs so all Generating... frames appear before generation starts. " +
   "If the user changes model, route, or attachment intent, discard only downstream answers that are no longer valid and ask the affected stages again. Reuse every still-valid answer verbatim.";
 const MEDIA_GENERATION_AGENT_INSTRUCTIONS = [
-  "Project-local Excalidraw canvas tools. Use the host task's CURRENT workspace/project root for every canvas operation, not the project used when the plugin was installed. Pass that absolute path as projectDir when the host exposes it; the server also reads MCP workspace roots as an automatic fallback. Call open_buzzassist_canvas first when the user opens or invokes BuzzAssist in a project, then open the returned canvasUrl in the host in-app browser. Use read_me/create_view for diagrams, get_excalidraw_selection before acting on selected items, and insert_* for local assets.",
+  "Project-local Excalidraw canvas tools. Use the host task's CURRENT workspace/project root for every canvas operation, not the project used when the plugin was installed. Pass that absolute path as projectDir when the host exposes it; the server also reads MCP workspace roots as an automatic fallback. Call open_buzzassist_canvas first when the user opens or invokes BuzzAssist in a project, then open the returned canvasUrl in the host in-app browser. If and only if the host has no in-app Browser capability, call open_buzzassist_canvas again with openExternalBrowser=true to open Chrome (or the platform browser fallback). Use read_me/create_view for diagrams, get_excalidraw_selection before acting on selected items, and insert_* for local assets.",
   "Generation/subtitle/silence-cut tools require confirmedSettings=true unless the user's request already specified all relevant settings; use payloadPreview or read_me for workflow details.",
   ASK_USER_QUESTION_STYLE_GUIDE,
   STAGED_MEDIA_SETTINGS_GUIDE,
   "Each project gets its own <current-project>/canvas directory, assets folder, and canvas/.server.json. Canvas tools auto-start that project's local static canvas server on an available port; multiple projects may run on different localhost ports.",
   "For phone/mobile access to the exact same full Excalidraw UI, use buzzassist_canvas_tunnel_start/status/stop. This starts an ngrok Canvas Tunnel with a generated access URL; Remote Canvas is not required for same-UI access.",
-  "For Codex and Claude Code interactive UI, open the local BUZZASSIST_CANVAS_URL in the host in-app browser/browser tool and use MCP tools for stable reads/writes. render_buzzassist_canvas_widget remains an experimental MCP Apps entrypoint only; do not use it for normal Codex or Claude Code work unless the user explicitly asks to test the widget.",
+  "For Codex and Claude Code interactive UI, always try the host in-app browser/browser tool first for the local BUZZASSIST_CANVAS_URL and use MCP tools for stable reads/writes. Use the explicit openExternalBrowser fallback only when that host does not expose an in-app Browser capability. render_buzzassist_canvas_widget remains an experimental MCP Apps entrypoint only; do not use it for normal Codex or Claude Code work unless the user explicitly asks to test the widget.",
   "To attach selected canvas images/videos/SRT/XML into the current chat, use prepare_canvas_attachments or read_canvas_attachment_bundle. Do not rely on OS GUI paste automation for media attachments.",
 ].join(" ");
 
@@ -151,7 +151,9 @@ async function requestCanvasFocus(args = {}, result) {
 async function requestGeneratingFramesFocus(args = {}, frames = []) {
   if (args.dryRun === true || args.payloadPreview === true || args.focusCreated === false) return null;
   const elementIds = frames.map((frame) => frame?.elementId).filter(Boolean);
-  if (elementIds.length === 0) return null;
+  // A single generation should leave the user's viewport exactly where it is.
+  // Focus only helps when the complete multi-output grid needs to be framed.
+  if (elementIds.length <= 1) return null;
   // Center the viewport on the live Generating... placeholders without
   // selecting them. Selection would reintroduce Excalidraw's outer handles
   // while the loading overlay is visible.
@@ -381,17 +383,17 @@ async function getMacScreenBounds() {
   return { width: 1440, height: 900 };
 }
 
-// "In-app browser" feel: hosts (Claude Code / Codex) expose no API to dock a
-// panel inside their window, so the closest match is a chromeless app-mode
-// window pinned to the right half of the screen. Falls back to the default
-// browser when no Chromium-family browser is installed.
+// Explicit external-browser fallback. Codex/Claude agents must first try their
+// in-app Browser capability; this function is called only when that capability
+// is unavailable (or an operator explicitly opts into EXCALIDRAW_OPEN_MODE).
+// Chrome/Chromium app mode is preferred, then the platform default browser.
 // EXCALIDRAW_OPEN_MODE=browser forces a plain tab; =none disables opening.
-async function openCanvasWindow(baseUrl) {
+async function openCanvasWindow(baseUrl, { forceExternal = false } = {}) {
   const mode = String(process.env.EXCALIDRAW_OPEN_MODE || "app").toLowerCase();
-  if (mode === "none") return;
+  if (mode === "none") return false;
   // Under Codex/Claude Code the host has an in-app browser — the agent opens
-  // the canvas there (see MCP instructions), so never spawn an external window.
-  if (process.env.CLAUDECODE || process.env.CLAUDE_CODE_ENTRYPOINT || process.env.CODEX || process.env.CODEX_HOME) return;
+  // the canvas there. Only an explicit fallback may spawn an external window.
+  if (!forceExternal && (process.env.CLAUDECODE || process.env.CLAUDE_CODE_ENTRYPOINT || process.env.CODEX || process.env.CODEX_HOME)) return false;
   if (mode !== "browser" && process.platform === "darwin") {
     const bounds = await getMacScreenBounds();
     const width = Math.round(bounds.width / 2);
@@ -400,7 +402,7 @@ async function openCanvasWindow(baseUrl) {
     for (const app of ["Google Chrome", "Microsoft Edge", "Brave Browser", "Chromium"]) {
       try {
         await runQuick("open", ["-na", app, "--args", `--app=${baseUrl}`, `--window-size=${width},${height}`, `--window-position=${x},0`]);
-        return;
+        return true;
       } catch {
         // try the next browser
       }
@@ -410,7 +412,7 @@ async function openCanvasWindow(baseUrl) {
     for (const exe of ["chrome", "msedge"]) {
       try {
         await runQuick("cmd", ["/c", "start", "", exe, `--app=${baseUrl}`]);
-        return;
+        return true;
       } catch {
         // try the next browser
       }
@@ -420,7 +422,7 @@ async function openCanvasWindow(baseUrl) {
     for (const exe of ["google-chrome", "chromium", "chromium-browser"]) {
       try {
         await runQuick(exe, [`--app=${baseUrl}`]);
-        return;
+        return true;
       } catch {
         // try the next browser
       }
@@ -429,6 +431,7 @@ async function openCanvasWindow(baseUrl) {
   const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
   const openerArgs = process.platform === "win32" ? ["/c", "start", "", baseUrl] : [baseUrl];
   spawn(opener, openerArgs, { detached: true, stdio: "ignore" }).unref();
+  return true;
 }
 
 async function ensureCanvasVisible(args = {}) {
@@ -437,12 +440,9 @@ async function ensureCanvasVisible(args = {}) {
   canvasAutoOpenAttempted.add(canvasKey);
   if (/^(1|true|yes)$/i.test(String(process.env.EXCALIDRAW_NO_AUTO_OPEN || ""))) return;
   try {
-    const { info, status } = await ensureCanvasServer(args);
+    const { info } = await ensureCanvasServer(args);
     const baseUrl = String(info.url || "").replace(/\/$/, "");
     if (baseUrl) lastCanvasBaseUrl = baseUrl;
-    if (status && Number(status.clients) === 0) {
-      await openCanvasWindow(baseUrl);
-    }
   } catch {
     // best-effort — never block the tool call
   }
@@ -1662,12 +1662,13 @@ function toolDefinitions() {
     {
       name: TOOL_OPEN_CANVAS,
       title: "Open Current Project BuzzAssist Canvas",
-      description: "Start or reuse the BuzzAssist canvas for the host task's current project. Returns that project's dynamic localhost URL, canvas directory, and canvas/assets directory. Open canvasUrl in the host in-app browser.",
+      description: "Start or reuse the BuzzAssist canvas for the host task's current project. Returns that project's dynamic localhost URL, canvas directory, and canvas/assets directory. First open canvasUrl in the host in-app browser. Set openExternalBrowser=true only when that host has no in-app Browser capability.",
       inputSchema: {
         type: "object",
         properties: {
           projectDir: { type: "string", description: "Current host project absolute path. Usually inferred automatically from MCP workspace roots." },
           canvasDir: { type: "string", description: "Absolute canvas directory. Overrides projectDir." },
+          openExternalBrowser: { type: "boolean", description: "Open Chrome (or the platform browser fallback). Use only after confirming the host has no in-app Browser capability. Defaults to false." },
         },
         additionalProperties: false,
       },
@@ -1887,7 +1888,7 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE_IMAGE,
       title: "Generate Excalidraw Image",
-      description: "Create and focus Generating... frame(s), generate one image or 1-10 independent images on the ChatGPT/Codex or local Grok route, replace each frame as it finishes, and save the scene. Requires confirmedSettings=true unless using payloadPreview.",
+      description: "Create Generating... frame(s), focus only multi-image grids, generate one image or 1-10 independent images on the ChatGPT/Codex or local Grok route, replace each frame as it finishes, and save the scene. Requires confirmedSettings=true unless using payloadPreview.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1936,7 +1937,7 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE_VIDEO,
       title: "Generate Excalidraw Video",
-      description: "Create and focus Generating... frame(s), generate one video or 1-10 independent videos on the local Grok route, replace each frame as it finishes, and save the scene. Requires confirmedSettings=true unless using payloadPreview.",
+      description: "Create Generating... frame(s), focus only multi-video grids, generate one video or 1-10 independent videos on the local Grok route, replace each frame as it finishes, and save the scene. Requires confirmedSettings=true unless using payloadPreview.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2037,7 +2038,7 @@ function toolDefinitions() {
           matchAnchor: { type: "boolean", description: "Match placeholder dimensions to the anchor. Defaults to true." },
           replaceAnchor: { type: "boolean", description: "Replace the anchor with the first Generating... frame." },
           selectCreated: { type: "boolean", description: "Select the inserted elements after saving." },
-          focusCreated: { type: "boolean", description: "Focus the viewport on the Generating... grid without showing selection handles. Defaults to true; set false only when the user asks to keep the current viewport." },
+          focusCreated: { type: "boolean", description: "Focus the viewport on a multi-item Generating... grid without showing selection handles. Single-item jobs never move the viewport. Defaults to true for multi-item jobs." },
           confirmedSettings: { type: "boolean", description: "True only after the staged flow has separately resolved each model, execution route when applicable, and all model-specific batch settings; payloadPreview is exempt." },
           dryRun: { type: "boolean", description: "Generate without copying or saving." },
         },
@@ -2094,7 +2095,7 @@ function toolDefinitions() {
           matchAnchor: { type: "boolean", description: "Match placeholder dimensions to the anchor. Defaults to true." },
           replaceAnchor: { type: "boolean", description: "Replace the anchor with the first Generating... frame." },
           selectCreated: { type: "boolean", description: "Select the inserted elements after saving." },
-          focusCreated: { type: "boolean", description: "Focus the viewport on the Generating... grid without showing selection handles. Defaults to true; set false only when the user asks to keep the current viewport." },
+          focusCreated: { type: "boolean", description: "Focus the viewport on a multi-item Generating... grid without showing selection handles. Single-item jobs never move the viewport. Defaults to true for multi-item jobs." },
           confirmedSettings: { type: "boolean", description: "True only after the staged flow has separately resolved each model, execution route when applicable, and all model-specific batch settings; payloadPreview is exempt." },
           dryRun: { type: "boolean", description: "Generate without copying or saving." },
         },
@@ -3025,9 +3026,16 @@ async function handleToolCall(params, progress = () => {}) {
     const canvasUrl = String(info?.url || "").replace(/\/$/, "");
     if (canvasUrl) lastCanvasBaseUrl = canvasUrl;
     canvasAutoOpenAttempted.add(activeCanvasDir);
-    if (status && Number(status.clients) === 0) await openCanvasWindow(canvasUrl);
+    const externalBrowserOpened = args.openExternalBrowser === true
+      ? await openCanvasWindow(canvasUrl, { forceExternal: true })
+      : false;
     return {
-      content: [{ type: "text", text: `BuzzAssist canvas ready for ${activeProjectDir}. Open: ${canvasUrl}` }],
+      content: [{
+        type: "text",
+        text: externalBrowserOpened
+          ? `BuzzAssist canvas ready for ${activeProjectDir}. Opened external browser fallback: ${canvasUrl}`
+          : `BuzzAssist canvas ready for ${activeProjectDir}. Open in the host in-app Browser first: ${canvasUrl}. If that Browser capability is unavailable, call this tool again with openExternalBrowser=true.`,
+      }],
       structuredContent: {
         ok: Boolean(canvasUrl),
         projectDir: activeProjectDir,
@@ -3036,6 +3044,7 @@ async function handleToolCall(params, progress = () => {}) {
         canvasUrl,
         mcpUrl: info?.mcpUrl || null,
         clients: Number(status?.clients) || 0,
+        externalBrowserOpened,
       },
     };
   }
