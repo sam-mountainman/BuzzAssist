@@ -308,7 +308,7 @@ list_canvas_attachment_bundles
 
 ## 画像・動画・字幕生成
 
-キャンバスUIとプラグインツールは同じ生成バックエンドを使います。UI上ではモデル名は正規化され、実行先は設定行の `実行先` pill で Codex / Hermes / BuzzAssist / Lovart から選ばれます。
+キャンバスUIとプラグインツールは同じ生成バックエンドを使います。UI上ではモデル名は正規化され、実行先は設定行の `実行先` pill で Codex / Hermes / Lovart / BuzzAssist から選ばれます。LovartとBuzzAssistの両方が使えるモデルでは、Lovartを上に表示し、デフォルト候補としても優先します。
 
 ローカル系モデル:
 

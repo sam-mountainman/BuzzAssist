@@ -57,6 +57,31 @@ test("Grok CLI video settings expose only 6s and 10s while Grok API keeps 1-15s"
   assert.doesNotMatch(mcpSource, /Grok Imagine clamps text-to-video to 1-15 seconds/);
 });
 
+test("agent setting questions and route menu prefer Lovart above BuzzAssist", async () => {
+  const catalogSource = await readFile(new URL("../lib/modelCatalog.mjs", import.meta.url), "utf8");
+  const mcpSource = await readFile(new URL("../mcp/server.mjs", import.meta.url), "utf8");
+
+  assert.match(catalogSource, /MEDIA_ROUTES = \[\s*\{ id: "codex"[\s\S]*?\{ id: "hermes"[\s\S]*?\{ id: "lovart"[\s\S]*?\{ id: "buzzassist"/);
+  assert.match(catalogSource, /ROUTE_PRIORITY = \["codex", "hermes", "lovart", "buzzassist"\]/);
+  assert.match(mcpSource, /show Lovart above BuzzAssist and prefer Lovart when both are viable/);
+  assert.match(mcpSource, /Codex\(local\) \/ Grok\(local\) \/ Lovart \/ BuzzAssist API/);
+  assert.match(mcpSource, /Grok\(local\) \/ Lovart \/ BuzzAssist API/);
+});
+
+test("agent batch generation defaults to 2 columns x 5 rows with 10 parallel jobs", async () => {
+  const mediaSource = await readFile(new URL("../lib/mediaGeneration.mjs", import.meta.url), "utf8");
+  const canvasSource = await readFile(new URL("../lib/canvasScene.mjs", import.meta.url), "utf8");
+  const mcpSource = await readFile(new URL("../mcp/server.mjs", import.meta.url), "utf8");
+
+  assert.match(mediaSource, /DEFAULT_MEDIA_BATCH_COLUMNS = 2/);
+  assert.match(mediaSource, /DEFAULT_MEDIA_BATCH_CONCURRENCY = 10/);
+  assert.match(mediaSource, /DEFAULT_MEDIA_BATCH_CHUNK_SIZE = 10/);
+  assert.match(canvasSource, /function newGeneratorFrameRecord[\s\S]*codexGenerating: true/);
+  assert.match(canvasSource, /export async function insertGeneratorFrameBatch[\s\S]*finiteNumber\(Number\(args\.columns\), 2\)/);
+  assert.match(mcpSource, /Defaults to 2 \(10-job chunks render as 2 columns × 5 rows\)/);
+  assert.match(mcpSource, /const generated = await runWithConcurrency\(chunkJobs, concurrency/);
+});
+
 test("file and canvas attachments pin the original panel without duplicate open notifications", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
 

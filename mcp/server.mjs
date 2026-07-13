@@ -547,9 +547,9 @@ const SETTINGS_CONFIRMATION_TOOLS = new Map([
 
 const SETTINGS_QUESTION_GUIDES = {
   image:
-    "model (GPT-Image-2.0 / Grok Imagine / NanoBanana 2 / Seedream v5 Lite / Midjourney …), 実行先 (execution route) whenever the chosen model can run on more than one of Codex(local) / Grok(local) / BuzzAssist API / Lovart (e.g. GPT Image 2 → Codex or BuzzAssist or Lovart; Grok Imagine → Grok or BuzzAssist), aspect ratio (model-specific: 1:1 / 16:9 / 9:16 …, Nano Banana 2 also 8:1 banners), size tier when supported (1K/2K/4K), 枚数 imageCount when the Lovart route supports it (Nano Banana up to 4, Seedream up to 6), quality (GPT Image 2: Auto / Low / Medium / High), and for Midjourney the model version (v8.1 / v7 / niji / niji7) plus 高精細レンダリング on/off. Recommended defaults: GPT-Image-2.0 (Codex), 1:1, Auto, 1枚.",
+    "model (GPT-Image-2.0 / Grok Imagine / NanoBanana 2 / Seedream v5 Lite / Midjourney …), 実行先 (execution route) whenever the chosen model can run on more than one of Codex(local) / Grok(local) / Lovart / BuzzAssist API — show Lovart above BuzzAssist and prefer Lovart when both are viable (e.g. GPT Image 2 → Codex or Lovart or BuzzAssist; Nano Banana 2 / Seedream 5 Lite → Lovart or BuzzAssist; Grok Imagine → Grok or BuzzAssist), aspect ratio (model-specific: 1:1 / 16:9 / 9:16 …, Nano Banana 2 also 8:1 banners), size tier when supported (1K/2K/4K), 枚数 imageCount when the Lovart route supports it (Nano Banana up to 4, Seedream up to 6), quality (GPT Image 2: Auto / Low / Medium / High), and for Midjourney the model version (v8.1 / v7 / niji / niji7) plus 高精細レンダリング on/off. Recommended defaults: GPT-Image-2.0 (Codex), 1:1, Auto, 1枚.",
   video:
-    "model (Grok Imagine / Seedance 2 / Kling v3 / Veo 3.1 / Wan 2.6 / Vidu Q2 …), 実行先 (execution route) whenever the chosen model can run on more than one of Grok(local) / BuzzAssist API / Lovart (e.g. Grok Imagine → Grok or BuzzAssist; Kling → BuzzAssist or Lovart), aspect ratio (16:9 / 9:16 / 1:1 …; Hailuo has none), duration (model-specific: Grok CLI 6/10s only, Grok API 1-15s, Veo 4/6/8s, Wan 5/10/15s, Vidu 2-8s, Seedance 4-15s, Kling 2.6 5/10s), resolution when supported (480p-4K: Seedance 2.0 and Veo 3.1 reach 4K), audio ON/OFF when the model supports it (Seedance/Kling/Veo/Wan; Gemini Omni Flash is always-on), and any start/end frames or reference images/videos. Recommended defaults: Grok Imagine (Grok), 16:9, 6s, 720p, audio ON.",
+    "model (Grok Imagine / Seedance 2 / Kling v3 / Veo 3.1 / Wan 2.6 / Vidu Q2 …), 実行先 (execution route) whenever the chosen model can run on more than one of Grok(local) / Lovart / BuzzAssist API — show Lovart above BuzzAssist and prefer Lovart when both are viable (e.g. Grok Imagine → Grok or BuzzAssist; Kling / Seedance → Lovart or BuzzAssist), aspect ratio (16:9 / 9:16 / 1:1 …; Hailuo has none), duration (model-specific: Grok CLI 6/10s only, Grok API 1-15s, Veo 4/6/8s, Wan 5/10/15s, Vidu 2-8s, Seedance 4-15s, Kling 2.6 5/10s), resolution when supported (480p-4K: Seedance 2.0 and Veo 3.1 reach 4K), audio ON/OFF when the model supports it (Seedance/Kling/Veo/Wan; Gemini Omni Flash is always-on), and any start/end frames or reference images/videos. Recommended defaults: Grok Imagine (Grok), 16:9, 6s, 720p, audio ON.",
   subtitle:
     "mode (scripted aligns a provided script / scriptless transcribes), lineCount (1 or 2), and maxCharsPerLine. Recommended defaults: scripted when a script exists (otherwise scriptless), 2 lines, 30 chars.",
   silenceCut:
@@ -1844,7 +1844,7 @@ function toolDefinitions() {
               additionalProperties: true,
             },
           },
-          columns: { type: "number", description: "Grid columns. Defaults to 5." },
+          columns: { type: "number", description: "Grid columns. Defaults to 2 (10-job chunks render as 2 columns × 5 rows)." },
           gap: { type: "number", description: "Canvas units between grid cells. Defaults to 24." },
           concurrency: { type: "number", description: "Parallel generations per chunk. Defaults to 10 and is capped at 10." },
           projectDir: { type: "string", description: "Absolute project directory containing canvas/." },
@@ -1895,7 +1895,7 @@ function toolDefinitions() {
               additionalProperties: true,
             },
           },
-          columns: { type: "number", description: "Grid columns. Defaults to 5." },
+          columns: { type: "number", description: "Grid columns. Defaults to 2 (10-job chunks render as 2 columns × 5 rows)." },
           gap: { type: "number", description: "Canvas units between grid cells. Defaults to 24." },
           concurrency: { type: "number", description: "Parallel generations per chunk. Defaults to 10 and is capped at 10." },
           projectDir: { type: "string", description: "Absolute project directory containing canvas/." },
