@@ -31,11 +31,21 @@ BuzzAssist cloud models (`seedance-2`, `seedance-2-fast`, `kling-v3`, `kling-o3`
 `generate_excalidraw_video` / `generate_excalidraw_videos_batch` は `confirmedSettings: true` なしの呼び出しを拒否します（`payloadPreview` を除く）。ユーザーのメッセージで全設定が明示されていない限り、生成前に AskUserQuestion を1回だけ出して確認してください:
 
 - モデル（Grok Imagine / Seedance 2 / Kling v3 / Veo 3.1 …）
-- 実行先（同じモデルが複数の実行先を持つ場合。例: Grok Imagine → Grok / BuzzAssist、Kling → BuzzAssist / Lovart）
-- アスペクト比（16:9 / 9:16 / 1:1）・秒数（5s / 10s …）・解像度（480p / 720p）
-- 推奨デフォルト: Grok Imagine (Grok)・16:9・5s・720p — 選択肢には（推奨）を付ける
+- 実行先（同じモデルが複数の実行先を持つ場合だけ。例: Grok Imagine → Grok / BuzzAssist、Kling / Seedance → Lovart / BuzzAssist。LovartはBuzzAssistより上に表示して優先）
+- モデル対応のアスペクト比・秒数・解像度・音声。選択肢が1つしかない項目は聞かない
+- 添付画像・動画の用途が曖昧なら、開始フレーム・スタイル/被写体参照・モーション元のどれかを生成前に確認する
+- 推奨デフォルト: Grok Imagine (Grok)・16:9・6s・720p — 選択肢には（推奨）を付ける
 
 確認できたら `confirmedSettings: true` を付けて呼び出します。
+
+### AskUserQuestionの表示ルール
+
+- 通常文で質問せず、ホストの `request_user_input` / `AskUserQuestion` UIを使う
+- ユーザーが日本語なら、見出し・質問・選択肢・説明も日本語にする
+- 1画面は1〜3問、各問は2〜3択。推奨候補を先頭にし、ラベル末尾へ `（推奨）` を付ける
+- `その他` は選択肢へ追加しない。カスタム秒数や比率はホストの自由入力欄を使う
+- ユーザーがすでに指定した項目は再質問しない。残りが3項目を超える場合は、次の画面で未確認項目だけを聞く
+- Grok CLIの秒数は6秒・10秒だけ。Seedance、Kling、Veoなども選択モデルの有効値だけを表示する
 
 ## Workflow
 

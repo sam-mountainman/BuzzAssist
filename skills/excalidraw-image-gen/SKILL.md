@@ -33,11 +33,21 @@ AI holders are rectangle elements with:
 `generate_excalidraw_image` / `generate_excalidraw_images_batch` は `confirmedSettings: true` なしの呼び出しを拒否します（`payloadPreview` を除く）。ユーザーのメッセージで全設定が明示されていない限り、生成前に AskUserQuestion を1回だけ出して確認してください:
 
 - モデル（GPT-Image-2.0 / Grok Imagine / NanoBanana 2 / Seedream v5 Lite / Midjourney …）
-- 実行先（同じモデルが複数の実行先を持つ場合。例: GPT Image 2 → Codex / BuzzAssist / Lovart、Grok Imagine → Grok / BuzzAssist）
-- アスペクト比（1:1 / 16:9 / 9:16 …）と品質（Auto / Low / Medium / High）
+- 実行先（同じモデルが複数の実行先を持つ場合だけ。例: GPT Image 2 → Codex / Lovart / BuzzAssist、Nano Banana 2 → Lovart / BuzzAssist、Grok Imagine → Grok / BuzzAssist。LovartはBuzzAssistより上に表示して優先）
+- アスペクト比（共通候補は 1:1 / 9:16 / 16:9。その他は自由入力欄でモデル対応値のみ受け付ける）
+- モデルが対応する場合だけ、品質・解像度・枚数を確認する。選択肢が1つしかない項目は聞かない
 - 推奨デフォルト: GPT-Image-2.0 (Codex)・1:1・Auto — 選択肢には（推奨）を付ける
 
 確認できたら `confirmedSettings: true` を付けて呼び出します。
+
+### AskUserQuestionの表示ルール
+
+- 通常文で質問せず、ホストの `request_user_input` / `AskUserQuestion` UIを使う
+- ユーザーが日本語なら、見出し・質問・選択肢・説明も日本語にする
+- 1画面は1〜3問、各問は2〜3択。推奨候補を先頭にし、ラベル末尾へ `（推奨）` を付ける
+- `その他` は選択肢へ追加しない。ホストが表示する自由入力欄を使う
+- ユーザーがすでに指定した項目は再質問しない。残りが3項目を超える場合は、次の画面で未確認項目だけを聞く
+- Midjourneyのバージョン・高精細レンダリングはLovart経由で反映を保証できないため質問しない
 
 ## Workflow
 

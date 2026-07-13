@@ -68,6 +68,23 @@ test("agent setting questions and route menu prefer Lovart above BuzzAssist", as
   assert.match(mcpSource, /Grok\(local\) \/ Lovart \/ BuzzAssist API/);
 });
 
+test("agent setting confirmation mirrors the BuzzAssist choice-question UX", async () => {
+  const mcpSource = await readFile(new URL("../mcp/server.mjs", import.meta.url), "utf8");
+  const imageSkill = await readFile(new URL("../skills/excalidraw-image-gen/SKILL.md", import.meta.url), "utf8");
+  const videoSkill = await readFile(new URL("../skills/excalidraw-video-gen/SKILL.md", import.meta.url), "utf8");
+
+  assert.match(mcpSource, /Use the host request_user_input \/ AskUserQuestion UI, not a plain-text question/);
+  assert.match(mcpSource, /Each dialog may contain 1-3 short questions with 2-3 mutually exclusive options each/);
+  assert.match(mcpSource, /Put the recommended option first and suffix its label with （推奨）/);
+  assert.match(mcpSource, /Do not add an explicit その他 \/ Other option/);
+  assert.match(mcpSource, /never ask a forced setting when only one valid value exists/);
+  assert.match(mcpSource, /When an attachment's role is ambiguous, ask whether it is a start frame, style\/subject reference, or motion source/);
+  assert.match(mcpSource, /Do not ask Midjourney version or detail rendering/);
+  assert.match(imageSkill, /ユーザーがすでに指定した項目は再質問しない/);
+  assert.match(videoSkill, /Grok CLIの秒数は6秒・10秒だけ/);
+  assert.doesNotMatch(videoSkill, /16:9・5s・720p/);
+});
+
 test("agent batch generation defaults to 2 columns x 5 rows with 10 parallel jobs", async () => {
   const mediaSource = await readFile(new URL("../lib/mediaGeneration.mjs", import.meta.url), "utf8");
   const canvasSource = await readFile(new URL("../lib/canvasScene.mjs", import.meta.url), "utf8");
