@@ -91,10 +91,18 @@ const ASK_USER_QUESTION_STYLE_GUIDE =
   "Each dialog may contain 1-3 short questions with 2-3 mutually exclusive options each. Put the recommended option first and suffix its label with （推奨） in Japanese or (Recommended) in English. " +
   "Do not add an explicit その他 / Other option because the host UI supplies the free-form row. If more than three independent settings remain, ask the next dialog only for the still-missing settings. " +
   "Use model-specific valid choices only. When an attachment's role is ambiguous, ask whether it is a start frame, style/subject reference, or motion source before choosing a model or invoking generation.";
+const STAGED_MEDIA_SETTINGS_GUIDE =
+  "Use a staged question flow and wait for each answer before constructing the next stage. Never combine model and execution route into one option, and never ask model-dependent output settings while the model or route is unresolved. " +
+  "Stage 0: if attached media has an ambiguous role, ask its intent first; use that answer to filter compatible models. " +
+  "Stage 1: if model is missing, ask the model only, then wait. " +
+  "Stage 2: after the model is known, ask execution route only when that exact model has multiple routes; show Lovart above BuzzAssist and prefer Lovart when both can satisfy the request, then wait. Skip this stage when only one route is valid. " +
+  "Stage 3: only after model and route are known, derive that exact combination's supported settings and ask up to three still-missing settings per dialog (for example aspect ratio, quality/resolution/count for images; aspect ratio, duration/resolution, then audio/mode/reference controls for videos). " +
+  "If the user changes model, route, or attachment intent, discard only downstream answers that are no longer valid and ask the affected stages again. Reuse every still-valid answer verbatim.";
 const MEDIA_GENERATION_AGENT_INSTRUCTIONS = [
   "Project-local Excalidraw canvas tools. Use read_me/create_view for diagrams, get_excalidraw_selection before acting on selected items, and insert_* for local assets.",
   "Generation/subtitle/silence-cut tools require confirmedSettings=true unless the user's request already specified all relevant settings; use payloadPreview or read_me for workflow details.",
   ASK_USER_QUESTION_STYLE_GUIDE,
+  STAGED_MEDIA_SETTINGS_GUIDE,
   "Canvas tools auto-start the local static canvas server and write canvas/.server.json with the dynamic URL and HTTP tool endpoint bearer token.",
   "For phone/mobile access to the exact same full Excalidraw UI, use buzzassist_canvas_tunnel_start/status/stop. This starts an ngrok Canvas Tunnel with a generated access URL; Remote Canvas is not required for same-UI access.",
   "For Codex and Claude Code interactive UI, open the local BUZZASSIST_CANVAS_URL in the host in-app browser/browser tool and use MCP tools for stable reads/writes. render_buzzassist_canvas_widget remains an experimental MCP Apps entrypoint only; do not use it for normal Codex or Claude Code work unless the user explicitly asks to test the widget.",
@@ -582,6 +590,7 @@ function settingsConfirmationErrorText(kind) {
     `call AskUserQuestion / request_user_input covering ${SETTINGS_QUESTION_GUIDES[kind]} ` +
     "Ask about every setting the user has NOT explicitly mentioned (実行先・モデル・その他の設定項目); settings the user already stated must be reused as-is and never re-asked. " +
     `${ASK_USER_QUESTION_STYLE_GUIDE} ` +
+    `${STAGED_MEDIA_SETTINGS_GUIDE} ` +
     "Skip asking ONLY when the user's own message already specified every relevant setting. " +
     "Then call this tool again with confirmedSettings: true and the chosen values."
   );
@@ -1754,7 +1763,7 @@ function toolDefinitions() {
           displayWidth: { type: "number" },
           displayHeight: { type: "number" },
           customData: { type: "object" },
-          confirmedSettings: { type: "boolean", description: "True only after the user has confirmed the generation settings; payloadPreview is exempt." },
+          confirmedSettings: { type: "boolean", description: "True only after the staged flow has separately resolved model, execution route when applicable, and all model-specific settings; payloadPreview is exempt." },
           dryRun: { type: "boolean" },
         },
         required: ["prompt"],
@@ -1814,7 +1823,7 @@ function toolDefinitions() {
           displayWidth: { type: "number" },
           displayHeight: { type: "number" },
           customData: { type: "object" },
-          confirmedSettings: { type: "boolean", description: "True only after the user has confirmed the generation settings; payloadPreview is exempt." },
+          confirmedSettings: { type: "boolean", description: "True only after the staged flow has separately resolved model, execution route when applicable, and all model-specific settings; payloadPreview is exempt." },
           dryRun: { type: "boolean" },
         },
         required: ["prompt"],
@@ -1870,7 +1879,7 @@ function toolDefinitions() {
           replaceAnchor: { type: "boolean", description: "Replace the anchor with the first Generating... frame." },
           selectCreated: { type: "boolean", description: "Select the inserted elements after saving." },
           focusCreated: { type: "boolean", description: "Focus the viewport on the Generating... grid without showing selection handles. Defaults to true; set false only when the user asks to keep the current viewport." },
-          confirmedSettings: { type: "boolean", description: "True only after the user has confirmed the batch generation settings; payloadPreview is exempt." },
+          confirmedSettings: { type: "boolean", description: "True only after the staged flow has separately resolved each model, execution route when applicable, and all model-specific batch settings; payloadPreview is exempt." },
           dryRun: { type: "boolean", description: "Generate without copying or saving." },
         },
         required: ["jobs"],
@@ -1927,7 +1936,7 @@ function toolDefinitions() {
           replaceAnchor: { type: "boolean", description: "Replace the anchor with the first Generating... frame." },
           selectCreated: { type: "boolean", description: "Select the inserted elements after saving." },
           focusCreated: { type: "boolean", description: "Focus the viewport on the Generating... grid without showing selection handles. Defaults to true; set false only when the user asks to keep the current viewport." },
-          confirmedSettings: { type: "boolean", description: "True only after the user has confirmed the batch generation settings; payloadPreview is exempt." },
+          confirmedSettings: { type: "boolean", description: "True only after the staged flow has separately resolved each model, execution route when applicable, and all model-specific batch settings; payloadPreview is exempt." },
           dryRun: { type: "boolean", description: "Generate without copying or saving." },
         },
         required: ["jobs"],

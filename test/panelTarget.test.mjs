@@ -80,8 +80,15 @@ test("agent setting confirmation mirrors the BuzzAssist choice-question UX", asy
   assert.match(mcpSource, /never ask a forced setting when only one valid value exists/);
   assert.match(mcpSource, /When an attachment's role is ambiguous, ask whether it is a start frame, style\/subject reference, or motion source/);
   assert.match(mcpSource, /Do not ask Midjourney version or detail rendering/);
+  assert.match(mcpSource, /Never combine model and execution route into one option/);
+  assert.match(mcpSource, /Stage 1: if model is missing, ask the model only, then wait/);
+  assert.match(mcpSource, /Stage 2: after the model is known, ask execution route only when that exact model has multiple routes/);
+  assert.match(mcpSource, /Stage 3: only after model and route are known, derive that exact combination's supported settings/);
   assert.match(imageSkill, /ユーザーがすでに指定した項目は再質問しない/);
+  assert.match(imageSkill, /一気に全設定を質問してはいけません/);
+  assert.match(imageSkill, /モデル名と実行先を1つの選択肢へまとめない/);
   assert.match(videoSkill, /Grok CLIの秒数は6秒・10秒だけ/);
+  assert.match(videoSkill, /添付画像・動画の用途が曖昧なら/);
   assert.doesNotMatch(videoSkill, /16:9・5s・720p/);
 });
 
