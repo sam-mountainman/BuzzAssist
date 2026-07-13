@@ -133,6 +133,7 @@ test("remote MCP focus events select and center only requested results", async (
   assert.match(appSource, /Object\.fromEntries\(focusElementIds\.map\(\(id\) => \[id, true\]\)\)/);
   assert.match(appSource, /fingerprint === lastSyncedFingerprintRef\.current && !shouldApplyFocus/);
   assert.match(appSource, /focusElementIds\r?\n\s*\}\)/);
+  assert.match(appSource, /api\.scrollToContent\(focusedElements, \{\s*fitToContent: true,\s*animate: false\s*\}\)/);
   assert.match(viteSource, /FOCUS_REQUEST_FILE_NAME/);
   assert.match(viteSource, /async function consumeCanvasFocusRequest\(\)/);
   assert.match(viteSource, /server\.watcher\.on\('add', scheduleCanvasWatchBroadcast\)/);

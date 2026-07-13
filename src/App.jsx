@@ -5782,24 +5782,6 @@ export default function App() {
       const focusElementIds = [...new Set((Array.isArray(options.focusElementIds) ? options.focusElementIds : [])
         .filter((id) => typeof id === 'string' && normalized.elements.some((element) => element.id === id && !element.isDeleted)))]
       const focusedElements = normalized.elements.filter((element) => focusElementIds.includes(element.id))
-      let focusedViewportState = null
-      if (shouldApplyViewport && focusedElements.length > 0) {
-        const bounds = focusedElements.map(getElementGeometry).reduce((combined, geometry) => ({
-          x: Math.min(combined.x, geometry.x),
-          y: Math.min(combined.y, geometry.y),
-          right: Math.max(combined.right, geometry.x + geometry.width),
-          bottom: Math.max(combined.bottom, geometry.y + geometry.height)
-        }), { x: Infinity, y: Infinity, right: -Infinity, bottom: -Infinity })
-        const zoom = currentAppState.zoom?.value || 1
-        const { width, height } = viewportSize(currentAppState)
-        const centerX = (bounds.x + bounds.right) / 2
-        const centerY = (bounds.y + bounds.bottom) / 2
-        focusedViewportState = {
-          scrollX: width / (2 * zoom) - centerX,
-          scrollY: height / (2 * zoom) - centerY,
-          zoom: currentAppState.zoom ?? { value: zoom }
-        }
-      }
       const requestedSelectedElementIds = options.applySelection
         ? (focusElementIds.length > 0
             ? Object.fromEntries(focusElementIds.map((id) => [id, true]))
@@ -5815,14 +5797,13 @@ export default function App() {
         // Never apply the remote selection — keep the user's live selection so
         // a refresh can't deselect the frame they're working in.
         selectedElementIds: nextSelectedElementIds,
-        ...(focusedViewportState || {}),
-        ...(!shouldApplyViewport
-          ? {
-              scrollX: currentAppState.scrollX,
-              scrollY: currentAppState.scrollY,
-              zoom: currentAppState.zoom
-            }
-          : {})
+        // Apply the remote scene at the live viewport first. Chat-generated
+        // frames are fitted below with Excalidraw's own scrollToContent API,
+        // matching the BuzzAssist desktop canvas including its UI offsets and
+        // zoom limits.
+        scrollX: currentAppState.scrollX,
+        scrollY: currentAppState.scrollY,
+        zoom: currentAppState.zoom
       }
       const nextScene = { ...normalized, appState: nextAppState }
       latestSceneRef.current = nextScene
@@ -5855,6 +5836,12 @@ export default function App() {
           appState: nextAppState,
           captureUpdate: CaptureUpdateAction.NEVER
         })
+        if (shouldApplyViewport && focusedElements.length > 0) {
+          api.scrollToContent(focusedElements, {
+            fitToContent: true,
+            animate: false
+          })
+        }
         window.setTimeout(() => {
           applyingRemoteRef.current = false
         }, 3000)
