@@ -419,7 +419,7 @@ test("the generation gate answers from a cached server-verified auth status", as
   const optimisticStart = appSource.indexOf("setGeneratingFrameIds((current) => new Set(current).add(optimisticGenerationId))");
   const authAwait = appSource.indexOf("await ensureBuzzAssistLoggedIn", optimisticStart);
   assert.ok(optimisticStart >= 0 && authAwait > optimisticStart);
-  assert.match(appSource, /setGeneratingFrameIds\(\(current\) => new Set\(current\)\.add\(optimisticGenerationId\)\)\s*\n\s*lastPointerDownCanvasRef\.current = null\s*\n\s*\/\/ Remove both Excalidraw's native selection border[\s\S]*?applyTransientSelection\(\{\}\)/);
+  assert.match(appSource, /setGeneratingFrameIds\(\(current\) => new Set\(current\)\.add\(optimisticGenerationId\)\)\s*\n\s*lastPointerDownCanvasRef\.current = null\s*\n\s*\/\/ Remove both Excalidraw's native selection border[\s\S]*?applyTransientSelection\(\{\}, submitViewport\)/);
   assert.match(appSource, /const transientScene = createScene\(elements, appState, api\.getFiles\(\)\)\s*\n\s*latestSceneRef\.current = transientScene\s*\n\s*refreshOverlayStates\(transientScene\)/);
   assert.match(appSource, /clearOptimisticGeneration[\s\S]*?applyTransientSelection\(originalSelectedElementIds\)/);
   assert.match(appSource, /clearOptimisticGeneration\(\)\s*\n\s*return/);
@@ -594,6 +594,20 @@ test("generator creation keeps a moved viewport instead of focusing every new fr
   assert.match(source, /if \(viewportMoved\) \{\s*\/\/ BuzzAssist behavior:[\s\S]*?if \(wasOverlapping\) \{/);
   assert.match(source, /targetScrollX = targetScreenX \/ targetZoom - frameCenterX/);
   assert.match(source, /targetScrollY = targetScreenY \/ targetZoom - frameCenterY/);
+});
+
+test("single generation preserves the live viewport while clearing selection handles", async () => {
+  const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+
+  assert.match(source, /if \(requestedIds\.size <= 1\) return/);
+  assert.match(source, /function canvasViewportSnapshot\(appState = \{\}\) \{/);
+  assert.match(source, /const captureGenerationSubmitViewport = useCallback\(\(event\) => \{\s*\/\/ Keep focus in the prompt[\s\S]*?event\.preventDefault\(\)\s*event\.stopPropagation\(\)/);
+  assert.match(source, /const submitViewport = generationSubmitViewportRef\.current \?\? canvasViewportSnapshot\(api\.getAppState\(\)\)/);
+  assert.match(source, /applyTransientSelection\(\{\}, submitViewport\)/);
+  assert.match(source, /onPointerDownCapture=\{captureGenerationSubmitViewport\}/);
+  assert.match(source, /api\.updateScene\(\{\s*appState: \{ \.\.\.stableViewport, selectedElementIds \},\s*captureUpdate: CaptureUpdateAction\.NEVER/);
+  assert.match(source, /const hasGeneratingFrame = generatingFrameIds\.size > 0 \|\| frameOverlays\.some\(\(overlay\) => overlay\.remoteGenerating\)/);
+  assert.match(source, /showPromptPanel \|\| managedSelectionActive \|\| hasGeneratingFrame \? ' hide-generator-props'/);
 });
 
 test("attachments from a generated result panel do not fall back to another frame", async () => {

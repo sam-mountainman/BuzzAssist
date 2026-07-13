@@ -2379,6 +2379,16 @@ function viewportCenter(appState) {
   }
 }
 
+function canvasViewportSnapshot(appState = {}) {
+  return {
+    scrollX: Number(appState.scrollX) || 0,
+    scrollY: Number(appState.scrollY) || 0,
+    zoom: appState.zoom && typeof appState.zoom === 'object'
+      ? { ...appState.zoom }
+      : { value: Number(appState.zoom) || 1 }
+  }
+}
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value))
 }
@@ -4786,6 +4796,7 @@ export default function App() {
   const scrollAnimGenerationRef = useRef(0)
   const isDraggingGeneratorRef = useRef(false)
   const lastPointerDownCanvasRef = useRef(null)
+  const generationSubmitViewportRef = useRef(null)
   const suppressNextChangeRef = useRef(false)
   const canvasPickerRef = useRef(null)
   const canvasPickerFrameIdRef = useRef('')
@@ -7983,7 +7994,10 @@ export default function App() {
   const focusGeneratingFrameGrid = useCallback((elementIds = []) => {
     if (!api) return
     const requestedIds = new Set(elementIds.filter(Boolean))
-    if (requestedIds.size === 0) return
+    // A single output must keep the user's camera exactly where it is.
+    // This guard makes that invariant explicit even if a future caller forgets
+    // to check the requested count before asking for grid focus.
+    if (requestedIds.size <= 1) return
     window.requestAnimationFrame(() => {
       const frames = api
         .getSceneElements()
@@ -7991,6 +8005,18 @@ export default function App() {
       if (frames.length === 0) return
       focusCanvasElementsWithSafeArea(api, frames)
     })
+  }, [api])
+
+  const captureGenerationSubmitViewport = useCallback((event) => {
+    // Keep focus in the prompt until the panel is replaced by Generating....
+    // Native button focus makes Excalidraw restore the camera it had before the
+    // selected edge frame was brought into view, which is visible at 200%.
+    event.preventDefault()
+    event.stopPropagation()
+    if (!api) return
+    // Button focus can make Excalidraw restore its pre-selection camera before
+    // the click handler runs. Capture on pointerdown, before that default action.
+    generationSubmitViewportRef.current = canvasViewportSnapshot(api.getAppState())
   }, [api])
 
   const runFrameGeneration = useCallback(async () => {
@@ -8054,12 +8080,20 @@ export default function App() {
     const originalSelectedElementIds = {
       ...(api.getAppState?.()?.selectedElementIds ?? scene.appState?.selectedElementIds ?? {})
     }
-    const applyTransientSelection = (selectedElementIds) => {
+    const submitViewport = generationSubmitViewportRef.current ?? canvasViewportSnapshot(api.getAppState())
+    generationSubmitViewportRef.current = null
+    const applyTransientSelection = (selectedElementIds, viewportOverride = null) => {
       const elements = api.getSceneElementsIncludingDeleted()
-      const appState = { ...api.getAppState(), selectedElementIds }
+      const currentAppState = api.getAppState()
+      // At high zoom Excalidraw may adjust the camera when a selected element
+      // near the viewport edge is deselected. Generating... deliberately clears
+      // selection handles, but that visual-only transition must not pan or zoom
+      // a single generation. Reapply the live viewport in the same scene update.
+      const stableViewport = viewportOverride ?? canvasViewportSnapshot(currentAppState)
+      const appState = { ...currentAppState, ...stableViewport, selectedElementIds }
       suppressNextChangeRef.current = true
       api.updateScene({
-        appState: { selectedElementIds },
+        appState: { ...stableViewport, selectedElementIds },
         captureUpdate: CaptureUpdateAction.NEVER
       })
       const transientScene = createScene(elements, appState, api.getFiles())
@@ -8073,7 +8107,7 @@ export default function App() {
     // Remove both Excalidraw's native selection border and our selected
     // overlay in the same paint as Generating.... Leaving this until after
     // preflight made the outer frame linger intermittently.
-    applyTransientSelection({})
+    applyTransientSelection({}, submitViewport)
     setGeneratorFramesRemoteGenerating([optimisticGenerationId], true)
     // 複数指定は送信と同時に（プリフライトを待たずに）Generating...フレーム
     // を右へ並べる。再生成時は新フレーム作成後に並べる。
@@ -8641,6 +8675,7 @@ export default function App() {
     : false
   const activePanelTarget = livePanelTarget ?? activeOverlay ?? selectedGeneratedResult
   const showPromptPanel = Boolean(activePanelTarget && !isCurrentFrameGenerating)
+  const hasGeneratingFrame = generatingFrameIds.size > 0 || frameOverlays.some((overlay) => overlay.remoteGenerating)
   const memoryConstrainedCanvas = isMemoryConstrainedCanvasRuntime()
   const imagePreviewOverlays = memoryConstrainedCanvas
     ? limitViewportOverlays(
@@ -8908,7 +8943,7 @@ export default function App() {
 
   return (
     <main
-      className={`codex-excalidraw-shell lovart-ai-root${showPromptPanel || managedSelectionActive ? ' hide-generator-props' : ''}${memoryConstrainedCanvas ? ' is-memory-constrained-canvas' : ''}`}
+      className={`codex-excalidraw-shell lovart-ai-root${showPromptPanel || managedSelectionActive || hasGeneratingFrame ? ' hide-generator-props' : ''}${memoryConstrainedCanvas ? ' is-memory-constrained-canvas' : ''}`}
       aria-label="Codex Excalidraw canvas"
       onPointerDownCapture={closeOpenMenuIfOutsideGeneratorUi}
       onMouseDownCapture={closeOpenMenuIfOutsideGeneratorUi}
@@ -10524,6 +10559,7 @@ export default function App() {
                 type="button"
                 className={`lovart-generate${isCurrentFrameGenerating ? ' is-generating' : ''}`}
                 disabled={!frameForm.prompt.trim() || isCurrentFrameGenerating}
+                onPointerDownCapture={captureGenerationSubmitViewport}
                 onClick={runFrameGeneration}
               >
                 <LightningIcon />
