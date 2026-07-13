@@ -41,22 +41,29 @@ BuzzAssist cloud models (`seedance-2`, `seedance-2-fast`, `kling-v3`, `kling-o3`
 
 1. Read the selection with the plugin `get_excalidraw_selection` tool.
 
-2. Generate and place the video with `generate_excalidraw_video`:
+2. Prefer `generate_excalidraw_videos_batch` for chat-driven generation, even
+   for one video. It creates and focuses the `Generating...` frame before the
+   slow generation starts, without showing selection handles. The default
+   layout fills items 1-5 down column 1 and items 6-10 down column 2.
 
 ```json
 {
-  "prompt": "<user prompt>",
-  "model": "grok-imagine-video-hermes",
+  "jobs": [{
+    "prompt": "<user prompt>",
+    "model": "grok-imagine-video-hermes",
+    "aspectRatio": "16:9",
+    "duration": "6",
+    "resolution": "720p"
+  }],
   "projectDir": "/absolute/path/to/user/codex-project",
   "anchorElementId": "<selected holder or source element id>",
-  "aspectRatio": "16:9",
-  "duration": "5",
-  "resolution": "720p",
   "placement": "right",
-  "margin": 40,
-  "matchAnchor": true
+  "columns": 2
 }
 ```
+
+`generate_excalidraw_video` follows the same placeholder behavior and is a
+valid convenience tool for one result.
 
 3. If the user supplies an existing video path, use `insert_excalidraw_video`.
 

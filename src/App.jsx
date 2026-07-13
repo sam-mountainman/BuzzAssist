@@ -7756,18 +7756,20 @@ export default function App() {
     return promise
   }, [])
 
-  // 複数枚生成: アンカーの右へ残り枚数分のGenerating...フレームを複製する。
+  // 複数枚生成: 5行を先に埋める2列グリッドとしてGenerating...フレームを
+  // 複製する。6枚なら1列目に5枚、2列目の先頭に1枚となる。
   // サーバーは各フレームを1枚ずつの結果で置き換える。
   const spawnExtraGeneratingFrames = useCallback((anchorElement, anchorId, count) => {
     if (!api || !anchorElement || count <= 0) return []
     const baseElements = api.getSceneElementsIncludingDeleted()
     const anchorLive = baseElements.find((element) => element.id === anchorId) ?? anchorElement
     const frameGap = 24
+    const rowsPerColumn = 5
     const clones = convertToExcalidrawElements(
       Array.from({ length: count }, (_, i) => ({
         type: 'rectangle',
-        x: Math.round(anchorLive.x + (anchorLive.width + frameGap) * (i + 1)),
-        y: Math.round(anchorLive.y),
+        x: Math.round(anchorLive.x + (anchorLive.width + frameGap) * Math.floor((i + 1) / rowsPerColumn)),
+        y: Math.round(anchorLive.y + (anchorLive.height + frameGap) * ((i + 1) % rowsPerColumn)),
         width: anchorLive.width,
         height: anchorLive.height,
         strokeColor: GENERATOR_FRAME_BORDER_COLOR,
