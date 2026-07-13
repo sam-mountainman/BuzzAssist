@@ -10,12 +10,12 @@ import {
   sanitizeGrokVideoDuration,
 } from "../lib/mediaGeneration.mjs";
 
-test("media batch defaults to 10 concurrent jobs in 5 columns", () => {
+test("media batch defaults to 10 concurrent jobs laid out as 2 columns x 5 rows", () => {
   assert.equal(DEFAULT_MEDIA_BATCH_CONCURRENCY, 10);
-  assert.equal(DEFAULT_MEDIA_BATCH_COLUMNS, 5);
+  assert.equal(DEFAULT_MEDIA_BATCH_COLUMNS, 2);
   assert.equal(DEFAULT_MEDIA_BATCH_CHUNK_SIZE, 10);
   assert.equal(normalizeMediaBatchConcurrency(undefined), 10);
-  assert.equal(normalizeMediaBatchColumns(undefined), 5);
+  assert.equal(normalizeMediaBatchColumns(undefined), 2);
 });
 
 test("media batch concurrency is capped at 10", () => {
