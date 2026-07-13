@@ -14,6 +14,13 @@ https://github.com/sam-mountainman/BuzzAssist
 
 エージェントはリポジトリを clone/open し、自分自身のホストだけを設定してから、ローカルキャンバスURLをそのホストの in-app browser で開きます。
 
+導入後は、別プロジェクトで `@BuzzAssist` を呼び出してもセットアップ時の
+保存先を使い回しません。MCP workspace rootから現在のプロジェクトを解決し、
+`<現在のプロジェクト>/canvas/` と `canvas/assets/` を作ります。
+`--project-dir` は初回起動およびworkspace情報がないホスト向けのfallbackです。
+各プロジェクトのURLはそれぞれの `canvas/.server.json` に保存され、同時起動時は
+別の空きlocalhostポートを利用します。
+
 ```bash
 node scripts/setup-agents.mjs --agent codex --project-dir /path/to/active/project
 node scripts/setup-agents.mjs --agent claude --project-dir /path/to/active/project

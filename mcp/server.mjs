@@ -10,12 +10,19 @@ import { generateKeyBetween } from "fractional-indexing";
 import { z } from "zod";
 import {
   DEFAULT_MEDIA_BATCH_CHUNK_SIZE,
+  DEFAULT_MEDIA_BATCH_COLUMNS,
+  DEFAULT_MEDIA_BATCH_CONCURRENCY,
   IMAGE_MODELS,
   VIDEO_MODELS,
   chunkMediaBatchJobs,
   generateImageMedia,
   generateVideoMedia,
   getHermesStatus,
+  isCodexImageModel,
+  isGrokImageModel,
+  isGrokVideoModel,
+  normalizeCodexImageCount,
+  normalizeGrokGenerationCount,
   normalizeMediaBatchColumns,
   normalizeMediaBatchConcurrency,
   runWithConcurrency,
@@ -32,6 +39,7 @@ import {
   clearFrameGeneratingFlags,
   insertGeneratorFrameBatch,
   performCanvasMaintenance,
+  syncDeletedCanvasAssets,
   writeCanvasFocusRequest,
 } from "../lib/canvasScene.mjs";
 import { refineSilenceCutFromPlan, silenceCutVideo } from "../lib/tempoCut.mjs";
@@ -39,7 +47,12 @@ import { estimateCreditsForJob } from "../lib/mediaCredits.mjs";
 import { isFalImageModel, isFalVideoModel, previewFalImageRequest, previewFalVideoRequest } from "../lib/falMediaGeneration.mjs";
 import { generateSubtitleSrt, normalizeSubtitleHoldSeconds, refineSubtitleFromPlan, renderSrt, writeSubtitleWordsSidecar } from "../lib/subtitleGeneration.mjs";
 import { startChatBridgeWorker } from "../lib/chatBridge.mjs";
-import { readServerDiscovery } from "../lib/canvasServerRuntime.mjs";
+import {
+  isCompatibleCanvasServerStatus,
+  readServerDiscovery,
+  terminateDiscoveredCanvasServer,
+} from "../lib/canvasServerRuntime.mjs";
+import { applyProjectContext } from "../lib/projectContext.mjs";
 import {
   canvasAttachmentBundleToMcpResult,
   createCanvasAttachmentBundle,
@@ -54,8 +67,9 @@ import {
 import { tmpdir } from "node:os";
 
 const SERVER_NAME = "BuzzAssist Excalidraw Plugin Tools";
-const SERVER_VERSION = "0.1.6";
+const SERVER_VERSION = "0.1.7";
 const TOOL_READ_ME = "read_me";
+const TOOL_OPEN_CANVAS = "open_buzzassist_canvas";
 const TOOL_CREATE_VIEW = "create_view";
 const TOOL_GET_SELECTION = "get_excalidraw_selection";
 const TOOL_INSERT_IMAGE = "insert_excalidraw_image";
@@ -97,13 +111,14 @@ const STAGED_MEDIA_SETTINGS_GUIDE =
   "Stage 1: if model is missing, ask the model only, then wait. " +
   "Stage 2: after the model is known, ask execution route only when that exact model has multiple routes; show Lovart above BuzzAssist and prefer Lovart when both can satisfy the request, then wait. Skip this stage when only one route is valid. " +
   "Stage 3: only after model and route are known, derive that exact combination's supported settings and ask up to three still-missing settings per dialog (for example aspect ratio, quality/resolution/count for images; aspect ratio, duration/resolution, then audio/mode/reference controls for videos). " +
+  "For GPT Image 2 on the ChatGPT/Codex route and Grok Imagine on the local Grok route, image count is 1-10; local Grok video count is also 1-10. Each output is an independent generation and count should be represented as repeated batch jobs so all Generating... frames appear before generation starts. " +
   "If the user changes model, route, or attachment intent, discard only downstream answers that are no longer valid and ask the affected stages again. Reuse every still-valid answer verbatim.";
 const MEDIA_GENERATION_AGENT_INSTRUCTIONS = [
-  "Project-local Excalidraw canvas tools. Use read_me/create_view for diagrams, get_excalidraw_selection before acting on selected items, and insert_* for local assets.",
+  "Project-local Excalidraw canvas tools. Use the host task's CURRENT workspace/project root for every canvas operation, not the project used when the plugin was installed. Pass that absolute path as projectDir when the host exposes it; the server also reads MCP workspace roots as an automatic fallback. Call open_buzzassist_canvas first when the user opens or invokes BuzzAssist in a project, then open the returned canvasUrl in the host in-app browser. Use read_me/create_view for diagrams, get_excalidraw_selection before acting on selected items, and insert_* for local assets.",
   "Generation/subtitle/silence-cut tools require confirmedSettings=true unless the user's request already specified all relevant settings; use payloadPreview or read_me for workflow details.",
   ASK_USER_QUESTION_STYLE_GUIDE,
   STAGED_MEDIA_SETTINGS_GUIDE,
-  "Canvas tools auto-start the local static canvas server and write canvas/.server.json with the dynamic URL and HTTP tool endpoint bearer token.",
+  "Each project gets its own <current-project>/canvas directory, assets folder, and canvas/.server.json. Canvas tools auto-start that project's local static canvas server on an available port; multiple projects may run on different localhost ports.",
   "For phone/mobile access to the exact same full Excalidraw UI, use buzzassist_canvas_tunnel_start/status/stop. This starts an ngrok Canvas Tunnel with a generated access URL; Remote Canvas is not required for same-UI access.",
   "For Codex and Claude Code interactive UI, open the local BUZZASSIST_CANVAS_URL in the host in-app browser/browser tool and use MCP tools for stable reads/writes. render_buzzassist_canvas_widget remains an experimental MCP Apps entrypoint only; do not use it for normal Codex or Claude Code work unless the user explicitly asks to test the widget.",
   "To attach selected canvas images/videos/SRT/XML into the current chat, use prepare_canvas_attachments or read_canvas_attachment_bundle. Do not rely on OS GUI paste automation for media attachments.",
@@ -156,9 +171,10 @@ async function mergedProjectGlossary(args = {}) {
 }
 
 // Auto-open: when a canvas tool runs and no browser tab is connected, start
-// the local canvas server if needed and open it once per MCP process.
+// the local canvas server if needed and open it once per project. One MCP
+// process can serve multiple host workspaces, each on its own dynamic port.
 // Disable with EXCALIDRAW_NO_AUTO_OPEN=1.
-let canvasAutoOpenAttempted = false;
+const canvasAutoOpenAttempted = new Set();
 let lastCanvasBaseUrl = null;
 
 async function fetchJsonQuick(url, timeoutMs = 1500, token = null) {
@@ -179,6 +195,12 @@ function resolveProjectDir(args = {}) {
   const explicitProjectDir = nonEmptyString(args.projectDir);
   if (explicitProjectDir) return pathResolve(explicitProjectDir);
 
+  const explicitCanvasDir = nonEmptyString(args.canvasDir);
+  if (explicitCanvasDir) {
+    const resolvedCanvasDir = pathResolve(explicitCanvasDir);
+    return basename(resolvedCanvasDir) === "canvas" ? dirname(resolvedCanvasDir) : process.cwd();
+  }
+
   const envProjectDir = nonEmptyString(process.env.EXCALIDRAW_PROJECT_DIR);
   if (envProjectDir) return pathResolve(envProjectDir);
 
@@ -187,8 +209,18 @@ function resolveProjectDir(args = {}) {
 }
 
 async function readCanvasServerInfo(args = {}) {
-  const discovered = await readServerDiscovery(resolveCanvasDir(args));
+  const activeCanvasDir = resolveCanvasDir(args);
+  const discovered = await readServerDiscovery(activeCanvasDir);
   if (discovered?.url) return discovered;
+
+  // The setup environment points at the install-time fallback project. Never
+  // probe or reuse that URL for a different active workspace: without this
+  // guard a healthy setup canvas would make a new project appear connected
+  // even though its own server and canvas directory were never created.
+  const envCanvasDir = nonEmptyString(process.env.EXCALIDRAW_CANVAS_DIR);
+  if (envCanvasDir && pathResolve(envCanvasDir) !== activeCanvasDir) {
+    return { url: "", mcpUrl: "", port: null, token: null };
+  }
   const port = Number(process.env.EXCALIDRAW_PORT ?? 43219);
   const url = nonEmptyString(process.env.EXCALIDRAW_CANVAS_URL) || `http://127.0.0.1:${port}/`;
   return { url, mcpUrl: `${url.replace(/\/$/, "")}/mcp`, port, token: process.env.EXCALIDRAW_MCP_TOKEN || null };
@@ -203,7 +235,12 @@ async function fetchCanvasClientStatus(info) {
 async function ensureCanvasServer(args = {}) {
   let info = await readCanvasServerInfo(args);
   let status = await fetchCanvasClientStatus(info);
-  if (status) return { info, status };
+  if (isCompatibleCanvasServerStatus(status, { canvasDir: resolveCanvasDir(args) })) return { info, status };
+  if (status) {
+    terminateDiscoveredCanvasServer(info, { expectedCanvasDir: resolveCanvasDir(args) });
+    await new Promise((resolveSleep) => setTimeout(resolveSleep, 350));
+    status = null;
+  }
 
   const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
   const child = spawn(process.execPath, ["scripts/serve-canvas.mjs", resolveProjectDir(args)], {
@@ -224,7 +261,10 @@ async function ensureCanvasServer(args = {}) {
   while (Date.now() < deadline && !status) {
     await new Promise((resolveSleep) => setTimeout(resolveSleep, 1000));
     info = await readCanvasServerInfo(args);
-    status = await fetchCanvasClientStatus(info);
+    const candidateStatus = await fetchCanvasClientStatus(info);
+    status = isCompatibleCanvasServerStatus(candidateStatus, { canvasDir: resolveCanvasDir(args) })
+      ? candidateStatus
+      : null;
   }
 
   return { info, status };
@@ -392,8 +432,9 @@ async function openCanvasWindow(baseUrl) {
 }
 
 async function ensureCanvasVisible(args = {}) {
-  if (canvasAutoOpenAttempted) return;
-  canvasAutoOpenAttempted = true;
+  const canvasKey = resolveCanvasDir(args);
+  if (canvasAutoOpenAttempted.has(canvasKey)) return;
+  canvasAutoOpenAttempted.add(canvasKey);
   if (/^(1|true|yes)$/i.test(String(process.env.EXCALIDRAW_NO_AUTO_OPEN || ""))) return;
   try {
     const { info, status } = await ensureCanvasServer(args);
@@ -404,6 +445,29 @@ async function ensureCanvasVisible(args = {}) {
     }
   } catch {
     // best-effort — never block the tool call
+  }
+}
+
+const projectRuntimeStops = new Map();
+const maintainedCanvasDirs = new Set();
+
+function ensureProjectRuntime(args = {}) {
+  const activeCanvasDir = resolveCanvasDir(args);
+  if (!projectRuntimeStops.has(activeCanvasDir)) {
+    try {
+      projectRuntimeStops.set(activeCanvasDir, startChatBridgeWorker({ canvasDir: activeCanvasDir }));
+    } catch (error) {
+      process.stderr.write(`[chat-bridge] failed for ${activeCanvasDir}: ${error?.message}\n`);
+    }
+  }
+  if (!maintainedCanvasDirs.has(activeCanvasDir)) {
+    maintainedCanvasDirs.add(activeCanvasDir);
+    performCanvasMaintenance({ canvasDir: activeCanvasDir, safeOnly: true })
+      .then((results) => {
+        const summary = JSON.stringify(results);
+        if (summary !== "{}") process.stderr.write(`[canvas-maintenance] ${activeCanvasDir}: ${summary}\n`);
+      })
+      .catch((error) => process.stderr.write(`[canvas-maintenance] ${activeCanvasDir} failed: ${error?.message}\n`));
   }
 }
 
@@ -540,9 +604,10 @@ function registerBuzzAssistWidget(server) {
     server,
     TOOL_RENDER_BUZZASSIST_WIDGET,
     toolConfigForMcpServer(widgetDefinition),
-    async (input = {}) => {
+    async (input = {}, extra) => {
       try {
-        const widgetData = await widgetStructuredContent(input);
+        const contextualInput = await contextualizeToolArgs(server, TOOL_RENDER_BUZZASSIST_WIDGET, input, extra);
+        const widgetData = await widgetStructuredContent(contextualInput);
         return {
           content: [
             {
@@ -575,9 +640,9 @@ const SETTINGS_CONFIRMATION_TOOLS = new Map([
 
 const SETTINGS_QUESTION_GUIDES = {
   image:
-    "model (GPT-Image-2.0 / Grok Imagine / Nano Banana 2 / Seedream 5 Lite / Midjourney …), 実行先 (execution route) whenever the chosen model can run on more than one of Codex(local) / Grok(local) / Lovart / BuzzAssist API — show Lovart above BuzzAssist and prefer Lovart when both are viable (e.g. GPT Image 2 → Codex or Lovart or BuzzAssist; Nano Banana 2 / Seedream 5 Lite → Lovart or BuzzAssist; Grok Imagine → Grok or BuzzAssist), aspect ratio using a short common preset list (1:1 / 9:16 / 16:9; accept another model-valid ratio through the host's free-form Other row), size tier when supported (0.5K/1K/2K/4K), 枚数 imageCount when supported (Nano Banana up to 4, Seedream up to 6), and model-specific quality when supported. Do not ask Midjourney version or detail rendering because Lovart verification found those controls are not reliably honored. Recommended defaults: GPT-Image-2.0 (Codex), 1:1, Auto, 1枚.",
+    "model (GPT-Image-2.0 / Grok Imagine / Nano Banana 2 / Seedream 5 Lite / Midjourney …), 実行先 (execution route) whenever the chosen model can run on more than one of Codex(local) / Grok(local) / Lovart / BuzzAssist API — show Lovart above BuzzAssist and prefer Lovart when both are viable (e.g. GPT Image 2 → Codex or Lovart or BuzzAssist; Nano Banana 2 / Seedream 5 Lite → Lovart or BuzzAssist; Grok Imagine → Grok or BuzzAssist), aspect ratio using a short common preset list (1:1 / 9:16 / 16:9; accept another model-valid ratio through the host's free-form Other row), size tier when supported (0.5K/1K/2K/4K), 枚数 imageCount when supported (GPT Image 2 on ChatGPT/Codex and Grok Imagine on local Grok: 1-10 independent parallel generations; Nano Banana up to 4; Seedream up to 6), and model-specific quality when supported. Do not ask Midjourney version or detail rendering because Lovart verification found those controls are not reliably honored. Recommended defaults: GPT-Image-2.0 (Codex), 1:1, Auto, 1枚.",
   video:
-    "model (Grok Imagine / Seedance 2 / Kling v3 / Veo 3.1 / Wan 2.6 / Vidu Q2 …), 実行先 (execution route) whenever the chosen model can run on more than one of Grok(local) / Lovart / BuzzAssist API — show Lovart above BuzzAssist and prefer Lovart when both are viable (e.g. Grok Imagine → Grok or BuzzAssist; Kling / Seedance → Lovart or BuzzAssist), aspect ratio using a short valid preset list (normally 16:9 / 9:16 / 1:1; skip when the endpoint has none), duration using only model-valid choices (Grok CLI 6/10s only, Grok API 1-15s, Veo 4/6/8s, Wan 5/10/15s, Vidu 2-8s, Seedance 4-15s, Kling 2.6 5/10s), resolution when selectable (480p-4K), audio ON/OFF only when selectable, and attachment role/mode for start frame, end frame, reference image/video/audio, or motion source. Recommended defaults: Grok Imagine (Grok), 16:9, 6s, 720p.",
+    "model (Grok Imagine / Seedance 2 / Kling v3 / Veo 3.1 / Wan 2.6 / Vidu Q2 …), 実行先 (execution route) whenever the chosen model can run on more than one of Grok(local) / Lovart / BuzzAssist API — show Lovart above BuzzAssist and prefer Lovart when both are viable (e.g. Grok Imagine → Grok or BuzzAssist; Kling / Seedance → Lovart or BuzzAssist), aspect ratio using a short valid preset list (normally 16:9 / 9:16 / 1:1; skip when the endpoint has none), duration using only model-valid choices (Grok CLI 6/10s only, Grok API 1-15s, Veo 4/6/8s, Wan 5/10/15s, Vidu 2-8s, Seedance 4-15s, Kling 2.6 5/10s), 本数 videoCount when supported (local Grok: 1-10 independent parallel generations), resolution when selectable (480p-4K), audio ON/OFF only when selectable, and attachment role/mode for start frame, end frame, reference image/video/audio, or motion source. Recommended defaults: Grok Imagine (Grok), 16:9, 6s, 720p, 1本.",
   subtitle:
     "mode (scripted aligns a provided script / scriptless transcribes), lineCount (1 or 2), and maxCharsPerLine. Recommended defaults: scripted when a script exists (otherwise scriptless), 2 lines, 30 chars.",
   silenceCut:
@@ -614,6 +679,35 @@ function createProgressReporter(extra) {
       })
       .catch((error) => process.stderr.write(`[mcp-progress] failed: ${error?.message ?? String(error)}\n`));
   };
+}
+
+const NON_PROJECT_SCOPED_TOOLS = new Set([
+  TOOL_READ_ME,
+  TOOL_BUZZASSIST_LOGIN,
+  TOOL_BUZZASSIST_AUTH_STATUS,
+  TOOL_SETUP_HERMES,
+]);
+
+async function contextualizeToolArgs(mcpServer, toolName, args = {}, extra = {}) {
+  const input = args && typeof args === "object" ? args : {};
+  if (NON_PROJECT_SCOPED_TOOLS.has(toolName)) return input;
+
+  let contextualArgs = applyProjectContext(input, { requestMeta: extra?._meta ?? {} });
+  if (!nonEmptyString(contextualArgs.projectDir) && !nonEmptyString(contextualArgs.canvasDir)) {
+    try {
+      const capabilities = mcpServer?.server?.getClientCapabilities?.();
+      if (capabilities?.roots) {
+        const result = await mcpServer.server.listRoots({}, { timeout: 1500, signal: extra?.signal });
+        contextualArgs = applyProjectContext(contextualArgs, { roots: result?.roots ?? [] });
+      }
+    } catch {
+      // Older hosts may not expose MCP roots. The setup-time project remains
+      // the final fallback, and skills explicitly pass the active projectDir.
+    }
+  }
+
+  ensureProjectRuntime(contextualArgs);
+  return contextualArgs;
 }
 
 function nonEmptyString(value) {
@@ -776,7 +870,9 @@ async function loadScene(args = {}) {
 }
 
 async function saveScene(args = {}, scene) {
-  await writeJsonAtomic(resolveCanvasFile(args), normalizeScene(scene));
+  const normalized = normalizeScene(scene);
+  await writeJsonAtomic(resolveCanvasFile(args), normalized);
+  await syncDeletedCanvasAssets(args, normalized);
 }
 
 function selectedIdsFromScene(scene) {
@@ -845,7 +941,21 @@ async function uniqueFilePath(dir, requestedName) {
       candidate = `${base}-v${counter}${ext}`;
       counter += 1;
     } catch (error) {
-      if (error?.code === "ENOENT") return { fileName: candidate, filePath: candidatePath };
+      if (error?.code === "ENOENT") {
+        const trashPath = basename(dir) === "assets" ? join(dirname(dir), "assets-trash", candidate) : null;
+        if (trashPath) {
+          try {
+            if ((await stat(trashPath)).isFile()) {
+              candidate = `${base}-v${counter}${ext}`;
+              counter += 1;
+              continue;
+            }
+          } catch (trashError) {
+            if (trashError?.code !== "ENOENT") throw trashError;
+          }
+        }
+        return { fileName: candidate, filePath: candidatePath };
+      }
       throw error;
     }
   }
@@ -1146,44 +1256,72 @@ function buildGenerationPayloadPreview(kind, args = {}) {
 
 async function generateExcalidrawImage(args = {}) {
   if (args.payloadPreview) return buildGenerationPayloadPreview("image", args);
+  const requestedCount = isCodexImageModel(args.model)
+    ? normalizeCodexImageCount(args.imageCount ?? args.image_count)
+    : isGrokImageModel(args.model)
+      ? normalizeGrokGenerationCount(args.imageCount ?? args.image_count)
+      : 1;
+  const requestedFileName = args.fileName ?? args.imageName ?? args.image_name;
+  const indexedFileName = (index) => {
+    if (!requestedFileName || requestedCount === 1) return requestedFileName;
+    const extension = extname(requestedFileName);
+    const stem = extension ? requestedFileName.slice(0, -extension.length) : requestedFileName;
+    return `${stem}-${index + 1}${extension || ".png"}`;
+  };
   const batch = await generateExcalidrawImagesBatch({
     ...args,
-    jobs: [{
+    jobs: Array.from({ length: requestedCount }, (_, index) => ({
       ...args,
+      imageCount: 1,
       aspectRatio: args.aspectRatio ?? args.aspect_ratio,
       imageSize: args.imageSize ?? args.size,
-      fileName: args.fileName ?? args.imageName ?? args.image_name,
+      fileName: indexedFileName(index),
       referenceImagePaths: args.referenceImagePaths ?? args.reference_image_paths,
-    }],
-    columns: 1,
-    concurrency: 1,
+    })),
+    columns: requestedCount > 1 ? DEFAULT_MEDIA_BATCH_COLUMNS : 1,
+    concurrency: requestedCount > 1 ? DEFAULT_MEDIA_BATCH_CONCURRENCY : 1,
   });
-  const result = batch.results[0];
-  if (result?.error) throw new Error(result.error);
-  return { ...result, dryRun: batch.dryRun };
+  const result = batch.results.find((item) => !item?.error);
+  if (!result) throw new Error(batch.results.map((item) => item?.error).filter(Boolean).join("\n") || "Image generation failed.");
+  return requestedCount > 1
+    ? { ...result, ...batch, primaryResult: result }
+    : { ...result, dryRun: batch.dryRun };
 }
 
 async function generateExcalidrawVideo(args = {}) {
   if (args.payloadPreview) return buildGenerationPayloadPreview("video", args);
+  const requestedCount = isGrokVideoModel(args.model)
+    ? normalizeGrokGenerationCount(args.videoCount ?? args.video_count)
+    : 1;
+  const requestedFileName = args.fileName ?? args.videoName ?? args.video_name;
+  const indexedFileName = (index) => {
+    if (!requestedFileName || requestedCount === 1) return requestedFileName;
+    const extension = extname(requestedFileName);
+    const stem = extension ? requestedFileName.slice(0, -extension.length) : requestedFileName;
+    return `${stem}-${index + 1}${extension || ".mp4"}`;
+  };
   const batch = await generateExcalidrawVideosBatch({
     ...args,
-    jobs: [{
+    jobs: Array.from({ length: requestedCount }, (_, index) => ({
       ...args,
+      videoCount: 1,
       aspectRatio: args.aspectRatio ?? args.aspect_ratio,
-      fileName: args.fileName ?? args.videoName ?? args.video_name,
+      fileName: indexedFileName(index),
       generateAudio: args.generateAudio ?? args.generate_audio,
       startFramePath: args.startFramePath ?? args.start_frame_path,
       referenceImagePaths: args.referenceImagePaths ?? args.reference_image_paths,
       referenceVideoPaths: args.referenceVideoPaths ?? args.reference_video_paths,
       referenceAudioPaths: args.referenceAudioPaths ?? args.reference_audio_paths,
       referenceVideos: args.referenceVideos ?? args.reference_videos,
-    }],
-    columns: 1,
-    concurrency: 1,
+    })),
+    columns: requestedCount > 1 ? DEFAULT_MEDIA_BATCH_COLUMNS : 1,
+    concurrency: requestedCount > 1 ? DEFAULT_MEDIA_BATCH_CONCURRENCY : 1,
   });
-  const result = batch.results[0];
-  if (result?.error) throw new Error(result.error);
-  return { ...result, dryRun: batch.dryRun };
+  const result = batch.results.find((item) => !item?.error);
+  if (!result) throw new Error(batch.results.map((item) => item?.error).filter(Boolean).join("\n") || "Video generation failed.");
+  return requestedCount > 1
+    ? { ...result, ...batch, primaryResult: result }
+    : { ...result, dryRun: batch.dryRun };
 }
 
 async function generateExcalidrawImagesBatch(args = {}) {
@@ -1522,6 +1660,25 @@ function toolDefinitions() {
       },
     },
     {
+      name: TOOL_OPEN_CANVAS,
+      title: "Open Current Project BuzzAssist Canvas",
+      description: "Start or reuse the BuzzAssist canvas for the host task's current project. Returns that project's dynamic localhost URL, canvas directory, and canvas/assets directory. Open canvasUrl in the host in-app browser.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          projectDir: { type: "string", description: "Current host project absolute path. Usually inferred automatically from MCP workspace roots." },
+          canvasDir: { type: "string", description: "Absolute canvas directory. Overrides projectDir." },
+        },
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    {
       name: TOOL_RENDER_BUZZASSIST_WIDGET,
       title: "Render BuzzAssist Canvas Widget",
       description: "Experimental MCP Apps widget for BuzzAssist. Use BUZZASSIST_CANVAS_URL in the host in-app browser for normal Codex and Claude Code work; call this only when the user explicitly asks to test the widget.",
@@ -1730,7 +1887,7 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE_IMAGE,
       title: "Generate Excalidraw Image",
-      description: "Create and focus a Generating... frame, generate one image, replace that frame with the result, and save the scene. Requires confirmedSettings=true unless using payloadPreview.",
+      description: "Create and focus Generating... frame(s), generate one image or 1-10 independent images on the ChatGPT/Codex or local Grok route, replace each frame as it finishes, and save the scene. Requires confirmedSettings=true unless using payloadPreview.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1750,7 +1907,7 @@ function toolDefinitions() {
           aspect_ratio: { type: "string", description: "Alias for aspectRatio." },
           imageSize: { type: "string", description: "Image size or Grok resolution hint (1K/2K)." },
           quality: { type: "string", description: "Quality hint. high maps to Grok quality mode." },
-          imageCount: { type: "number", description: "Number of images per generation (Lovart route only; e.g. Nano Banana up to 4, Seedream up to 6)." },
+          imageCount: { type: "number", minimum: 1, maximum: 10, description: "Image count. GPT Image 2 on ChatGPT/Codex and Grok Imagine on local Grok accept 1-10 independent parallel generations. Lovart limits remain model-specific (for example Nano Banana up to 4 and Seedream up to 6)." },
           modelVersion: { type: "string", description: "Midjourney model version (v8.1 / v7 / niji / niji7). Lovart route only." },
           detailRendering: { type: "boolean", description: "Midjourney 高精細レンダリング (high-detail rendering). Lovart route only." },
           referenceImagePaths: { type: "array", items: { type: "string" }, description: "Optional local image references for Grok Imagine image edit." },
@@ -1779,7 +1936,7 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE_VIDEO,
       title: "Generate Excalidraw Video",
-      description: "Create and focus a Generating... frame, generate one video, replace that frame with the result, and save the scene. Requires confirmedSettings=true unless using payloadPreview.",
+      description: "Create and focus Generating... frame(s), generate one video or 1-10 independent videos on the local Grok route, replace each frame as it finishes, and save the scene. Requires confirmedSettings=true unless using payloadPreview.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1804,6 +1961,8 @@ function toolDefinitions() {
           aspectRatio: { type: "string", description: "Aspect ratio such as 16:9, 9:16, or 1:1." },
           aspect_ratio: { type: "string", description: "Alias for aspectRatio." },
           duration: { type: "string", description: "Duration seconds. Grok CLI accepts only 6 or 10; BuzzAssist/xAI Grok API accepts 1-15." },
+          videoCount: { type: "number", minimum: 1, maximum: 10, description: "Video count. Local Grok runs 1-10 independent generations in parallel; other routes currently generate one video per call." },
+          video_count: { type: "number", minimum: 1, maximum: 10, description: "Alias for videoCount." },
           resolution: { type: "string", description: "480p or 720p." },
           generateAudio: { type: "boolean", description: "Whether Grok Imagine should generate audio when supported." },
           generate_audio: { type: "boolean", description: "Alias for generateAudio." },
@@ -2856,6 +3015,31 @@ async function handleToolCall(params, progress = () => {}) {
     };
   }
 
+  if (params?.name === TOOL_OPEN_CANVAS) {
+    const args = params.arguments ?? {};
+    const activeProjectDir = resolveProjectDir(args);
+    const activeCanvasDir = resolveCanvasDir(args);
+    const assetsDir = join(activeCanvasDir, "assets");
+    await mkdir(assetsDir, { recursive: true });
+    const { info, status } = await ensureCanvasServer(args);
+    const canvasUrl = String(info?.url || "").replace(/\/$/, "");
+    if (canvasUrl) lastCanvasBaseUrl = canvasUrl;
+    canvasAutoOpenAttempted.add(activeCanvasDir);
+    if (status && Number(status.clients) === 0) await openCanvasWindow(canvasUrl);
+    return {
+      content: [{ type: "text", text: `BuzzAssist canvas ready for ${activeProjectDir}. Open: ${canvasUrl}` }],
+      structuredContent: {
+        ok: Boolean(canvasUrl),
+        projectDir: activeProjectDir,
+        canvasDir: activeCanvasDir,
+        assetsDir,
+        canvasUrl,
+        mcpUrl: info?.mcpUrl || null,
+        clients: Number(status?.clients) || 0,
+      },
+    };
+  }
+
   if (params?.name === TOOL_READ_ME) {
     return {
       content: [{ type: "text", text: OFFICIAL_EXCALIDRAW_README }],
@@ -3025,25 +3209,9 @@ async function handleToolCall(params, progress = () => {}) {
   throw new Error(`Unknown tool: ${params?.name ?? ""}`);
 }
 
-// Startup housekeeping (safe-only): migrate legacy inline file records and
-// sweep stale .tmp files. Never moves subtitle cards or trashes assets on its
-// own. Fire-and-forget — stdout is reserved for JSON-RPC, so results go to stderr.
-performCanvasMaintenance({ safeOnly: true })
-  .then((results) => {
-    const summary = JSON.stringify(results);
-    if (summary !== "{}") process.stderr.write(`[canvas-maintenance] ${summary}\n`);
-  })
-  .catch((error) => process.stderr.write(`[canvas-maintenance] failed: ${error?.message}\n`));
-
-// This process lives in the user's GUI session (spawned by Claude Code /
-// Codex), so it can run the osascript paste that the browser canvas and the
-// preview-jailed vite server cannot — execute their queued chat-send
-// requests (canvas/.chat-bridge/).
-try {
-  startChatBridgeWorker({ canvasDir: resolveCanvasDir() });
-} catch (error) {
-  process.stderr.write(`[chat-bridge] failed to start: ${error?.message}\n`);
-}
+// Keep the setup-time project ready as a fallback. Additional host workspace
+// roots are initialized lazily by contextualizeToolArgs in the same process.
+ensureProjectRuntime({});
 
 const server = new McpServer(
   {
@@ -3063,7 +3231,8 @@ for (const definition of toolDefinitions()) {
     toolConfigForMcpServer(definition),
     async (args = {}, extra) => {
       try {
-        return await handleToolCall({ name: definition.name, arguments: args }, createProgressReporter(extra));
+        const contextualArgs = await contextualizeToolArgs(server, definition.name, args, extra);
+        return await handleToolCall({ name: definition.name, arguments: contextualArgs }, createProgressReporter(extra));
       } catch (error) {
         return toolErrorResult(error);
       }

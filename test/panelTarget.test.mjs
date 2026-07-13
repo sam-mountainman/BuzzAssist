@@ -37,6 +37,20 @@ test("Hermes route shows zero BuzzAssist credits and exposes setup prompt copy",
   assert.match(source, /if \(route\.id === 'hermes'\) await refreshHermesStatus\(\)/);
 });
 
+test("ChatGPT and local Grok counts use compact 1-10 range sliders", async () => {
+  const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+
+  assert.match(source, /if \(resolveGatingImageModel\(model\) === 'gpt-image-2-codex'\) return MAX_CHATGPT_IMAGE_COUNT/);
+  assert.match(source, /if \(resolveGatingImageModel\(model\) === 'grok-imagine-image-hermes'\) return MAX_GROK_GENERATION_COUNT/);
+  assert.match(source, /usesIndependentImageCount\(imageModel\) \? \(/);
+  assert.match(source, /min="1"\s*max=\{maxCount\}\s*step="1"\s*className="lovart-duration-slider"\s*value=\{activeCount\}\s*aria-label="生成枚数"/);
+  assert.match(source, /onChange=\{\(event\) => updateFrameForm\('imageCount', Number\(event\.target\.value\)\)\}/);
+  assert.match(source, /function getMaxVideoCount\(model\)/);
+  assert.match(source, /aria-label="生成本数"/);
+  assert.match(source, /onChange=\{\(event\) => updateFrameForm\('videoCount', Number\(event\.target\.value\)\)\}/);
+  assert.match(source, /\) : \(\s*<>\s*<div className="lovart-menu-header">枚数<\/div>\s*<div className="lovart-menu-grid count">/);
+});
+
 test("Grok CLI video settings expose only 6s and 10s while Grok API keeps 1-15s", async () => {
   const appSource = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
   const mcpSource = await readFile(new URL("../mcp/server.mjs", import.meta.url), "utf8");
@@ -97,10 +111,13 @@ test("agent batch generation defaults to 2 rows x 5 columns with 10 parallel job
   const canvasSource = await readFile(new URL("../lib/canvasScene.mjs", import.meta.url), "utf8");
   const mcpSource = await readFile(new URL("../mcp/server.mjs", import.meta.url), "utf8");
   const appSource = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const viteSource = await readFile(new URL("../vite.config.js", import.meta.url), "utf8");
 
   assert.match(mediaSource, /DEFAULT_MEDIA_BATCH_COLUMNS = 5/);
   assert.match(mediaSource, /DEFAULT_MEDIA_BATCH_CONCURRENCY = 10/);
   assert.match(mediaSource, /DEFAULT_MEDIA_BATCH_CHUNK_SIZE = 10/);
+  assert.match(mediaSource, /MAX_CODEX_IMAGE_COUNT = DEFAULT_MEDIA_BATCH_CONCURRENCY/);
+  assert.match(mediaSource, /Array\.from\(\{ length: count \}[\s\S]*generateImageWithCodexBridge/);
   assert.match(canvasSource, /function newGeneratorFrameRecord[\s\S]*codexGenerating: true/);
   assert.match(canvasSource, /export async function insertGeneratorFrameBatch[\s\S]*finiteNumber\(Number\(args\.columns\), 5\)/);
   assert.match(canvasSource, /const col = i % columns;\s*const row = Math\.floor\(i \/ columns\)/);
@@ -111,6 +128,28 @@ test("agent batch generation defaults to 2 rows x 5 columns with 10 parallel job
   assert.match(mcpSource, /Defaults to true; set false only when the user asks to keep the current viewport/);
   assert.match(appSource, /const columnsPerRow = 5/);
   assert.match(appSource, /Math\.floor\(\(i \+ 1\) \/ columnsPerRow\)/);
+  assert.match(appSource, /previousGeneratorFrameIdsRef\.current = new Set\(\s*elementsWithClones\.filter\(isGeneratorFrame\)/);
+  assert.match(appSource, /codexGenerating: true/);
+  assert.match(appSource, /const setGeneratorFramesRemoteGenerating = useCallback\(\(elementIds = \[\], isGenerating = true\) => \{/);
+  assert.match(appSource, /setGeneratorFramesRemoteGenerating\(\[optimisticGenerationId\], true\)/);
+  assert.match(appSource, /setGeneratorFramesRemoteGenerating\(\[retryFrameId\], true\)/);
+  assert.match(appSource, /const focusGeneratingFrameGrid = useCallback\(\(elementIds = \[\]\) => \{/);
+  assert.match(appSource, /function buzzAssistCanvasFocusOffsets\(\)/);
+  assert.match(appSource, /buzzAssistRailRect\.right - rootRect\.left \+ GENERATOR_FOCUS_RAIL_GAP/);
+  assert.match(appSource, /function focusCanvasElementsWithSafeArea\(api, elements = \[\]\)/);
+  assert.match(appSource, /api\.scrollToContent\(elements, \{\s*fitToContent: true,\s*animate: true,\s*duration: GENERATOR_SCROLL_ANIMATION_MS,\s*viewportZoomFactor: GENERATOR_FOCUS_ZOOM_FACTOR,\s*canvasOffsets: buzzAssistCanvasFocusOffsets\(\)\s*\}\)/);
+  assert.match(appSource, /focusCanvasElementsWithSafeArea\(api, frames\)/);
+  assert.match(appSource, /focusGeneratingFrameGrid\(\[anchorElementId, \.\.\.extraFrameIds\]\)/);
+  assert.match(appSource, /focusGeneratingFrameGrid\(\[generationAnchorId, \.\.\.extraFrameIds\]\)/);
+  assert.match(appSource, /MAX_CHATGPT_IMAGE_COUNT = 10/);
+  assert.match(appSource, /MAX_GROK_GENERATION_COUNT = 10/);
+  assert.match(appSource, /resolveGatingImageModel\(model\) === 'gpt-image-2-codex'/);
+  assert.match(mcpSource, /GPT Image 2 on the ChatGPT\/Codex route and Grok Imagine on the local Grok route, image count is 1-10/);
+  assert.match(mcpSource, /jobs: Array\.from\(\{ length: requestedCount \}/);
+  assert.match(appSource, /const requestedGenerationCount = kind === 'image'/);
+  assert.match(appSource, /videoCount: requestedGenerationCount/);
+  assert.match(appSource, /extraAnchorElementIds: extraFrameIds/);
+  assert.match(viteSource, /\[generate\/video\] extra video insert failed/);
 });
 
 test("file and canvas attachments pin the original panel without duplicate open notifications", async () => {
@@ -133,7 +172,7 @@ test("remote MCP focus events select and center only requested results", async (
   assert.match(appSource, /Object\.fromEntries\(focusElementIds\.map\(\(id\) => \[id, true\]\)\)/);
   assert.match(appSource, /fingerprint === lastSyncedFingerprintRef\.current && !shouldApplyFocus/);
   assert.match(appSource, /focusElementIds\r?\n\s*\}\)/);
-  assert.match(appSource, /api\.scrollToContent\(focusedElements, \{\s*fitToContent: true,\s*animate: false\s*\}\)/);
+  assert.match(appSource, /focusCanvasElementsWithSafeArea\(api, focusedElements\)/);
   assert.match(viteSource, /FOCUS_REQUEST_FILE_NAME/);
   assert.match(viteSource, /async function consumeCanvasFocusRequest\(\)/);
   assert.match(viteSource, /server\.watcher\.on\('add', scheduleCanvasWatchBroadcast\)/);
@@ -505,15 +544,26 @@ test("phone tunnel renders images via capped overlays instead of hydrating Excal
 
 test("left generator rail keeps requested utility tool order", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const viteSource = await readFile(new URL("../vite.config.js", import.meta.url), "utf8");
   const image = source.indexOf('data-lovart-generator-kind="image"');
   const video = source.indexOf('data-lovart-generator-kind="video"');
   const subtitle = source.indexOf('data-lovart-generator-kind="subtitle"');
   const silenceCut = source.indexOf('data-lovart-generator-kind="silenceCut"');
+  const assetsFolder = source.indexOf('data-lovart-action="open-assets-folder"');
 
   assert.ok(image > 0, "missing image generator button");
   assert.ok(video > image, "video should follow image");
   assert.ok(silenceCut > video, "silence cut should follow video");
   assert.ok(subtitle > silenceCut, "SRT should follow silence cut");
+  assert.ok(assetsFolder > subtitle, "assets folder should follow the generator tools");
+  assert.match(source, /async function openCanvasAssetsFolder\(\) \{/);
+  assert.match(source, /canvasFetch\(ASSET_FOLDER_OPEN_ENDPOINT, \{ method: 'POST' \}\)/);
+  assert.match(source, /onPointerDown=\{\(event\) => \{[\s\S]*?openCanvasAssetsFolder\(\)\.catch/);
+  assert.match(source, /if \(event\.detail === 0\) \{\s*openCanvasAssetsFolder\(\)\.catch/);
+  assert.match(source, /!isTunnelCanvasRuntime\(\) \? \(/);
+  assert.match(viteSource, /server\.middlewares\.use\('\/api\/assets\/open-folder'/);
+  assert.match(viteSource, /if \(rejectRemoteOperator\(req, res\)\) return/);
+  assert.match(viteSource, /await openLocalFolder\(canvasAssetsDir\)/);
 });
 
 test("tunnel generation requests use async responses to avoid Cloudflare timeouts", async () => {

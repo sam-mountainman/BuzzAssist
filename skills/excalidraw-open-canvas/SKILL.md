@@ -7,15 +7,39 @@ description: Open the local project-bound BuzzAssist Excalidraw canvas. Use when
 
 ## Workflow
 
-1. Start the local Excalidraw web service with the user's active project directory, and keep the process running:
+1. Resolve the host task's current workspace/project root. This is the project
+   the user currently opened in Codex or Claude Code — never substitute the
+   BuzzAssist plugin/cache/repository directory and never reuse the project
+   chosen during an older setup just because it already has a server.
 
-```bash
-./scripts/start-canvas.sh /path/to/user/project
+2. Call the plugin `open_buzzassist_canvas` tool with that absolute directory:
+
+```json
+{
+  "projectDir": "/absolute/path/to/current/user/project"
+}
 ```
 
-Run this from the BuzzAssist Excalidraw repository root. Pass the active user project directory, not the plugin repository directory.
+The MCP server also reads the host's MCP workspace roots automatically when
+`projectDir` is omitted, but pass it explicitly whenever the host exposes the
+current working directory. The tool starts or reuses this project's server,
+creates `<project>/canvas/assets`, and returns the project's live `canvasUrl`.
 
-2. Open the local URL in the current host's in-app browser when browser control is available. In Codex, use the in-app Browser tool. In Claude Code, use its browser tool if available. This is mandatory for both hosts when those tools are exposed: do not use the OS/default browser (`open`, `xdg-open`, etc.) as a substitute unless the user explicitly asks for it.
+3. If the plugin tool is unavailable, start the service manually and keep it
+running:
+
+```bash
+node scripts/serve-canvas.mjs /path/to/current/user/project
+```
+
+Run this from the BuzzAssist repository root. The same command works in macOS,
+Windows PowerShell, and Linux.
+
+4. Open the returned local URL in the current host's in-app browser when
+browser control is available. In Codex, use the in-app Browser tool. In Claude
+Code, use its browser tool if available. This is mandatory for both hosts when
+those tools are exposed: do not use the OS/default browser (`open`,
+`xdg-open`, etc.) as a substitute unless the user explicitly asks for it.
 
 The default URL is usually:
 
@@ -23,15 +47,16 @@ The default URL is usually:
 http://127.0.0.1:43219/
 ```
 
-If that port is busy, the server chooses another local port. Read
-`canvas/.server.json` for the live `url`.
+If that port is busy, the server chooses another local port. Read the current
+project's `canvas/.server.json` for the live `url`. Different projects can run
+simultaneously on different localhost ports.
 
 Canvas data is saved under:
 
 ```text
-canvas/excalidraw-canvas.json
-canvas/excalidraw-selection.json
-canvas/assets/
+<current-project>/canvas/excalidraw-canvas.json
+<current-project>/canvas/excalidraw-selection.json
+<current-project>/canvas/assets/
 ```
 
 If browser control is unavailable, treat the service start as successful and give the user the local URL.

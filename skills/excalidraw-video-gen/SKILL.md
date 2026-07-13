@@ -9,6 +9,14 @@ Use this skill when the user wants a generated video represented on the BuzzAssi
 
 ## Preconditions
 
+Resolve the current Codex/Claude Code task's workspace root before calling any
+BuzzAssist tool. Pass that absolute path as `projectDir` on every selection,
+generation, batch, and insertion call. Never use the plugin cache, BuzzAssist
+source repository, or the project remembered at install time as a substitute.
+If the current project's canvas is not open yet, call
+`open_buzzassist_canvas({ projectDir })` first and open its returned `canvasUrl`
+in the host's in-app browser.
+
 The Excalidraw service should be running for the active project. The default
 URL is usually:
 
@@ -32,7 +40,7 @@ BuzzAssist cloud models (`seedance-2`, `seedance-2-fast`, `kling-v3`, `kling-o3`
 
 - モデル（Grok Imagine / Seedance 2 / Kling v3 / Veo 3.1 …）
 - 実行先（同じモデルが複数の実行先を持つ場合だけ。例: Grok Imagine → Grok / BuzzAssist、Kling / Seedance → Lovart / BuzzAssist。LovartはBuzzAssistより上に表示して優先）
-- モデル対応のアスペクト比・秒数・解像度・音声。選択肢が1つしかない項目は聞かない
+- モデル対応のアスペクト比・秒数・解像度・音声・本数。Grok Imagineの実行先がGrokの場合は1〜10本を独立生成する。選択肢が1つしかない項目は聞かない
 - 添付画像・動画の用途が曖昧なら、開始フレーム・スタイル/被写体参照・モーション元のどれかを生成前に確認する
 - 推奨デフォルト: Grok Imagine (Grok)・16:9・6s・720p — 選択肢には（推奨）を付ける
 
@@ -55,7 +63,7 @@ BuzzAssist cloud models (`seedance-2`, `seedance-2-fast`, `kling-v3`, `kling-o3`
 2. モデルが未指定なら、次にモデルだけを質問する
 3. モデル確定後、そのモデルに複数の実行先がある場合だけ、実行先を別の質問として出す。モデル名と実行先を1つの選択肢へまとめない
 4. モデルと実行先の確定後、その組み合わせが実際に対応する設定だけを質問する
-   - 比率・秒数・解像度
+   - 比率・秒数・解像度・対応時のみ本数
    - 対応時のみ音声・モード・開始/終了フレーム・参照素材
 5. 1画面で収まらない場合は、回答後に残りの未確認項目だけを次画面で質問する
 
@@ -63,7 +71,8 @@ BuzzAssist cloud models (`seedance-2`, `seedance-2-fast`, `kling-v3`, `kling-o3`
 
 ## Workflow
 
-1. Read the selection with the plugin `get_excalidraw_selection` tool.
+1. Read the selection with the plugin `get_excalidraw_selection` tool, passing
+   the current task's absolute `projectDir`.
 
 2. Prefer `generate_excalidraw_videos_batch` for chat-driven generation, even
    for one video. It creates and focuses the `Generating...` frame before the
@@ -86,8 +95,11 @@ BuzzAssist cloud models (`seedance-2`, `seedance-2-fast`, `kling-v3`, `kling-o3`
 }
 ```
 
-`generate_excalidraw_video` follows the same placeholder behavior and is a
-valid convenience tool for one result.
+Grok ImagineをGrokで複数本生成する場合は、回答された本数ぶん同じ設定の`jobs`を作り、`generate_excalidraw_videos_batch`を1回呼びます。先に全`Generating...`フレームを2行×5列で表示し、各動画を独立ジョブとして最大10件並列生成します。秒数（6秒または10秒）などの設定は全ジョブで共有します。
+
+`generate_excalidraw_video` follows the same placeholder behavior. On the
+local Grok route it also accepts `videoCount: 1..10` and expands that count
+into the same batch flow.
 
 3. If the user supplies an existing video path, use `insert_excalidraw_video`.
 

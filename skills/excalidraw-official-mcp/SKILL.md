@@ -23,17 +23,17 @@ For the local browser canvas, the plugin config exposes:
 
 ```json
 {
-  "name": "excalidraw_mcp",
+  "name": "buzzassist_mcp",
   "command": "node",
-  "args": ["./mcp/server.mjs"]
+  "args": ["<managed-plugin>/scripts/start-mcp.mjs"]
 }
 ```
 
 ## Routing
 
 - Use `excalidraw_official` for the hosted official Excalidraw MCP App generation and interactive MCP App rendering.
-- Use the local `excalidraw_mcp` server when the user says "this canvas", "browser screen", or "local Excalidraw canvas".
-- The local `excalidraw_mcp` implements official-compatible `read_me` and `create_view`; `create_view` writes directly into this repository's persisted canvas and the browser updates through the canvas event stream.
+- Use the local `buzzassist_mcp` server when the user says "this canvas", "browser screen", or "local Excalidraw canvas". Pass the current host task's absolute workspace root as `projectDir`; never substitute the plugin cache, BuzzAssist source repository, or setup-time project.
+- The local `buzzassist_mcp` implements official-compatible `read_me` and `create_view`; `create_view` writes into `<current-project>/canvas/` and the browser updates through that project's canvas event stream. Call `open_buzzassist_canvas({ projectDir })` first when the current project's canvas is not open.
 - If a client does not support MCP Apps, explain that the official server may still connect as MCP but the interactive app rendering may be unavailable in that client.
 
 ## Prompting

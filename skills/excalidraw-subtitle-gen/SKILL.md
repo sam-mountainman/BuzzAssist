@@ -9,6 +9,11 @@ Use this skill when the user wants SRT subtitles generated from audio and placed
 
 ## Preconditions
 
+- Resolve the current Codex/Claude Code task's workspace root and pass it as
+  `projectDir` to every BuzzAssist tool call. Never write into the plugin cache,
+  BuzzAssist source repository, or a project remembered at install time. Call
+  `open_buzzassist_canvas({ projectDir })` first when the current project's
+  canvas is not open.
 - The Excalidraw canvas service should be running; read `canvas/.server.json` if the default port was busy.
 - BuzzAssist login is required. Check with the plugin `buzzassist_auth_status` tool; sign in with `buzzassist_login` (opens a browser).
 - `ffprobe` is used to probe audio duration when `durationSeconds` is not given.
@@ -19,7 +24,9 @@ Use this skill when the user wants SRT subtitles generated from audio and placed
 
 ## Workflow
 
-1. Confirm auth with `buzzassist_auth_status`. If not logged in, run `buzzassist_login` and ask the user to finish sign-in in the browser.
+1. Resolve the current task's absolute `projectDir`, then confirm auth with
+   `buzzassist_auth_status`. If not logged in, run `buzzassist_login` and ask
+   the user to finish sign-in in the browser.
 2. Ask which mode when unclear:
    - 台本あり (scripted): pass `scriptText` or `scriptPath` — uses ElevenLabs Forced Alignment.
    - 台本なし (scriptless): audio only — uses ElevenLabs Scribe v2.
