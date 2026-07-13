@@ -151,7 +151,9 @@ async function requestCanvasFocus(args = {}, result) {
 async function requestGeneratingFramesFocus(args = {}, frames = []) {
   if (args.dryRun === true || args.payloadPreview === true || args.focusCreated === false) return null;
   const elementIds = frames.map((frame) => frame?.elementId).filter(Boolean);
-  if (elementIds.length === 0) return null;
+  // A single generation should leave the user's viewport exactly where it is.
+  // Focus only helps when the complete multi-output grid needs to be framed.
+  if (elementIds.length <= 1) return null;
   // Center the viewport on the live Generating... placeholders without
   // selecting them. Selection would reintroduce Excalidraw's outer handles
   // while the loading overlay is visible.
@@ -1886,7 +1888,7 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE_IMAGE,
       title: "Generate Excalidraw Image",
-      description: "Create and focus Generating... frame(s), generate one image or 1-10 independent images on the ChatGPT/Codex or local Grok route, replace each frame as it finishes, and save the scene. Requires confirmedSettings=true unless using payloadPreview.",
+      description: "Create Generating... frame(s), focus only multi-image grids, generate one image or 1-10 independent images on the ChatGPT/Codex or local Grok route, replace each frame as it finishes, and save the scene. Requires confirmedSettings=true unless using payloadPreview.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1935,7 +1937,7 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE_VIDEO,
       title: "Generate Excalidraw Video",
-      description: "Create and focus Generating... frame(s), generate one video or 1-10 independent videos on the local Grok route, replace each frame as it finishes, and save the scene. Requires confirmedSettings=true unless using payloadPreview.",
+      description: "Create Generating... frame(s), focus only multi-video grids, generate one video or 1-10 independent videos on the local Grok route, replace each frame as it finishes, and save the scene. Requires confirmedSettings=true unless using payloadPreview.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2036,7 +2038,7 @@ function toolDefinitions() {
           matchAnchor: { type: "boolean", description: "Match placeholder dimensions to the anchor. Defaults to true." },
           replaceAnchor: { type: "boolean", description: "Replace the anchor with the first Generating... frame." },
           selectCreated: { type: "boolean", description: "Select the inserted elements after saving." },
-          focusCreated: { type: "boolean", description: "Focus the viewport on the Generating... grid without showing selection handles. Defaults to true; set false only when the user asks to keep the current viewport." },
+          focusCreated: { type: "boolean", description: "Focus the viewport on a multi-item Generating... grid without showing selection handles. Single-item jobs never move the viewport. Defaults to true for multi-item jobs." },
           confirmedSettings: { type: "boolean", description: "True only after the staged flow has separately resolved each model, execution route when applicable, and all model-specific batch settings; payloadPreview is exempt." },
           dryRun: { type: "boolean", description: "Generate without copying or saving." },
         },
@@ -2093,7 +2095,7 @@ function toolDefinitions() {
           matchAnchor: { type: "boolean", description: "Match placeholder dimensions to the anchor. Defaults to true." },
           replaceAnchor: { type: "boolean", description: "Replace the anchor with the first Generating... frame." },
           selectCreated: { type: "boolean", description: "Select the inserted elements after saving." },
-          focusCreated: { type: "boolean", description: "Focus the viewport on the Generating... grid without showing selection handles. Defaults to true; set false only when the user asks to keep the current viewport." },
+          focusCreated: { type: "boolean", description: "Focus the viewport on a multi-item Generating... grid without showing selection handles. Single-item jobs never move the viewport. Defaults to true for multi-item jobs." },
           confirmedSettings: { type: "boolean", description: "True only after the staged flow has separately resolved each model, execution route when applicable, and all model-specific batch settings; payloadPreview is exempt." },
           dryRun: { type: "boolean", description: "Generate without copying or saving." },
         },

@@ -124,8 +124,9 @@ test("agent batch generation defaults to 2 rows x 5 columns with 10 parallel job
   assert.match(mcpSource, /Defaults to 5 \(10-job chunks render as 2 rows × 5 columns\)/);
   assert.match(mcpSource, /const generated = await runWithConcurrency\(chunkJobs, concurrency/);
   assert.match(mcpSource, /requestGeneratingFramesFocus\(args, frames\)/);
+  assert.match(mcpSource, /if \(elementIds\.length <= 1\) return null/);
   assert.match(mcpSource, /applySelection: false,\s*applyViewport: true/);
-  assert.match(mcpSource, /Defaults to true; set false only when the user asks to keep the current viewport/);
+  assert.match(mcpSource, /Single-item jobs never move the viewport/);
   assert.match(appSource, /const columnsPerRow = 5/);
   assert.match(appSource, /Math\.floor\(\(i \+ 1\) \/ columnsPerRow\)/);
   assert.match(appSource, /previousGeneratorFrameIdsRef\.current = new Set\(\s*elementsWithClones\.filter\(isGeneratorFrame\)/);
@@ -139,8 +140,10 @@ test("agent batch generation defaults to 2 rows x 5 columns with 10 parallel job
   assert.match(appSource, /function focusCanvasElementsWithSafeArea\(api, elements = \[\]\)/);
   assert.match(appSource, /api\.scrollToContent\(elements, \{\s*fitToContent: true,\s*animate: true,\s*duration: GENERATOR_SCROLL_ANIMATION_MS,\s*viewportZoomFactor: GENERATOR_FOCUS_ZOOM_FACTOR,\s*canvasOffsets: buzzAssistCanvasFocusOffsets\(\)\s*\}\)/);
   assert.match(appSource, /focusCanvasElementsWithSafeArea\(api, frames\)/);
-  assert.match(appSource, /focusGeneratingFrameGrid\(\[anchorElementId, \.\.\.extraFrameIds\]\)/);
-  assert.match(appSource, /focusGeneratingFrameGrid\(\[generationAnchorId, \.\.\.extraFrameIds\]\)/);
+  assert.match(appSource, /if \(!isRegeneratingResult && requestedGenerationCount > 1\)[\s\S]*focusGeneratingFrameGrid\(\[anchorElementId, \.\.\.extraFrameIds\]\)/);
+  assert.match(appSource, /if \(isRegeneratingResult && requestedGenerationCount > 1\)[\s\S]*focusGeneratingFrameGrid\(\[generationAnchorId, \.\.\.extraFrameIds\]\)/);
+  assert.match(appSource, /lastCreatedGeo\?\.id && elements\.some/);
+  assert.match(appSource, /element\.id === lastCreatedGeo\.id && !element\.isDeleted && isGeneratorFrame\(element\)/);
   assert.match(appSource, /MAX_CHATGPT_IMAGE_COUNT = 10/);
   assert.match(appSource, /MAX_GROK_GENERATION_COUNT = 10/);
   assert.match(appSource, /resolveGatingImageModel\(model\) === 'gpt-image-2-codex'/);
