@@ -118,6 +118,19 @@ async function requestCanvasFocus(args = {}, result) {
   });
 }
 
+async function requestGeneratingFramesFocus(args = {}, frames = []) {
+  if (args.dryRun === true || args.payloadPreview === true || args.focusCreated === false) return null;
+  const elementIds = frames.map((frame) => frame?.elementId).filter(Boolean);
+  if (elementIds.length === 0) return null;
+  // Center the viewport on the live Generating... placeholders without
+  // selecting them. Selection would reintroduce Excalidraw's outer handles
+  // while the loading overlay is visible.
+  return writeCanvasFocusRequest(args, elementIds, {
+    applySelection: false,
+    applyViewport: true,
+  });
+}
+
 // Project-common 用語辞書 (canvas/subtitle-glossary.json) merges into every
 // SRT / scribe-cut transcription, matching the BuzzAssist desktop app.
 async function mergedProjectGlossary(args = {}) {
@@ -1116,78 +1129,44 @@ function buildGenerationPayloadPreview(kind, args = {}) {
 
 async function generateExcalidrawImage(args = {}) {
   if (args.payloadPreview) return buildGenerationPayloadPreview("image", args);
-  const media = await generateImageMedia({
+  const batch = await generateExcalidrawImagesBatch({
     ...args,
-    aspectRatio: args.aspectRatio ?? args.aspect_ratio,
-    imageSize: args.imageSize ?? args.size,
-    fileName: args.fileName ?? args.imageName ?? args.image_name,
-    referenceImagePaths: args.referenceImagePaths ?? args.reference_image_paths,
+    jobs: [{
+      ...args,
+      aspectRatio: args.aspectRatio ?? args.aspect_ratio,
+      imageSize: args.imageSize ?? args.size,
+      fileName: args.fileName ?? args.imageName ?? args.image_name,
+      referenceImagePaths: args.referenceImagePaths ?? args.reference_image_paths,
+    }],
+    columns: 1,
+    concurrency: 1,
   });
-  return insertExcalidrawImageMedia({
-    ...args,
-    mediaBuffer: media.buffer,
-    mimeType: media.mimeType,
-    // Leave unset when the caller gave no name — canvasScene then assigns
-    // desktop-app-style sequential ImageN names.
-    fileName: args.fileName ?? args.imageName ?? args.image_name,
-    customData: {
-      codexGeneratedImage: true,
-      codexGenerationModel: media.model,
-      codexGenerationPrompt: args.prompt,
-      codexGenerationAspectRatio: args.aspectRatio ?? args.aspect_ratio,
-      codexGenerationQuality: args.quality,
-      generatorPrompt: args.prompt,
-      generatorModel: args.model,
-      generatorAspectRatio: args.aspectRatio ?? args.aspect_ratio,
-      generatorImageQuality: args.quality,
-      generatorImageSize: args.imageSize ?? args.size ?? "1K",
-      codexGenerationSource: media.source,
-      ...(args.customData && typeof args.customData === "object" ? args.customData : {}),
-    },
-  });
+  const result = batch.results[0];
+  if (result?.error) throw new Error(result.error);
+  return { ...result, dryRun: batch.dryRun };
 }
 
 async function generateExcalidrawVideo(args = {}) {
   if (args.payloadPreview) return buildGenerationPayloadPreview("video", args);
-  const media = await generateVideoMedia({
+  const batch = await generateExcalidrawVideosBatch({
     ...args,
-    aspectRatio: args.aspectRatio ?? args.aspect_ratio,
-    duration: args.duration,
-    fileName: args.fileName ?? args.videoName ?? args.video_name,
-    generateAudio: args.generateAudio ?? args.generate_audio,
-    startFramePath: args.startFramePath ?? args.start_frame_path,
-    referenceImagePaths: args.referenceImagePaths ?? args.reference_image_paths,
-    referenceVideoPaths: args.referenceVideoPaths ?? args.reference_video_paths,
-    referenceAudioPaths: args.referenceAudioPaths ?? args.reference_audio_paths,
-    referenceVideos: args.referenceVideos ?? args.reference_videos,
+    jobs: [{
+      ...args,
+      aspectRatio: args.aspectRatio ?? args.aspect_ratio,
+      fileName: args.fileName ?? args.videoName ?? args.video_name,
+      generateAudio: args.generateAudio ?? args.generate_audio,
+      startFramePath: args.startFramePath ?? args.start_frame_path,
+      referenceImagePaths: args.referenceImagePaths ?? args.reference_image_paths,
+      referenceVideoPaths: args.referenceVideoPaths ?? args.reference_video_paths,
+      referenceAudioPaths: args.referenceAudioPaths ?? args.reference_audio_paths,
+      referenceVideos: args.referenceVideos ?? args.reference_videos,
+    }],
+    columns: 1,
+    concurrency: 1,
   });
-  return insertExcalidrawVideoMedia({
-    ...args,
-    mediaBuffer: media.buffer,
-    mimeType: media.mimeType,
-    // Unset → canvasScene assigns sequential VideoN names (desktop parity).
-    fileName: args.fileName ?? args.videoName ?? args.video_name,
-    aspectRatio: args.aspectRatio ?? args.aspect_ratio,
-    duration: args.duration,
-    prompt: args.prompt,
-    model: media.model,
-    customData: {
-      codexGeneratedVideo: true,
-      codexGenerationModel: media.model,
-      codexGenerationPrompt: args.prompt,
-      codexGenerationAspectRatio: args.aspectRatio ?? args.aspect_ratio,
-      codexGenerationDuration: args.duration,
-      codexGenerationResolution: args.resolution,
-      videoPrompt: args.prompt,
-      videoModel: args.model,
-      videoAspectRatio: args.aspectRatio ?? args.aspect_ratio,
-      videoDuration: args.duration,
-      videoResolution: args.resolution,
-      videoGenerateAudio: args.generateAudio ?? args.generate_audio,
-      codexGenerationSource: media.source,
-      ...(args.customData && typeof args.customData === "object" ? args.customData : {}),
-    },
-  });
+  const result = batch.results[0];
+  if (result?.error) throw new Error(result.error);
+  return { ...result, dryRun: batch.dryRun };
 }
 
 async function generateExcalidrawImagesBatch(args = {}) {
@@ -1206,11 +1185,22 @@ async function generateExcalidrawImagesBatch(args = {}) {
 
   for (const [chunkIndex, chunk] of chunkMediaBatchJobs(jobs, DEFAULT_MEDIA_BATCH_CHUNK_SIZE).entries()) {
     const chunkJobs = chunk.jobs;
+    const chunkPlacementArgs = chunkIndex === 0
+      ? {
+          anchorElementId: args.anchorElementId,
+          sourceElementId: args.sourceElementId,
+          placement: args.placement,
+          margin: args.margin,
+          matchAnchor: args.matchAnchor,
+          replaceAnchor: args.replaceAnchor,
+        }
+      : {};
     const frames = dryRun
       ? []
       : await insertGeneratorFrameBatch({
           projectDir: args.projectDir,
           canvasDir: args.canvasDir,
+          ...chunkPlacementArgs,
           frames: chunkJobs.map((job) => ({
             kind: "image",
             prompt: job.prompt,
@@ -1222,9 +1212,11 @@ async function generateExcalidrawImagesBatch(args = {}) {
           })),
           columns,
           gap,
-          selectCreated: args.selectCreated !== false,
-          focusCreated: args.focusCreated === true,
+          selectCreated: args.selectCreated === true,
+          focusCreated: false,
         });
+
+    await requestGeneratingFramesFocus(args, frames);
 
     let writeQueue = Promise.resolve();
     const enqueueWrite = (fn) => {
@@ -1346,11 +1338,22 @@ async function generateExcalidrawVideosBatch(args = {}) {
 
   for (const [chunkIndex, chunk] of chunkMediaBatchJobs(jobs, DEFAULT_MEDIA_BATCH_CHUNK_SIZE).entries()) {
     const chunkJobs = chunk.jobs;
+    const chunkPlacementArgs = chunkIndex === 0
+      ? {
+          anchorElementId: args.anchorElementId,
+          sourceElementId: args.sourceElementId,
+          placement: args.placement,
+          margin: args.margin,
+          matchAnchor: args.matchAnchor,
+          replaceAnchor: args.replaceAnchor,
+        }
+      : {};
     const frames = dryRun
       ? []
       : await insertGeneratorFrameBatch({
           projectDir: args.projectDir,
           canvasDir: args.canvasDir,
+          ...chunkPlacementArgs,
           frames: chunkJobs.map((job) => ({
             kind: "video",
             prompt: job.prompt,
@@ -1363,9 +1366,11 @@ async function generateExcalidrawVideosBatch(args = {}) {
           })),
           columns,
           gap,
-          selectCreated: args.selectCreated !== false,
-          focusCreated: args.focusCreated === true,
+          selectCreated: args.selectCreated === true,
+          focusCreated: false,
         });
+
+    await requestGeneratingFramesFocus(args, frames);
 
     let writeQueue = Promise.resolve();
     const enqueueWrite = (fn) => {
@@ -1708,7 +1713,7 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE_IMAGE,
       title: "Generate Excalidraw Image",
-      description: "Generate an image, insert it into the project canvas, and save the scene. Requires confirmedSettings=true unless using payloadPreview.",
+      description: "Create and focus a Generating... frame, generate one image, replace that frame with the result, and save the scene. Requires confirmedSettings=true unless using payloadPreview.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1757,7 +1762,7 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE_VIDEO,
       title: "Generate Excalidraw Video",
-      description: "Generate a video, insert a media element into the project canvas, and save the scene. Requires confirmedSettings=true unless using payloadPreview.",
+      description: "Create and focus a Generating... frame, generate one video, replace that frame with the result, and save the scene. Requires confirmedSettings=true unless using payloadPreview.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1849,8 +1854,14 @@ function toolDefinitions() {
           concurrency: { type: "number", description: "Parallel generations per chunk. Defaults to 10 and is capped at 10." },
           projectDir: { type: "string", description: "Absolute project directory containing canvas/." },
           canvasDir: { type: "string", description: "Absolute canvas directory. Overrides projectDir." },
+          anchorElementId: { type: "string", description: "Optional existing element to place the Generating... grid beside." },
+          sourceElementId: { type: "string", description: "Alias for anchorElementId." },
+          placement: { type: "string", enum: ["right", "left", "below", "replace", "inside"] },
+          margin: { type: "number", description: "Canvas units between the anchor and the Generating... grid. Defaults to 40." },
+          matchAnchor: { type: "boolean", description: "Match placeholder dimensions to the anchor. Defaults to true." },
+          replaceAnchor: { type: "boolean", description: "Replace the anchor with the first Generating... frame." },
           selectCreated: { type: "boolean", description: "Select the inserted elements after saving." },
-          focusCreated: { type: "boolean", description: "Focus the canvas viewport on the newly created generator-frame grid. Defaults to false; leave unset to avoid moving the user's current canvas view." },
+          focusCreated: { type: "boolean", description: "Focus the viewport on the Generating... grid without showing selection handles. Defaults to true; set false only when the user asks to keep the current viewport." },
           confirmedSettings: { type: "boolean", description: "True only after the user has confirmed the batch generation settings; payloadPreview is exempt." },
           dryRun: { type: "boolean", description: "Generate without copying or saving." },
         },
@@ -1900,8 +1911,14 @@ function toolDefinitions() {
           concurrency: { type: "number", description: "Parallel generations per chunk. Defaults to 10 and is capped at 10." },
           projectDir: { type: "string", description: "Absolute project directory containing canvas/." },
           canvasDir: { type: "string", description: "Absolute canvas directory. Overrides projectDir." },
+          anchorElementId: { type: "string", description: "Optional existing element to place the Generating... grid beside." },
+          sourceElementId: { type: "string", description: "Alias for anchorElementId." },
+          placement: { type: "string", enum: ["right", "left", "below", "replace", "inside"] },
+          margin: { type: "number", description: "Canvas units between the anchor and the Generating... grid. Defaults to 40." },
+          matchAnchor: { type: "boolean", description: "Match placeholder dimensions to the anchor. Defaults to true." },
+          replaceAnchor: { type: "boolean", description: "Replace the anchor with the first Generating... frame." },
           selectCreated: { type: "boolean", description: "Select the inserted elements after saving." },
-          focusCreated: { type: "boolean", description: "Focus the canvas viewport on the newly created generator-frame grid. Defaults to false; leave unset to avoid moving the user's current canvas view." },
+          focusCreated: { type: "boolean", description: "Focus the viewport on the Generating... grid without showing selection handles. Defaults to true; set false only when the user asks to keep the current viewport." },
           confirmedSettings: { type: "boolean", description: "True only after the user has confirmed the batch generation settings; payloadPreview is exempt." },
           dryRun: { type: "boolean", description: "Generate without copying or saving." },
         },

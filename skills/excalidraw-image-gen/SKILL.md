@@ -45,22 +45,30 @@ AI holders are rectangle elements with:
 
 2. If exactly one selected element is an AI holder, use its `width` and `height` as the target generation and display size.
 
-3. Prefer the plugin `generate_excalidraw_image` tool when available:
+3. Prefer `generate_excalidraw_images_batch` for chat-driven generation, even
+   for one image. It creates the `Generating...` frame first, focuses the
+   viewport without selection handles, and replaces each frame as its result
+   arrives. The default layout fills downward: items 1-5 in column 1 and items
+   6-10 in column 2.
 
 ```json
 {
-  "prompt": "<user prompt>",
-  "model": "gpt-image-2-codex",
+  "jobs": [{
+    "prompt": "<user prompt>",
+    "model": "gpt-image-2-codex",
+    "aspectRatio": "1:1"
+  }],
   "projectDir": "/absolute/path/to/user/codex-project",
   "anchorElementId": "<selected holder or source element id>",
-  "aspectRatio": "1:1",
   "placement": "right",
-  "margin": 40,
-  "matchAnchor": true
+  "columns": 2
 }
 ```
 
 Use `"model": "grok-imagine-image-hermes"` when the user requests Grok Imagine(Grok).
+
+`generate_excalidraw_image` follows the same placeholder behavior and is a
+valid convenience tool for a single result.
 
 4. If the user supplies an existing image path, insert it with the plugin `insert_excalidraw_image` tool:
 

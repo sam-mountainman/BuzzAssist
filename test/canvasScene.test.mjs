@@ -8,6 +8,7 @@ import {
   insertExcalidrawMediaBatch,
   insertExcalidrawSilenceCutResult,
   insertExcalidrawSubtitle,
+  insertGeneratorFrameBatch,
   isSafeChildPath,
   normalizeScene,
   normalizeSubtitleCards,
@@ -45,6 +46,37 @@ test("writeCanvasFocusRequest stores a one-shot selection and viewport request",
     assert.equal(typeof stored.requestId, "string");
   } finally {
     await rm(canvasDir, { recursive: true, force: true });
+  }
+});
+
+test("generator batches fill five rows before starting the second column", async () => {
+  const projectDir = await mkdtemp(join(tmpdir(), "excalidraw-generator-grid-"));
+  try {
+    const results = await insertGeneratorFrameBatch({
+      projectDir,
+      frames: Array.from({ length: 6 }, (_, index) => ({
+        kind: "image",
+        prompt: `image ${index + 1}`,
+        aspectRatio: "1:1",
+      })),
+      columns: 2,
+      gap: 24,
+    });
+
+    assert.equal(results.length, 6);
+    assert.deepEqual(results.slice(0, 5).map((result) => result.bounds.x), Array(5).fill(results[0].bounds.x));
+    assert.deepEqual(
+      results.slice(0, 5).map((result) => result.bounds.y),
+      results.slice(0, 5).map((_, index) => results[0].bounds.y + index * (results[0].bounds.height + 24)),
+    );
+    assert.equal(results[5].bounds.y, results[0].bounds.y);
+    assert.equal(results[5].bounds.x, results[0].bounds.x + results[0].bounds.width + 24);
+
+    const saved = JSON.parse(await readFile(join(projectDir, "canvas", "excalidraw-canvas.json"), "utf8"));
+    const placeholders = saved.elements.filter((element) => element.customData?.codexGenerating === true);
+    assert.equal(placeholders.length, 6);
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
   }
 });
 
