@@ -1938,6 +1938,23 @@ function visibleAssetBackedImageFileIds(scene, padding = 900) {
   return visible
 }
 
+function liveAssetBackedImageFileIds(scene) {
+  const files = scene?.files ?? {}
+  const live = new Set()
+  for (const element of scene?.elements ?? []) {
+    if (
+      element?.type !== 'image' ||
+      element.isDeleted ||
+      element.customData?.codexMediaKind === 'video' ||
+      !isAssetBackedFileRecord(files[element.fileId])
+    ) {
+      continue
+    }
+    live.add(element.fileId)
+  }
+  return live
+}
+
 async function hydrateSceneAssetBackedFiles(scene, options = {}) {
   const files = { ...(scene.files ?? {}) }
   const onlyFileIds = options.onlyVisible === true ? visibleAssetBackedImageFileIds(scene) : options.onlyFileIds
@@ -5509,9 +5526,10 @@ export default function App() {
         await hydrateAssetBackedFiles(initialScene.files, addIfLive, { onlyFileIds: visibleFileIds })
         if (cancelled) return
       }
+      const liveFileIds = liveAssetBackedImageFileIds(initialScene)
       const restIds = new Set(
         Object.values(initialScene.files ?? {})
-          .filter((file) => isAssetBackedFileRecord(file) && !visibleFileIds.has(file.id))
+          .filter((file) => liveFileIds.has(file.id) && !visibleFileIds.has(file.id))
           .map((file) => file.id)
       )
       if (restIds.size === 0) return
@@ -5924,7 +5942,9 @@ export default function App() {
           }
         }
       } else {
-        hydrateAssetBackedFiles(normalized.files, addHydratedAssetFile)
+        hydrateAssetBackedFiles(normalized.files, addHydratedAssetFile, {
+          onlyFileIds: liveAssetBackedImageFileIds(nextScene)
+        })
       }
       window.setTimeout(() => {
         if (localChangeVersionRef.current !== remoteApplyVersion && !options.force) return

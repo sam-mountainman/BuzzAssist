@@ -41,3 +41,12 @@ test("remote result hydration blocks stale placeholder saves before adding files
   assert.ok(guardIndex > handlerIndex);
   assert.ok(hydrateIndex > guardIndex);
 });
+
+test("background hydration ignores files owned only by deleted canvas elements", async () => {
+  const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+
+  assert.match(source, /function liveAssetBackedImageFileIds\(scene\)[\s\S]*?element\.isDeleted[\s\S]*?live\.add\(element\.fileId\)/);
+  assert.match(source, /const liveFileIds = liveAssetBackedImageFileIds\(initialScene\)[\s\S]*?liveFileIds\.has\(file\.id\) && !visibleFileIds\.has\(file\.id\)/);
+  assert.match(source, /hydrateAssetBackedFiles\(normalized\.files, addHydratedAssetFile, \{\s*onlyFileIds: liveAssetBackedImageFileIds\(nextScene\)\s*\}\)/);
+  assert.doesNotMatch(source, /hydrateAssetBackedFiles\(normalized\.files, addHydratedAssetFile\)\s*\n/);
+});
