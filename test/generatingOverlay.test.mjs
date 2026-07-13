@@ -20,3 +20,24 @@ test("generating placeholders never show Excalidraw selection handles", async ()
   assert.match(styles, /\.lovart-frame-overlay\.is-generating \.lovart-frame-inner \{\s*inset: -2px;/);
   assert.doesNotMatch(styles, /has-generating-frame \.excalidraw__canvas\.interactive/);
 });
+
+test("remote generated images hydrate before replacing their Generating frame", async () => {
+  const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+
+  assert.match(source, /const remoteGeneratingFrameIds = new Set/);
+  assert.match(source, /element\.customData\?\.codexGenerating === true/);
+  assert.match(source, /const resultAnchorIds = new Set\(\[\.\.\.generatingFrameIdsRef\.current, \.\.\.remoteGeneratingFrameIds\]\)/);
+  assert.match(source, /const resultFileIds = generatedResultFileIds\(payload\.scene, resultAnchorIds\)/);
+  assert.match(source, /await prehydrateResultFiles\(payload\.scene, resultFileIds\)/);
+});
+
+test("remote result hydration blocks stale placeholder saves before adding files", async () => {
+  const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const handlerIndex = source.indexOf("async function loadRemoteCanvas");
+  const guardIndex = source.indexOf("applyingRemoteRef.current = true", handlerIndex);
+  const hydrateIndex = source.indexOf("await prehydrateResultFiles", handlerIndex);
+
+  assert.ok(handlerIndex >= 0);
+  assert.ok(guardIndex > handlerIndex);
+  assert.ok(hydrateIndex > guardIndex);
+});

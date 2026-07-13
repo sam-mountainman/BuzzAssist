@@ -92,25 +92,25 @@ test("agent setting confirmation mirrors the BuzzAssist choice-question UX", asy
   assert.doesNotMatch(videoSkill, /16:9・5s・720p/);
 });
 
-test("agent batch generation defaults to 2 columns x 5 rows with 10 parallel jobs", async () => {
+test("agent batch generation defaults to 2 rows x 5 columns with 10 parallel jobs", async () => {
   const mediaSource = await readFile(new URL("../lib/mediaGeneration.mjs", import.meta.url), "utf8");
   const canvasSource = await readFile(new URL("../lib/canvasScene.mjs", import.meta.url), "utf8");
   const mcpSource = await readFile(new URL("../mcp/server.mjs", import.meta.url), "utf8");
   const appSource = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
 
-  assert.match(mediaSource, /DEFAULT_MEDIA_BATCH_COLUMNS = 2/);
+  assert.match(mediaSource, /DEFAULT_MEDIA_BATCH_COLUMNS = 5/);
   assert.match(mediaSource, /DEFAULT_MEDIA_BATCH_CONCURRENCY = 10/);
   assert.match(mediaSource, /DEFAULT_MEDIA_BATCH_CHUNK_SIZE = 10/);
   assert.match(canvasSource, /function newGeneratorFrameRecord[\s\S]*codexGenerating: true/);
-  assert.match(canvasSource, /export async function insertGeneratorFrameBatch[\s\S]*finiteNumber\(Number\(args\.columns\), 2\)/);
-  assert.match(canvasSource, /const col = Math\.floor\(i \/ rowsPerColumn\);\s*const row = i % rowsPerColumn/);
-  assert.match(mcpSource, /Defaults to 2 \(10-job chunks render as 2 columns × 5 rows\)/);
+  assert.match(canvasSource, /export async function insertGeneratorFrameBatch[\s\S]*finiteNumber\(Number\(args\.columns\), 5\)/);
+  assert.match(canvasSource, /const col = i % columns;\s*const row = Math\.floor\(i \/ columns\)/);
+  assert.match(mcpSource, /Defaults to 5 \(10-job chunks render as 2 rows × 5 columns\)/);
   assert.match(mcpSource, /const generated = await runWithConcurrency\(chunkJobs, concurrency/);
   assert.match(mcpSource, /requestGeneratingFramesFocus\(args, frames\)/);
   assert.match(mcpSource, /applySelection: false,\s*applyViewport: true/);
   assert.match(mcpSource, /Defaults to true; set false only when the user asks to keep the current viewport/);
-  assert.match(appSource, /const rowsPerColumn = 5/);
-  assert.match(appSource, /Math\.floor\(\(i \+ 1\) \/ rowsPerColumn\)/);
+  assert.match(appSource, /const columnsPerRow = 5/);
+  assert.match(appSource, /Math\.floor\(\(i \+ 1\) \/ columnsPerRow\)/);
 });
 
 test("file and canvas attachments pin the original panel without duplicate open notifications", async () => {

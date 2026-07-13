@@ -71,8 +71,8 @@ AI holders are rectangle elements with:
 3. Prefer `generate_excalidraw_images_batch` for chat-driven generation, even
    for one image. It creates the `Generating...` frame first, focuses the
    viewport without selection handles, and replaces each frame as its result
-   arrives. The default layout fills downward: items 1-5 in column 1 and items
-   6-10 in column 2.
+   arrives. The default layout fills across: items 1-5 in row 1 and items 6-10
+   in row 2.
 
 ```json
 {
@@ -84,7 +84,7 @@ AI holders are rectangle elements with:
   "projectDir": "/absolute/path/to/user/codex-project",
   "anchorElementId": "<selected holder or source element id>",
   "placement": "right",
-  "columns": 2
+  "columns": 5
 }
 ```
 

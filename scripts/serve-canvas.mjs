@@ -11,6 +11,7 @@ import {
   createRemoteCanvasSession,
 } from "../lib/remoteCanvasRelayClient.mjs";
 import { handleTunnelAccess } from "../lib/canvasServerRuntime.mjs";
+import { createCanvasFileWatcher } from "../lib/canvasFileWatcher.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const argv = process.argv.slice(2);
@@ -206,7 +207,11 @@ process.env.EXCALIDRAW_HOST = host;
 const { canvasStoragePlugin } = await import("../vite.config.js");
 const middlewares = createMiddlewareStack();
 const server = createServer((req, res) => middlewares.handle(req, res));
-const watcher = { add() {}, on() {} };
+// The production/static server must observe MCP writes just like Vite's
+// watcher does. Without this adapter, canvas-changed SSE events never fire and
+// generated media appears only after a manual browser reload.
+const watcher = createCanvasFileWatcher();
+server.once("close", () => watcher.close());
 
 middlewares.use((req, res, next) => {
   if (handleTunnelAccess(req, res)) return;

@@ -5912,10 +5912,30 @@ export default function App() {
         // broadcast): if the content matches what we last synced, do nothing.
         const fingerprint = sceneFingerprint(normalizeScene(payload.scene))
         if (fingerprint === lastSyncedFingerprintRef.current && !shouldApplyFocus) return
+        // Lock out canvas persistence before hydrating a generated result.
+        // api.addFiles() can emit an onChange containing the still-visible
+        // Generating placeholder. Saving that stale callback would overwrite
+        // the freshly written MCP result a moment later, so the remote-apply
+        // guard must cover the entire hydration gap.
+        if (hasLocalChangesRef.current) return
+        window.clearTimeout(saveTimerRef.current)
+        saveTimerRef.current = null
+        applyingRemoteRef.current = true
         // 生成中フレームを置き換える結果画像は、シーン適用前にアセットを
         // Excalidraw本体へ注入しておく（灰色フレームを見せないため）。
         // その間はフレームがGenerating...表示のまま残る。
-        const resultFileIds = generatedResultFileIds(payload.scene, generatingFrameIdsRef.current)
+        // MCP-created placeholders carry codexGenerating in the previous disk
+        // scene but are not part of the local generatingFrameIds state. Include
+        // both sets so their replacement image is hydrated before the frame is
+        // removed; otherwise Excalidraw briefly shows its gray missing-image
+        // placeholder until a reload or background hydration finishes.
+        const remoteGeneratingFrameIds = new Set(
+          (latestSceneRef.current?.elements ?? [])
+            .filter((element) => isGeneratorFrame(element) && !element.isDeleted && element.customData?.codexGenerating === true)
+            .map((element) => element.id)
+        )
+        const resultAnchorIds = new Set([...generatingFrameIdsRef.current, ...remoteGeneratingFrameIds])
+        const resultFileIds = generatedResultFileIds(payload.scene, resultAnchorIds)
         if (resultFileIds.size > 0) {
           await prehydrateResultFiles(payload.scene, resultFileIds)
         }
@@ -5925,6 +5945,7 @@ export default function App() {
           focusElementIds
         })
       } catch (error) {
+        applyingRemoteRef.current = false
         console.error(error)
       }
     }
@@ -7756,20 +7777,20 @@ export default function App() {
     return promise
   }, [])
 
-  // 複数枚生成: 5行を先に埋める2列グリッドとしてGenerating...フレームを
-  // 複製する。6枚なら1列目に5枚、2列目の先頭に1枚となる。
+  // 複数枚生成: 5列を先に埋める2行グリッドとしてGenerating...フレームを
+  // 複製する。6枚なら1行目に5枚、2行目の先頭に1枚となる。
   // サーバーは各フレームを1枚ずつの結果で置き換える。
   const spawnExtraGeneratingFrames = useCallback((anchorElement, anchorId, count) => {
     if (!api || !anchorElement || count <= 0) return []
     const baseElements = api.getSceneElementsIncludingDeleted()
     const anchorLive = baseElements.find((element) => element.id === anchorId) ?? anchorElement
     const frameGap = 24
-    const rowsPerColumn = 5
+    const columnsPerRow = 5
     const clones = convertToExcalidrawElements(
       Array.from({ length: count }, (_, i) => ({
         type: 'rectangle',
-        x: Math.round(anchorLive.x + (anchorLive.width + frameGap) * Math.floor((i + 1) / rowsPerColumn)),
-        y: Math.round(anchorLive.y + (anchorLive.height + frameGap) * ((i + 1) % rowsPerColumn)),
+        x: Math.round(anchorLive.x + (anchorLive.width + frameGap) * ((i + 1) % columnsPerRow)),
+        y: Math.round(anchorLive.y + (anchorLive.height + frameGap) * Math.floor((i + 1) / columnsPerRow)),
         width: anchorLive.width,
         height: anchorLive.height,
         strokeColor: GENERATOR_FRAME_BORDER_COLOR,

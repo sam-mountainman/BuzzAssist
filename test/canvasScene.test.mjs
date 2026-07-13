@@ -49,7 +49,7 @@ test("writeCanvasFocusRequest stores a one-shot selection and viewport request",
   }
 });
 
-test("generator batches fill five rows before starting the second column", async () => {
+test("generator batches fill five columns before starting the second row", async () => {
   const projectDir = await mkdtemp(join(tmpdir(), "excalidraw-generator-grid-"));
   try {
     const results = await insertGeneratorFrameBatch({
@@ -59,18 +59,18 @@ test("generator batches fill five rows before starting the second column", async
         prompt: `image ${index + 1}`,
         aspectRatio: "1:1",
       })),
-      columns: 2,
+      columns: 5,
       gap: 24,
     });
 
     assert.equal(results.length, 6);
-    assert.deepEqual(results.slice(0, 5).map((result) => result.bounds.x), Array(5).fill(results[0].bounds.x));
     assert.deepEqual(
-      results.slice(0, 5).map((result) => result.bounds.y),
-      results.slice(0, 5).map((_, index) => results[0].bounds.y + index * (results[0].bounds.height + 24)),
+      results.slice(0, 5).map((result) => result.bounds.x),
+      results.slice(0, 5).map((_, index) => results[0].bounds.x + index * (results[0].bounds.width + 24)),
     );
-    assert.equal(results[5].bounds.y, results[0].bounds.y);
-    assert.equal(results[5].bounds.x, results[0].bounds.x + results[0].bounds.width + 24);
+    assert.deepEqual(results.slice(0, 5).map((result) => result.bounds.y), Array(5).fill(results[0].bounds.y));
+    assert.equal(results[5].bounds.x, results[0].bounds.x);
+    assert.equal(results[5].bounds.y, results[0].bounds.y + results[0].bounds.height + 24);
 
     const saved = JSON.parse(await readFile(join(projectDir, "canvas", "excalidraw-canvas.json"), "utf8"));
     const placeholders = saved.elements.filter((element) => element.customData?.codexGenerating === true);

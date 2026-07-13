@@ -68,7 +68,7 @@ BuzzAssist cloud models (`seedance-2`, `seedance-2-fast`, `kling-v3`, `kling-o3`
 2. Prefer `generate_excalidraw_videos_batch` for chat-driven generation, even
    for one video. It creates and focuses the `Generating...` frame before the
    slow generation starts, without showing selection handles. The default
-   layout fills items 1-5 down column 1 and items 6-10 down column 2.
+   layout fills items 1-5 across row 1 and items 6-10 across row 2.
 
 ```json
 {
@@ -82,7 +82,7 @@ BuzzAssist cloud models (`seedance-2`, `seedance-2-fast`, `kling-v3`, `kling-o3`
   "projectDir": "/absolute/path/to/user/codex-project",
   "anchorElementId": "<selected holder or source element id>",
   "placement": "right",
-  "columns": 2
+  "columns": 5
 }
 ```
 
