@@ -618,7 +618,7 @@ node scripts/setup-agents.mjs --agent cursor --project-dir <active-user-project-
 
 Configure Cursor only. Do not configure Codex, Claude Code, or Antigravity unless the user explicitly asks for those hosts too.
 
-After the script prints \`BUZZASSIST_CANVAS_URL=...\` and \`BUZZASSIST_CANVAS_CHECK=ok\`, open that URL in Cursor's in-app browser or browser preview if available. If browser control is unavailable, report the URL and say setup completed because the canvas check passed.
+After the script prints \`BUZZASSIST_CANVAS_URL=...\` and \`BUZZASSIST_CANVAS_CHECK=ok\`, first open that URL in Cursor's in-app browser or browser preview. Only if that capability is unavailable, use Chrome/the external-browser fallback.
 
 If the user wants phone/mobile access or the exact same Excalidraw UI outside this machine, run setup with \`--tunnel\` or run \`npm run tunnel:start -- --project-dir <active-user-project-dir>\`. The tunnel uses Cloudflare (\`cloudflared\`) by default — no account needed. If it is not installed, tell the user to install it with \`brew install cloudflared\` on macOS or \`winget install Cloudflare.cloudflared\` on Windows. Give the printed \`BUZZASSIST_TUNNEL_ACCESS_URL\` for the phone.
 `;
@@ -632,7 +632,7 @@ When the user gives this repository URL and asks to set it up, do the setup end 
 1. Clone or open this repository.
 2. Run \`node scripts/setup-agents.mjs --agent antigravity --project-dir <active-user-project-dir>\` from the repository root. If there is no separate active project, use this repository root as the project dir.
 3. The script must configure Antigravity only. Do not configure Codex, Claude Code, or Cursor unless the user explicitly asks for those hosts too.
-4. After the script prints \`BUZZASSIST_CANVAS_URL=...\` and \`BUZZASSIST_CANVAS_CHECK=ok\`, open that URL in Antigravity's in-app browser if available. If browser control is unavailable, report the URL and say that setup still completed because the canvas check passed.
+4. After the script prints \`BUZZASSIST_CANVAS_URL=...\` and \`BUZZASSIST_CANVAS_CHECK=ok\`, first open that URL in Antigravity's in-app browser. Only if that capability is unavailable, use Chrome/the external-browser fallback.
 5. If the user wants phone/mobile access or says they want the exact same Excalidraw UI outside the machine, use Canvas Tunnel: run setup with \`--tunnel\` or run \`npm run tunnel:start -- --project-dir <active-user-project-dir>\`. The tunnel uses Cloudflare (\`cloudflared\`) by default — no account needed. If it is not installed, tell the user to install it with \`brew install cloudflared\` on macOS or \`winget install Cloudflare.cloudflared\` on Windows. Give the printed \`BUZZASSIST_TUNNEL_ACCESS_URL\` for the phone.
 
 Manual fallback:
@@ -934,7 +934,7 @@ async function main() {
     console.log(`BUZZASSIST_CANVAS_CHECK=${canvasCheck?.ok ? "ok" : "needs-attention"}`);
     console.log(`BUZZASSIST_CANVAS_DISCOVERY=${join(canvasDir, ".server.json")}`);
     if (targetIncludesLocalBrowserHost()) {
-      console.log("For Codex, Claude Code, Cursor, or Antigravity, open BUZZASSIST_CANVAS_URL in the host in-app browser. Do not use the OS/default browser unless the user explicitly asks.");
+      console.log("For Codex, Claude Code, Cursor, or Antigravity, first open BUZZASSIST_CANVAS_URL in the host in-app browser. Only when that Browser capability is unavailable, use Chrome/the external-browser fallback.");
     }
   }
   if (tunnelStatus?.publicUrl) {

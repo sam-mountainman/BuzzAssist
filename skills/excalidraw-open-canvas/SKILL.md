@@ -35,11 +35,23 @@ node scripts/serve-canvas.mjs /path/to/current/user/project
 Run this from the BuzzAssist repository root. The same command works in macOS,
 Windows PowerShell, and Linux.
 
-4. Open the returned local URL in the current host's in-app browser when
-browser control is available. In Codex, use the in-app Browser tool. In Claude
-Code, use its browser tool if available. This is mandatory for both hosts when
-those tools are exposed: do not use the OS/default browser (`open`,
-`xdg-open`, etc.) as a substitute unless the user explicitly asks for it.
+4. First open the returned local URL in the current host's in-app browser. In
+Codex, use the in-app Browser tool. In Claude Code, use its browser tool. This
+is mandatory whenever that capability is exposed. Do not infer that it is
+unavailable merely because the canvas currently has zero connected clients.
+
+Only when the current host does not expose an in-app Browser capability, call
+the plugin tool again with the explicit external-browser fallback:
+
+```json
+{
+  "projectDir": "/absolute/path/to/current/user/project",
+  "openExternalBrowser": true
+}
+```
+
+This prefers Chrome/Chromium and falls back to the platform browser. Do not run
+`open`, `xdg-open`, or equivalent commands before trying the in-app Browser.
 
 The default URL is usually:
 
@@ -59,7 +71,8 @@ Canvas data is saved under:
 <current-project>/canvas/assets/
 ```
 
-If browser control is unavailable, treat the service start as successful and give the user the local URL.
+If browser control is unavailable and the explicit external fallback cannot be
+called, treat the service start as successful and give the user the local URL.
 
 ## Phone / Mobile Same-UI Access
 
@@ -84,8 +97,8 @@ npm run tunnel:start -- --project-dir /path/to/user/project --provider ngrok --n
 
 The tunnel prints a public URL and an Access URL. Give the Access URL to the
 user for the phone. Continue to open the local `BUZZASSIST_CANVAS_URL` in the
-current host's in-app browser for desktop work. Do not use the OS/default
-browser unless the user explicitly asks.
+current host's in-app browser for desktop work. Use the external-browser
+fallback only when that in-app capability is unavailable.
 
 Stop the tunnel when finished:
 
