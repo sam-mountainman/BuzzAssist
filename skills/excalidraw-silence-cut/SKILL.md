@@ -9,6 +9,11 @@ Use this skill when the user wants a silence-cut edit plan. The output is **Prem
 
 ## Preconditions
 
+- Resolve the current Codex/Claude Code task's workspace root and pass it as
+  `projectDir` to every BuzzAssist tool call. Never write into the plugin cache,
+  BuzzAssist source repository, or a project remembered at install time. Call
+  `open_buzzassist_canvas({ projectDir })` first when the current project's
+  canvas is not open.
 - `ffmpeg` and `ffprobe` must be available on PATH (or set `FFMPEG_PATH` / `FFPROBE_PATH`).
 - Default/recommended model is `elevenlabs-scribe-v2` via BuzzAssist login. Use `ffmpeg-local` only when the user wants a fully local/offline threshold cut.
 

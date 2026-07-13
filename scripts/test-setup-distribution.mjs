@@ -115,6 +115,17 @@ async function runHostSetup(host) {
     assert.equal(local.env.EXCALIDRAW_PROJECT_DIR, projectDir);
     assert.equal(local.env.EXCALIDRAW_CANVAS_DIR, path.join(projectDir, "canvas"));
     assert.equal(local.command, process.execPath);
+    assert.match(local.note, /setup fallback/);
+    const installedServer = await readFile(path.join(pluginRoot, "mcp", "server.mjs"), "utf8");
+    const installedOpenSkill = await readFile(path.join(pluginRoot, "skills", "excalidraw-open-canvas", "SKILL.md"), "utf8");
+    const installedViteConfig = await readFile(path.join(pluginRoot, "vite.config.js"), "utf8");
+    assert.match(installedServer, /open_buzzassist_canvas/);
+    assert.match(installedServer, /server\.listRoots/);
+    assert.match(installedOpenSkill, /current workspace\/project root/);
+    assert.match(installedOpenSkill, /<current-project>\/canvas\/assets/);
+    assert.match(installedViteConfig, /\/api\/assets\/open-folder/);
+    await readFile(path.join(pluginRoot, "lib", "projectContext.mjs"), "utf8");
+    await readFile(path.join(pluginRoot, "lib", "openLocalFolder.mjs"), "utf8");
     assert.equal(JSON.parse(await readFile(statePath, "utf8")).installed, true);
   } finally {
     await rm(tempRoot, { recursive: true, force: true });

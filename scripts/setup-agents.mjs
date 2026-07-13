@@ -7,6 +7,10 @@ import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { resolveCodexCommand } from "./codex-image-bridge.mjs";
 import {
+  isCompatibleCanvasServerStatus,
+  terminateDiscoveredCanvasServer,
+} from "../lib/canvasServerRuntime.mjs";
+import {
   SUPPORTED_SETUP_AGENTS,
   assertSupportedNodeVersion,
   claudeDesktopConfigPathForPlatform,
@@ -370,7 +374,7 @@ async function refreshManagedPluginSource() {
       },
       buzzassist_mcp: {
         title: "BuzzAssist Local Canvas MCP",
-        description: "Start and control the project-local BuzzAssist Excalidraw canvas.",
+        description: "Start and control the current host workspace's project-local BuzzAssist Excalidraw canvas.",
         command: process.execPath,
         args: [join(managedPluginRoot, "scripts", "start-mcp.mjs")],
         cwd: managedPluginRoot,
@@ -380,7 +384,7 @@ async function refreshManagedPluginSource() {
           EXCALIDRAW_PROJECT_DIR: projectDir,
           EXCALIDRAW_CANVAS_DIR: canvasDir,
         },
-        note: "Primary local MCP server. It auto-starts the local canvas server and writes canvas/.server.json with the local canvas URL.",
+        note: "Primary local MCP server. EXCALIDRAW_PROJECT_DIR is only the setup fallback: tool calls resolve the current host workspace and use <current-project>/canvas. The server writes that project's canvas/.server.json with its dynamic local URL.",
       },
     },
   });
@@ -745,6 +749,20 @@ async function isReachable(url) {
   }
 }
 
+async function readCanvasRuntimeStatus(discovery) {
+  if (!discovery?.url) return null;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1500);
+  try {
+    const response = await fetch(new URL('/api/canvas-clients', discovery.url), { signal: controller.signal });
+    return response.ok ? await response.json() : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function verifyCanvasDiscovery(discovery) {
   if (!discovery?.url) return { ok: false, checks: [] };
   const checks = [
@@ -761,9 +779,21 @@ async function launchCanvasServer() {
   await mkdir(canvasDir, { recursive: true });
 
   const existing = await readDiscovery();
-  if (existing?.url && (await isReachable(existing.url))) {
+  const existingStatus = await readCanvasRuntimeStatus(existing);
+  if (
+    existing?.url &&
+    (await isReachable(existing.url)) &&
+    isCompatibleCanvasServerStatus(existingStatus, { canvasDir })
+  ) {
     console.log(`Using existing canvas server: ${existing.url}`);
     return existing;
+  }
+  if (existingStatus) {
+    const stopped = terminateDiscoveredCanvasServer(existing, { expectedCanvasDir: canvasDir });
+    if (stopped) {
+      console.log(`Restarting outdated canvas server: ${existing.url}`);
+      await sleep(350);
+    }
   }
 
   const command = process.execPath;
@@ -795,7 +825,12 @@ async function launchCanvasServer() {
   for (let attempt = 0; attempt < 45; attempt += 1) {
     await sleep(1000);
     const discovery = await readDiscovery();
-    if (discovery?.url && (await isReachable(discovery.url))) {
+    const runtimeStatus = await readCanvasRuntimeStatus(discovery);
+    if (
+      discovery?.url &&
+      (await isReachable(discovery.url)) &&
+      isCompatibleCanvasServerStatus(runtimeStatus, { canvasDir })
+    ) {
       console.log(`Started canvas server: ${discovery.url}`);
       return discovery;
     }

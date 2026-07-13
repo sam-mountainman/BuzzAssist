@@ -9,6 +9,14 @@ Use this skill when the user wants an image placed onto the BuzzAssist canvas.
 
 ## Preconditions
 
+Resolve the current Codex/Claude Code task's workspace root before calling any
+BuzzAssist tool. Pass that absolute path as `projectDir` on every selection,
+generation, batch, and insertion call. Never use the plugin cache, BuzzAssist
+source repository, or the project remembered at install time as a substitute.
+If the current project's canvas is not open yet, call
+`open_buzzassist_canvas({ projectDir })` first and open its returned `canvasUrl`
+in the host's in-app browser.
+
 The Excalidraw service should be running for the active project. The default
 URL is usually:
 
@@ -35,7 +43,7 @@ AI holders are rectangle elements with:
 - モデル（GPT-Image-2.0 / Grok Imagine / NanoBanana 2 / Seedream v5 Lite / Midjourney …）
 - 実行先（同じモデルが複数の実行先を持つ場合だけ。例: GPT Image 2 → Codex / Lovart / BuzzAssist、Nano Banana 2 → Lovart / BuzzAssist、Grok Imagine → Grok / BuzzAssist。LovartはBuzzAssistより上に表示して優先）
 - アスペクト比（共通候補は 1:1 / 9:16 / 16:9。その他は自由入力欄でモデル対応値のみ受け付ける）
-- モデルが対応する場合だけ、品質・解像度・枚数を確認する。選択肢が1つしかない項目は聞かない
+- モデルが対応する場合だけ、品質・解像度・枚数を確認する。GPT-Image-2.0の実行先がChatGPT（Codex）の場合と、Grok Imagineの実行先がGrokの場合は1〜10枚。各画像は独立生成として最大10件を並列実行する。選択肢が1つしかない項目は聞かない
 - 推奨デフォルト: GPT-Image-2.0 (Codex)・1:1・Auto — 選択肢には（推奨）を付ける
 
 確認できたら `confirmedSettings: true` を付けて呼び出します。
@@ -64,7 +72,8 @@ AI holders are rectangle elements with:
 
 ## Workflow
 
-1. Read the selection with the plugin `get_excalidraw_selection` tool.
+1. Read the selection with the plugin `get_excalidraw_selection` tool, passing
+   the current task's absolute `projectDir`.
 
 2. If exactly one selected element is an AI holder, use its `width` and `height` as the target generation and display size.
 
@@ -90,8 +99,23 @@ AI holders are rectangle elements with:
 
 Use `"model": "grok-imagine-image-hermes"` when the user requests Grok Imagine(Grok).
 
+GPT-Image-2.0をChatGPT（Codex）で、またはGrok ImagineをGrokで複数枚生成する場合は、回答された枚数ぶん同じ設定の`jobs`を作り、`generate_excalidraw_images_batch`を1回呼びます。1つのjobへ枚数だけを渡してはいけません。先に全`Generating...`フレームを2行×5列（1〜5枚目が1行目、6〜10枚目が2行目）で表示し、最大10件を並列生成するためです。
+
+```json
+{
+  "jobs": [
+    { "prompt": "<user prompt>", "model": "gpt-image-2-codex", "aspectRatio": "1:1" },
+    { "prompt": "<user prompt>", "model": "gpt-image-2-codex", "aspectRatio": "1:1" }
+  ],
+  "columns": 5,
+  "concurrency": 10,
+  "confirmedSettings": true
+}
+```
+
 `generate_excalidraw_image` follows the same placeholder behavior and is a
-valid convenience tool for a single result.
+valid convenience tool for one result. On the ChatGPT/Codex and local Grok
+routes it also accepts `imageCount: 1..10` and expands that count into the same batch flow.
 
 4. If the user supplies an existing image path, insert it with the plugin `insert_excalidraw_image` tool:
 

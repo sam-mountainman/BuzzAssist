@@ -29,6 +29,7 @@ const GENERATE_SUBTITLES_ENDPOINT = '/api/generate/subtitles'
 const SILENCE_CUT_ENDPOINT = '/api/video/silence-cut'
 const GENERATION_CAPABILITIES_ENDPOINT = '/api/generation-capabilities'
 const ASSET_UPLOAD_ENDPOINT = '/api/assets/upload'
+const ASSET_FOLDER_OPEN_ENDPOINT = '/api/assets/open-folder'
 const SELECTION_ENDPOINT = '/api/selection'
 const VIEW_STATE_ENDPOINT = '/api/view-state'
 const AI_HOLDER_KEY = 'codexAiImageHolder'
@@ -48,6 +49,9 @@ const GENERATOR_PANEL_IMAGE_MIN_WIDTH = 420
 const GENERATOR_PANEL_IMAGE_MAX_WIDTH = 560
 const GENERATOR_PANEL_VIDEO_WIDTH = 580
 const GENERATOR_SCROLL_ANIMATION_MS = 600
+const GENERATOR_FOCUS_VIEWPORT_PADDING = 16
+const GENERATOR_FOCUS_RAIL_GAP = 20
+const GENERATOR_FOCUS_ZOOM_FACTOR = 0.94
 const SAVE_DELAY_MS = 450
 const SELECTION_DELAY_MS = 180
 const CANVAS_ASSETS_ROUTE = '/excalidraw-assets/'
@@ -253,6 +257,7 @@ const DEFAULT_FRAME_FORM = {
   quality: 'auto',
   imageSize: '1K',
   imageCount: 1,
+  videoCount: 1,
   imageVersion: '',
   imageDetailRendering: false,
   duration: '6',
@@ -492,9 +497,23 @@ function getAvailableImageAspectRatios(model) {
   return isGrokImageModel(model) ? Object.keys(GROK_IMAGE_ASPECT_RATIO_OPTIONS) : Object.keys(IMAGE_ASPECTS)
 }
 
-// 複数枚生成の上限（Lovartルートのみ。1なら枚数UI非表示）。
+const MAX_CHATGPT_IMAGE_COUNT = 10
+const MAX_GROK_GENERATION_COUNT = 10
+
+// 複数生成の上限。ChatGPT画像とローカルGrokは独立ジョブを最大10件並列実行する。
 function getMaxImageCount(model) {
+  if (resolveGatingImageModel(model) === 'gpt-image-2-codex') return MAX_CHATGPT_IMAGE_COUNT
+  if (resolveGatingImageModel(model) === 'grok-imagine-image-hermes') return MAX_GROK_GENERATION_COUNT
   return getLovartImageSettings(model)?.maxImages ?? 1
+}
+
+function getMaxVideoCount(model) {
+  return resolveGatingVideoModel(model) === 'grok-imagine-video-hermes' ? MAX_GROK_GENERATION_COUNT : 1
+}
+
+function usesIndependentImageCount(model) {
+  const id = resolveGatingImageModel(model)
+  return id === 'gpt-image-2-codex' || id === 'grok-imagine-image-hermes'
 }
 
 // Midjourneyのモデルバージョン選択（v8.1/v7/niji/niji7）。他モデルはnull。
@@ -871,6 +890,15 @@ async function downloadAssetsViaServerDialog(assets = []) {
   return saveDownloadAssetsWithPicker(assets)
 }
 
+async function openCanvasAssetsFolder() {
+  const response = await canvasFetch(ASSET_FOLDER_OPEN_ENDPOINT, { method: 'POST' })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.error || `assetsフォルダーを開けませんでした (${response.status})`)
+  }
+  return payload
+}
+
 async function createAgentAttachmentBundle(assets = []) {
   const items = uniqueDownloadAssets(assets)
   if (items.length === 0) throw new Error('添付できるアセットがありません。')
@@ -1213,6 +1241,16 @@ function SilenceCutGeneratorToolIcon() {
         <path d="M8.6 15.4l10.4 -10.4" />
       </svg>
     </span>
+  )
+}
+
+function AssetsFolderToolIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+      <path d="M12 12h6" />
+      <path d="M15 9l3 3l-3 3" />
+    </svg>
   )
 }
 
@@ -2256,6 +2294,65 @@ function viewportSize(appState) {
   }
 }
 
+function visibleElementRect(element) {
+  if (!(element instanceof Element)) return null
+  const rect = element.getBoundingClientRect()
+  return rect.width > 0 && rect.height > 0 ? rect : null
+}
+
+// Excalidraw's imperative scrollToContent API does not automatically include
+// editor UI offsets. Reserve both its native chrome and BuzzAssist's custom
+// left rail so a 2 x 5 generation grid is fitted into the actually visible
+// canvas instead of being centered underneath the rail.
+function buzzAssistCanvasFocusOffsets() {
+  if (typeof document === 'undefined') {
+    return {
+      top: GENERATOR_FOCUS_VIEWPORT_PADDING,
+      right: GENERATOR_FOCUS_VIEWPORT_PADDING,
+      bottom: GENERATOR_FOCUS_VIEWPORT_PADDING,
+      left: GENERATOR_FOCUS_VIEWPORT_PADDING
+    }
+  }
+
+  const root = document.querySelector('.lovart-ai-root')
+  const rootRect = visibleElementRect(root) ?? {
+    top: 0,
+    right: window.innerWidth,
+    bottom: window.innerHeight,
+    left: 0
+  }
+  const toolbarRect = visibleElementRect(root?.querySelector('.excalidraw .App-toolbar'))
+  const nativeLeftPanelRect = visibleElementRect(root?.querySelector('.excalidraw .App-menu__left'))
+  const nativeRightSidebarRect = visibleElementRect(root?.querySelector('.excalidraw .sidebar'))
+  const buzzAssistRailRect = visibleElementRect(root?.querySelector('.lovart-ai-rail'))
+  const padding = GENERATOR_FOCUS_VIEWPORT_PADDING
+
+  return {
+    top: Math.max(padding, toolbarRect ? toolbarRect.bottom - rootRect.top + padding : padding),
+    right: Math.max(
+      padding,
+      nativeRightSidebarRect ? rootRect.right - nativeRightSidebarRect.left + padding : padding
+    ),
+    bottom: padding,
+    left: Math.max(
+      padding,
+      nativeLeftPanelRect ? nativeLeftPanelRect.right - rootRect.left + padding : padding,
+      buzzAssistRailRect ? buzzAssistRailRect.right - rootRect.left + GENERATOR_FOCUS_RAIL_GAP : padding
+    )
+  }
+}
+
+function focusCanvasElementsWithSafeArea(api, elements = []) {
+  if (!api || elements.length === 0) return
+  api.scrollToContent(elements, {
+    fitToContent: true,
+    animate: true,
+    duration: GENERATOR_SCROLL_ANIMATION_MS,
+    viewportZoomFactor: GENERATOR_FOCUS_ZOOM_FACTOR,
+    canvasOffsets: buzzAssistCanvasFocusOffsets()
+  })
+}
+
 function viewportCenter(appState) {
   const zoom = appState.zoom?.value || 1
   const { width, height } = viewportSize(appState)
@@ -3235,7 +3332,8 @@ function frameFormFromElement(element) {
     videoAspectRatio: customData.videoAspectRatio || customData.codexGenerationAspectRatio || DEFAULT_FRAME_FORM.videoAspectRatio,
     quality: customData.generatorImageQuality || customData.codexGenerationQuality || DEFAULT_FRAME_FORM.quality,
     imageSize: customData.generatorImageSize || DEFAULT_FRAME_FORM.imageSize,
-    imageCount: clamp(Math.round(finiteNumberOr(customData.generatorImageCount, DEFAULT_FRAME_FORM.imageCount)), 1, 6),
+    imageCount: clamp(Math.round(finiteNumberOr(customData.generatorImageCount, DEFAULT_FRAME_FORM.imageCount)), 1, MAX_CHATGPT_IMAGE_COUNT),
+    videoCount: clamp(Math.round(finiteNumberOr(customData.generatorVideoCount, DEFAULT_FRAME_FORM.videoCount)), 1, MAX_GROK_GENERATION_COUNT),
     imageVersion: typeof customData.generatorImageVersion === 'string' ? customData.generatorImageVersion : DEFAULT_FRAME_FORM.imageVersion,
     imageDetailRendering: customData.generatorImageDetailRendering === true,
     duration: videoDuration,
@@ -3343,6 +3441,7 @@ function frameCustomDataFromForm(kind, form) {
         videoAspectRatio: form.videoAspectRatio,
         videoDuration: form.duration,
         videoResolution: form.resolution,
+        generatorVideoCount: form.videoCount || 1,
         videoTab: form.videoTab,
         videoStartFrameAsset: normalizeAssetList(form.videoStartFrame ? [form.videoStartFrame] : [])[0] ?? null,
         videoEndFrameAsset: normalizeAssetList(form.videoEndFrame ? [form.videoEndFrame] : [])[0] ?? null,
@@ -5837,10 +5936,7 @@ export default function App() {
           captureUpdate: CaptureUpdateAction.NEVER
         })
         if (shouldApplyViewport && focusedElements.length > 0) {
-          api.scrollToContent(focusedElements, {
-            fitToContent: true,
-            animate: false
-          })
+          focusCanvasElementsWithSafeArea(api, focusedElements)
         }
         window.setTimeout(() => {
           applyingRemoteRef.current = false
@@ -7786,7 +7882,14 @@ export default function App() {
         strokeStyle: 'solid',
         strokeWidth: GENERATOR_FRAME_STROKE_WIDTH,
         roughness: 0,
-        customData: { ...(anchorLive.customData ?? {}), role: 'frame' }
+        customData: {
+          ...(anchorLive.customData ?? {}),
+          role: 'frame',
+          // Persist the loading state just like chat/MCP-created frames. A
+          // canvas SSE refresh must not collapse a multi-job batch back to the
+          // first frame while the remaining jobs are still running.
+          codexGenerating: true
+        }
       })),
       { regenerateIds: true }
     )
@@ -7797,6 +7900,13 @@ export default function App() {
       cloneElements.push(nextClone)
       elementsWithClones = [...elementsWithClones, nextClone]
     }
+    // onChange also contains a convenience path that detects user-pasted
+    // generator frames and moves them beside the nearest frame. Register the
+    // whole batch before updateScene so these programmatic 2 x 5 placeholders
+    // are not mistaken for a manual paste and shifted a second time.
+    previousGeneratorFrameIdsRef.current = new Set(
+      elementsWithClones.filter(isGeneratorFrame).map((element) => element.id)
+    )
     suppressNextChangeRef.current = true
     api.updateScene({ elements: elementsWithClones, captureUpdate: CaptureUpdateAction.NEVER })
     const sceneWithClones = createScene(elementsWithClones, api.getAppState(), api.getFiles())
@@ -7806,6 +7916,56 @@ export default function App() {
     setGeneratingFrameIds((current) => new Set([...current, ...ids]))
     return ids
   }, [api, refreshOverlayStates])
+
+  const setGeneratorFramesRemoteGenerating = useCallback((elementIds = [], isGenerating = true) => {
+    if (!api) return
+    const requestedIds = new Set(elementIds.filter(Boolean))
+    if (requestedIds.size === 0) return
+    let changed = false
+    const now = Date.now()
+    const nextElements = api.getSceneElementsIncludingDeleted().map((element) => {
+      if (!requestedIds.has(element.id) || !isGeneratorFrame(element) || element.isDeleted) return element
+      const currentlyGenerating = element.customData?.codexGenerating === true
+      if (currentlyGenerating === isGenerating) return element
+      changed = true
+      const customData = isGenerating
+        ? { ...(element.customData ?? {}), codexGenerating: true }
+        : (() => {
+            const rest = { ...(element.customData ?? {}) }
+            delete rest.codexGenerating
+            return rest
+          })()
+      return {
+        ...element,
+        customData,
+        version: (Number(element.version) || 1) + 1,
+        versionNonce: Math.floor(Math.random() * 2 ** 31),
+        updated: now
+      }
+    })
+    if (!changed) return
+    suppressNextChangeRef.current = true
+    api.updateScene({ elements: nextElements, captureUpdate: CaptureUpdateAction.NEVER })
+    const nextScene = createScene(nextElements, api.getAppState(), api.getFiles())
+    latestSceneRef.current = nextScene
+    refreshOverlayStates(nextScene)
+  }, [api, refreshOverlayStates])
+
+  // Match the chat/MCP generation path: fit the complete Generating... grid
+  // into the viewport without selecting it, so no resize/rotation handles are
+  // shown while the jobs are running.
+  const focusGeneratingFrameGrid = useCallback((elementIds = []) => {
+    if (!api) return
+    const requestedIds = new Set(elementIds.filter(Boolean))
+    if (requestedIds.size === 0) return
+    window.requestAnimationFrame(() => {
+      const frames = api
+        .getSceneElements()
+        .filter((element) => requestedIds.has(element.id) && !element.isDeleted)
+      if (frames.length === 0) return
+      focusCanvasElementsWithSafeArea(api, frames)
+    })
+  }, [api])
 
   const runFrameGeneration = useCallback(async () => {
     if (!api) return
@@ -7888,14 +8048,18 @@ export default function App() {
     // overlay in the same paint as Generating.... Leaving this until after
     // preflight made the outer frame linger intermittently.
     applyTransientSelection({})
-    // 複数枚指定は送信と同時に（プリフライトを待たずに）Generating...フレーム
+    setGeneratorFramesRemoteGenerating([optimisticGenerationId], true)
+    // 複数指定は送信と同時に（プリフライトを待たずに）Generating...フレーム
     // を右へ並べる。再生成時は新フレーム作成後に並べる。
-    const requestedImageCount = kind === 'image'
+    const requestedGenerationCount = kind === 'image'
       ? Math.min(Number(savedForm.imageCount) || 1, getMaxImageCount(savedForm.imageModel))
-      : 1
+      : Math.min(Number(savedForm.videoCount) || 1, getMaxVideoCount(savedForm.videoModel))
     let extraFrameIds = []
-    if (!isRegeneratingResult && requestedImageCount > 1) {
-      extraFrameIds = spawnExtraGeneratingFrames(anchorElement, anchorElementId, requestedImageCount - 1)
+    if (!isRegeneratingResult && requestedGenerationCount > 1) {
+      extraFrameIds = spawnExtraGeneratingFrames(anchorElement, anchorElementId, requestedGenerationCount - 1)
+    }
+    if (!isRegeneratingResult) {
+      focusGeneratingFrameGrid([anchorElementId, ...extraFrameIds])
     }
     const clearOptimisticGeneration = () => {
       setGeneratingFrameIds((current) => {
@@ -7915,6 +8079,7 @@ export default function App() {
         refreshOverlayStates(cleanedScene)
         extraFrameIds = []
       }
+      setGeneratorFramesRemoteGenerating([optimisticGenerationId], false)
       applyTransientSelection(originalSelectedElementIds)
     }
     if (generationRouteId === 'hermes' && !(await refreshHermesStatus())) {
@@ -7949,6 +8114,7 @@ export default function App() {
         next.add(retryFrameId)
         return next
       })
+      setGeneratorFramesRemoteGenerating([retryFrameId], true)
     }
 
     if (!isRegeneratingResult) updateActiveFrameElement(savedForm)
@@ -7959,9 +8125,12 @@ export default function App() {
 
     let keepGeneratingFrame = false
 
-    // 複数枚指定の再生成では、新しいフレームの右にクローンを並べる。
-    if (requestedImageCount > 1 && extraFrameIds.length === 0) {
-      extraFrameIds = spawnExtraGeneratingFrames(generationAnchorElement, generationAnchorId, requestedImageCount - 1)
+    // 複数指定の再生成では、新しいフレームの右にクローンを並べる。
+    if (requestedGenerationCount > 1 && extraFrameIds.length === 0) {
+      extraFrameIds = spawnExtraGeneratingFrames(generationAnchorElement, generationAnchorId, requestedGenerationCount - 1)
+    }
+    if (isRegeneratingResult) {
+      focusGeneratingFrameGrid([generationAnchorId, ...extraFrameIds])
     }
 
     try {
@@ -7976,6 +8145,8 @@ export default function App() {
               // Models without an aspect parameter (e.g. Hailuo) get no hint.
               aspectRatio: getVideoAspectRatioOptions(savedForm.videoModel).length > 0 ? savedForm.videoAspectRatio : undefined,
               duration: savedForm.duration,
+              videoCount: requestedGenerationCount,
+              extraAnchorElementIds: extraFrameIds,
               resolution: getVideoResolutionOptions(savedForm.videoModel).length > 0 ? savedForm.resolution : undefined,
               mode: normalizeVideoModeForContext(savedForm.videoModel, savedForm.videoTab, savedForm.videoMode),
               useReference: savedForm.videoTab === 'reference',
@@ -8022,7 +8193,7 @@ export default function App() {
               aspectRatio: savedForm.aspectRatio,
               quality: savedForm.quality,
               imageSize: savedForm.imageSize,
-              imageCount: requestedImageCount,
+              imageCount: requestedGenerationCount,
               extraAnchorElementIds: extraFrameIds,
               modelVersion: getImageVersionOptions(savedForm.imageModel)?.includes(savedForm.imageVersion) ? savedForm.imageVersion : undefined,
               detailRendering: supportsDetailRendering(savedForm.imageModel) && savedForm.imageDetailRendering === true,
@@ -8065,8 +8236,14 @@ export default function App() {
             for (const extraId of extraFrameIds) next.delete(extraId)
             return next
           })
+          setGeneratorFramesRemoteGenerating([generationAnchorId, ...extraFrameIds], false)
         }, 10 * 60 * 1000)
         return
+      }
+      if (Array.isArray(payload.generationErrors) && payload.generationErrors.length > 0) {
+        setGenerationError(
+          `${requestedGenerationCount}件中${payload.generationErrors.length}件を生成できませんでした。成功した結果はキャンバスに反映しました。`
+        )
       }
       const canvasResponse = await canvasFetch(CANVAS_ENDPOINT)
       if (canvasResponse.ok) {
@@ -8099,6 +8276,7 @@ export default function App() {
       }
     } catch (error) {
       setGenerationError(error.message)
+      setGeneratorFramesRemoteGenerating([generationAnchorId], false)
       if (api) {
         const currentElements = api.getSceneElementsIncludingDeleted()
         let nextElements = currentElements
@@ -8157,7 +8335,7 @@ export default function App() {
         })
       }
     }
-  }, [api, applyRemoteScene, ensureBuzzAssistLoggedIn, frameForm, generatingFrameIds, insertGeneratorFrame, prehydrateResultFiles, refreshHermesStatus, refreshOverlayStates, saveCanvas, scheduleCanvasSave, scheduleSelectionSave, selectedGeneratedResult, spawnExtraGeneratingFrames, updateActiveFrameElement])
+  }, [api, applyRemoteScene, ensureBuzzAssistLoggedIn, focusGeneratingFrameGrid, frameForm, generatingFrameIds, insertGeneratorFrame, prehydrateResultFiles, refreshHermesStatus, refreshOverlayStates, saveCanvas, scheduleCanvasSave, scheduleSelectionSave, selectedGeneratedResult, setGeneratorFramesRemoteGenerating, spawnExtraGeneratingFrames, updateActiveFrameElement])
 
   // Generation for utility frames. SRT replaces the frame with an SRT card;
   // silence cut keeps the frame selected and downloads a Premiere XML.
@@ -8578,6 +8756,7 @@ export default function App() {
         videoTab: nextTab,
         videoMode: normalizeVideoModeForContext(concreteId, nextTab, frameForm.videoMode),
         duration: normalizeVideoDurationForModel(concreteId, frameForm.duration),
+        videoCount: Math.min(Number(frameForm.videoCount) || 1, getMaxVideoCount(concreteId)),
         videoAspectRatio: normalizeVideoAspectRatioForModel(concreteId, frameForm.videoAspectRatio),
         ...(nextResolutions.length > 0 && !nextResolutions.includes(frameForm.resolution)
           ? { resolution: nextResolutions.includes('720p') ? '720p' : nextResolutions[0] }
@@ -8975,6 +9154,37 @@ export default function App() {
           >
             <SrtGeneratorToolIcon />
           </button>
+          {!isTunnelCanvasRuntime() ? (
+            <>
+              <div className="lovart-ai-sep" aria-hidden="true" />
+              <button
+                type="button"
+                className="lovart-ai-button"
+                aria-label="生成物フォルダーを開く"
+                data-lovart-tooltip="生成物フォルダーを開く"
+                data-lovart-action="open-assets-folder"
+                onPointerDown={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  // Launch on press rather than waiting for pointer-up/click.
+                  // The local endpoint responds in a few milliseconds, but
+                  // click waits for the full gesture and made Finder/Explorer
+                  // feel noticeably delayed.
+                  openCanvasAssetsFolder().catch((error) => console.warn(error))
+                }}
+                onClick={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  // Keyboard activation has no preceding pointerdown.
+                  if (event.detail === 0) {
+                    openCanvasAssetsFolder().catch((error) => console.warn(error))
+                  }
+                }}
+              >
+                <AssetsFolderToolIcon />
+              </button>
+            </>
+          ) : null}
         </div>
       ) : null}
 
@@ -10022,19 +10232,46 @@ export default function App() {
                         ) : null}
                         {maxCount > 1 ? (
                           <>
-                            <div className="lovart-menu-header">枚数</div>
-                            <div className="lovart-menu-grid count">
-                              {Array.from({ length: maxCount }, (_, i) => i + 1).map((count) => (
-                                <button
-                                  type="button"
-                                  key={count}
-                                  className={activeCount === count ? 'is-selected' : ''}
-                                  onClick={() => updateFrameForm('imageCount', count)}
-                                >
-                                  <span>{count}</span>
-                                </button>
-                              ))}
-                            </div>
+                            {usesIndependentImageCount(imageModel) ? (
+                              <>
+                                <div className="lovart-setting-row">
+                                  <div className="lovart-menu-header">枚数</div>
+                                  <span>{activeCount}枚</span>
+                                </div>
+                                <input
+                                  type="range"
+                                  min="1"
+                                  max={maxCount}
+                                  step="1"
+                                  className="lovart-duration-slider"
+                                  value={activeCount}
+                                  aria-label="生成枚数"
+                                  style={{
+                                    background: (() => {
+                                      const pct = ((activeCount - 1) / Math.max(1, maxCount - 1)) * 100
+                                      return `linear-gradient(to right, #7c3aed 0%, #7c3aed ${pct}%, #e0e0e0 ${pct}%, #e0e0e0 100%)`
+                                    })()
+                                  }}
+                                  onChange={(event) => updateFrameForm('imageCount', Number(event.target.value))}
+                                />
+                              </>
+                            ) : (
+                              <>
+                                <div className="lovart-menu-header">枚数</div>
+                                <div className="lovart-menu-grid count">
+                                  {Array.from({ length: maxCount }, (_, i) => i + 1).map((count) => (
+                                    <button
+                                      type="button"
+                                      key={count}
+                                      className={activeCount === count ? 'is-selected' : ''}
+                                      onClick={() => updateFrameForm('imageCount', count)}
+                                    >
+                                      <span>{count}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              </>
+                            )}
                           </>
                         ) : null}
                       </div>
@@ -10106,7 +10343,9 @@ export default function App() {
                         const hasAspect = getVideoAspectRatioOptions(frameForm.videoModel).length > 0
                         const aspect = hasAspect ? `${frameForm.videoAspectRatio === 'auto' ? 'Auto' : frameForm.videoAspectRatio}・` : ''
                         const resolution = supportsResolutionSelection(frameForm.videoModel) ? `・${frameForm.resolution}` : ''
-                        return `${modePrefix}${aspect}${frameForm.duration}s${resolution}`
+                        const count = Math.min(Number(frameForm.videoCount) || 1, getMaxVideoCount(frameForm.videoModel))
+                        const countSuffix = getMaxVideoCount(frameForm.videoModel) > 1 ? `・${count}本` : ''
+                        return `${modePrefix}${aspect}${frameForm.duration}s${resolution}${countSuffix}`
                       })()}
                     </span>
                     <ChevronIcon />
@@ -10189,6 +10428,32 @@ export default function App() {
                           onChange={(event) => updateFrameForm('duration', event.target.value)}
                         />
                       )}
+                      {getMaxVideoCount(frameForm.videoModel) > 1 ? (() => {
+                        const maxCount = getMaxVideoCount(frameForm.videoModel)
+                        const activeCount = Math.min(Number(frameForm.videoCount) || 1, maxCount)
+                        const pct = ((activeCount - 1) / Math.max(1, maxCount - 1)) * 100
+                        return (
+                          <>
+                            <div className="lovart-setting-row">
+                              <div className="lovart-menu-header">本数</div>
+                              <span>{activeCount}本</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="1"
+                              max={maxCount}
+                              step="1"
+                              className="lovart-duration-slider"
+                              value={activeCount}
+                              aria-label="生成本数"
+                              style={{
+                                background: `linear-gradient(to right, #7c3aed 0%, #7c3aed ${pct}%, #e0e0e0 ${pct}%, #e0e0e0 100%)`
+                              }}
+                              onChange={(event) => updateFrameForm('videoCount', Number(event.target.value))}
+                            />
+                          </>
+                        )
+                      })() : null}
                       {supportsResolutionSelection(frameForm.videoModel) ? (
                         <>
                           <div className="lovart-menu-header">Quality</div>

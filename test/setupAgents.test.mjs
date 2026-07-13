@@ -59,6 +59,24 @@ test("repository instructions bind Codex and Claude Code to their own setup targ
   assert.doesNotMatch(claude, /setup-agents\.mjs --agent codex --project-dir/);
   assert.match(readme, /https:\/\/github\.com\/sam-mountainman\/BuzzAssist/);
   assert.match(readme, /macOS でも Windows でも使えます/);
+  assert.match(readme, /<現在のプロジェクト>\/canvas\/assets/);
+  assert.match(readme, /open_buzzassist_canvas/);
+});
+
+test("all canvas skills bind tool calls to the current host project", async () => {
+  const skillNames = [
+    "excalidraw-open-canvas",
+    "excalidraw-image-gen",
+    "excalidraw-video-gen",
+    "excalidraw-subtitle-gen",
+    "excalidraw-silence-cut",
+    "excalidraw-official-mcp",
+  ];
+  for (const skillName of skillNames) {
+    const source = await readFile(new URL(`../skills/${skillName}/SKILL.md`, import.meta.url), "utf8");
+    assert.match(source, /current/i, `${skillName} must identify the current project`);
+    assert.match(source, /projectDir/, `${skillName} must pass projectDir`);
+  }
 });
 
 test("all distributable host manifests use the package version", async () => {

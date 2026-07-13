@@ -1,6 +1,6 @@
 {
   "name": "buzzassist",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "BuzzAssist canvas and media plugin for Codex.",
   "author": {
     "name": "higataiyu"
@@ -20,7 +20,7 @@
   "interface": {
     "displayName": "BuzzAssist",
     "shortDescription": "Use the BuzzAssist canvas and media generation plugin from Codex.",
-    "longDescription": "BuzzAssist is a Codex plugin that bundles a project-local Excalidraw canvas, MCP-backed plugin tools, and an optional token-protected local HTTP MCP endpoint discovered through canvas/.server.json. Open the local canvas URL in Codex's in-app browser for desktop work. Tool calls update the same browser canvas and can draw diagrams, read selections, insert assets, and run image, video, subtitle, and silence-cut workflows. For phone access to the exact same canvas UI, the plugin can start a Cloudflare Canvas Tunnel by default, with ngrok available as an optional provider.",
+    "longDescription": "BuzzAssist is a Codex plugin that gives every active project its own Excalidraw canvas under <project>/canvas, with generated files under <project>/canvas/assets. The MCP server resolves the current task workspace instead of reusing the install-time project, starts or reuses that project's dynamic localhost server, and returns its URL through open_buzzassist_canvas. Open that URL in Codex's in-app browser for desktop work. Tool calls update the same browser canvas and can draw diagrams, read selections, insert assets, and run image, video, subtitle, and silence-cut workflows. For phone access to the exact same canvas UI, the plugin can start a Cloudflare Canvas Tunnel by default, with ngrok available as an optional provider.",
     "developerName": "BuzzAssist",
     "category": "Productivity",
     "brandColor": "#ff6a4d",
@@ -33,12 +33,14 @@
       "Token-protected HTTP MCP endpoint",
       "Cloudflare Canvas Tunnel",
       "Project-local persistence",
+      "Automatic active-project routing",
+      "One-click generated-files folder",
       "Canvas selection reading",
       "Image generation",
       "Video generation"
     ],
     "defaultPrompt": [
-      "Open the BuzzAssist local canvas URL for this project in the in-app browser.",
+      "Call open_buzzassist_canvas with the current task project directory, then open the returned local URL in the in-app browser.",
       "Use read_me and create_view to draw into the live BuzzAssist canvas.",
       "Generate a new image into the selected Excalidraw AI holder."
     ]

@@ -1,6 +1,6 @@
 {
   "name": "buzzassist-canvas-mcp",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "BuzzAssist project-local Excalidraw canvas plugin with MCP-backed tools for AI coding agents.",
   "homepage": "https://github.com/sam-mountainman/BuzzAssist",
   "repository": {
@@ -56,6 +56,7 @@
     "tunnel:stop": "node scripts/canvas-tunnel.mjs stop",
     "test": "node scripts/run-tests.mjs",
     "test:setup": "node scripts/test-setup-distribution.mjs",
+    "test:project-routing": "node scripts/test-active-project-routing.mjs",
     "prepack": "npm run build",
     "postinstall": "node scripts/patch-excalidraw.mjs"
   },

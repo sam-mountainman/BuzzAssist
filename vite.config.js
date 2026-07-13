@@ -18,14 +18,15 @@ import {
   runWithConcurrency
 } from './lib/mediaGeneration.mjs'
 import { getBuzzAssistAuthStatus, loginBuzzAssistViaBrowser, resolveAuthFilePath } from './lib/buzzassistApi.mjs'
-import { FOCUS_REQUEST_FILE_NAME, OFFICIAL_EXCALIDRAW_README, createExcalidrawView, insertExcalidrawImage, insertExcalidrawSubtitle, insertExcalidrawVideo, insertExcalidrawMediaBatch, performCanvasMaintenance, stripAssetBackedFileDataURLs } from './lib/canvasScene.mjs'
+import { FOCUS_REQUEST_FILE_NAME, OFFICIAL_EXCALIDRAW_README, createExcalidrawView, insertExcalidrawImage, insertExcalidrawSubtitle, insertExcalidrawVideo, insertExcalidrawMediaBatch, performCanvasMaintenance, stripAssetBackedFileDataURLs, syncDeletedCanvasAssets } from './lib/canvasScene.mjs'
 import { streamZipStore } from './lib/zipStore.mjs'
 import { generateSubtitleSrt, refineSubtitleFromPlan, writeSubtitleWordsSidecar } from './lib/subtitleGeneration.mjs'
 import { silenceCutVideo } from './lib/tempoCut.mjs'
 import { getLovartAuthStatus, getLovartModelCosts, saveLovartCredentials } from './lib/lovartMediaGeneration.mjs'
 import { bridgeWorkerAlive, canDriveGui, runOsascript, runPowershell, sendChatMessage } from './lib/chatBridge.mjs'
-import { getOrCreateMcpToken, rejectDisallowedOrigin, rejectRemoteOperator, rejectMissingBearer, setLocalCorsHeaders, writeServerDiscovery } from './lib/canvasServerRuntime.mjs'
+import { CANVAS_SERVER_PROTOCOL_VERSION, getOrCreateMcpToken, rejectDisallowedOrigin, rejectRemoteOperator, rejectMissingBearer, setLocalCorsHeaders, writeServerDiscovery } from './lib/canvasServerRuntime.mjs'
 import { canvasAttachmentBundleToMcpResult, createCanvasAttachmentBundle, listCanvasAttachmentBundles, readCanvasAttachmentBundle } from './lib/canvasAttachmentBundle.mjs'
+import { openLocalFolder } from './lib/openLocalFolder.mjs'
 import { homedir, tmpdir } from 'node:os'
 
 const projectDir = resolve(process.env.EXCALIDRAW_PROJECT_DIR ?? process.cwd())
@@ -1379,6 +1380,24 @@ function configureCanvasServer(server) {
   server.watcher.on('add', scheduleCanvasWatchBroadcast)
   server.watcher.on('change', scheduleCanvasWatchBroadcast)
 
+      // Reveal the current project's canonical media folder. Local operator
+      // only: a tunnel/phone page must never be able to open host OS windows.
+      server.middlewares.use('/api/assets/open-folder', async (req, res) => {
+        if (rejectRemoteOperator(req, res)) return
+        if (req.method !== 'POST') {
+          res.statusCode = 405
+          res.setHeader('allow', 'POST')
+          res.end()
+          return
+        }
+        try {
+          const result = await openLocalFolder(canvasAssetsDir)
+          sendJson(res, 200, result)
+        } catch (error) {
+          sendJson(res, 500, { ok: false, error: `assetsフォルダーを開けませんでした: ${error.message}` })
+        }
+      })
+
       // Bulk download: zips requested canvas assets as a streaming STORE
       // archive. GET supports direct browser downloads; POST is kept for
       // programmatic callers. Names are validated through the same path guard
@@ -1664,7 +1683,8 @@ function configureCanvasServer(server) {
             // on-disk asset (keeps drag-dropped images and video posters inline).
             await stripAssetBackedFileDataURLs(scene)
             await writeJsonAtomic(canvasFile, scene)
-            sendJson(res, 200, { ok: true, path: canvasFile, storage: 'single-file' })
+            const assetSync = await syncDeletedCanvasAssets({ canvasDir }, scene)
+            sendJson(res, 200, { ok: true, path: canvasFile, storage: 'single-file', assetSync })
             broadcastCanvasChanged([canvasFile], { fingerprint: sceneContentFingerprint(scene) })
             return
           }
@@ -1782,10 +1802,10 @@ function configureCanvasServer(server) {
                 ...(body.customData && typeof body.customData === 'object' ? body.customData : {})
               }
             })
-            // Multi-image runs (Lovart imageCount > 1): each extra replaces
-            // one of the placeholder frames the client laid out to the right
-            // of the primary frame; without placeholders they chain to the
-            // right of the previous result.
+            // Multi-image runs (Lovart native outputs or repeated ChatGPT
+            // generations): each extra replaces one of the placeholder
+            // frames the client laid out in its 2 × 5 grid. Without
+            // placeholders they chain to the right of the previous result.
             const extraAnchors = Array.isArray(body.extraAnchorElementIds)
               ? body.extraAnchorElementIds.filter((id) => typeof id === 'string' && id)
               : []
@@ -1815,7 +1835,9 @@ function configureCanvasServer(server) {
                     generatorPrompt: body.prompt,
                     generatorModel: body.model,
                     generatorAspectRatio: body.aspectRatio ?? body.aspect_ratio,
-                    codexGenerationSource: extra.source
+                    generatorImageCount: body.imageCount ?? body.image_count ?? 1,
+                    codexGenerationSource: extra.source,
+                    ...(body.customData && typeof body.customData === 'object' ? body.customData : {})
                   }
                 })
                 changedAssets.push(extraResult.assetFile)
@@ -1841,6 +1863,7 @@ function configureCanvasServer(server) {
             ok: true,
             kind: 'image',
             model: media.model,
+            generationErrors: media.generationErrors ?? [],
             ...result
           })
         } catch (error) {
@@ -1890,13 +1913,66 @@ function configureCanvasServer(server) {
                 videoAspectRatio: body.aspectRatio ?? body.aspect_ratio,
                 videoDuration: body.duration,
                 videoResolution: body.resolution,
+                generatorVideoCount: body.videoCount ?? body.video_count ?? 1,
                 videoGenerateAudio: body.generateAudio ?? body.generate_audio,
                 codexGenerationSource: media.source,
                 ...(body.customData && typeof body.customData === 'object' ? body.customData : {})
               }
             })
-            broadcastCanvasChanged([canvasFile, result.assetFile])
-            return { media, result }
+            // Grok multi-video uses independent requests. Each extra result
+            // replaces the corresponding Generating... placeholder in the
+            // same 2 × 5 layout used by multi-image generation.
+            const extraAnchors = Array.isArray(body.extraAnchorElementIds)
+              ? body.extraAnchorElementIds.filter((id) => typeof id === 'string' && id)
+              : []
+            const changedAssets = [result.assetFile]
+            const extras = []
+            let extraAnchorId = result.elementId
+            for (const [extraIndex, extra] of (Array.isArray(media.extraMedia) ? media.extraMedia : []).entries()) {
+              try {
+                const placeholderId = extraAnchors[extraIndex]
+                const extraResult = await insertExcalidrawVideo({
+                  canvasDir,
+                  mediaBuffer: extra.buffer,
+                  mimeType: extra.mimeType,
+                  fileName: body.fileName || body.videoName ? extra.fileName : undefined,
+                  anchorElementId: placeholderId ?? extraAnchorId,
+                  placement: placeholderId ? 'replace' : 'right',
+                  replaceAnchor: Boolean(placeholderId),
+                  matchAnchor: true,
+                  displayWidth: body.displayWidth,
+                  displayHeight: body.displayHeight,
+                  aspectRatio: body.aspectRatio,
+                  duration: body.duration,
+                  prompt: body.prompt,
+                  model: media.model,
+                  customData: {
+                    codexGeneratedVideo: true,
+                    codexGenerationModel: media.model,
+                    codexGenerationPrompt: body.prompt,
+                    codexGenerationAspectRatio: body.aspectRatio ?? body.aspect_ratio,
+                    codexGenerationDuration: body.duration,
+                    codexGenerationResolution: body.resolution,
+                    videoPrompt: body.prompt,
+                    videoModel: body.model,
+                    videoAspectRatio: body.aspectRatio ?? body.aspect_ratio,
+                    videoDuration: body.duration,
+                    videoResolution: body.resolution,
+                    generatorVideoCount: body.videoCount ?? body.video_count ?? 1,
+                    videoGenerateAudio: body.generateAudio ?? body.generate_audio,
+                    codexGenerationSource: extra.source,
+                    ...(body.customData && typeof body.customData === 'object' ? body.customData : {})
+                  }
+                })
+                changedAssets.push(extraResult.assetFile)
+                extraAnchorId = extraResult.elementId
+                extras.push({ elementId: extraResult.elementId, fileId: extraResult.fileId, assetUrl: extraResult.assetUrl })
+              } catch (extraError) {
+                console.warn('[generate/video] extra video insert failed:', extraError.message)
+              }
+            }
+            broadcastCanvasChanged([canvasFile, ...changedAssets])
+            return { media, result: { ...result, extras } }
           }
 
           if (wantsAsyncGeneration(req, body)) {
@@ -1911,6 +1987,7 @@ function configureCanvasServer(server) {
             ok: true,
             kind: 'video',
             model: media.model,
+            generationErrors: media.generationErrors ?? [],
             ...result
           })
         } catch (error) {
@@ -2161,7 +2238,13 @@ function configureCanvasServer(server) {
       // Lets the MCP server decide whether to open a browser tab (auto-open
       // when no canvas tab is connected).
       server.middlewares.use('/api/canvas-clients', (req, res) => {
-        sendJson(res, 200, { clients: canvasEventClients.size })
+        sendJson(res, 200, {
+          clients: canvasEventClients.size,
+          protocolVersion: CANVAS_SERVER_PROTOCOL_VERSION,
+          projectDir,
+          canvasDir,
+          capabilities: { openAssetsFolder: true, syncDeletedAssets: true }
+        })
       })
 
       // Project-common 用語辞書 (same model as the BuzzAssist desktop app):
