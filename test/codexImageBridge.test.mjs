@@ -49,3 +49,14 @@ test("agent setup reuses the same ChatGPT/Codex auto-detection", async () => {
   assert.match(source, /codex = dryRun \? commandName\("codex"\) : await resolveCodexCommand\(\)/);
   assert.doesNotMatch(source, /Codex CLI was not found/);
 });
+
+test("Codex image generation recovers from deleted working directories", async () => {
+  const [bridge, media] = await Promise.all([
+    readFile(new URL("../scripts/codex-image-bridge.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../lib/mediaGeneration.mjs", import.meta.url), "utf8"),
+  ]);
+  assert.match(bridge, /resolveBridgeWorkingDirectory/);
+  assert.match(bridge, /choices\.push\(os\.homedir\(\)\)/);
+  assert.match(media, /cwd: options\.cwd \|\| safeProcessCwd\(\)/);
+  assert.match(media, /cwd: getEnv\("CODEX_IMAGE_BRIDGE_CWD"\) \|\| safeProcessCwd\(\)/);
+});

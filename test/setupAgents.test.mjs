@@ -98,3 +98,11 @@ test("all distributable host manifests use the package version", async () => {
   );
   assert.equal(marketplace.plugins.find((plugin) => plugin.name === "buzzassist")?.version, version);
 });
+
+test("plugin refresh preserves active process working directories", async () => {
+  const source = await readFile(new URL("../scripts/setup-agents.mjs", import.meta.url), "utf8");
+  assert.match(source, /replaceDirectoryChildrenPreservingRoot\(tmpPluginRoot, managedPluginRoot\)/);
+  assert.doesNotMatch(source, /rm\(managedPluginDir, \{ recursive: true/);
+  assert.doesNotMatch(source, /\["plugin", "remove", codexSelector\]/);
+  assert.match(source, /claudeInstalled \? "update" : "install"/);
+});

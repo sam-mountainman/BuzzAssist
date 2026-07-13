@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { access, cp, mkdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -216,19 +216,6 @@ function includesConfiguredMarketplace(output) {
   return output.includes(marketplaceName) || output.includes(repoRoot);
 }
 
-function installedPluginVersion(output, selector) {
-  const index = output.indexOf(selector);
-  if (index < 0) return null;
-  const nextBlock = output.indexOf("\n\n", index);
-  const block = output.slice(index, nextBlock >= 0 ? nextBlock : output.length);
-  return block.match(/Version:\s*([^\s]+)/)?.[1] ?? "";
-}
-
-function pluginNeedsRefresh(output, selector) {
-  const installedVersion = installedPluginVersion(output, selector);
-  return installedVersion !== null && installedVersion !== pluginVersion;
-}
-
 async function ensureDependencies() {
   if (skipInstall) {
     console.log("Skipping npm install.");
@@ -279,6 +266,28 @@ async function ensureWidgetBuild() {
 async function copyIfExists(source, target) {
   if (!(await pathExists(source))) return;
   await cp(source, target, { recursive: true, force: true, dereference: false });
+}
+
+async function replaceDirectoryChildrenPreservingRoot(sourceDir, targetDir, { preserveNames = [] } = {}) {
+  await mkdir(targetDir, { recursive: true });
+  const preserved = new Set(preserveNames);
+  const sourceNames = (await readdir(sourceDir)).filter((name) => !preserved.has(name));
+  const sourceSet = new Set(sourceNames);
+
+  for (const name of sourceNames) {
+    const sourcePath = join(sourceDir, name);
+    const targetPath = join(targetDir, name);
+    const previousPath = join(targetDir, `.${name}.previous-${process.pid}`);
+    await rm(previousPath, { recursive: true, force: true });
+    if (await pathExists(targetPath)) await rename(targetPath, previousPath);
+    await rename(sourcePath, targetPath);
+    await rm(previousPath, { recursive: true, force: true });
+  }
+
+  for (const name of await readdir(targetDir)) {
+    if (preserved.has(name) || sourceSet.has(name) || name.endsWith(`.previous-${process.pid}`)) continue;
+    await rm(join(targetDir, name), { recursive: true, force: true });
+  }
 }
 
 async function refreshManagedPluginSource() {
@@ -394,9 +403,13 @@ async function refreshManagedPluginSource() {
     await symlink(join(repoRoot, "node_modules"), join(tmpPluginRoot, "node_modules"), process.platform === "win32" ? "junction" : "dir");
   }
   await rm(join(tmpPluginRoot, "canvas"), { recursive: true, force: true });
-  await rm(managedPluginDir, { recursive: true, force: true });
-  await mkdir(dirname(managedPluginDir), { recursive: true });
-  await rename(tmpDir, managedPluginDir);
+  // Keep both stable directory inodes alive while refreshing their children.
+  // Existing canvas/MCP processes may use either directory as cwd; deleting
+  // the roots makes their next shell command fail with getcwd/ENOENT.
+  await mkdir(managedPluginRoot, { recursive: true });
+  await replaceDirectoryChildrenPreservingRoot(tmpPluginRoot, managedPluginRoot);
+  await replaceDirectoryChildrenPreservingRoot(tmpDir, managedPluginDir, { preserveNames: ["plugin"] });
+  await rm(tmpDir, { recursive: true, force: true });
   return managedPluginRoot;
 }
 
@@ -491,13 +504,10 @@ async function setupCodex(pluginDir) {
   await cleanupLegacyCodex(codex);
   await setupCodexMarketplace(codex);
 
-  const current = await run(codex, ["plugin", "list"], { allowFailure: true, log: false, silent: true });
   const codexSelector = `${pluginName}@${marketplaceName}`;
-  const codexInstalled = current.stdout.includes(codexSelector);
-  if (pluginNeedsRefresh(current.stdout, codexSelector) || (codexInstalled && !skipPluginSource)) {
-    await run(codex, ["plugin", "remove", codexSelector], { allowFailure: true });
-  }
-
+  // `plugin add` installs the current marketplace snapshot alongside any old
+  // version. Do not remove first: an active Codex task may still have its MCP
+  // process rooted in the previous version's cache directory.
   const installed = await run(codex, ["plugin", "add", codexSelector], { allowFailure: true });
   if (!installed.ok) {
     console.warn("Codex plugin install did not complete. Check the Codex CLI output above.");
@@ -546,14 +556,9 @@ async function setupClaude(pluginDir) {
   const current = await run(claude, ["plugin", "list"], { allowFailure: true, log: false, silent: true });
   const claudeSelector = `${pluginName}@${marketplaceName}`;
   const claudeInstalled = current.stdout.includes(claudeSelector);
-  if (pluginNeedsRefresh(current.stdout, claudeSelector) || (claudeInstalled && !skipPluginSource)) {
-    await run(claude, ["plugin", "uninstall", claudeSelector, "--scope", "user", "-y"], {
-      allowFailure: true,
-      timeoutMs: 180000,
-    });
-  }
-
-  const installed = await run(claude, ["plugin", "install", claudeSelector, "--scope", "user"], {
+  // Claude Code has a non-destructive update command. Preserve the old cache
+  // until active sessions finish instead of uninstalling it out from under them.
+  const installed = await run(claude, ["plugin", claudeInstalled ? "update" : "install", claudeSelector, "--scope", "user"], {
     allowFailure: true,
     timeoutMs: 180000,
   });
@@ -618,7 +623,7 @@ node scripts/setup-agents.mjs --agent cursor --project-dir <active-user-project-
 
 Configure Cursor only. Do not configure Codex, Claude Code, or Antigravity unless the user explicitly asks for those hosts too.
 
-After the script prints \`BUZZASSIST_CANVAS_URL=...\` and \`BUZZASSIST_CANVAS_CHECK=ok\`, open that URL in Cursor's in-app browser or browser preview if available. If browser control is unavailable, report the URL and say setup completed because the canvas check passed.
+After the script prints \`BUZZASSIST_CANVAS_URL=...\` and \`BUZZASSIST_CANVAS_CHECK=ok\`, first open that URL in Cursor's in-app browser or browser preview. Only if that capability is unavailable, use Chrome/the external-browser fallback.
 
 If the user wants phone/mobile access or the exact same Excalidraw UI outside this machine, run setup with \`--tunnel\` or run \`npm run tunnel:start -- --project-dir <active-user-project-dir>\`. The tunnel uses Cloudflare (\`cloudflared\`) by default — no account needed. If it is not installed, tell the user to install it with \`brew install cloudflared\` on macOS or \`winget install Cloudflare.cloudflared\` on Windows. Give the printed \`BUZZASSIST_TUNNEL_ACCESS_URL\` for the phone.
 `;
@@ -632,7 +637,7 @@ When the user gives this repository URL and asks to set it up, do the setup end 
 1. Clone or open this repository.
 2. Run \`node scripts/setup-agents.mjs --agent antigravity --project-dir <active-user-project-dir>\` from the repository root. If there is no separate active project, use this repository root as the project dir.
 3. The script must configure Antigravity only. Do not configure Codex, Claude Code, or Cursor unless the user explicitly asks for those hosts too.
-4. After the script prints \`BUZZASSIST_CANVAS_URL=...\` and \`BUZZASSIST_CANVAS_CHECK=ok\`, open that URL in Antigravity's in-app browser if available. If browser control is unavailable, report the URL and say that setup still completed because the canvas check passed.
+4. After the script prints \`BUZZASSIST_CANVAS_URL=...\` and \`BUZZASSIST_CANVAS_CHECK=ok\`, first open that URL in Antigravity's in-app browser. Only if that capability is unavailable, use Chrome/the external-browser fallback.
 5. If the user wants phone/mobile access or says they want the exact same Excalidraw UI outside the machine, use Canvas Tunnel: run setup with \`--tunnel\` or run \`npm run tunnel:start -- --project-dir <active-user-project-dir>\`. The tunnel uses Cloudflare (\`cloudflared\`) by default — no account needed. If it is not installed, tell the user to install it with \`brew install cloudflared\` on macOS or \`winget install Cloudflare.cloudflared\` on Windows. Give the printed \`BUZZASSIST_TUNNEL_ACCESS_URL\` for the phone.
 
 Manual fallback:
@@ -934,7 +939,7 @@ async function main() {
     console.log(`BUZZASSIST_CANVAS_CHECK=${canvasCheck?.ok ? "ok" : "needs-attention"}`);
     console.log(`BUZZASSIST_CANVAS_DISCOVERY=${join(canvasDir, ".server.json")}`);
     if (targetIncludesLocalBrowserHost()) {
-      console.log("For Codex, Claude Code, Cursor, or Antigravity, open BUZZASSIST_CANVAS_URL in the host in-app browser. Do not use the OS/default browser unless the user explicitly asks.");
+      console.log("For Codex, Claude Code, Cursor, or Antigravity, first open BUZZASSIST_CANVAS_URL in the host in-app browser. Only when that Browser capability is unavailable, use Chrome/the external-browser fallback.");
     }
   }
   if (tunnelStatus?.publicUrl) {

@@ -7589,7 +7589,13 @@ export default function App() {
           Math.abs(lastView.scrollX - curScrollX) > 1 ||
           Math.abs(lastView.scrollY - curScrollY) > 1 ||
           Math.abs(lastView.zoom - curZoom) > 0.01
-      const lastGeo = !viewportMoved ? lastCreatedFrameGeoRef.current : null
+      const lastCreatedGeo = lastCreatedFrameGeoRef.current
+      const lastCreatedFrameStillExists = Boolean(
+        lastCreatedGeo?.id && elements.some((element) =>
+          element.id === lastCreatedGeo.id && !element.isDeleted && isGeneratorFrame(element)
+        )
+      )
+      const lastGeo = !viewportMoved && lastCreatedFrameStillExists ? lastCreatedGeo : null
       const center = viewportCenter(appState)
       let frameX = lastGeo
         ? Math.round(lastGeo.x + lastGeo.width / 2 - size.width / 2)
@@ -7704,7 +7710,7 @@ export default function App() {
       suppressNextChangeRef.current = true
       justCreatedFrameIdRef.current = nextFrame.id
       previousGeneratorFrameIdsRef.current = new Set(nextElements.filter(isGeneratorFrame).map((element) => element.id))
-      lastCreatedFrameGeoRef.current = getElementGeometry(nextFrame)
+      lastCreatedFrameGeoRef.current = { id: nextFrame.id, ...getElementGeometry(nextFrame) }
       api.updateScene({
         elements: nextElements,
         appState: {
@@ -8078,7 +8084,7 @@ export default function App() {
     if (!isRegeneratingResult && requestedGenerationCount > 1) {
       extraFrameIds = spawnExtraGeneratingFrames(anchorElement, anchorElementId, requestedGenerationCount - 1)
     }
-    if (!isRegeneratingResult) {
+    if (!isRegeneratingResult && requestedGenerationCount > 1) {
       focusGeneratingFrameGrid([anchorElementId, ...extraFrameIds])
     }
     const clearOptimisticGeneration = () => {
@@ -8149,7 +8155,7 @@ export default function App() {
     if (requestedGenerationCount > 1 && extraFrameIds.length === 0) {
       extraFrameIds = spawnExtraGeneratingFrames(generationAnchorElement, generationAnchorId, requestedGenerationCount - 1)
     }
-    if (isRegeneratingResult) {
+    if (isRegeneratingResult && requestedGenerationCount > 1) {
       focusGeneratingFrameGrid([generationAnchorId, ...extraFrameIds])
     }
 
