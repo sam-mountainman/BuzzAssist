@@ -85,9 +85,16 @@ const CANVAS_FILE_NAME = "excalidraw-canvas.json";
 const SELECTION_FILE_NAME = "excalidraw-selection.json";
 const ASSETS_ROUTE = "/excalidraw-assets/";
 const AI_HOLDER_KEY = "codexAiImageHolder";
+const ASK_USER_QUESTION_STYLE_GUIDE =
+  "Use the host request_user_input / AskUserQuestion UI, not a plain-text question. Match the user's language throughout. " +
+  "For Japanese, use short Japanese headers, question text, option labels, and descriptions. Ask only settings the user has not already supplied, and never ask a forced setting when only one valid value exists. " +
+  "Each dialog may contain 1-3 short questions with 2-3 mutually exclusive options each. Put the recommended option first and suffix its label with （推奨） in Japanese or (Recommended) in English. " +
+  "Do not add an explicit その他 / Other option because the host UI supplies the free-form row. If more than three independent settings remain, ask the next dialog only for the still-missing settings. " +
+  "Use model-specific valid choices only. When an attachment's role is ambiguous, ask whether it is a start frame, style/subject reference, or motion source before choosing a model or invoking generation.";
 const MEDIA_GENERATION_AGENT_INSTRUCTIONS = [
   "Project-local Excalidraw canvas tools. Use read_me/create_view for diagrams, get_excalidraw_selection before acting on selected items, and insert_* for local assets.",
   "Generation/subtitle/silence-cut tools require confirmedSettings=true unless the user's request already specified all relevant settings; use payloadPreview or read_me for workflow details.",
+  ASK_USER_QUESTION_STYLE_GUIDE,
   "Canvas tools auto-start the local static canvas server and write canvas/.server.json with the dynamic URL and HTTP tool endpoint bearer token.",
   "For phone/mobile access to the exact same full Excalidraw UI, use buzzassist_canvas_tunnel_start/status/stop. This starts an ngrok Canvas Tunnel with a generated access URL; Remote Canvas is not required for same-UI access.",
   "For Codex and Claude Code interactive UI, open the local BUZZASSIST_CANVAS_URL in the host in-app browser/browser tool and use MCP tools for stable reads/writes. render_buzzassist_canvas_widget remains an experimental MCP Apps entrypoint only; do not use it for normal Codex or Claude Code work unless the user explicitly asks to test the widget.",
@@ -560,9 +567,9 @@ const SETTINGS_CONFIRMATION_TOOLS = new Map([
 
 const SETTINGS_QUESTION_GUIDES = {
   image:
-    "model (GPT-Image-2.0 / Grok Imagine / NanoBanana 2 / Seedream v5 Lite / Midjourney …), 実行先 (execution route) whenever the chosen model can run on more than one of Codex(local) / Grok(local) / Lovart / BuzzAssist API — show Lovart above BuzzAssist and prefer Lovart when both are viable (e.g. GPT Image 2 → Codex or Lovart or BuzzAssist; Nano Banana 2 / Seedream 5 Lite → Lovart or BuzzAssist; Grok Imagine → Grok or BuzzAssist), aspect ratio (model-specific: 1:1 / 16:9 / 9:16 …, Nano Banana 2 also 8:1 banners), size tier when supported (1K/2K/4K), 枚数 imageCount when the Lovart route supports it (Nano Banana up to 4, Seedream up to 6), quality (GPT Image 2: Auto / Low / Medium / High), and for Midjourney the model version (v8.1 / v7 / niji / niji7) plus 高精細レンダリング on/off. Recommended defaults: GPT-Image-2.0 (Codex), 1:1, Auto, 1枚.",
+    "model (GPT-Image-2.0 / Grok Imagine / Nano Banana 2 / Seedream 5 Lite / Midjourney …), 実行先 (execution route) whenever the chosen model can run on more than one of Codex(local) / Grok(local) / Lovart / BuzzAssist API — show Lovart above BuzzAssist and prefer Lovart when both are viable (e.g. GPT Image 2 → Codex or Lovart or BuzzAssist; Nano Banana 2 / Seedream 5 Lite → Lovart or BuzzAssist; Grok Imagine → Grok or BuzzAssist), aspect ratio using a short common preset list (1:1 / 9:16 / 16:9; accept another model-valid ratio through the host's free-form Other row), size tier when supported (0.5K/1K/2K/4K), 枚数 imageCount when supported (Nano Banana up to 4, Seedream up to 6), and model-specific quality when supported. Do not ask Midjourney version or detail rendering because Lovart verification found those controls are not reliably honored. Recommended defaults: GPT-Image-2.0 (Codex), 1:1, Auto, 1枚.",
   video:
-    "model (Grok Imagine / Seedance 2 / Kling v3 / Veo 3.1 / Wan 2.6 / Vidu Q2 …), 実行先 (execution route) whenever the chosen model can run on more than one of Grok(local) / Lovart / BuzzAssist API — show Lovart above BuzzAssist and prefer Lovart when both are viable (e.g. Grok Imagine → Grok or BuzzAssist; Kling / Seedance → Lovart or BuzzAssist), aspect ratio (16:9 / 9:16 / 1:1 …; Hailuo has none), duration (model-specific: Grok CLI 6/10s only, Grok API 1-15s, Veo 4/6/8s, Wan 5/10/15s, Vidu 2-8s, Seedance 4-15s, Kling 2.6 5/10s), resolution when supported (480p-4K: Seedance 2.0 and Veo 3.1 reach 4K), audio ON/OFF when the model supports it (Seedance/Kling/Veo/Wan; Gemini Omni Flash is always-on), and any start/end frames or reference images/videos. Recommended defaults: Grok Imagine (Grok), 16:9, 6s, 720p, audio ON.",
+    "model (Grok Imagine / Seedance 2 / Kling v3 / Veo 3.1 / Wan 2.6 / Vidu Q2 …), 実行先 (execution route) whenever the chosen model can run on more than one of Grok(local) / Lovart / BuzzAssist API — show Lovart above BuzzAssist and prefer Lovart when both are viable (e.g. Grok Imagine → Grok or BuzzAssist; Kling / Seedance → Lovart or BuzzAssist), aspect ratio using a short valid preset list (normally 16:9 / 9:16 / 1:1; skip when the endpoint has none), duration using only model-valid choices (Grok CLI 6/10s only, Grok API 1-15s, Veo 4/6/8s, Wan 5/10/15s, Vidu 2-8s, Seedance 4-15s, Kling 2.6 5/10s), resolution when selectable (480p-4K), audio ON/OFF only when selectable, and attachment role/mode for start frame, end frame, reference image/video/audio, or motion source. Recommended defaults: Grok Imagine (Grok), 16:9, 6s, 720p.",
   subtitle:
     "mode (scripted aligns a provided script / scriptless transcribes), lineCount (1 or 2), and maxCharsPerLine. Recommended defaults: scripted when a script exists (otherwise scriptless), 2 lines, 30 chars.",
   silenceCut:
@@ -572,9 +579,10 @@ const SETTINGS_QUESTION_GUIDES = {
 function settingsConfirmationErrorText(kind) {
   return (
     "Settings not confirmed — call rejected. Like the BuzzAssist app, confirm the generation settings with the user BEFORE generating: " +
-    `ask ONE AskUserQuestion covering ${SETTINGS_QUESTION_GUIDES[kind]} ` +
+    `call AskUserQuestion / request_user_input covering ${SETTINGS_QUESTION_GUIDES[kind]} ` +
     "Ask about every setting the user has NOT explicitly mentioned (実行先・モデル・その他の設定項目); settings the user already stated must be reused as-is and never re-asked. " +
-    "Mark the default option with (Recommended) / （推奨）. Skip asking ONLY when the user's own message already specified every one of these settings. " +
+    `${ASK_USER_QUESTION_STYLE_GUIDE} ` +
+    "Skip asking ONLY when the user's own message already specified every relevant setting. " +
     "Then call this tool again with confirmedSettings: true and the chosen values."
   );
 }
