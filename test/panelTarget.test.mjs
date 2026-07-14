@@ -431,6 +431,7 @@ test("Grok OAuth failures open the re-login flow instead of leaving a raw 403", 
   const mcpSource = await readFile(new URL("../mcp/server.mjs", import.meta.url), "utf8");
 
   assert.match(mediaSource, /runLocalProcess\(command, \["models"\]/);
+  assert.match(mediaSource, /needsWindowsCommandShell/);
   assert.match(mediaSource, /isGrokAuthenticationError\(response\.status, message\)/);
   assert.match(mediaSource, /Grokの再ログインが必要です/);
   assert.match(appSource, /generationRouteId === 'hermes' && \/Grokの再ログインが必要です\//);

@@ -145,7 +145,10 @@ test("Grok OAuth refreshes before expiry, retries one rejected token, and reques
   };
   const previousFetch = globalThis.fetch;
   const home = await mkdtemp(join(os.tmpdir(), "buzzassist-grok-auth-"));
-  const cli = fileURLToPath(new URL("./fixtures/fakeGrokCli.mjs", import.meta.url));
+  const cli = fileURLToPath(new URL(
+    process.platform === "win32" ? "./fixtures/fakeGrokCli.cmd" : "./fixtures/fakeGrokCli.mjs",
+    import.meta.url,
+  ));
   const authPath = join(home, "auth.json");
   const writeAuth = async (token, expiresAt) => {
     await writeFile(
