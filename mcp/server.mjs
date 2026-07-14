@@ -2934,7 +2934,7 @@ async function handleToolCall(params, progress = () => {}) {
     const before = await getHermesStatus();
     if (before.installed && before.session === "logged-in") {
       return {
-        content: [{ type: "text", text: "Hermes is installed and already logged in to xAI Grok OAuth. The Hermes route is ready." }],
+        content: [{ type: "text", text: "Grok CLI is installed and already authenticated. The Grok Imagine route is ready." }],
         structuredContent: { ...before, action: "already-logged-in" },
       };
     }
@@ -2945,8 +2945,8 @@ async function handleToolCall(params, progress = () => {}) {
           type: "text",
           text:
             result.action === "already-logged-in"
-              ? "Hermes was already logged in. The Hermes route is ready."
-              : "Hermes xAI OAuth completed — the browser sign-in succeeded and the Hermes route is ready for Grok Imagine.",
+              ? "Grok CLI was already authenticated. The Grok Imagine route is ready."
+              : "Grok OAuth completed — the browser sign-in succeeded and the Grok Imagine route is ready.",
         },
       ],
       structuredContent: result,
