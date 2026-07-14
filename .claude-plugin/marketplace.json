@@ -11,7 +11,7 @@
   "plugins": [
     {
       "name": "buzzassist",
-      "version": "0.1.10",
+      "version": "0.1.11",
       "source": "./",
       "description": "BuzzAssist canvas and media plugin tools.",
       "author": {

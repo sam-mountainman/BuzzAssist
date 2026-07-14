@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   DEFAULT_MEDIA_BATCH_COLUMNS,
@@ -10,7 +13,9 @@ import {
   chunkMediaBatchJobs,
   generateImageMedia,
   generateVideoMedia,
+  getHermesStatus,
   isCodexImageModel,
+  isGrokAuthenticationError,
   isGrokImageModel,
   isGrokVideoModel,
   isRetryableGrokRateLimit,
@@ -120,6 +125,118 @@ test("Grok retries temporary 429 responses but not exhausted quota", () => {
   assert.equal(isRetryableGrokRateLimit(429, "rate limit exceeded, retry later"), true);
   assert.equal(isRetryableGrokRateLimit(429, "monthly quota exhausted"), false);
   assert.equal(isRetryableGrokRateLimit(500, "rate limit"), false);
+});
+
+test("Grok recognizes rejected OAuth credentials without treating every 403 as an auth failure", () => {
+  assert.equal(isGrokAuthenticationError(401, "anything"), true);
+  assert.equal(isGrokAuthenticationError(403, "The OAuth2 access token could not be validated."), true);
+  assert.equal(isGrokAuthenticationError(403, "content policy violation"), false);
+  assert.equal(isGrokAuthenticationError(429, "access token"), false);
+});
+
+test("Grok OAuth refreshes before expiry, retries one rejected token, and requests re-login cleanly", async () => {
+  const previous = {
+    GROK_HOME: process.env.GROK_HOME,
+    GROK_CLI_PATH: process.env.GROK_CLI_PATH,
+    XAI_API_KEY: process.env.XAI_API_KEY,
+    GROK_DEPLOYMENT_KEY: process.env.GROK_DEPLOYMENT_KEY,
+    FAKE_GROK_REFRESH_TOKEN: process.env.FAKE_GROK_REFRESH_TOKEN,
+    FAKE_GROK_REFRESH_FAIL: process.env.FAKE_GROK_REFRESH_FAIL,
+  };
+  const previousFetch = globalThis.fetch;
+  const home = await mkdtemp(join(os.tmpdir(), "buzzassist-grok-auth-"));
+  const cli = fileURLToPath(new URL("./fixtures/fakeGrokCli.mjs", import.meta.url));
+  const authPath = join(home, "auth.json");
+  const writeAuth = async (token, expiresAt) => {
+    await writeFile(
+      authPath,
+      `${JSON.stringify({
+        "https://auth.x.ai::test": {
+          key: token,
+          refresh_token: "test-refresh-token",
+          expires_at: expiresAt,
+          auth_mode: "oauth",
+        },
+      })}\n`,
+    );
+  };
+  const imageResponse = () => new Response(
+    JSON.stringify({ data: [{ b64_json: Buffer.from("fake-png").toString("base64") }] }),
+    { status: 200, headers: { "content-type": "application/json" } },
+  );
+
+  try {
+    await mkdir(home, { recursive: true });
+    process.env.GROK_HOME = home;
+    process.env.GROK_CLI_PATH = cli;
+    delete process.env.XAI_API_KEY;
+    delete process.env.GROK_DEPLOYMENT_KEY;
+    delete process.env.FAKE_GROK_REFRESH_FAIL;
+
+    // Expired credentials are silently refreshed before the paid generation.
+    await writeAuth("expired-oauth-token", new Date(Date.now() - 60_000).toISOString());
+    process.env.FAKE_GROK_REFRESH_TOKEN = "proactively-refreshed-token";
+    globalThis.fetch = async (_url, options = {}) => {
+      assert.equal(options.headers.Authorization, "Bearer proactively-refreshed-token");
+      return imageResponse();
+    };
+    const proactive = await generateImageMedia({
+      model: "grok-imagine-image-hermes",
+      prompt: "refresh before generation",
+    });
+    assert.equal(proactive.buffer.toString(), "fake-png");
+
+    // A token rejected during generation is refreshed once and retried.
+    await writeAuth("server-rejected-token", new Date(Date.now() + 60 * 60_000).toISOString());
+    process.env.FAKE_GROK_REFRESH_TOKEN = "retry-refreshed-token";
+    let requestCount = 0;
+    globalThis.fetch = async (_url, options = {}) => {
+      requestCount += 1;
+      if (requestCount === 1) {
+        assert.equal(options.headers.Authorization, "Bearer server-rejected-token");
+        return new Response(
+          JSON.stringify({ error: { message: "The OAuth2 access token could not be validated." } }),
+          { status: 403, headers: { "content-type": "application/json" } },
+        );
+      }
+      assert.equal(options.headers.Authorization, "Bearer retry-refreshed-token");
+      return imageResponse();
+    };
+    const retried = await generateImageMedia({
+      model: "grok-imagine-image-hermes",
+      prompt: "retry after 403",
+    });
+    assert.equal(retried.buffer.toString(), "fake-png");
+    assert.equal(requestCount, 2);
+
+    // If silent refresh genuinely fails, expose a stable Japanese re-login
+    // action instead of leaking the provider's raw OAuth 403 into the panel.
+    await writeAuth("unrefreshable-token", new Date(Date.now() + 60 * 60_000).toISOString());
+    process.env.FAKE_GROK_REFRESH_FAIL = "1";
+    globalThis.fetch = async () => new Response(
+      JSON.stringify({ error: { message: "The OAuth2 access token could not be validated." } }),
+      { status: 403, headers: { "content-type": "application/json" } },
+    );
+    await assert.rejects(
+      generateImageMedia({ model: "grok-imagine-image-hermes", prompt: "reauth required" }),
+      (error) => {
+        assert.match(error.message, /Grokの再ログインが必要です/);
+        assert.doesNotMatch(error.message, /OAuth2 access token could not be validated/);
+        return true;
+      },
+    );
+    const status = await getHermesStatus();
+    assert.equal(status.installed, true);
+    assert.equal(status.session, "logged-out");
+    assert.equal(status.reauthenticationRequired, true);
+  } finally {
+    globalThis.fetch = previousFetch;
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    await rm(home, { recursive: true, force: true });
+  }
 });
 
 test("media batch concurrency is capped at 10", () => {

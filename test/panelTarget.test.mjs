@@ -425,6 +425,20 @@ test("the generation gate answers from a cached server-verified auth status", as
   assert.match(appSource, /clearOptimisticGeneration\(\)\s*\n\s*return/);
 });
 
+test("Grok OAuth failures open the re-login flow instead of leaving a raw 403", async () => {
+  const appSource = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const mediaSource = await readFile(new URL("../lib/mediaGeneration.mjs", import.meta.url), "utf8");
+  const mcpSource = await readFile(new URL("../mcp/server.mjs", import.meta.url), "utf8");
+
+  assert.match(mediaSource, /runLocalProcess\(command, \["models"\]/);
+  assert.match(mediaSource, /isGrokAuthenticationError\(response\.status, message\)/);
+  assert.match(mediaSource, /Grokの再ログインが必要です/);
+  assert.match(appSource, /generationRouteId === 'hermes' && \/Grokの再ログインが必要です\//);
+  assert.match(appSource, /openHermesSetupDialog\(\{\s*installed: true,\s*session: 'logged-out'/);
+  assert.doesNotMatch(mcpSource, /Hermes is installed and already logged in/);
+  assert.match(mcpSource, /Grok CLI is installed and already authenticated/);
+});
+
 test("download save dialog opens in the OS Downloads folder", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
   const viteSource = await readFile(new URL("../vite.config.js", import.meta.url), "utf8");

@@ -8335,7 +8335,16 @@ export default function App() {
         if (leftoverFrameIds.length > 0) scheduleCanvasSave(latestSceneRef.current)
       }
     } catch (error) {
-      setGenerationError(error.message)
+      const message = error.message || '生成に失敗しました。'
+      setGenerationError(message)
+      if (generationRouteId === 'hermes' && /Grokの再ログインが必要です/.test(message)) {
+        openHermesSetupDialog({
+          installed: true,
+          session: 'logged-out',
+          error: message,
+          reauthenticationRequired: true
+        })
+      }
       setGeneratorFramesRemoteGenerating([generationAnchorId], false)
       if (api) {
         const currentElements = api.getSceneElementsIncludingDeleted()
@@ -8395,7 +8404,7 @@ export default function App() {
         })
       }
     }
-  }, [api, applyRemoteScene, ensureBuzzAssistLoggedIn, focusGeneratingFrameGrid, frameForm, generatingFrameIds, insertGeneratorFrame, prehydrateResultFiles, refreshHermesStatus, refreshOverlayStates, saveCanvas, scheduleCanvasSave, scheduleSelectionSave, selectedGeneratedResult, setGeneratorFramesRemoteGenerating, spawnExtraGeneratingFrames, updateActiveFrameElement])
+  }, [api, applyRemoteScene, ensureBuzzAssistLoggedIn, focusGeneratingFrameGrid, frameForm, generatingFrameIds, insertGeneratorFrame, openHermesSetupDialog, prehydrateResultFiles, refreshHermesStatus, refreshOverlayStates, saveCanvas, scheduleCanvasSave, scheduleSelectionSave, selectedGeneratedResult, setGeneratorFramesRemoteGenerating, spawnExtraGeneratingFrames, updateActiveFrameElement])
 
   // Generation for utility frames. SRT replaces the frame with an SRT card;
   // silence cut keeps the frame selected and downloads a Premiere XML.
