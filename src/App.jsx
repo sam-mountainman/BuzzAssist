@@ -2703,6 +2703,14 @@ function isGeneratedSubtitleResult(element) {
   return !element?.isDeleted && element?.customData?.codexGeneratedSubtitle === true
 }
 
+function isGeneratedSilenceCutResult(element) {
+  return !element?.isDeleted && element?.customData?.codexGeneratedSilenceCut === true
+}
+
+function isGeneratedTextPreviewResult(element) {
+  return isGeneratedSubtitleResult(element) || isGeneratedSilenceCutResult(element)
+}
+
 function getGeneratedResultKind(element) {
   return isGeneratedVideoResult(element) ? 'video' : 'image'
 }
@@ -3650,6 +3658,7 @@ function buildSelectedImageOverlays(scene) {
     overlays.push({
       id: element.id,
       assetType,
+      textPreview: isGeneratedTextPreviewResult(element),
       fileName: getCanvasMediaDisplayName(element, scene.files),
       assetPath: assetPathFromElement(element),
       assetUrl,
@@ -3703,7 +3712,7 @@ function buildSubtitlePreviewOverlays(scene) {
   const overlays = []
 
   for (const element of scene.elements) {
-    if (!isGeneratedSubtitleResult(element)) continue
+    if (!isGeneratedTextPreviewResult(element)) continue
     const assetUrl = element.customData?.codexAssetUrl || ''
     if (!assetUrl) continue
     const placement = getFrameViewportPlacement(getElementGeometry(element), appState)
@@ -3711,6 +3720,7 @@ function buildSubtitlePreviewOverlays(scene) {
     overlays.push({
       id: element.id,
       assetUrl,
+      assetType: canvasAssetKindFromElement(element) || 'srt',
       fileName: getCanvasMediaDisplayName(element, scene.files),
       cueCount: Number(element.customData?.subtitleCueCount) || 0,
       left: placement.left,
@@ -3726,8 +3736,8 @@ function buildSubtitlePreviewOverlays(scene) {
   return limitViewportOverlays(overlays, appState, SUBTITLE_PREVIEW_OVERLAY_MAX_ITEMS)
 }
 
-// Fetched SRT text, split into raw lines, cached per asset URL. The lines map
-// is also read synchronously by the canvas wheel handler to clamp scrolling.
+// Fetched SRT text and XML text, split into raw lines, cached per asset URL. The lines
+// map is also read synchronously by the canvas wheel handler to clamp scroll.
 const srtTextCache = new Map()
 const srtLinesCache = new Map()
 
@@ -3736,13 +3746,23 @@ function splitSrtLines(text) {
   return source ? source.split('\n') : ['']
 }
 
-function fetchSrtLines(url) {
+function splitXmlLines(text) {
+  const source = String(text || '').replace(/\r\n?/g, '\n').trim()
+  if (!source) return ['']
+  // Premiere XML is sometimes serialized into only a handful of very long
+  // lines. Expand adjacent tags for a useful editor-style preview without
+  // modifying the downloadable source file.
+  return source.replace(/>\s*</g, '>\n<').split('\n')
+}
+
+function fetchSrtLines(url, assetType = 'srt') {
   let pending = srtTextCache.get(url)
   if (pending) return pending
   pending = (async () => {
     const response = await canvasFetch(url)
     if (!response.ok) throw new Error(`Failed to load subtitles ${url}: ${response.status}`)
-    const lines = splitSrtLines(await response.text())
+    const text = await response.text()
+    const lines = assetType === 'xml' ? splitXmlLines(text) : splitSrtLines(text)
     srtLinesCache.set(url, lines)
     return lines
   })()
@@ -3753,8 +3773,9 @@ function fetchSrtLines(url) {
   return pending
 }
 
-function classifySrtLine(line) {
+function classifyTextPreviewLine(line, assetType) {
   if (!line.trim()) return 'blank'
+  if (assetType === 'xml') return 'xml'
   if (/^\d+$/.test(line.trim())) return 'index'
   if (/^\s*\d{1,2}:\d{2}:\d{2}[,.　]\d{1,3}\s*-->\s*\d{1,2}:\d{2}:\d{2}[,.　]\d{1,3}/.test(line)) {
     return 'timestamp'
@@ -3762,7 +3783,16 @@ function classifySrtLine(line) {
   return 'text'
 }
 
-function renderHighlightedSrtLine(line, kind) {
+function renderHighlightedXmlLine(line) {
+  return line.split(/(<[^>]+>)/g).map((part, index) =>
+    part.startsWith('<') && part.endsWith('>')
+      ? <span key={index} style={{ color: '#7c3aed' }}>{part}</span>
+      : <span key={index} style={{ color: '#2d2d2d' }}>{part}</span>
+  )
+}
+
+function renderHighlightedTextPreviewLine(line, kind) {
+  if (kind === 'xml') return renderHighlightedXmlLine(line)
   if (kind === 'timestamp') {
     const match = line.match(/^(\s*)(\d{1,2}:\d{2}:\d{2}[,.　]\d{1,3})(\s*-->\s*)(\d{1,2}:\d{2}:\d{2}[,.　]\d{1,3})(.*)$/)
     if (match) {
@@ -3829,12 +3859,12 @@ function SubtitleCanvasOverlay({ overlay, scrollOffset }) {
 
   useEffect(() => {
     let cancelled = false
-    fetchSrtLines(overlay.assetUrl)
+    fetchSrtLines(overlay.assetUrl, overlay.assetType)
       .then((nextLines) => {
         if (!cancelled) setLines(nextLines)
       })
       .catch(() => {
-        if (!cancelled) setLines(['字幕を読み込めませんでした。'])
+        if (!cancelled) setLines(['ファイルを読み込めませんでした。'])
       })
     return () => {
       cancelled = true
@@ -3918,7 +3948,7 @@ function SubtitleCanvasOverlay({ overlay, scrollOffset }) {
             {visibleLines.map((line, localIndex) => {
               const index = firstVisibleLine + localIndex
               const top = topPadding + index * rowHeight
-              const kind = classifySrtLine(line)
+              const kind = classifyTextPreviewLine(line, overlay.assetType)
               return (
                 <div
                   key={index}
@@ -3957,7 +3987,7 @@ function SubtitleCanvasOverlay({ overlay, scrollOffset }) {
                       overflow: 'hidden'
                     }}
                   >
-                    {line ? renderHighlightedSrtLine(line, kind) : '​'}
+                    {line ? renderHighlightedTextPreviewLine(line, kind) : '​'}
                   </div>
                 </div>
               )
@@ -5096,6 +5126,7 @@ export default function App() {
             element &&
             (isGeneratorFrame(element) ||
               isGeneratedSubtitleResult(element) ||
+              isGeneratedSilenceCutResult(element) ||
               isCanvasVideoElement(element) ||
               isCanvasImageElement(element))
           )
@@ -8515,7 +8546,7 @@ export default function App() {
               anchorElementId,
               placement: 'replace',
               replaceAnchor: true,
-              matchAnchor: true
+              matchAnchor: false
             }
 
       const response = await canvasFetch(endpoint, {
@@ -8675,15 +8706,15 @@ export default function App() {
         fileName: overlay.outputAsset.name || assetFileNameFromUrl(overlay.outputAsset.url) || 'jetcut.xml'
       }))
     // SRT cards get the same attach/download toolbar, plus the AI-refine action.
-    const selectedSrtCards = subtitlePreviewOverlays
+    const selectedTextCards = subtitlePreviewOverlays
       .filter((overlay) => overlay.isSelected && overlay.assetUrl)
       .map((overlay) => ({
         ...overlay,
-        assetType: 'srt',
-        fileName: overlay.fileName || assetFileNameFromUrl(overlay.assetUrl) || 'subtitles.srt'
+        assetType: overlay.assetType || 'srt',
+        fileName: overlay.fileName || assetFileNameFromUrl(overlay.assetUrl) || (overlay.assetType === 'xml' ? 'jetcut.xml' : 'subtitles.srt')
       }))
     const mediaByKey = new Map()
-    for (const overlay of [...selectedImageOverlays.filter((item) => item.isSelected && item.assetUrl), ...selectedXmlOutputs, ...selectedSrtCards]) {
+    for (const overlay of [...selectedImageOverlays.filter((item) => item.isSelected && item.assetUrl), ...selectedXmlOutputs, ...selectedTextCards]) {
       const key = `${overlay.id || ''}\n${overlay.assetUrl || ''}`
       if (!mediaByKey.has(key)) mediaByKey.set(key, overlay)
     }
@@ -9410,10 +9441,9 @@ export default function App() {
       ))}
 
       {selectedImageOverlays.map((img) => {
-        // SRT cards draw their own header (file name + line count) inside
-        // SubtitleCanvasOverlay — rendering this one too made the two labels
-        // overprint (e.g. "820 × 3656" colliding with "36 行").
-        if (img.assetType === 'srt') return null
+        // Text cards draw their own header (file name + line count) inside
+        // SubtitleCanvasOverlay — rendering this too would overprint it.
+        if (img.textPreview) return null
         const { headerFontSize, headerOffset } = getMediaHeaderMetrics(img.width)
         if (img.width < 28) return null
         return (

@@ -183,7 +183,7 @@ test("batch images persist the same numbered file names in element and file meta
   }
 });
 
-test("silence-cut XML results replace generators with normal canvas attachment cards", async () => {
+test("silence-cut XML results replace generators with SRT-style text preview cards", async () => {
   const projectDir = await mkdtemp(join(tmpdir(), "excalidraw-silence-cut-result-"));
   try {
     const canvasDir = join(projectDir, "canvas");
@@ -222,7 +222,7 @@ test("silence-cut XML results replace generators with normal canvas attachment c
       clipCount: 4,
       anchorElementId: anchor.id,
       replaceAnchor: true,
-      matchAnchor: true,
+      matchAnchor: false,
     });
 
     const saved = JSON.parse(await readFile(join(canvasDir, "excalidraw-canvas.json"), "utf8"));
@@ -231,18 +231,18 @@ test("silence-cut XML results replace generators with normal canvas attachment c
 
     assert.equal(replacedAnchor.isDeleted, true);
     assert.equal(result.replacedAnchor, true);
-    assert.equal(element.type, "image");
+    assert.equal(element.type, "rectangle");
     assert.equal(element.customData["buzzassist.silenceCutGenerator.frame"], undefined);
     assert.equal(element.customData["buzzassist.imageGenerator.frame"], undefined);
     assert.equal(element.customData.codexMediaKind, "xml");
+    assert.equal(element.customData.codexTextPreview, true);
     assert.equal(element.customData.codexAssetPath, xmlPath);
     assert.equal(element.customData.codexAssetUrl, "/excalidraw-assets/cut.xml");
     assert.equal(element.customData.silenceCutOutputAsset.name, "cut.xml");
     assert.equal(element.customData.silenceCutOutputAsset.kind, "xml");
     assert.equal(element.customData.silenceCutOutputAsset.path, xmlPath);
-    assert.equal(saved.files[result.fileId].mimeType, "image/svg+xml");
-    assert.match(saved.files[result.fileId].dataURL, /^data:image\/svg\+xml;base64,/);
-    assert.deepEqual(result.bounds, { x: 120, y: 80, width: 364, height: 205 });
+    assert.deepEqual(saved.files, {});
+    assert.deepEqual(result.bounds, { x: 199.5, y: 0.5, width: 205, height: 364 });
     assert.equal(saved.appState.selectedElementIds[result.elementId], true);
   } finally {
     await rm(projectDir, { recursive: true, force: true });

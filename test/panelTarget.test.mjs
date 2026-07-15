@@ -324,7 +324,10 @@ test("silence-cut completion replaces the generator with a normal XML canvas car
   const viteSource = await readFile(new URL("../vite.config.js", import.meta.url), "utf8");
 
   assert.match(source, /inputAsset: savedForm\.silenceCutVideo,/);
-  assert.match(source, /anchorElementId,\s*placement: 'replace',\s*replaceAnchor: true,\s*matchAnchor: true/);
+  assert.match(source, /anchorElementId,\s*placement: 'replace',\s*replaceAnchor: true,\s*matchAnchor: false/);
+  assert.match(source, /isGeneratedSubtitleResult\(element\) \|\| isGeneratedSilenceCutResult\(element\)/);
+  assert.match(source, /assetType: canvasAssetKindFromElement\(element\) \|\| 'srt'/);
+  assert.match(source, /if \(img\.textPreview\) return null/);
   assert.doesNotMatch(source, /triggerAssetDownload\(payload\.assetUrl, payload\.fileName \|\| 'jetcut\.xml'\)/);
   assert.match(viteSource, /insertExcalidrawSilenceCutResult\(\{/);
   assert.match(viteSource, /replacedAnchor: placement\.replacedAnchor/);
@@ -485,9 +488,9 @@ test("download save dialog opens in the OS Downloads folder", async () => {
 test("selected SRT cards expose the toolbar plus a host-agent refine action", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
 
-  // SRT cards join the attach/download toolbar sources…
-  assert.match(source, /const selectedSrtCards = subtitlePreviewOverlays/);
-  assert.match(source, /assetType: 'srt'/);
+  // SRT and XML text-preview cards join the attach/download toolbar sources…
+  assert.match(source, /const selectedTextCards = subtitlePreviewOverlays/);
+  assert.match(source, /assetType: overlay\.assetType \|\| 'srt'/);
   // …and a single selected .srt gets the AI-refine button, which copies a
   // self-contained request for the host agent (refine_excalidraw_subtitles).
   assert.match(source, /const selectedRefinableSrtAsset = selectedCanvasDownloadAssets\.length === 1 && \/\\\.srt\$\/i\.test/);
