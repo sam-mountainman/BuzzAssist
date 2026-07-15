@@ -4430,6 +4430,8 @@ export default function App() {
   const [lovartAuth, setLovartAuth] = useState(null)
   const [lovartKeySaving, setLovartKeySaving] = useState(false)
   const [lovartKeyEditing, setLovartKeyEditing] = useState(false)
+  const [lovartGenerationMode, setLovartGenerationMode] = useState(null)
+  const [lovartGenerationModeSaving, setLovartGenerationModeSaving] = useState(false)
   const [hermesStatus, setHermesStatus] = useState(null)
   const [hermesSetupDialog, setHermesSetupDialog] = useState(null)
   const [hermesSetupChecking, setHermesSetupChecking] = useState(false)
@@ -4751,6 +4753,14 @@ export default function App() {
   const [pendingPanelFrame, setPendingPanelFrame] = useState(null)
   const [selectedGeneratedResult, setSelectedGeneratedResult] = useState(null)
 
+  const refreshLovartGenerationMode = useCallback(async () => {
+    const response = await canvasFetch('/api/lovart/generation-mode')
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(payload.error || 'Lovartの生成方法を確認できませんでした。')
+    setLovartGenerationMode(payload)
+    return payload
+  }, [])
+
   useEffect(() => {
     canvasFetch('/api/subtitle-glossary')
       .then((response) => response.json())
@@ -4758,9 +4768,19 @@ export default function App() {
       .catch(() => setGlossaryTerms([]))
     canvasFetch('/api/lovart/auth-status')
       .then((response) => response.json())
-      .then(setLovartAuth)
-      .catch(() => setLovartAuth({ configured: false }))
-  }, [])
+      .then((payload) => {
+        setLovartAuth(payload)
+        if (payload?.configured) {
+          refreshLovartGenerationMode().catch(() => setLovartGenerationMode(null))
+        } else {
+          setLovartGenerationMode(null)
+        }
+      })
+      .catch(() => {
+        setLovartAuth({ configured: false })
+        setLovartGenerationMode(null)
+      })
+  }, [refreshLovartGenerationMode])
   const [openMenu, setOpenMenu] = useState(null)
   const [videoFrameBtnsHovered, setVideoFrameBtnsHovered] = useState(false)
   const [utilityTrayHovered, setUtilityTrayHovered] = useState(false)
@@ -10064,7 +10084,14 @@ export default function App() {
                     setLovartKeyEditing(false)
                     canvasFetch('/api/lovart/auth-status')
                       .then((response) => response.json())
-                      .then(setLovartAuth)
+                      .then((payload) => {
+                        setLovartAuth(payload)
+                        if (payload?.configured) {
+                          refreshLovartGenerationMode().catch(() => setLovartGenerationMode(null))
+                        } else {
+                          setLovartGenerationMode(null)
+                        }
+                      })
                       .catch(() => {})
                     canvasFetch('/api/hermes/status')
                       .then((response) => response.json())
@@ -10119,6 +10146,57 @@ export default function App() {
                             ? `接続済み: ${lovartAuth.accessKeyPreview ?? ''}`
                             : '未設定（OpenClaw の ak_/sk_ を入力）'}
                         </div>
+                        {lovartAuth?.configured ? (
+                          <div className="lovart-generation-method">
+                            <div className="lovart-generation-method-head">Lovart生成方法</div>
+                            <div
+                              className="lovart-generation-method-options"
+                              role="group"
+                              aria-label="Lovartの生成方法"
+                            >
+                              {[
+                                ['fast', '⚡ 高速'],
+                                ['unlimited', '∞ 無制限']
+                              ].map(([value, label]) => (
+                                <button
+                                  type="button"
+                                  key={value}
+                                  className={lovartGenerationMode?.preference === value ? 'is-selected' : ''}
+                                  aria-pressed={lovartGenerationMode?.preference === value}
+                                  disabled={lovartGenerationModeSaving || lovartGenerationMode === null}
+                                  onClick={async () => {
+                                    if (lovartGenerationMode?.preference === value) return
+                                    setLovartGenerationModeSaving(true)
+                                    try {
+                                      const response = await canvasFetch('/api/lovart/generation-mode', {
+                                        method: 'PUT',
+                                        headers: { 'content-type': 'application/json' },
+                                        body: JSON.stringify({ preference: value })
+                                      })
+                                      const payload = await response.json().catch(() => ({}))
+                                      if (!response.ok) throw new Error(payload.error || '生成方法を変更できませんでした。')
+                                      setLovartGenerationMode(payload)
+                                      setGenerationError('')
+                                    } catch (error) {
+                                      setGenerationError(error.message)
+                                    } finally {
+                                      setLovartGenerationModeSaving(false)
+                                    }
+                                  }}
+                                >
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                            <div className="lovart-generation-method-note">
+                              {lovartGenerationMode === null
+                                ? '確認中...'
+                                : lovartGenerationMode.preference === 'fast'
+                                  ? 'すべて高速で生成'
+                                  : '対象外アカウント・モデルは高速へ自動切替'}
+                            </div>
+                          </div>
+                        ) : null}
                         {lovartAuth !== null && (!lovartAuth?.configured || lovartKeyEditing) ? (
                           <>
                             <input ref={lovartAccessKeyInputRef} type="password" placeholder="ak_..." autoComplete="off" />
@@ -10143,7 +10221,9 @@ export default function App() {
                                   })
                                   const payload = await response.json()
                                   if (!response.ok) throw new Error(payload.error || '保存に失敗しました')
-                                  setLovartAuth(payload)
+                                  const { modeStatus, ...authStatus } = payload
+                                  setLovartAuth(authStatus)
+                                  setLovartGenerationMode(modeStatus ?? null)
                                   setGenerationError('')
                                   setLovartKeyEditing(false)
                                   if (lovartAccessKeyInputRef.current) lovartAccessKeyInputRef.current.value = ''

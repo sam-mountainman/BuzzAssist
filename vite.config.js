@@ -22,7 +22,13 @@ import { FOCUS_REQUEST_FILE_NAME, OFFICIAL_EXCALIDRAW_README, createExcalidrawVi
 import { streamZipStore } from './lib/zipStore.mjs'
 import { generateSubtitleSrt, refineSubtitleFromPlan, writeSubtitleWordsSidecar } from './lib/subtitleGeneration.mjs'
 import { silenceCutVideo } from './lib/tempoCut.mjs'
-import { getLovartAuthStatus, getLovartModelCosts, saveLovartCredentials } from './lib/lovartMediaGeneration.mjs'
+import {
+  getLovartAuthStatus,
+  getLovartModelCosts,
+  queryLovartGenerationMode,
+  saveLovartCredentials,
+  setLovartGenerationPreference
+} from './lib/lovartMediaGeneration.mjs'
 import { bridgeWorkerAlive, canDriveGui, runOsascript, runPowershell, sendChatMessage } from './lib/chatBridge.mjs'
 import { CANVAS_SERVER_PROTOCOL_VERSION, getOrCreateMcpToken, rejectDisallowedOrigin, rejectRemoteOperator, rejectMissingBearer, setLocalCorsHeaders, writeServerDiscovery } from './lib/canvasServerRuntime.mjs'
 import { canvasAttachmentBundleToMcpResult, createCanvasAttachmentBundle, listCanvasAttachmentBundles, readCanvasAttachmentBundle } from './lib/canvasAttachmentBundle.mjs'
@@ -2611,6 +2617,25 @@ function configureCanvasServer(server) {
           sendJson(res, 200, await getLovartAuthStatus())
         } catch (error) {
           sendJson(res, 500, { error: error.message })
+        }
+      })
+
+      server.middlewares.use('/api/lovart/generation-mode', async (req, res) => {
+        try {
+          if (req.method === 'GET') {
+            sendJson(res, 200, await queryLovartGenerationMode())
+            return
+          }
+          if (req.method === 'PUT') {
+            const body = JSON.parse(await readRequestBody(req))
+            sendJson(res, 200, await setLovartGenerationPreference(body.preference))
+            return
+          }
+          res.statusCode = 405
+          res.setHeader('allow', 'GET, PUT')
+          res.end()
+        } catch (error) {
+          sendJson(res, 400, { error: error.message })
         }
       })
 

@@ -2429,6 +2429,71 @@ a.lovart-error-action {
   white-space: nowrap;
 }
 
+.lovart-generation-method {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  margin-top: 1px;
+  border-top: 1px solid #eceef1;
+}
+
+.lovart-generation-method-head {
+  color: #5f6368;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.lovart-generation-method-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.lovart-menu[data-lovart-menu='route'] .lovart-generation-method-options button {
+  display: inline-flex;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  color: #5f6368;
+  font-size: 11px;
+  font-weight: 500;
+  text-align: center;
+  background: #ffffff;
+  border: 1px solid #e0e0e6;
+  border-radius: 8px;
+}
+
+.lovart-menu[data-lovart-menu='route'] .lovart-generation-method-options button:hover:not(:disabled) {
+  color: #6d28d9;
+  background: #faf8ff;
+  border-color: #c4b5fd;
+}
+
+.lovart-menu[data-lovart-menu='route'] .lovart-generation-method-options button.is-selected {
+  color: #6d28d9;
+  font-weight: 600;
+  background: #f2ecff;
+  border-color: #8b5cf6;
+}
+
+.lovart-menu[data-lovart-menu='route'] .lovart-generation-method-options button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.lovart-generation-method-note {
+  min-height: 14px;
+  overflow: hidden;
+  color: #9aa0a6;
+  font-size: 10px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .lovart-menu button .lovart-route-check {
   margin-left: 0;
 }
