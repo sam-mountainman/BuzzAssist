@@ -6724,11 +6724,24 @@ export default function App() {
         })
     }
     events.addEventListener('canvas-changed', queueRemoteCanvasLoad)
+    // EventSource reconnects do not replay file-watcher events. Fetch once on
+    // every connection, then keep polling only while a remote Generating...
+    // placeholder is visible. This also retries an event that was deferred
+    // while a local canvas save was still pending.
+    events.onopen = () => queueRemoteCanvasLoad({ data: '' })
+    const catchUpTimer = window.setInterval(() => {
+      const hasRemoteGeneratingFrame = (latestSceneRef.current?.elements ?? []).some(
+        (element) => isGeneratorFrame(element) && !element.isDeleted && element.customData?.codexGenerating === true
+      )
+      if (hasRemoteGeneratingFrame) queueRemoteCanvasLoad({ data: '' })
+    }, 1200)
     events.onerror = (error) => {
       console.warn('Codex Excalidraw live refresh disconnected.', error)
     }
     return () => {
       closed = true
+      window.clearInterval(catchUpTimer)
+      events.onopen = null
       events.removeEventListener('canvas-changed', queueRemoteCanvasLoad)
       events.close()
     }
