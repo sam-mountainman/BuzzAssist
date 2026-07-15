@@ -632,6 +632,18 @@ test("phone canvas taps open only frame and generated-result panels", async () =
   assert.match(source, /syncGeneratorUi\(nextScene\)/);
 });
 
+test("empty local canvas clicks close the prompt without closing on another panel target", async () => {
+  const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+
+  assert.match(source, /const closePromptFromEmptyCanvasClick = \(event\) => \{/);
+  assert.match(source, /target\.closest\('\.lovart-ai-panel, \.lovart-menu, \.lovart-canvas-picker-bar'\)/);
+  assert.match(source, /target\.closest\('canvas\.excalidraw__canvas'\)/);
+  assert.match(source, /if \(panelTargetElementAtScenePoint\(elements, scenePoint\)\) return/);
+  assert.match(source, /closeActiveGeneratorPanel\(\)/);
+  assert.match(source, /document\.addEventListener\('click', closePromptFromEmptyCanvasClick, true\)/);
+  assert.match(source, /document\.removeEventListener\('click', closePromptFromEmptyCanvasClick, true\)/);
+});
+
 test("phone tunnel renders images via capped overlays instead of hydrating Excalidraw files", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
 

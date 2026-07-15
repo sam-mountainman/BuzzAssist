@@ -6943,6 +6943,44 @@ export default function App() {
     }
   }, [api, openToolbarMediaPicker])
 
+  // Excalidraw does not always emit a selection change when an already
+  // selected managed element is followed by a click on empty canvas. The
+  // prompt panel used to stay open in that case on the local desktop canvas.
+  // Resolve the click against the scene independently: another generator
+  // frame/result keeps (or switches) the panel, while true empty canvas
+  // dismisses it and clears the stale native selection.
+  useEffect(() => {
+    if (!api) return undefined
+
+    const closePromptFromEmptyCanvasClick = (event) => {
+      if (!activeFrameIdRef.current && !selectedGeneratedResultRef.current) return
+      if (event.button !== 0) return
+      const target = event.target
+      if (!(target instanceof Element)) return
+      if (target.closest('.lovart-ai-panel, .lovart-menu, .lovart-canvas-picker-bar')) return
+      const canvas = target instanceof HTMLCanvasElement
+        ? target
+        : target.closest('canvas.excalidraw__canvas')
+      if (!(canvas instanceof HTMLCanvasElement)) return
+
+      const root = canvas.closest('.excalidraw')
+      if (!(root instanceof HTMLElement)) return
+      const appState = api.getAppState?.() ?? {}
+      const zoom = Math.max(0.1, Number(appState.zoom?.value) || 1)
+      const rootRect = root.getBoundingClientRect()
+      const scenePoint = {
+        x: (event.clientX - rootRect.left) / zoom - (Number(appState.scrollX) || 0),
+        y: (event.clientY - rootRect.top) / zoom - (Number(appState.scrollY) || 0)
+      }
+      const elements = api.getSceneElementsIncludingDeleted?.() ?? api.getSceneElements?.() ?? []
+      if (panelTargetElementAtScenePoint(elements, scenePoint)) return
+      closeActiveGeneratorPanel()
+    }
+
+    document.addEventListener('click', closePromptFromEmptyCanvasClick, true)
+    return () => document.removeEventListener('click', closePromptFromEmptyCanvasClick, true)
+  }, [api, closeActiveGeneratorPanel])
+
   useEffect(() => {
     if (!api) return undefined
     const root = document.querySelector('.excalidraw')
