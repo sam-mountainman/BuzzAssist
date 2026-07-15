@@ -239,7 +239,9 @@ test("generated media can reopen its prompt and every generator panel can be clo
 
 test("video expand gesture cannot immediately close its own modal", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
-  const player = source.match(/function ExpandedVideoPlayer\(\{ video, onClose \}\) \{([\s\S]*?)\n\}\n\nfunction scenePointInElement/);
+  const player = source.match(
+    /function ExpandedVideoPlayer\(\{ video, onClose \}\) \{([\s\S]*?)\r?\n\}\r?\n\r?\nfunction scenePointInElement/,
+  );
   assert.ok(player, "Missing ExpandedVideoPlayer");
 
   assert.match(player[1], /className="lovart-video-modal"[\s\S]*?onPointerDown=\{\(event\) => \{/);
