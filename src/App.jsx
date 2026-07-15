@@ -19,6 +19,10 @@ import {
 } from '../lib/modelCatalog.mjs'
 import { estimateCreditsForJob } from '../lib/mediaCredits.mjs'
 import { getLovartImageSettings, getLovartVideoSettings } from '../lib/lovartModelSettings.mjs'
+import {
+  getTextPreviewMaxColumns,
+  normalizeTextPreviewScrollOffset
+} from '../lib/textPreviewScroll.mjs'
 import { providerIconDataUri } from './providerIcons.js'
 
 const CANVAS_ENDPOINT = '/api/canvas'
@@ -3300,6 +3304,38 @@ function normalizeGeneratorFrameVisuals(elements) {
   return changed ? normalized : null
 }
 
+function normalizeTextPreviewCardVisuals(elements) {
+  let changed = false
+  const now = Date.now()
+  const normalized = elements.map((element) => {
+    if (!isGeneratedSubtitleResult(element) && !isGeneratedSilenceCutResult(element)) return element
+    if (
+      element.strokeColor === '#d9d9d9' &&
+      element.backgroundColor === '#ffffff' &&
+      element.fillStyle === 'solid' &&
+      Number(element.strokeWidth || 1) === 1 &&
+      element.strokeStyle === 'solid' &&
+      element.roundness == null
+    ) {
+      return element
+    }
+    changed = true
+    return {
+      ...element,
+      strokeColor: '#d9d9d9',
+      backgroundColor: '#ffffff',
+      fillStyle: 'solid',
+      strokeWidth: 1,
+      strokeStyle: 'solid',
+      roundness: null,
+      version: (Number(element.version) || 1) + 1,
+      versionNonce: Math.floor(Math.random() * 2 ** 31),
+      updated: now
+    }
+  })
+  return changed ? normalized : null
+}
+
 function frameFormFromElement(element) {
   const customData = element?.customData ?? {}
   const isVideoElement =
@@ -3824,7 +3860,8 @@ function getSubtitlePreviewBaseFontSize(canvasViewportWidth) {
   return Math.max(minFontSize, Math.min(baseFontSize, canvasViewportWidth / 28))
 }
 
-function getSubtitlePreviewLayout(lineCount, overlayWidth, overlayHeight, zoom, isSelected) {
+function getSubtitlePreviewLayout(lines, overlayWidth, overlayHeight, zoom, isSelected) {
+  const lineCount = Array.isArray(lines) ? lines.length : 0
   const selectedPreviewInset = isSelected ? 5 : 0
   const viewportWidth = Math.max(1, overlayWidth - selectedPreviewInset * 2)
   const viewportHeight = Math.max(1, overlayHeight - selectedPreviewInset * 2)
@@ -3836,6 +3873,14 @@ function getSubtitlePreviewLayout(lineCount, overlayWidth, overlayHeight, zoom, 
   const topPadding = Math.round(fontSize * 0.5)
   const bottomPadding = Math.round(fontSize * 1.4)
   const contentHeight = lineCount * rowHeight + topPadding + bottomPadding
+  const gutterDigits = Math.max(2, String(lineCount).length)
+  const gutterWidth = Math.max(Math.round(fontSize * 1.8), Math.round(fontSize * 0.62 * (gutterDigits + 1.5)))
+  const codeHorizontalPadding = Math.round(fontSize * 1.6)
+  const maxColumns = getTextPreviewMaxColumns(lines, 4)
+  const contentWidth = Math.max(
+    viewportWidth,
+    gutterWidth + Math.ceil(maxColumns * fontSize * 0.62) + codeHorizontalPadding
+  )
   return {
     selectedPreviewInset,
     viewportWidth,
@@ -3845,17 +3890,23 @@ function getSubtitlePreviewLayout(lineCount, overlayWidth, overlayHeight, zoom, 
     rowHeight,
     topPadding,
     contentHeight,
-    maxScroll: Math.max(0, contentHeight - viewportHeight)
+    contentWidth,
+    gutterWidth,
+    maxScrollX: Math.max(0, contentWidth - viewportWidth),
+    maxScrollY: Math.max(0, contentHeight - viewportHeight)
   }
 }
 
-// Verbatim port of Youtube-AGI's SubtitleScrollablePreviewOverlay: a white
-// editor-style card with a line-number gutter and syntax-highlighted raw SRT
-// lines. Fully pointer-events none — scrolling is driven externally via the
-// scrollOffset prop (canvas wheel handler), so click/drag/select pass through
-// to Excalidraw untouched.
-function SubtitleCanvasOverlay({ overlay, scrollOffset }) {
+// White editor-style SRT/XML cards with a fixed line-number gutter. Wheel input
+// works anywhere over the card, while the always-visible custom scrollbars can
+// be clicked or dragged even before the card is selected.
+function SubtitleCanvasOverlay({ overlay, scrollOffset, onScrollOffsetChange }) {
   const [lines, setLines] = useState(() => srtLinesCache.get(overlay.assetUrl) ?? [''])
+  const [hoveredScrollbarAxis, setHoveredScrollbarAxis] = useState('')
+  const [scrollingScrollbarAxis, setScrollingScrollbarAxis] = useState('')
+  const scrollbarHideTimerRef = useRef(0)
+  const scrollViewportRef = useRef(null)
+  const scrollbarDragRef = useRef(null)
 
   useEffect(() => {
     let cancelled = false
@@ -3871,18 +3922,152 @@ function SubtitleCanvasOverlay({ overlay, scrollOffset }) {
     }
   }, [overlay.assetUrl])
 
-  const layout = getSubtitlePreviewLayout(lines.length, overlay.width, overlay.height, overlay.zoom, overlay.isSelected)
-  const { selectedPreviewInset, viewportHeight, fontSize, lineHeight, rowHeight, topPadding, contentHeight } = layout
-  const safeScrollOffset = Math.max(0, Math.min(scrollOffset || 0, layout.maxScroll))
-  const gutterDigits = Math.max(2, String(lines.length).length)
-  const gutterWidth = Math.max(Math.round(fontSize * 1.8), Math.round(fontSize * 0.62 * (gutterDigits + 1.5)))
+  useEffect(() => {
+    if (!overlay.isSelected) {
+      setHoveredScrollbarAxis('')
+      setScrollingScrollbarAxis('')
+      window.clearTimeout(scrollbarHideTimerRef.current)
+    }
+  }, [overlay.isSelected])
+
+  useEffect(() => () => window.clearTimeout(scrollbarHideTimerRef.current), [])
+
+  const layout = getSubtitlePreviewLayout(lines, overlay.width, overlay.height, overlay.zoom, overlay.isSelected)
+  const {
+    selectedPreviewInset,
+    viewportWidth,
+    viewportHeight,
+    fontSize,
+    lineHeight,
+    rowHeight,
+    topPadding,
+    contentHeight,
+    contentWidth,
+    gutterWidth
+  } = layout
+  const requestedScrollOffset = normalizeTextPreviewScrollOffset(scrollOffset)
+  const safeScrollLeft = Math.max(0, Math.min(requestedScrollOffset.x, layout.maxScrollX))
+  const safeScrollTop = Math.max(0, Math.min(requestedScrollOffset.y, layout.maxScrollY))
+  const previousVisibleScrollOffsetRef = useRef({ x: safeScrollLeft, y: safeScrollTop })
+  const keepScrollbarsVisible = useCallback((activeAxis) => {
+    if (!activeAxis) return
+    setScrollingScrollbarAxis(activeAxis)
+    window.clearTimeout(scrollbarHideTimerRef.current)
+    scrollbarHideTimerRef.current = window.setTimeout(() => {
+      setScrollingScrollbarAxis('')
+    }, 1200)
+  }, [])
+
+  useEffect(() => {
+    const previous = previousVisibleScrollOffsetRef.current
+    previousVisibleScrollOffsetRef.current = { x: safeScrollLeft, y: safeScrollTop }
+    if (!overlay.isSelected) return
+    const movedHorizontally = Math.abs(safeScrollLeft - previous.x) >= 0.5
+    const movedVertically = Math.abs(safeScrollTop - previous.y) >= 0.5
+    keepScrollbarsVisible(`${movedHorizontally ? 'x' : ''}${movedVertically ? 'y' : ''}`)
+  }, [keepScrollbarsVisible, overlay.isSelected, safeScrollLeft, safeScrollTop])
+
   const { headerFontSize, headerOffset } = getMediaHeaderMetrics(overlay.width)
   const lineCountLabel = `${lines.length} 行`
   const overscan = 12
-  const firstVisibleLine = Math.max(0, Math.floor((safeScrollOffset - topPadding) / rowHeight) - overscan)
+  const firstVisibleLine = Math.max(0, Math.floor((safeScrollTop - topPadding) / rowHeight) - overscan)
   const visibleLineCount = Math.ceil(viewportHeight / rowHeight) + overscan * 2
   const lastVisibleLine = Math.min(lines.length, firstVisibleLine + visibleLineCount)
   const visibleLines = lines.slice(firstVisibleLine, lastVisibleLine)
+  const hasHorizontalScrollbar = layout.maxScrollX > 0
+  const hasVerticalScrollbar = layout.maxScrollY > 0
+  const emphasizeHorizontalScrollbar = (
+    hoveredScrollbarAxis.includes('x') || scrollingScrollbarAxis.includes('x')
+  )
+  const emphasizeVerticalScrollbar = (
+    hoveredScrollbarAxis.includes('y') || scrollingScrollbarAxis.includes('y')
+  )
+  const showHorizontalScrollbar = hasHorizontalScrollbar
+  const showVerticalScrollbar = hasVerticalScrollbar
+  const scrollbarThickness = 14
+  const minimumScrollbarThumb = 32
+  const verticalTrackLength = Math.max(1, viewportHeight - (hasHorizontalScrollbar ? scrollbarThickness : 0))
+  const verticalViewportLength = verticalTrackLength
+  const verticalThumbLength = Math.min(
+    verticalTrackLength,
+    Math.max(minimumScrollbarThumb, verticalTrackLength * verticalViewportLength / Math.max(contentHeight, 1))
+  )
+  const verticalThumbTop = layout.maxScrollY > 0
+    ? (verticalTrackLength - verticalThumbLength) * safeScrollTop / layout.maxScrollY
+    : 0
+  const horizontalTrackLength = Math.max(1, viewportWidth - (hasVerticalScrollbar ? scrollbarThickness : 0))
+  const horizontalViewportLength = horizontalTrackLength
+  const horizontalThumbLength = Math.min(
+    horizontalTrackLength,
+    Math.max(minimumScrollbarThumb, horizontalTrackLength * horizontalViewportLength / Math.max(contentWidth, 1))
+  )
+  const horizontalThumbLeft = layout.maxScrollX > 0
+    ? (horizontalTrackLength - horizontalThumbLength) * safeScrollLeft / layout.maxScrollX
+    : 0
+
+  const applyScrollbarOffset = (axis, value) => {
+    if (!onScrollOffsetChange) return
+    const next = {
+      x: axis === 'x' ? Math.max(0, Math.min(layout.maxScrollX, value)) : safeScrollLeft,
+      y: axis === 'y' ? Math.max(0, Math.min(layout.maxScrollY, value)) : safeScrollTop
+    }
+    const scrollViewport = scrollViewportRef.current
+    if (scrollViewport) {
+      if (axis === 'x') scrollViewport.scrollLeft = next.x
+      if (axis === 'y') scrollViewport.scrollTop = next.y
+    }
+    keepScrollbarsVisible(axis)
+    onScrollOffsetChange(next)
+  }
+
+  const beginScrollbarDrag = (axis, event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const track = event.currentTarget
+    track.setPointerCapture?.(event.pointerId)
+    const trackRect = track.getBoundingClientRect()
+    const pointerPosition = axis === 'y' ? event.clientY - trackRect.top : event.clientX - trackRect.left
+    const thumbLength = axis === 'y' ? verticalThumbLength : horizontalThumbLength
+    const trackLength = axis === 'y' ? verticalTrackLength : horizontalTrackLength
+    const trackTravel = Math.max(1, trackLength - thumbLength)
+    const maxScroll = axis === 'y' ? layout.maxScrollY : layout.maxScrollX
+    const currentScroll = axis === 'y' ? safeScrollTop : safeScrollLeft
+    const currentThumbStart = trackTravel * currentScroll / Math.max(1, maxScroll)
+    const clickedThumb = pointerPosition >= currentThumbStart && pointerPosition <= currentThumbStart + thumbLength
+    const startScroll = clickedThumb
+      ? currentScroll
+      : Math.max(0, Math.min(maxScroll, (pointerPosition - thumbLength / 2) / trackTravel * maxScroll))
+    if (!clickedThumb) applyScrollbarOffset(axis, startScroll)
+    scrollbarDragRef.current = {
+      axis,
+      pointerId: event.pointerId,
+      startPointer: pointerPosition,
+      startScroll,
+      maxScroll,
+      trackTravel
+    }
+    setHoveredScrollbarAxis(axis)
+  }
+
+  const moveScrollbarDrag = (event) => {
+    const drag = scrollbarDragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    event.preventDefault()
+    event.stopPropagation()
+    const trackRect = event.currentTarget.getBoundingClientRect()
+    const pointerPosition = drag.axis === 'y' ? event.clientY - trackRect.top : event.clientX - trackRect.left
+    const delta = pointerPosition - drag.startPointer
+    applyScrollbarOffset(drag.axis, drag.startScroll + delta / drag.trackTravel * drag.maxScroll)
+  }
+
+  const endScrollbarDrag = (event) => {
+    const drag = scrollbarDragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    event.preventDefault()
+    event.stopPropagation()
+    event.currentTarget.releasePointerCapture?.(event.pointerId)
+    scrollbarDragRef.current = null
+  }
 
   return (
     <div
@@ -3907,22 +4092,57 @@ function SubtitleCanvasOverlay({ overlay, scrollOffset }) {
         }}
       >
         <div
+          className={[
+            'lovart-subtitle-preview-scroll',
+            emphasizeHorizontalScrollbar ? 'show-horizontal-scrollbar' : '',
+            emphasizeVerticalScrollbar ? 'show-vertical-scrollbar' : ''
+          ].filter(Boolean).join(' ')}
           ref={(el) => {
-            if (el && el.scrollTop !== safeScrollOffset) {
-              el.scrollTop = safeScrollOffset
-            }
+            scrollViewportRef.current = el
+            if (!el) return
+            if (el.scrollTop !== safeScrollTop) el.scrollTop = safeScrollTop
+            if (el.scrollLeft !== safeScrollLeft) el.scrollLeft = safeScrollLeft
           }}
+          onScroll={(event) => {
+            if (!overlay.isSelected || !onScrollOffsetChange) return
+            const next = {
+              x: Math.max(0, event.currentTarget.scrollLeft),
+              y: Math.max(0, event.currentTarget.scrollTop)
+            }
+            const movedHorizontally = Math.abs(next.x - safeScrollLeft) >= 0.5
+            const movedVertically = Math.abs(next.y - safeScrollTop) >= 0.5
+            if (!movedHorizontally && !movedVertically) return
+            const activeAxis = `${movedHorizontally ? 'x' : ''}${movedVertically ? 'y' : ''}`
+            keepScrollbarsVisible(activeAxis)
+            onScrollOffsetChange(next)
+          }}
+          onPointerDown={(event) => {
+            if (overlay.isSelected) event.stopPropagation()
+          }}
+          onPointerMove={(event) => {
+            if (!overlay.isSelected) return
+            const scrollViewport = event.currentTarget
+            const rect = scrollViewport.getBoundingClientRect()
+            const edgeThreshold = 16
+            const canScrollHorizontally = scrollViewport.scrollWidth > scrollViewport.clientWidth + 1
+            const canScrollVertically = scrollViewport.scrollHeight > scrollViewport.clientHeight + 1
+            const nearHorizontalScrollbar = canScrollHorizontally && rect.bottom - event.clientY <= edgeThreshold
+            const nearVerticalScrollbar = canScrollVertically && rect.right - event.clientX <= edgeThreshold
+            const nextAxis = `${nearHorizontalScrollbar ? 'x' : ''}${nearVerticalScrollbar ? 'y' : ''}`
+            setHoveredScrollbarAxis((currentAxis) => currentAxis === nextAxis ? currentAxis : nextAxis)
+          }}
+          onPointerLeave={() => setHoveredScrollbarAxis('')}
           style={{
             flex: 1,
             minHeight: 0,
             overflowY: 'scroll',
-            overflowX: 'hidden',
+            overflowX: 'scroll',
             background: '#ffffff',
             fontFamily: '"SF Mono", Menlo, Monaco, Consolas, "Courier New", monospace',
             fontSize: `${fontSize}px`,
             lineHeight,
             tabSize: 4,
-            pointerEvents: 'none'
+            pointerEvents: overlay.isSelected ? 'auto' : 'none'
           }}
         >
           <div
@@ -3930,19 +4150,21 @@ function SubtitleCanvasOverlay({ overlay, scrollOffset }) {
               position: 'relative',
               minHeight: '100%',
               height: `${Math.max(contentHeight, viewportHeight)}px`,
+              width: `${contentWidth}px`,
               background: '#ffffff'
             }}
           >
             <div
               style={{
-                position: 'absolute',
+                position: 'sticky',
                 left: 0,
                 top: 0,
                 width: `${gutterWidth}px`,
                 height: '100%',
                 background: '#ffffff',
                 borderRight: '1px solid #f0f0f0',
-                boxSizing: 'border-box'
+                boxSizing: 'border-box',
+                zIndex: 1
               }}
             />
             {visibleLines.map((line, localIndex) => {
@@ -3955,7 +4177,7 @@ function SubtitleCanvasOverlay({ overlay, scrollOffset }) {
                   style={{
                     position: 'absolute',
                     left: 0,
-                    right: 0,
+                    width: `${contentWidth}px`,
                     top: `${top}px`,
                     height: `${rowHeight}px`,
                     display: 'grid',
@@ -3971,7 +4193,12 @@ function SubtitleCanvasOverlay({ overlay, scrollOffset }) {
                       color: '#858585',
                       userSelect: 'none',
                       boxSizing: 'border-box',
-                      whiteSpace: 'pre'
+                      whiteSpace: 'pre',
+                      position: 'sticky',
+                      left: 0,
+                      zIndex: 2,
+                      background: '#ffffff',
+                      borderRight: '1px solid #f0f0f0'
                     }}
                   >
                     {index + 1}
@@ -3983,8 +4210,7 @@ function SubtitleCanvasOverlay({ overlay, scrollOffset }) {
                       paddingRight: `${Math.round(fontSize * 0.9)}px`,
                       color: kind === 'text' ? '#2d2d2d' : undefined,
                       whiteSpace: 'pre',
-                      boxSizing: 'border-box',
-                      overflow: 'hidden'
+                      boxSizing: 'border-box'
                     }}
                   >
                     {line ? renderHighlightedTextPreviewLine(line, kind) : '​'}
@@ -3994,6 +4220,52 @@ function SubtitleCanvasOverlay({ overlay, scrollOffset }) {
             })}
           </div>
         </div>
+        {showVerticalScrollbar ? (
+          <div
+            className={`lovart-subtitle-preview-scrollbar is-vertical${emphasizeVerticalScrollbar ? ' is-active' : ''}`}
+            data-scrollbar-axis="vertical"
+            style={{ bottom: `${hasHorizontalScrollbar ? scrollbarThickness : 0}px` }}
+            onPointerEnter={() => setHoveredScrollbarAxis('y')}
+            onPointerLeave={() => {
+              if (!scrollbarDragRef.current) setHoveredScrollbarAxis('')
+            }}
+            onPointerDown={(event) => beginScrollbarDrag('y', event)}
+            onPointerMove={moveScrollbarDrag}
+            onPointerUp={endScrollbarDrag}
+            onPointerCancel={endScrollbarDrag}
+          >
+            <div
+              className="lovart-subtitle-preview-scrollbar-thumb"
+              style={{
+                height: `${verticalThumbLength}px`,
+                transform: `translateY(${verticalThumbTop}px)`
+              }}
+            />
+          </div>
+        ) : null}
+        {showHorizontalScrollbar ? (
+          <div
+            className={`lovart-subtitle-preview-scrollbar is-horizontal${emphasizeHorizontalScrollbar ? ' is-active' : ''}`}
+            data-scrollbar-axis="horizontal"
+            style={{ right: `${hasVerticalScrollbar ? scrollbarThickness : 0}px` }}
+            onPointerEnter={() => setHoveredScrollbarAxis('x')}
+            onPointerLeave={() => {
+              if (!scrollbarDragRef.current) setHoveredScrollbarAxis('')
+            }}
+            onPointerDown={(event) => beginScrollbarDrag('x', event)}
+            onPointerMove={moveScrollbarDrag}
+            onPointerUp={endScrollbarDrag}
+            onPointerCancel={endScrollbarDrag}
+          >
+            <div
+              className="lovart-subtitle-preview-scrollbar-thumb"
+              style={{
+                width: `${horizontalThumbLength}px`,
+                transform: `translateX(${horizontalThumbLeft}px)`
+              }}
+            />
+          </div>
+        ) : null}
       </div>
       {overlay.width >= 28 ? (
         <div
@@ -5778,6 +6050,18 @@ export default function App() {
           return
         }
 
+        const normalizedTextPreviewElements = normalizeTextPreviewCardVisuals(workingElements)
+        if (normalizedTextPreviewElements) {
+          window.setTimeout(() => {
+            suppressNextChangeRef.current = true
+            api.updateScene({
+              elements: normalizedTextPreviewElements,
+              captureUpdate: CaptureUpdateAction.NEVER
+            })
+          }, 0)
+          return
+        }
+
         const generatorFrames = workingElements.filter(isGeneratorFrame)
         const nextIds = new Set(generatorFrames.map((frame) => frame.id))
         const previousIds = previousGeneratorFrameIdsRef.current
@@ -7454,7 +7738,7 @@ export default function App() {
                 width: bounds.width,
                 height: bounds.height,
                 strokeColor: '#d9d9d9',
-                backgroundColor: '#faf8ff',
+                backgroundColor: '#ffffff',
                 fillStyle: 'solid',
                 strokeStyle: 'solid',
                 strokeWidth: 1,
@@ -7471,7 +7755,7 @@ export default function App() {
             ],
             { regenerateIds: true }
           )
-          const cardElement = { ...rawCard, roundness: { type: 3 }, index: chooseElementIndex(nextElements) }
+          const cardElement = { ...rawCard, roundness: null, index: chooseElementIndex(nextElements) }
           nextElements.push(cardElement)
           insertedIds[cardElement.id] = true
           cursorX = bounds.x + bounds.width + 24
@@ -8619,10 +8903,10 @@ export default function App() {
     }
   }, [api, applyRemoteScene, ensureBuzzAssistLoggedIn, frameForm, generatingFrameIds, refreshOverlayStates, saveCanvas, scheduleCanvasSave, scheduleSelectionSave, updateActiveFrameElement])
 
-  // Wheel over a subtitle result card scrolls its SRT preview instead of
-  // panning the canvas (Youtube-AGI parity). The overlay itself is
-  // pointer-events none, so the wheel lands on the Excalidraw canvas and is
-  // intercepted here by viewport-rect hit test.
+  // Wheel over an SRT/XML result card scrolls its text preview instead of
+  // panning the canvas. Unselected overlays are pointer-events none, so the
+  // wheel is intercepted here by viewport-rect hit test. Selected cards also
+  // expose the native scroll viewport and keep this handler for trackpads.
   useEffect(() => {
     if (!api) return undefined
     const root = document.querySelector('.excalidraw')
@@ -8648,21 +8932,34 @@ export default function App() {
       if (!hit) return
       const lines = srtLinesCache.get(hit.assetUrl)
       if (!lines) return
-      const layout = getSubtitlePreviewLayout(lines.length, hit.width, hit.height, hit.zoom, hit.isSelected)
-      if (layout.maxScroll <= 0) return
+      const layout = getSubtitlePreviewLayout(lines, hit.width, hit.height, hit.zoom, hit.isSelected)
+      const deltaUnit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? hit.height * 0.85 : 1
+      let deltaX = event.deltaX * deltaUnit
+      let deltaY = event.deltaY * deltaUnit
+      if (event.shiftKey && Math.abs(deltaX) < 0.5 && Math.abs(deltaY) >= 0.5) {
+        deltaX = deltaY
+        deltaY = 0
+      }
+      const wantsHorizontalScroll = layout.maxScrollX > 0 && Number.isFinite(deltaX) && Math.abs(deltaX) >= 0.5
+      const wantsVerticalScroll = layout.maxScrollY > 0 && Number.isFinite(deltaY) && Math.abs(deltaY) >= 0.5
+      if (!wantsHorizontalScroll && !wantsVerticalScroll) return
       event.preventDefault()
       event.stopPropagation()
       if (typeof event.stopImmediatePropagation === 'function') {
         event.stopImmediatePropagation()
       }
-      const deltaUnit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? hit.height * 0.85 : 1
-      const delta = (event.deltaY || event.deltaX) * deltaUnit
-      if (!Number.isFinite(delta) || delta === 0) return
       setSubtitleScrollOffsets((prev) => {
-        const current = Number(prev[hit.id]) || 0
-        const nextValue = Math.max(0, Math.min(layout.maxScroll, current + delta))
-        if (Math.abs(nextValue - current) < 0.5) return prev
-        return { ...prev, [hit.id]: nextValue }
+        const current = normalizeTextPreviewScrollOffset(prev[hit.id])
+        const next = {
+          x: wantsHorizontalScroll
+            ? Math.max(0, Math.min(layout.maxScrollX, current.x + deltaX))
+            : current.x,
+          y: wantsVerticalScroll
+            ? Math.max(0, Math.min(layout.maxScrollY, current.y + deltaY))
+            : current.y
+        }
+        if (Math.abs(next.x - current.x) < 0.5 && Math.abs(next.y - current.y) < 0.5) return prev
+        return { ...prev, [hit.id]: next }
       })
     }
     root.addEventListener('wheel', onWheel, { capture: true, passive: false })
@@ -9437,7 +9734,18 @@ export default function App() {
   })}
 
       {subtitlePreviewOverlays.map((overlay) => (
-        <SubtitleCanvasOverlay key={overlay.id} overlay={overlay} scrollOffset={subtitleScrollOffsets[overlay.id] || 0} />
+        <SubtitleCanvasOverlay
+          key={overlay.id}
+          overlay={overlay}
+          scrollOffset={subtitleScrollOffsets[overlay.id]}
+          onScrollOffsetChange={(next) => {
+            setSubtitleScrollOffsets((current) => {
+              const previous = normalizeTextPreviewScrollOffset(current[overlay.id])
+              if (Math.abs(previous.x - next.x) < 0.5 && Math.abs(previous.y - next.y) < 0.5) return current
+              return { ...current, [overlay.id]: next }
+            })
+          }}
+        />
       ))}
 
       {selectedImageOverlays.map((img) => {
