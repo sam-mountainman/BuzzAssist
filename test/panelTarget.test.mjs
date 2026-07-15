@@ -590,18 +590,19 @@ test("prompt panel keeps the desktop layout, scaled and kept reachable on phones
   // desktop placement.
   assert.match(source, /const rawLeft = Math\.round\(\(Number\(target\?\.left\) \|\| 0\) \+ frameViewportWidth \/ 2 - panelWidth \/ 2\)/);
   assert.match(source, /const rawTop = Math\.round\(targetTop \+ frameViewportHeight \+ 4\)/);
-  assert.match(source, /const left = isCompactViewport\s*\?\s*clamp\(rawLeft, minLeft, Math\.max\(minLeft, maxLeft\)\)\s*:\s*rawLeft/);
-  assert.match(source, /const top = isCompactViewport && viewportHeight > 0\s*\?\s*clamp\(rawTop, minTop, Math\.max\(minTop, maxTop\)\)\s*:\s*rawTop/);
+  assert.match(source, /const left = viewportWidth > 0\s*\?\s*clamp\(rawLeft, minLeft, Math\.max\(minLeft, maxLeft\)\)\s*:\s*rawLeft/);
+  assert.match(source, /const top = viewportHeight > 0\s*\?\s*clamp\(rawTop, minTop, Math\.max\(minTop, maxTop\)\)\s*:\s*rawTop/);
   assert.match(source, /left,\s*top,/);
   // Phones shrink the whole panel with a CSS scale instead of reflowing it, so
   // the mobile UI is pixel-identical to desktop, just smaller. The outer
-  // placement is clamped after scaling so it stays reachable while panning.
+  // placement is clamped after scaling so it stays reachable while panning;
+  // desktop uses the same clamp with a wider outside-click gutter.
   // Use the visual viewport rather than the layout viewport so the same
   // placement is recalculated when the software keyboard opens.
   assert.match(source, /const isCompactViewport = viewportWidth > 0 && viewportWidth <= 900/);
   assert.match(source, /function readVisualViewportMetrics\(\)/);
   assert.match(source, /visualViewport\?\.addEventListener\('resize', update\)/);
-  assert.match(source, /const panelScale = isCompactViewport\s*\?\s*Math\.min\(1, \(viewportWidth - 16\) \/ desiredWidth\)/);
+  assert.match(source, /const panelScale = isCompactViewport\s*\?\s*Math\.min\(1, Math\.max\(1, viewportWidth - viewportGutter \* 2\) \/ desiredWidth\)/);
   assert.match(source, /const transformInsetX = \(panelWidth - panelVisualWidth\) \/ 2/);
   assert.match(source, /transform: panelPlacement\.scale && panelPlacement\.scale < 1 \? `scale\(\$\{panelPlacement\.scale\}\)` : 'none'/);
   assert.match(source, /transformOrigin: 'top center'/);
@@ -642,6 +643,16 @@ test("empty local canvas clicks close the prompt without closing on another pane
   assert.match(source, /closeActiveGeneratorPanel\(\)/);
   assert.match(source, /document\.addEventListener\('click', closePromptFromEmptyCanvasClick, true\)/);
   assert.match(source, /document\.removeEventListener\('click', closePromptFromEmptyCanvasClick, true\)/);
+});
+
+test("desktop prompt placement keeps an outside-click gutter at every viewport edge", async () => {
+  const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+
+  assert.match(source, /const GENERATOR_PANEL_COMPACT_GUTTER = 16/);
+  assert.match(source, /const GENERATOR_PANEL_DESKTOP_GUTTER = 24/);
+  assert.match(source, /const viewportGutter = isCompactViewport/);
+  assert.match(source, /const left = viewportWidth > 0\s*\? clamp\(rawLeft, minLeft, Math\.max\(minLeft, maxLeft\)\)/);
+  assert.match(source, /const top = viewportHeight > 0\s*\? clamp\(rawTop, minTop, Math\.max\(minTop, maxTop\)\)/);
 });
 
 test("phone tunnel renders images via capped overlays instead of hydrating Excalidraw files", async () => {
