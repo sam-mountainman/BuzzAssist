@@ -1,6 +1,6 @@
 {
   "name": "buzzassist",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "BuzzAssist active-project canvas, media generation, generated-files folder, and Cloudflare Canvas Tunnel plugin for Claude Code.",
   "author": {
     "name": "higataiyu"

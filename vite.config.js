@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import { createReadStream, createWriteStream, constants as fsConstants } from 'node:fs'
+import { createReadStream, createWriteStream, constants as fsConstants, mkdirSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
@@ -18,7 +18,7 @@ import {
   runWithConcurrency
 } from './lib/mediaGeneration.mjs'
 import { getBuzzAssistAuthStatus, loginBuzzAssistViaBrowser, resolveAuthFilePath } from './lib/buzzassistApi.mjs'
-import { FOCUS_REQUEST_FILE_NAME, OFFICIAL_EXCALIDRAW_README, createExcalidrawView, insertExcalidrawImage, insertExcalidrawSubtitle, insertExcalidrawVideo, insertExcalidrawMediaBatch, performCanvasMaintenance, stripAssetBackedFileDataURLs, syncDeletedCanvasAssets } from './lib/canvasScene.mjs'
+import { FOCUS_REQUEST_FILE_NAME, OFFICIAL_EXCALIDRAW_README, createExcalidrawView, insertExcalidrawImage, insertExcalidrawSubtitle, insertExcalidrawVideo, insertExcalidrawMediaBatch, performCanvasMaintenance, stripAssetBackedFileDataURLs, syncDeletedCanvasAssets, syncMissingCanvasAssets } from './lib/canvasScene.mjs'
 import { streamZipStore } from './lib/zipStore.mjs'
 import { generateSubtitleSrt, refineSubtitleFromPlan, writeSubtitleWordsSidecar } from './lib/subtitleGeneration.mjs'
 import { silenceCutVideo } from './lib/tempoCut.mjs'
@@ -27,6 +27,7 @@ import { bridgeWorkerAlive, canDriveGui, runOsascript, runPowershell, sendChatMe
 import { CANVAS_SERVER_PROTOCOL_VERSION, getOrCreateMcpToken, rejectDisallowedOrigin, rejectRemoteOperator, rejectMissingBearer, setLocalCorsHeaders, writeServerDiscovery } from './lib/canvasServerRuntime.mjs'
 import { canvasAttachmentBundleToMcpResult, createCanvasAttachmentBundle, listCanvasAttachmentBundles, readCanvasAttachmentBundle } from './lib/canvasAttachmentBundle.mjs'
 import { openLocalFolder } from './lib/openLocalFolder.mjs'
+import { mergeLocalCanvasScenes } from './lib/localCanvasSceneMerge.mjs'
 import { homedir, tmpdir } from 'node:os'
 
 const projectDir = resolve(process.env.EXCALIDRAW_PROJECT_DIR ?? process.cwd())
@@ -1361,7 +1362,8 @@ function configureCanvasServer(server) {
     }
   })
   server.middlewares.use(serveCanvasAsset)
-  server.watcher.add([canvasFile, focusRequestFile])
+  mkdirSync(canvasAssetsDir, { recursive: true })
+  server.watcher.add([canvasFile, focusRequestFile, canvasAssetsDir])
   let canvasWatchTimer = null
   const scheduleCanvasWatchBroadcast = (changedPath) => {
     const resolvedPath = resolve(changedPath)
@@ -1379,6 +1381,34 @@ function configureCanvasServer(server) {
   }
   server.watcher.on('add', scheduleCanvasWatchBroadcast)
   server.watcher.on('change', scheduleCanvasWatchBroadcast)
+  let assetDeletionTimer = null
+  const scheduleMissingAssetSync = (changedPath) => {
+    const resolvedPath = resolve(changedPath)
+    const isWholeAssetsDirectory = resolvedPath === canvasAssetsDir
+    if (!isWholeAssetsDirectory && !isSafeChildPath(canvasAssetsDir, resolvedPath)) return
+    clearTimeout(assetDeletionTimer)
+    assetDeletionTimer = setTimeout(async () => {
+      try {
+        const assetFileName = isWholeAssetsDirectory ? undefined : basename(resolvedPath)
+        if (assetFileName && (await stat(resolvedPath).catch(() => null))?.isFile()) return
+        const result = await syncMissingCanvasAssets({
+          canvasDir,
+          assetFileName,
+          restoreFromTrash: false
+        })
+        if (result.deleted > 0) {
+          const scene = normalizeScene(await readJsonFile(canvasFile))
+          broadcastCanvasChanged([canvasFile], { fingerprint: sceneContentFingerprint(scene) })
+        }
+      } catch (error) {
+        console.warn('[asset-delete-sync] failed:', error.message)
+      }
+    }, 180)
+  }
+  server.watcher.on('unlink', scheduleMissingAssetSync)
+  server.watcher.on('change', (changedPath) => {
+    if (resolve(changedPath) === canvasAssetsDir) scheduleMissingAssetSync(changedPath)
+  })
 
       // Reveal the current project's canonical media folder. Local operator
       // only: a tunnel/phone page must never be able to open host OS windows.
@@ -1659,33 +1689,50 @@ function configureCanvasServer(server) {
           if (req.method === 'PUT') {
             const body = await readRequestBody(req)
             const payload = JSON.parse(body)
-            const scene = normalizeScene(payload)
-            if (!isScene(scene)) {
+            const incomingScene = normalizeScene(payload)
+            let existingScene = normalizeScene(null)
+            try {
+              existingScene = normalizeScene(await readJsonFile(canvasFile))
+            } catch (error) {
+              if (error.code !== 'ENOENT') throw error
+            }
+            if (!isScene(incomingScene)) {
               sendJson(res, 400, { error: 'Expected an Excalidraw scene.' })
               return
             }
-            if (scene.elements.length === 0 && payload?.allowClearCanvas !== true) {
-              try {
-                const existingScene = normalizeScene(await readJsonFile(canvasFile))
-                if (existingScene.elements.length > 0) {
-                  sendJson(res, 409, {
-                    error: 'Refusing to replace a non-empty Excalidraw canvas with an empty scene.',
-                    existingElementCount: existingScene.elements.length
-                  })
-                  return
-                }
-              } catch (error) {
-                if (error.code !== 'ENOENT') throw error
+            if (incomingScene.elements.length === 0 && payload?.allowClearCanvas !== true) {
+              if (existingScene.elements.length > 0) {
+                sendJson(res, 409, {
+                  error: 'Refusing to replace a non-empty Excalidraw canvas with an empty scene.',
+                  existingElementCount: existingScene.elements.length
+                })
+                return
               }
             }
+            const scene = payload?.allowClearCanvas === true
+              ? incomingScene
+              : normalizeScene(mergeLocalCanvasScenes(existingScene, incomingScene))
 
             // Strip inline base64 for file records verifiably backed by an
             // on-disk asset (keeps drag-dropped images and video posters inline).
             await stripAssetBackedFileDataURLs(scene)
             await writeJsonAtomic(canvasFile, scene)
             const assetSync = await syncDeletedCanvasAssets({ canvasDir }, scene)
-            sendJson(res, 200, { ok: true, path: canvasFile, storage: 'single-file', assetSync })
-            broadcastCanvasChanged([canvasFile], { fingerprint: sceneContentFingerprint(scene) })
+            // A stale browser tab may try to resurrect an element after its
+            // backing file was deliberately removed in Finder/Explorer. Run
+            // the missing-file invariant on every save, not only on unlink.
+            const missingAssetSync = await syncMissingCanvasAssets({ canvasDir, restoreFromTrash: false })
+            const persistedScene = missingAssetSync.deleted > 0
+              ? normalizeScene(await readJsonFile(canvasFile))
+              : scene
+            sendJson(res, 200, {
+              ok: true,
+              path: canvasFile,
+              storage: 'single-file',
+              assetSync,
+              missingAssetSync
+            })
+            broadcastCanvasChanged([canvasFile], { fingerprint: sceneContentFingerprint(persistedScene) })
             return
           }
 
