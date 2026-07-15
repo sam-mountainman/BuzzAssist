@@ -5,7 +5,7 @@ description: Create a non-destructive Premiere Pro XML (FCP7 xmeml) that removes
 
 # Excalidraw Silence Cut
 
-Use this skill when the user wants a silence-cut edit plan. The output is **Premiere XML only** under `canvas/assets/`; it is also inserted on the canvas as a normal selectable XML result card. Do not promise a rendered video or a video media element.
+Use this skill when the user wants a silence-cut edit plan. The output is **Premiere XML only** under `canvas/assets/`; it is also inserted on the canvas as an SRT-style selectable text preview with line numbers, scrolling, download, and chat attachment actions. Do not promise a rendered video or a video media element.
 
 ## Preconditions
 
@@ -48,7 +48,7 @@ Use this skill when the user wants a silence-cut edit plan. The output is **Prem
 }
 ```
 
-2. The tool outputs a `.xml` file in `canvas/assets/`, inserts a selectable XML result card on the canvas, and returns `assetUrl`, `elementId`, `inputDuration`, `outputDuration`, `cutDuration`, `cutCount`, and `clipCount`.
+2. The tool outputs a `.xml` file in `canvas/assets/`, inserts an SRT-style line-numbered XML preview on the canvas, and returns `assetUrl`, `elementId`, `inputDuration`, `outputDuration`, `cutDuration`, `cutCount`, and `clipCount`.
 3. Report the before/after durations and the XML filename. Tell the user to import the XML into Premiere Pro as the cut-applied sequence.
 
 ## Precision Notes

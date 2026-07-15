@@ -11,6 +11,7 @@ import {
   insertGeneratorFrameBatch,
   isSafeChildPath,
   normalizeScene,
+  normalizeSilenceCutTextPreviewCards,
   normalizeSubtitleCards,
   resolveCanvasDir,
   resolveFocusRequestFile,
@@ -183,7 +184,7 @@ test("batch images persist the same numbered file names in element and file meta
   }
 });
 
-test("silence-cut XML results replace generators with normal canvas attachment cards", async () => {
+test("silence-cut XML results replace generators with SRT-style text preview cards", async () => {
   const projectDir = await mkdtemp(join(tmpdir(), "excalidraw-silence-cut-result-"));
   try {
     const canvasDir = join(projectDir, "canvas");
@@ -222,7 +223,7 @@ test("silence-cut XML results replace generators with normal canvas attachment c
       clipCount: 4,
       anchorElementId: anchor.id,
       replaceAnchor: true,
-      matchAnchor: true,
+      matchAnchor: false,
     });
 
     const saved = JSON.parse(await readFile(join(canvasDir, "excalidraw-canvas.json"), "utf8"));
@@ -231,19 +232,60 @@ test("silence-cut XML results replace generators with normal canvas attachment c
 
     assert.equal(replacedAnchor.isDeleted, true);
     assert.equal(result.replacedAnchor, true);
-    assert.equal(element.type, "image");
+    assert.equal(element.type, "rectangle");
     assert.equal(element.customData["buzzassist.silenceCutGenerator.frame"], undefined);
     assert.equal(element.customData["buzzassist.imageGenerator.frame"], undefined);
     assert.equal(element.customData.codexMediaKind, "xml");
+    assert.equal(element.customData.codexTextPreview, true);
     assert.equal(element.customData.codexAssetPath, xmlPath);
     assert.equal(element.customData.codexAssetUrl, "/excalidraw-assets/cut.xml");
     assert.equal(element.customData.silenceCutOutputAsset.name, "cut.xml");
     assert.equal(element.customData.silenceCutOutputAsset.kind, "xml");
     assert.equal(element.customData.silenceCutOutputAsset.path, xmlPath);
-    assert.equal(saved.files[result.fileId].mimeType, "image/svg+xml");
-    assert.match(saved.files[result.fileId].dataURL, /^data:image\/svg\+xml;base64,/);
-    assert.deepEqual(result.bounds, { x: 120, y: 80, width: 364, height: 205 });
+    assert.deepEqual(saved.files, {});
+    assert.deepEqual(result.bounds, { x: 199.5, y: 0.5, width: 205, height: 364 });
     assert.equal(saved.appState.selectedElementIds[result.elementId], true);
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("legacy landscape silence-cut cards migrate once to the portrait SRT footprint", async () => {
+  const projectDir = await mkdtemp(join(tmpdir(), "excalidraw-silence-cut-migrate-"));
+  try {
+    const canvasDir = join(projectDir, "canvas");
+    await mkdir(canvasDir, { recursive: true });
+    await writeFile(join(canvasDir, "excalidraw-canvas.json"), JSON.stringify({
+      type: "excalidraw",
+      version: 2,
+      source: "test",
+      elements: [{
+        id: "legacy-xml",
+        type: "image",
+        x: 120,
+        y: 80,
+        width: 364,
+        height: 205,
+        isDeleted: false,
+        customData: {
+          codexGeneratedSilenceCut: true,
+          codexMediaKind: "xml",
+          codexAssetUrl: "/excalidraw-assets/JetCut1.xml",
+        },
+      }],
+      appState: {},
+      files: {},
+    }));
+
+    assert.deepEqual(await normalizeSilenceCutTextPreviewCards({ projectDir }), { normalized: 1 });
+    const saved = JSON.parse(await readFile(join(canvasDir, "excalidraw-canvas.json"), "utf8"));
+    const element = saved.elements[0];
+    assert.equal(element.x, 199.5);
+    assert.equal(element.y, 0.5);
+    assert.equal(element.width, 205);
+    assert.equal(element.height, 364);
+    assert.equal(element.customData.codexTextPreview, true);
+    assert.deepEqual(await normalizeSilenceCutTextPreviewCards({ projectDir }), { normalized: 0 });
   } finally {
     await rm(projectDir, { recursive: true, force: true });
   }
