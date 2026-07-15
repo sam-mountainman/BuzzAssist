@@ -1704,15 +1704,102 @@ a.lovart-error-action {
   transform: rotate(180deg);
 }
 
-/* The SRT preview mirrors Youtube-AGI's SubtitleScrollablePreviewOverlay: it
-   lives in the z 3 overlay band (above the selection layer, below the
-   toolbar), is fully pointer-events none (clicks/drags pass through to the
-   canvas), and scrolls via the canvas wheel handler. Visuals are inline. */
+/* SRT/XML previews live in the z 3 overlay band (above the selection layer,
+   below the toolbar). The root remains transparent to canvas interactions;
+   its custom scrollbar tracks opt back into pointer input independently. */
 .lovart-subtitle-preview-overlay {
   position: absolute;
   z-index: 3;
   pointer-events: none;
   transform-origin: center center;
+}
+
+/* Native scrollbar styling is retained for selected cards. Custom tracks below
+   remain visible and directly draggable even when the card is unselected. */
+.lovart-subtitle-preview-scroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.lovart-subtitle-preview-scroll::-webkit-scrollbar-track,
+.lovart-subtitle-preview-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.lovart-subtitle-preview-scroll::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: 999px;
+}
+
+.lovart-subtitle-preview-scroll.show-vertical-scrollbar,
+.lovart-subtitle-preview-scroll.show-horizontal-scrollbar {
+  scrollbar-color: rgb(100 116 139 / 0.76) rgb(226 232 240 / 0.72);
+  scrollbar-width: thin;
+}
+
+.lovart-subtitle-preview-scroll.show-vertical-scrollbar::-webkit-scrollbar-track,
+.lovart-subtitle-preview-scroll.show-horizontal-scrollbar::-webkit-scrollbar-track {
+  background-color: rgb(226 232 240 / 0.72);
+  border-radius: 999px;
+}
+
+.lovart-subtitle-preview-scroll.show-vertical-scrollbar::-webkit-scrollbar-thumb,
+.lovart-subtitle-preview-scroll.show-horizontal-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgb(100 116 139 / 0.62);
+}
+
+.lovart-subtitle-preview-scroll.show-vertical-scrollbar::-webkit-scrollbar-thumb:hover,
+.lovart-subtitle-preview-scroll.show-horizontal-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(71 85 105 / 0.78);
+}
+
+/* macOS may suppress native overlay scrollbars even when their CSS colors are
+   set. These cross-platform tracks mirror the scroll position and handle track
+   clicks and thumb drags themselves. */
+.lovart-subtitle-preview-scrollbar {
+  position: absolute;
+  z-index: 4;
+  box-sizing: border-box;
+  pointer-events: auto;
+  touch-action: none;
+  background: rgb(226 232 240 / 0.9);
+  border: 1px solid rgb(203 213 225 / 0.9);
+  border-radius: 999px;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.12);
+  opacity: 0.72;
+  transition: opacity 120ms ease;
+}
+
+.lovart-subtitle-preview-scrollbar.is-active {
+  opacity: 1;
+}
+
+.lovart-subtitle-preview-scrollbar.is-vertical {
+  top: 0;
+  right: 0;
+  width: 14px;
+  cursor: ns-resize;
+}
+
+.lovart-subtitle-preview-scrollbar.is-horizontal {
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 14px;
+  cursor: ew-resize;
+}
+
+.lovart-subtitle-preview-scrollbar-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 8px;
+  height: 8px;
+  background: rgb(71 85 105 / 0.88);
+  border-radius: 999px;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.22);
 }
 
 .lovart-canvas-picker-bar {
