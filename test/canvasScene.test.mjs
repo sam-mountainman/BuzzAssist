@@ -11,6 +11,7 @@ import {
   insertGeneratorFrameBatch,
   isSafeChildPath,
   normalizeScene,
+  normalizeSilenceCutTextPreviewCards,
   normalizeSubtitleCards,
   resolveCanvasDir,
   resolveFocusRequestFile,
@@ -244,6 +245,47 @@ test("silence-cut XML results replace generators with SRT-style text preview car
     assert.deepEqual(saved.files, {});
     assert.deepEqual(result.bounds, { x: 199.5, y: 0.5, width: 205, height: 364 });
     assert.equal(saved.appState.selectedElementIds[result.elementId], true);
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("legacy landscape silence-cut cards migrate once to the portrait SRT footprint", async () => {
+  const projectDir = await mkdtemp(join(tmpdir(), "excalidraw-silence-cut-migrate-"));
+  try {
+    const canvasDir = join(projectDir, "canvas");
+    await mkdir(canvasDir, { recursive: true });
+    await writeFile(join(canvasDir, "excalidraw-canvas.json"), JSON.stringify({
+      type: "excalidraw",
+      version: 2,
+      source: "test",
+      elements: [{
+        id: "legacy-xml",
+        type: "image",
+        x: 120,
+        y: 80,
+        width: 364,
+        height: 205,
+        isDeleted: false,
+        customData: {
+          codexGeneratedSilenceCut: true,
+          codexMediaKind: "xml",
+          codexAssetUrl: "/excalidraw-assets/JetCut1.xml",
+        },
+      }],
+      appState: {},
+      files: {},
+    }));
+
+    assert.deepEqual(await normalizeSilenceCutTextPreviewCards({ projectDir }), { normalized: 1 });
+    const saved = JSON.parse(await readFile(join(canvasDir, "excalidraw-canvas.json"), "utf8"));
+    const element = saved.elements[0];
+    assert.equal(element.x, 199.5);
+    assert.equal(element.y, 0.5);
+    assert.equal(element.width, 205);
+    assert.equal(element.height, 364);
+    assert.equal(element.customData.codexTextPreview, true);
+    assert.deepEqual(await normalizeSilenceCutTextPreviewCards({ projectDir }), { normalized: 0 });
   } finally {
     await rm(projectDir, { recursive: true, force: true });
   }
