@@ -19,6 +19,7 @@ import {
 } from '../lib/modelCatalog.mjs'
 import { estimateCreditsForJob } from '../lib/mediaCredits.mjs'
 import { getLovartImageSettings, getLovartVideoSettings } from '../lib/lovartModelSettings.mjs'
+import { getViewportConstrainedMenuShift } from '../lib/menuPlacement.mjs'
 import {
   getTextPreviewMaxColumns,
   normalizeTextPreviewScrollOffset
@@ -5433,6 +5434,49 @@ export default function App() {
       document.removeEventListener('click', closeMenuOnOutsidePointer, true)
     }
   }, [openMenu])
+
+  // Every generator dropdown is positioned relative to its pill, while the
+  // canvas shell intentionally clips overflow. Keep the rendered menu inside
+  // the visual viewport even when the frame sits at an edge, the canvas is at
+  // 200%, or the utility menu grows after opening its advanced settings.
+  useLayoutEffect(() => {
+    if (!openMenu || typeof document === 'undefined') return undefined
+    let frame = window.requestAnimationFrame(() => {
+      const menu = document.querySelector('.lovart-ai-panel .lovart-menu[data-lovart-menu]')
+      if (!(menu instanceof HTMLElement)) return
+      const panel = menu.closest('.lovart-ai-panel')
+      const panelRect = panel?.getBoundingClientRect()
+      const panelScale = panel instanceof HTMLElement && panel.offsetWidth > 0
+        ? Math.max(0.01, (panelRect?.width || panel.offsetWidth) / panel.offsetWidth)
+        : 1
+      const viewport = readVisualViewportMetrics()
+      const gutter = viewport.width > 0 && viewport.width <= 900
+        ? GENERATOR_PANEL_COMPACT_GUTTER
+        : GENERATOR_PANEL_DESKTOP_GUTTER
+
+      menu.style.setProperty('--lovart-menu-shift-x', '0px')
+      menu.style.setProperty('--lovart-menu-shift-y', '0px')
+      menu.style.setProperty('--lovart-menu-max-width', `${Math.max(120, (viewport.width - gutter * 2) / panelScale)}px`)
+      menu.style.setProperty('--lovart-menu-max-height', `${Math.max(160, (viewport.height - gutter * 2) / panelScale)}px`)
+
+      const placement = getViewportConstrainedMenuShift(menu.getBoundingClientRect(), viewport, gutter)
+      menu.style.setProperty('--lovart-menu-shift-x', `${placement.shiftX / panelScale}px`)
+      menu.style.setProperty('--lovart-menu-shift-y', `${placement.shiftY / panelScale}px`)
+    })
+
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame)
+      frame = 0
+    }
+  }, [
+    activeFrameKind,
+    openMenu,
+    silenceCutAdvancedOpen,
+    visualViewportMetrics.height,
+    visualViewportMetrics.offsetLeft,
+    visualViewportMetrics.offsetTop,
+    visualViewportMetrics.width
+  ])
 
   useEffect(() => {
     const backdrop = menuBackdropRef.current
@@ -11390,7 +11434,7 @@ export default function App() {
         }
         return (
         <section
-          className={`lovart-ai-panel lovart-utility-panel${openMenuBlocksPrompt ? ' has-open-menu' : ''}${['utility-model', 'utility-settings', 'glossary'].includes(openMenu) ? ' menu-over-tray' : ''}`}
+          className={`lovart-ai-panel lovart-utility-panel${openMenuBlocksPrompt ? ' has-open-menu' : ''}`}
           style={panelStyle}
           aria-label={isSilencePanel ? 'Silence Cut Generator' : 'SRT Generator'}
           onPointerDown={(event) => {
