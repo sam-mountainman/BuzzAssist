@@ -7470,6 +7470,7 @@ export default function App() {
             index: chooseElementIndex(nextElements),
             customData: {
               codexInsertedAttachment: true,
+              codexKeepInlinePreview: true,
               codexMediaKind: asset.kind,
               codexFileName: asset.name,
               codexAssetPath: asset.path,
@@ -8434,8 +8435,8 @@ export default function App() {
     }
   }, [api, applyRemoteScene, ensureBuzzAssistLoggedIn, focusGeneratingFrameGrid, frameForm, generatingFrameIds, insertGeneratorFrame, openHermesSetupDialog, prehydrateResultFiles, refreshHermesStatus, refreshOverlayStates, saveCanvas, scheduleCanvasSave, scheduleSelectionSave, selectedGeneratedResult, setGeneratorFramesRemoteGenerating, spawnExtraGeneratingFrames, updateActiveFrameElement])
 
-  // Generation for utility frames. SRT replaces the frame with an SRT card;
-  // silence cut keeps the frame selected and downloads a Premiere XML.
+  // Utility generation replaces its generator with a normal canvas result:
+  // an SRT card or a Premiere XML attachment card.
   const runUtilityGeneration = useCallback(async () => {
     if (!api) return
     const anchorElementId = activeFrameIdRef.current
@@ -8509,7 +8510,12 @@ export default function App() {
               thresholdDb: savedForm.silenceCutThresholdAuto ? 'auto' : savedForm.silenceCutThresholdDb,
               keepSeconds: savedForm.silenceCutKeepSeconds,
               preMarginSeconds: savedForm.silenceCutPreMarginSeconds,
-              postMarginSeconds: savedForm.silenceCutPostMarginSeconds
+              postMarginSeconds: savedForm.silenceCutPostMarginSeconds,
+              inputAsset: savedForm.silenceCutVideo,
+              anchorElementId,
+              placement: 'replace',
+              replaceAnchor: true,
+              matchAnchor: true
             }
 
       const response = await canvasFetch(endpoint, {
@@ -8521,74 +8527,12 @@ export default function App() {
       if (!response.ok || payload.error) {
         throw new Error(payload.error || `Generation failed: ${response.status}`)
       }
-      if (kind === 'silenceCut') {
-        // The jet-cut Premiere XML is saved under canvas/assets — no canvas
-        // element. Keep the generator frame (settings survive for re-runs),
-        // surface the stats, and hand the file to the browser.
-        const formatClock = (seconds) => {
-          const total = Math.max(0, Math.round(Number(seconds) || 0))
-          return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
-        }
-        const outputAsset = {
-          id: crypto.randomUUID(),
-          name: payload.fileName || 'jetcut.xml',
-          kind: 'xml',
-          mimeType: 'application/xml',
-          path: payload.assetPath || '',
-          url: payload.assetUrl || '',
-          dataURL: '',
-          thumbnail: '',
-          duration: 0
-        }
-        const nextForm = { ...savedForm, silenceCutOutput: outputAsset }
-        const currentElements = api.getSceneElementsIncludingDeleted()
-        const nextElements = currentElements.map((element) =>
-          element.id === anchorElementId
-            ? {
-                ...element,
-                customData: {
-                  ...(element.customData ?? {}),
-                  ...frameCustomDataFromForm(kind, nextForm)
-                },
-                version: (Number(element.version) || 1) + 1,
-                versionNonce: Math.floor(Math.random() * 2 ** 31),
-                updated: Date.now()
-              }
-            : element
-        )
-        const appState = {
-          ...(api.getAppState?.() ?? latestSceneRef.current.appState),
-          selectedElementIds: { [anchorElementId]: true }
-        }
-        const nextScene = createScene(nextElements, appState, api.getFiles())
-        latestSceneRef.current = nextScene
-        suppressNextChangeRef.current = true
-        api.updateScene({
-          elements: nextElements,
-          appState: { selectedElementIds: { [anchorElementId]: true } },
-          captureUpdate: CaptureUpdateAction.IMMEDIATELY
-        })
-        refreshOverlayStates(nextScene)
-        scheduleCanvasSave(nextScene)
-        scheduleSelectionSave(nextScene)
-        setSilenceCutNotice(
-          `${formatClock(payload.inputDuration)} → ${formatClock(payload.outputDuration)}（−${formatClock(payload.cutDuration)}・${payload.cutCount}箇所）${payload.fileName} を書き出しました`
-        )
-        triggerAssetDownload(payload.assetUrl, payload.fileName || 'jetcut.xml')
-        activeFrameIdRef.current = anchorElementId
-        lastFocusedFrameIdRef.current = anchorElementId
-        setActiveFrameId(anchorElementId)
-        setActiveFrameKind(kind)
-        setFrameForm(nextForm)
-        return
-      }
       const canvasResponse = await canvasFetch(CANVAS_ENDPOINT)
       if (canvasResponse.ok) {
         const canvasPayload = await canvasResponse.json()
         let nextScene = normalizeScene(canvasPayload.scene)
-        // The subtitle/silence-cut endpoints do not forward replaceAnchor, so
-        // the generator frame survives underneath the result. Delete it here
-        // and persist, completing the frame → result replacement.
+        // Compatibility fallback for older servers that returned a result
+        // without replacing the generator anchor.
         if (!payload.replacedAnchor && nextScene.elements.some((element) => element.id === anchorElementId && isGeneratorFrame(element))) {
           nextScene = {
             ...nextScene,
