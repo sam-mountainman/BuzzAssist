@@ -46,6 +46,7 @@ function usage() {
 
 Options:
   --agent <name>         Configure one host: codex, claude-desktop, claude, cursor, antigravity.
+  --agents <names>       Configure a comma-separated host list. Used by the safe updater.
   --host <name>          Alias for --agent.
   --all-agents           Configure all supported hosts. Not used by default.
   --project-dir <path>   Project whose canvas/ directory should store state.
@@ -55,6 +56,7 @@ Options:
   --skip-build           Do not run npm run build.
   --skip-plugin-source   Do not refresh ~/plugins/buzzassist.
   --no-launch            Do not start the canvas service.
+  --no-auto-update       Do not register the daily safe updater for Codex/Claude Code.
   --tunnel               Start a Canvas Tunnel after setup for phone access to the same full Excalidraw UI (Cloudflare by default).
   --ngrok-authtoken <token>
                          Opt into ngrok instead of Cloudflare and configure it. Also reads BUZZASSIST_NGROK_AUTHTOKEN or NGROK_AUTHTOKEN.
@@ -73,6 +75,17 @@ function hasArg(name) {
 
 function resolveTargetAgents() {
   if (hasArg("--all-agents")) return [...supportedAgents];
+  const explicitMany = readArg("--agents", "");
+  if (explicitMany) {
+    const resolved = [];
+    for (const value of explicitMany.split(",")) {
+      const normalized = normalizeSetupAgentName(value.trim());
+      if (!normalized || !supportedAgents.includes(normalized)) throw new Error(`Unsupported setup agent: ${value}`);
+      if (!resolved.includes(normalized)) resolved.push(normalized);
+    }
+    if (resolved.length === 0) throw new Error("--agents requires at least one supported host.");
+    return resolved;
+  }
   const explicit = readArg("--agent", readArg("--host", null));
   return [normalizeSetupAgentName(explicit) || detectSetupAgent({ env: process.env, argv: process.argv })];
 }
@@ -87,6 +100,7 @@ const skipInstall = hasArg("--skip-install");
 const skipBuild = hasArg("--skip-build");
 const skipPluginSource = hasArg("--skip-plugin-source");
 const launchCanvas = !hasArg("--no-launch");
+const enableAutoUpdate = !hasArg("--no-auto-update");
 const launchTunnel = hasArg("--tunnel") && launchCanvas;
 const targetAgents = resolveTargetAgents();
 const projectDir = resolve(
@@ -625,7 +639,7 @@ Configure Cursor only. Do not configure Codex, Claude Code, or Antigravity unles
 
 After the script prints \`BUZZASSIST_CANVAS_URL=...\` and \`BUZZASSIST_CANVAS_CHECK=ok\`, first open that URL in Cursor's in-app browser or browser preview. Only if that capability is unavailable, use Chrome/the external-browser fallback.
 
-If the user wants phone/mobile access or the exact same Excalidraw UI outside this machine, run setup with \`--tunnel\` or run \`npm run tunnel:start -- --project-dir <active-user-project-dir>\`. The tunnel uses Cloudflare (\`cloudflared\`) by default — no account needed. If it is not installed, tell the user to install it with \`brew install cloudflared\` on macOS or \`winget install Cloudflare.cloudflared\` on Windows. Give the printed \`BUZZASSIST_TUNNEL_ACCESS_URL\` for the phone.
+If the user wants phone/mobile access or the exact same Excalidraw UI outside this machine, run setup with \`--tunnel\` or run \`npm run tunnel:start -- --project-dir <active-user-project-dir>\`. The tunnel uses Cloudflare (\`cloudflared\`) by default — no account is needed. If a system copy is not installed, BuzzAssist downloads the pinned official release into the user's \`~/.buzzassist/tools/\` cache, verifies its SHA-256 checksum, and runs it without administrator privileges. Use \`--no-auto-download\` or \`BUZZASSIST_CLOUDFLARED_AUTO_DOWNLOAD=0\` to opt out. Give the printed \`BUZZASSIST_TUNNEL_ACCESS_URL\` for the phone.
 `;
 }
 
@@ -638,7 +652,7 @@ When the user gives this repository URL and asks to set it up, do the setup end 
 2. Run \`node scripts/setup-agents.mjs --agent antigravity --project-dir <active-user-project-dir>\` from the repository root. If there is no separate active project, use this repository root as the project dir.
 3. The script must configure Antigravity only. Do not configure Codex, Claude Code, or Cursor unless the user explicitly asks for those hosts too.
 4. After the script prints \`BUZZASSIST_CANVAS_URL=...\` and \`BUZZASSIST_CANVAS_CHECK=ok\`, first open that URL in Antigravity's in-app browser. Only if that capability is unavailable, use Chrome/the external-browser fallback.
-5. If the user wants phone/mobile access or says they want the exact same Excalidraw UI outside the machine, use Canvas Tunnel: run setup with \`--tunnel\` or run \`npm run tunnel:start -- --project-dir <active-user-project-dir>\`. The tunnel uses Cloudflare (\`cloudflared\`) by default — no account needed. If it is not installed, tell the user to install it with \`brew install cloudflared\` on macOS or \`winget install Cloudflare.cloudflared\` on Windows. Give the printed \`BUZZASSIST_TUNNEL_ACCESS_URL\` for the phone.
+5. If the user wants phone/mobile access or says they want the exact same Excalidraw UI outside the machine, use Canvas Tunnel: run setup with \`--tunnel\` or run \`npm run tunnel:start -- --project-dir <active-user-project-dir>\`. The tunnel uses Cloudflare (\`cloudflared\`) by default — no account is needed. If a system copy is not installed, BuzzAssist downloads the pinned official release into the user's \`~/.buzzassist/tools/\` cache, verifies its SHA-256 checksum, and runs it without administrator privileges. Use \`--no-auto-download\` or \`BUZZASSIST_CLOUDFLARED_AUTO_DOWNLOAD=0\` to opt out. Give the printed \`BUZZASSIST_TUNNEL_ACCESS_URL\` for the phone.
 
 Manual fallback:
 
@@ -722,6 +736,35 @@ async function setupAgent(agent, pluginDir) {
   if (agent === "cursor") return setupCursor(pluginDir);
   if (agent === "antigravity") return setupAntigravity(pluginDir);
   throw new Error(`Unsupported agent "${agent}".`);
+}
+
+async function configureAutoUpdate(pluginDir, results) {
+  const hosts = targetAgents.filter((agent) => ["codex", "claude"].includes(agent) && results[agent]?.ok);
+  if (hosts.length === 0) return null;
+  if (!enableAutoUpdate) {
+    console.log("Skipping automatic update registration.");
+    return { enabled: false, hosts };
+  }
+  logStep("Registering safe automatic updates");
+  if (dryRun) {
+    console.log(`Would register daily stable-Release updates for ${hosts.join(", ")}.`);
+    return { enabled: true, hosts, dryRun: true };
+  }
+  const updater = join(pluginDir, "scripts", "auto-update.mjs");
+  await run(process.execPath, [
+    updater,
+    "install",
+    "--agent", hosts.join(","),
+    "--marketplace-dir", managedPluginDir,
+    "--plugin-root", pluginDir,
+    "--project-dir", projectDir,
+    "--canvas-dir", canvasDir,
+    "--repository", "sam-mountainman/BuzzAssist",
+  ], {
+    timeoutMs: 120_000,
+    env: { ...process.env, BUZZASSIST_SETUP_HOME: homeDir },
+  });
+  return { enabled: true, hosts };
 }
 
 function targetIncludesWidgetHost() {
@@ -900,6 +943,7 @@ async function main() {
   for (const agent of targetAgents) {
     results[agent] = await setupAgent(agent, pluginDir);
   }
+  const autoUpdateStatus = await configureAutoUpdate(pluginDir, results);
 
   const tunnelStatus = launchTunnel ? await launchCanvasTunnel() : null;
   const discovery = launchCanvas
@@ -929,6 +973,11 @@ async function main() {
   if (targetAgents.some((agent) => agent === "codex" || agent === "claude")) {
     console.log("BUZZASSIST_HOST_RESTART_REQUIRED=yes");
     console.log("Start a new Codex task or Claude Code session after setup so the newly installed skills and MCP tools are loaded.");
+  }
+  if (autoUpdateStatus?.enabled) {
+    console.log("BUZZASSIST_AUTO_UPDATE=enabled");
+    console.log(`BUZZASSIST_AUTO_UPDATE_HOSTS=${autoUpdateStatus.hosts.join(",")}`);
+    console.log("Stable GitHub Releases are checked daily at 03:17 local time. Updates are verified and rolled back on failure; restart the host to load a newly installed version.");
   }
   if (targetIncludesWidgetHost()) {
     console.log("BUZZASSIST_WIDGET_TOOL=render_buzzassist_canvas_widget");

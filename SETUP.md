@@ -40,7 +40,6 @@ macOS:
 
 ```bash
 brew install node
-brew install cloudflared
 ```
 
 Windows:
@@ -48,10 +47,9 @@ Windows:
 ```powershell
 winget install Git.Git
 winget install OpenJS.NodeJS.LTS
-winget install Cloudflare.cloudflared
 ```
 
-Windowsでは `.sh` ではなく `.mjs` を使います。
+Windowsでは `.sh` ではなく `.mjs` を使います。スマホ用Canvas Tunnelで`cloudflared`が未導入でも、BuzzAssistがCloudflare公式バイナリを初回起動時にユーザー領域へ自動取得し、SHA-256検証後に使用します。自動取得を止めたい場合は`--no-auto-download`または`BUZZASSIST_CLOUDFLARED_AUTO_DOWNLOAD=0`を指定してください。
 
 ```powershell
 node scripts/setup-agents.mjs --agent codex --project-dir C:\path\to\active\project
@@ -72,6 +70,7 @@ npm run tunnel:start -- --project-dir C:\path\to\active\project
 - ローカルキャンバスを起動して `BUZZASSIST_CANVAS_URL=...` を出力
 - ブラウザーキャンバスを確認して `BUZZASSIST_CANVAS_CHECK=ok` を出力
 - 対象ホストのplugin listを再確認し、`buzzassist@buzzassist`が見つからなければ非ゼロで終了
+- Codex / Claude Codeでは、正式なstable Releaseだけを毎日確認する安全な自動更新を登録して`BUZZASSIST_AUTO_UPDATE=enabled`を出力
 - `--tunnel` 付きなら Cloudflare Canvas Tunnel を起動して `BUZZASSIST_TUNNEL_ACCESS_URL=...` を出力
 
 既定では指定ホスト以外は変更しません。全ホストを明示的に設定する時だけ使います。
@@ -87,6 +86,7 @@ node scripts/setup-agents.mjs --all-agents --project-dir /path/to/active/project
 ```text
 BUZZASSIST_CANVAS_URL=http://127.0.0.1:<port>/
 BUZZASSIST_CANVAS_CHECK=ok
+BUZZASSIST_AUTO_UPDATE=enabled
 ```
 
 スマホや別PCでは、`--tunnel` で出るAccess URLを使います。
@@ -106,4 +106,34 @@ canvas/.server.json
 
 ```bash
 npm run tunnel:stop
+```
+
+## Codex / Claude Codeの自動更新
+
+通常のセットアップでは、対象にしたCodexまたはClaude Codeだけを自動更新対象として登録します。両方を明示的に設定する場合は`--agents codex,claude`を使います。
+
+```bash
+node scripts/setup-agents.mjs --agents codex,claude --project-dir /path/to/active/project
+```
+
+- macOS: `~/Library/LaunchAgents/ai.buzzassist.plugin-updater.plist`
+- Windows: タスクスケジューラの`BuzzAssist Plugin Update`
+- 実行時刻: 毎日03:17（ローカル時刻）
+- 更新元: `sam-mountainman/BuzzAssist`の正式なstable GitHub Release
+- 安全策: 隔離build・配布テスト・実MCP検査・更新前バックアップ・失敗時ロールバック
+- 非対象: Draft、Prerelease、mainブランチ上だけの変更
+
+認証情報は`~/.buzzassist/`内の既存設定を引き継ぎ、各プロジェクトの`canvas/`や生成物を更新処理で削除しません。成功した新版のskillsを確実に読み込むには、次回CodexまたはClaude Codeを再起動してください。
+
+```bash
+npm run update:status
+npm run update:check
+npm run update:now
+npm run update:disable
+```
+
+定期更新を使わない明示的な導入では`--no-auto-update`を付けます。
+
+```bash
+node scripts/setup-agents.mjs --agent codex --project-dir /path/to/active/project --no-auto-update
 ```

@@ -184,6 +184,14 @@ test("remote MCP focus events select and center only requested results", async (
   assert.match(mcpSource, /await requestCanvasFocus\(args, result\)/);
 });
 
+test("focus requests survive until a canvas browser is connected", async () => {
+  const viteSource = await readFile(new URL("../vite.config.js", import.meta.url), "utf8");
+
+  assert.match(viteSource, /if \(canvasEventClients\.size === 0\) return null/);
+  assert.match(viteSource, /async function broadcastPendingCanvasFocusRequest\(\)/);
+  assert.match(viteSource, /void broadcastPendingCanvasFocusRequest\(\)/);
+});
+
 test("all generation routes require BuzzAssist login through the shared dialog", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
 
@@ -213,6 +221,48 @@ test("uploaded canvas media does not open the generator prompt panel", async () 
   assert.match(match[1], /isGeneratedResult\(element\)/);
   assert.doesNotMatch(match[1], /isCanvasImageElement\(element\)/);
   assert.doesNotMatch(match[1], /isCanvasVideoElement\(element\)/);
+});
+
+test("generated media can reopen its prompt and every generator panel can be closed", async () => {
+  const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const imageResult = source.match(/function isGeneratedImageResult\(element\) \{\r?\n([\s\S]*?)\r?\n\}/);
+  assert.ok(imageResult, "Missing isGeneratedImageResult");
+  assert.match(imageResult[1], /codexGeneratedImage === true/);
+  assert.match(imageResult[1], /codexGenerationPrompt/);
+  assert.match(imageResult[1], /codexInsertedImage === true/);
+  assert.match(source, /const closeActiveGeneratorPanel = useCallback\(\(options = \{\}\) => \{/);
+  assert.match(source, /data-lovart-panel-close="true"/);
+  assert.match(source, /aria-label="入力欄を閉じる"/);
+  assert.match(source, /selectedElementIds = \{\}/);
+  assert.match(source, /setSelectedGeneratedResult\(null\)/);
+});
+
+test("video expand gesture cannot immediately close its own modal", async () => {
+  const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const player = source.match(
+    /function ExpandedVideoPlayer\(\{ video, onClose \}\) \{([\s\S]*?)\r?\n\}\r?\n\r?\nfunction scenePointInElement/,
+  );
+  assert.ok(player, "Missing ExpandedVideoPlayer");
+
+  assert.match(player[1], /className="lovart-video-modal"[\s\S]*?onPointerDown=\{\(event\) => \{/);
+  assert.match(player[1], /if \(event\.target !== event\.currentTarget\) return/);
+  assert.doesNotMatch(player[1], /className="lovart-video-modal" onClick=\{onClose\}/);
+});
+
+test("video playback controls render above the interactive canvas", async () => {
+  const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const underLayer = source.match(
+    /<div ref=\{overlayUnderLayerRef\} className="lovart-canvas-overlay-layer is-under-canvas">([\s\S]*?)<\/div>\s*<div ref=\{overlayLayerRef\}/,
+  );
+  const aboveLayer = source.match(
+    /<div ref=\{overlayLayerRef\} className="lovart-canvas-overlay-layer is-above-canvas">([\s\S]*?)\{frameOverlays\.map/,
+  );
+
+  assert.ok(underLayer, "under-canvas overlay layer should exist");
+  assert.ok(aboveLayer, "above-canvas overlay layer should exist");
+  assert.match(underLayer[1], /<VideoCanvasMediaOverlay/);
+  assert.doesNotMatch(underLayer[1], /<VideoCanvasControlsOverlay/);
+  assert.match(aboveLayer[1], /<VideoCanvasControlsOverlay/);
 });
 
 test("generated media labels resolve to their backing result for panel selection only", async () => {
@@ -546,15 +596,40 @@ test("prompt panel keeps the desktop layout, scaled and kept reachable on phones
   // Phones shrink the whole panel with a CSS scale instead of reflowing it, so
   // the mobile UI is pixel-identical to desktop, just smaller. The outer
   // placement is clamped after scaling so it stays reachable while panning.
-  assert.match(source, /const isCompactViewport = isTunnelCanvasRuntime\(\) && viewportWidth > 0 && viewportWidth <= 900/);
+  // Use the visual viewport rather than the layout viewport so the same
+  // placement is recalculated when the software keyboard opens.
+  assert.match(source, /const isCompactViewport = viewportWidth > 0 && viewportWidth <= 900/);
+  assert.match(source, /function readVisualViewportMetrics\(\)/);
+  assert.match(source, /visualViewport\?\.addEventListener\('resize', update\)/);
   assert.match(source, /const panelScale = isCompactViewport\s*\?\s*Math\.min\(1, \(viewportWidth - 16\) \/ desiredWidth\)/);
   assert.match(source, /const transformInsetX = \(panelWidth - panelVisualWidth\) \/ 2/);
   assert.match(source, /transform: panelPlacement\.scale && panelPlacement\.scale < 1 \? `scale\(\$\{panelPlacement\.scale\}\)` : 'none'/);
   assert.match(source, /transformOrigin: 'top center'/);
   assert.match(source, /if \(kind === 'subtitle'\) return 300/);
-  assert.match(styles, /\.is-memory-constrained-canvas \.lovart-ai-panel/);
-  assert.match(styles, /\.is-memory-constrained-canvas \.lovart-ai-prompt/);
-  assert.doesNotMatch(styles, /@media \(max-width: 900px\) \{\s*\.lovart-ai-panel/);
+  assert.match(styles, /@media \(max-width: 900px\) \{[\s\S]*\.lovart-ai-panel/);
+  assert.match(styles, /@media \(max-width: 900px\) \{[\s\S]*\.lovart-ai-prompt[\s\S]*font-size: 16px/);
+  assert.match(styles, /\.lovart-ai-root \{[\s\S]*min-height: 100dvh/);
+});
+
+test("phone keyboard cannot expose page background below the canvas", async () => {
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+
+  assert.match(styles, /html,\s*body,\s*#root \{[\s\S]*?overflow: hidden;[\s\S]*?overscroll-behavior: none;[\s\S]*?background: #ffffff;[\s\S]*?\}/);
+  assert.match(styles, /\.lovart-ai-root \{[\s\S]*?overflow: hidden;[\s\S]*?background: #ffffff;[\s\S]*?\}/);
+});
+
+test("phone canvas taps open only frame and generated-result panels", async () => {
+  const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+
+  assert.match(source, /function panelTargetElementAtScenePoint\(elements, point\) \{/);
+  assert.match(source, /isGeneratorFrame\(element\) \|\| isPanelMediaTargetElement\(element\)/);
+  assert.match(source, /const labelFor = element\.customData\?\.codexVideoLabelFor/);
+  assert.match(source, /const isCanvasSurface = event\?\.target instanceof HTMLCanvasElement/);
+  assert.match(source, /Math\.hypot\(dx, dy\) > \(event\.pointerType === 'touch' \? 12 : 7\)/);
+  assert.match(source, /const panelTarget = panelTargetElementAtScenePoint\(elements, completedTap\.scenePoint\)/);
+  assert.match(source, /closeActiveGeneratorPanel\(\{ clearCanvasSelection: false \}\)/);
+  assert.match(source, /const selectedElementIds = \{ \[panelTarget\.id\]: true \}/);
+  assert.match(source, /syncGeneratorUi\(nextScene\)/);
 });
 
 test("phone tunnel renders images via capped overlays instead of hydrating Excalidraw files", async () => {
@@ -615,13 +690,17 @@ test("tunnel generation requests use async responses to avoid Cloudflare timeout
   assert.match(appSource, /\.\.\.\(useAsyncGeneration \? \{ prefer: 'respond-async' \} : \{\}\)/);
   assert.match(appSource, /JSON\.stringify\(useAsyncGeneration \? \{ \.\.\.body, async: true \} : body\)/);
   assert.match(appSource, /if \(payload\.async\) \{/);
+  assert.match(appSource, /payload = await waitForCanvasGenerationJob\(payload\.jobId\)/);
+  assert.match(appSource, /Mobile tunnel connections can briefly reconnect/);
 
   assert.match(viteSource, /function wantsAsyncGeneration\(req, body = \{\}\) \{/);
   assert.match(viteSource, /prefer\.includes\('respond-async'\) \|\| body\.async === true/);
   assert.match(viteSource, /sendJson\(res, 202, \{ ok: true, async: true, jobId, kind: 'image' \}\)/);
   assert.match(viteSource, /sendJson\(res, 202, \{ ok: true, async: true, jobId, kind: 'video' \}\)/);
-  assert.match(viteSource, /runBackgroundGeneration\(jobId, runImageGeneration\)/);
-  assert.match(viteSource, /runBackgroundGeneration\(jobId, runVideoGeneration\)/);
+  assert.match(viteSource, /server\.middlewares\.use\('\/api\/generate\/jobs'/);
+  assert.match(viteSource, /status: 'completed'/);
+  assert.match(viteSource, /status: 'failed'/);
+  assert.match(viteSource, /clearFrameGeneratingFlags\(\{ canvasDir \}, generationPlaceholderIds\(body\)\)/);
 });
 
 test("generator creation keeps a moved viewport instead of focusing every new frame", async () => {

@@ -23,7 +23,7 @@ test('legacy vertical offsets normalize to two-dimensional scroll positions', ()
 test('SRT and XML canvas previews expose independent horizontal and vertical scrolling', async () => {
   const source = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8')
   const start = source.indexOf('function SubtitleCanvasOverlay')
-  const end = source.indexOf('function VideoCanvasOverlay', start)
+  const end = source.indexOf('function VideoCanvasMediaOverlay', start)
   const renderer = source.slice(start, end)
   const wheelStart = source.indexOf('// Wheel over an SRT/XML result card')
   const wheelEnd = source.indexOf('if (!initialScene)', wheelStart)

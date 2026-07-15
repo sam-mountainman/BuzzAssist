@@ -1,6 +1,6 @@
 {
   "name": "buzzassist-canvas-mcp",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "description": "BuzzAssist project-local Excalidraw canvas plugin with MCP-backed tools for AI coding agents.",
   "homepage": "https://github.com/sam-mountainman/BuzzAssist",
   "repository": {
@@ -46,6 +46,12 @@
     "build:widget": "node scripts/build-widget.mjs",
     "serve": "node scripts/serve-canvas.mjs",
     "setup:agents": "node scripts/setup-agents.mjs",
+    "update:check": "node scripts/update-current.mjs --check-only",
+    "update:now": "node scripts/update-current.mjs",
+    "update:auto": "node scripts/auto-update.mjs install",
+    "update:status": "node scripts/auto-update.mjs status",
+    "update:disable": "node scripts/auto-update.mjs uninstall",
+    "release:verify": "node scripts/verify-release-version.mjs",
     "mcp": "node mcp/server.mjs",
     "preview": "node scripts/serve-canvas.mjs",
     "remote:start": "node scripts/remote-canvas-relay.mjs start",

@@ -1,0 +1,2 @@
+dist/assets/* linguist-generated=true -diff
+dist-widget/assets/* linguist-generated=true -diff

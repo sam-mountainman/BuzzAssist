@@ -85,6 +85,7 @@ async function runHostSetup(host) {
       CODEX_COMMAND: host === "codex" ? path.join(binDir, process.platform === "win32" ? "codex.cmd" : "codex") : "",
       CLAUDE_CODE: host === "claude" ? "1" : "",
       CODEX: host === "codex" ? "1" : "",
+      BUZZASSIST_AUTO_UPDATE_SKIP_REGISTER: "1",
     };
     const result = spawnSync(
       process.execPath,
@@ -126,6 +127,20 @@ async function runHostSetup(host) {
     assert.match(installedViteConfig, /\/api\/assets\/open-folder/);
     await readFile(path.join(pluginRoot, "lib", "projectContext.mjs"), "utf8");
     await readFile(path.join(pluginRoot, "lib", "openLocalFolder.mjs"), "utf8");
+    await readFile(path.join(pluginRoot, "scripts", "update-current.mjs"), "utf8");
+    await readFile(path.join(pluginRoot, "scripts", "verify-plugin-runtime.mjs"), "utf8");
+    const updaterConfig = JSON.parse(await readFile(path.join(homeDir, ".buzzassist", "updater", "config.json"), "utf8"));
+    assert.equal(updaterConfig.enabled, true);
+    assert.deepEqual(updaterConfig.hosts, [host]);
+    assert.equal(updaterConfig.projectDir, projectDir);
+    if (process.platform === "darwin") {
+      const plist = await readFile(path.join(homeDir, "Library", "LaunchAgents", "ai.buzzassist.plugin-updater.plist"), "utf8");
+      assert.match(plist, /update-current\.mjs/);
+    }
+    if (process.platform === "win32") {
+      const runner = await readFile(path.join(homeDir, ".buzzassist", "updater", "run-update.cmd"), "utf8");
+      assert.match(runner, /update-current\.mjs/);
+    }
     assert.equal(JSON.parse(await readFile(statePath, "utf8")).installed, true);
   } finally {
     await rm(tempRoot, { recursive: true, force: true });

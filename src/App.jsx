@@ -29,6 +29,7 @@ const CANVAS_ENDPOINT = '/api/canvas'
 const CANVAS_EVENTS_ENDPOINT = '/api/canvas-events'
 const GENERATE_IMAGE_ENDPOINT = '/api/generate/image'
 const GENERATE_VIDEO_ENDPOINT = '/api/generate/video'
+const GENERATION_JOB_ENDPOINT = '/api/generate/jobs'
 const GENERATE_SUBTITLES_ENDPOINT = '/api/generate/subtitles'
 const SILENCE_CUT_ENDPOINT = '/api/video/silence-cut'
 const GENERATION_CAPABILITIES_ENDPOINT = '/api/generation-capabilities'
@@ -114,6 +115,23 @@ function widgetCanvasBaseUrl() {
 
 function isNarrowCanvasViewport() {
   return typeof window !== 'undefined' && Number(window.innerWidth) > 0 && Number(window.innerWidth) <= 900
+}
+
+// On phones, opening the software keyboard changes the visual viewport while
+// the layout viewport (and therefore the canvas root) can stay unchanged.
+// Keep the overlay placement in the same coordinate system as the visible
+// portion of the browser so the prompt never ends up underneath the keyboard.
+function readVisualViewportMetrics() {
+  if (typeof window === 'undefined') {
+    return { width: 0, height: 0, offsetLeft: 0, offsetTop: 0 }
+  }
+  const visualViewport = window.visualViewport
+  return {
+    width: Math.max(1, Number(visualViewport?.width) || Number(window.innerWidth) || 1),
+    height: Math.max(1, Number(visualViewport?.height) || Number(window.innerHeight) || 1),
+    offsetLeft: Number(visualViewport?.offsetLeft) || 0,
+    offsetTop: Number(visualViewport?.offsetTop) || 0
+  }
 }
 
 function isMemoryConstrainedCanvasRuntime() {
@@ -216,6 +234,38 @@ function canvasFetch(input, init) {
     ...(init ?? {}),
     credentials: init?.credentials ?? 'include'
   })
+}
+
+async function waitForCanvasGenerationJob(jobId, options = {}) {
+  const deadline = Date.now() + (Number(options.timeoutMs) || 32 * 60 * 1000)
+  const pollIntervalMs = Math.max(500, Number(options.pollIntervalMs) || 1500)
+  let lastNetworkError = null
+  while (Date.now() < deadline) {
+    let response
+    try {
+      response = await canvasFetch(`${GENERATION_JOB_ENDPOINT}/${encodeURIComponent(jobId)}`, {
+        cache: 'no-store'
+      })
+      lastNetworkError = null
+    } catch (error) {
+      // Mobile tunnel connections can briefly reconnect while the generation
+      // continues on the host. A short fetch failure must not abandon the job.
+      lastNetworkError = error
+    }
+    if (response) {
+      const payload = await response.json().catch(() => ({}))
+      if (response.ok && payload.status === 'completed') return payload
+      if (payload.status === 'failed') {
+        throw new Error(payload.error || '生成に失敗しました。')
+      }
+      if (!response.ok && ![502, 503, 504].includes(response.status)) {
+        throw new Error(payload.error || `生成状況を確認できませんでした: ${response.status}`)
+      }
+    }
+    await new Promise((resolveWait) => window.setTimeout(resolveWait, pollIntervalMs))
+  }
+  if (lastNetworkError) throw lastNetworkError
+  throw new Error('生成が32分以内に完了しませんでした。')
 }
 
 function createCanvasEventSource(url) {
@@ -2479,7 +2529,7 @@ function limitViewportOverlays(overlays, appState, maxItems) {
   return selected.concat(rest.slice(0, maxItems - selected.length))
 }
 
-function getPanelPlacementFromViewportTarget(target, kind = 'image') {
+function getPanelPlacementFromViewportTarget(target, kind = 'image', viewportOverride = null) {
   const isVideo = kind === true || kind === 'video'
   const frameViewportWidth = Math.max(1, Number(target?.width) || 1)
   const frameViewportHeight = Math.max(1, Number(target?.height) || 1)
@@ -2494,9 +2544,12 @@ function getPanelPlacementFromViewportTarget(target, kind = 'image') {
   // shrink it visually with a CSS scale so it fits the screen width. The
   // content remains the desktop UI; only the outer placement is clamped so the
   // prompt stays reachable after the user pans or zooms the canvas.
-  const viewportWidth = typeof window !== 'undefined' ? (window.innerWidth || 0) : 0
-  const viewportHeight = typeof window !== 'undefined' ? (window.innerHeight || 0) : 0
-  const isCompactViewport = isTunnelCanvasRuntime() && viewportWidth > 0 && viewportWidth <= 900
+  const viewport = viewportOverride || readVisualViewportMetrics()
+  const viewportWidth = Math.max(0, Number(viewport.width) || 0)
+  const viewportHeight = Math.max(0, Number(viewport.height) || 0)
+  const viewportOffsetLeft = Number(viewport.offsetLeft) || 0
+  const viewportOffsetTop = Number(viewport.offsetTop) || 0
+  const isCompactViewport = viewportWidth > 0 && viewportWidth <= 900
   const panelScale = isCompactViewport
     ? Math.min(1, (viewportWidth - 16) / desiredWidth)
     : 1
@@ -2506,12 +2559,12 @@ function getPanelPlacementFromViewportTarget(target, kind = 'image') {
   const rawTop = Math.round(targetTop + frameViewportHeight + 4)
   const panelVisualWidth = panelWidth * panelScale
   const transformInsetX = (panelWidth - panelVisualWidth) / 2
-  const minLeft = 8 - transformInsetX
-  const maxLeft = viewportWidth - 8 - panelVisualWidth - transformInsetX
+  const minLeft = viewportOffsetLeft + 8 - transformInsetX
+  const maxLeft = viewportOffsetLeft + viewportWidth - 8 - panelVisualWidth - transformInsetX
   const panelEstimatedHeight = isVideo ? 280 : kind === 'subtitle' || kind === 'silenceCut' ? 220 : GENERATOR_PANEL_ESTIMATED_HEIGHT + 24
   const panelVisualHeight = panelEstimatedHeight * panelScale
-  const minTop = 8
-  const maxTop = viewportHeight - 8 - panelVisualHeight
+  const minTop = viewportOffsetTop + 8
+  const maxTop = viewportOffsetTop + viewportHeight - 8 - panelVisualHeight
   const left = isCompactViewport
     ? clamp(rawLeft, minLeft, Math.max(minLeft, maxLeft))
     : rawLeft
@@ -2626,11 +2679,39 @@ function generatorFrameTagFor(kind) {
 }
 
 function isGeneratedImageResult(element) {
-  return !element?.isDeleted && element?.customData?.codexGeneratedImage === true
+  const customData = element?.customData ?? {}
+  const hasGenerationMetadata = Boolean(
+    customData.codexGenerationPrompt ||
+    customData.generatorPrompt ||
+    customData.codexGenerationModel ||
+    customData.generatorModel ||
+    customData.codexGenerationSource ||
+    customData.codexAnchorElementId ||
+    customData.sourceFrameId
+  )
+  return Boolean(
+    !element?.isDeleted &&
+      (customData.codexGeneratedImage === true ||
+        (customData.codexMediaKind === 'image' && customData.codexInsertedImage === true && hasGenerationMetadata))
+  )
 }
 
 function isGeneratedVideoResult(element) {
-  return !element?.isDeleted && element?.customData?.codexGeneratedVideo === true
+  const customData = element?.customData ?? {}
+  const hasGenerationMetadata = Boolean(
+    customData.codexGenerationPrompt ||
+    customData.videoPrompt ||
+    customData.codexGenerationModel ||
+    customData.videoModel ||
+    customData.codexGenerationSource ||
+    customData.codexAnchorElementId ||
+    customData.sourceFrameId
+  )
+  return Boolean(
+    !element?.isDeleted &&
+      (customData.codexGeneratedVideo === true ||
+        (customData.codexMediaKind === 'video' && customData.codexInsertedVideo === true && hasGenerationMetadata))
+  )
 }
 
 function isGeneratedResult(element) {
@@ -2683,6 +2764,19 @@ function panelMediaTargetIdFromSelection(selectedIds, elementsById) {
     if (isPanelMediaTargetElement(elementsById.get(labelFor))) return labelFor
   }
   return ''
+}
+
+function panelTargetElementAtScenePoint(elements, point) {
+  if (!point || !Array.isArray(elements)) return null
+  const elementsById = new Map(elements.map((element) => [element.id, element]))
+  for (const element of [...elements].reverse()) {
+    if (!element || element.isDeleted || !scenePointInElement(point, element)) continue
+    if (isGeneratorFrame(element) || isPanelMediaTargetElement(element)) return element
+    const labelFor = element.customData?.codexVideoLabelFor
+    const labeledElement = labelFor ? elementsById.get(labelFor) : null
+    if (isPanelMediaTargetElement(labeledElement)) return labeledElement
+  }
+  return null
 }
 
 function selectedCanvasAttachableElementFromScene(scene) {
@@ -4325,7 +4419,7 @@ function CanvasImagePreviewOverlay({ image }) {
   )
 }
 
-function VideoCanvasOverlay({ video, isHovered, onExpand }) {
+function VideoCanvasMediaOverlay({ video, isHovered }) {
   const hoverVideoRef = useRef(null)
   const containerRef = useRef(null)
   const [isHoverVideoReady, setIsHoverVideoReady] = useState(false)
@@ -4397,10 +4491,6 @@ function VideoCanvasOverlay({ video, isHovered, onExpand }) {
     }
   }, [shouldPlayInline, isHovered, autoPlayInline, video.sourceURL])
 
-  const minDim = Math.min(video.width, video.height)
-  const showOverlayUI = minDim >= 60
-  const iconScale = Math.max(0.5, Math.min(1, minDim / 200))
-  const durationLabel = formatPlaybackDuration(video.duration)
   const placementStyle = {
     left: `${video.left}px`,
     top: `${video.top}px`,
@@ -4409,12 +4499,7 @@ function VideoCanvasOverlay({ video, isHovered, onExpand }) {
     transform: video.angle ? `rotate(${video.angle}rad)` : undefined
   }
 
-  // Media (poster + hover video) paints at z-index 1 so the Excalidraw
-  // selection layer (interactive canvas, z 2) can draw the selection border
-  // over it; the interactive controls live in a separate sibling at z 3,
-  // mirroring Youtube-AGI's videoLayer (z1) / overlay portal (z3) split.
   return (
-    <>
     <div className="lovart-video-playback-overlay" data-overlay-anchor={video.id} style={placementStyle} ref={containerRef}>
       {isRenderableVideoPosterDataURL(video.posterDataURL) ? (
         <img className="lovart-video-playback-media" src={video.posterDataURL} draggable={false} alt="" />
@@ -4434,9 +4519,30 @@ function VideoCanvasOverlay({ video, isHovered, onExpand }) {
         />
       ) : null}
     </div>
+  )
+}
+
+function VideoCanvasControlsOverlay({ video, isHovered, onExpand }) {
+  const autoPlayInline = useMemo(() => isTouchLikeDevice(), [])
+  const minDim = Math.min(video.width, video.height)
+  const showOverlayUI = minDim >= 60
+  const iconScale = Math.max(0.5, Math.min(1, minDim / 200))
+  const durationLabel = formatPlaybackDuration(video.duration)
+  const placementStyle = {
+    left: `${video.left}px`,
+    top: `${video.top}px`,
+    width: `${video.width}px`,
+    height: `${video.height}px`,
+    transform: video.angle ? `rotate(${video.angle}rad)` : undefined
+  }
+
+  // Controls are rendered in the above-canvas overlay layer. A child's
+  // z-index cannot escape the stacking context of the media layer, so keeping
+  // media and controls in one component made the canvas intercept every tap.
+  return (
     <div className="lovart-video-playback-ui" style={placementStyle}>
       {isHovered && showOverlayUI && !video.isSelected ? <div className="lovart-video-hover-gradient" /> : null}
-      {!shouldPlayInline && showOverlayUI ? (
+      {!isHovered && !autoPlayInline && showOverlayUI ? (
         <button
           type="button"
           className="lovart-video-play-icon"
@@ -4509,13 +4615,27 @@ function VideoCanvasOverlay({ video, isHovered, onExpand }) {
         </button>
       ) : null}
     </div>
-    </>
   )
 }
 
 function ExpandedVideoPlayer({ video, onClose }) {
   return (
-    <div className="lovart-video-modal" onClick={onClose}>
+    <div
+      className="lovart-video-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-label="拡大動画プレイヤー"
+      onPointerDown={(event) => {
+        // The expand control opens this modal on pointerdown so it remains
+        // reliable even when the hover UI disappears mid-gesture. Do not
+        // close on the trailing click from that same gesture: only a fresh
+        // pointerdown directly on the backdrop should dismiss the player.
+        if (event.target !== event.currentTarget) return
+        event.preventDefault()
+        event.stopPropagation()
+        onClose()
+      }}
+    >
       <button type="button" className="lovart-video-modal-close" onClick={onClose} aria-label="閉じる">
         <CloseIcon />
       </button>
@@ -4715,9 +4835,44 @@ export default function App() {
   const [initialScene, setInitialScene] = useState(null)
   const [loadError, setLoadError] = useState(null)
   const [api, setApi] = useState(null)
+  const [visualViewportMetrics, setVisualViewportMetrics] = useState(() => readVisualViewportMetrics())
   useEffect(() => {
     if (import.meta.env.DEV) window.__excalidrawApi = api
   }, [api])
+
+  // visualViewport.resize fires when the mobile keyboard opens/closes. Keep a
+  // small React mirror so the canvas-anchored prompt is recalculated while the
+  // user is typing instead of remaining behind the keyboard.
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const visualViewport = window.visualViewport
+    let frame = 0
+    const update = () => {
+      if (frame) return
+      frame = window.requestAnimationFrame(() => {
+        frame = 0
+        const next = readVisualViewportMetrics()
+        setVisualViewportMetrics((current) => (
+          current.width === next.width &&
+          current.height === next.height &&
+          current.offsetLeft === next.offsetLeft &&
+          current.offsetTop === next.offsetTop
+            ? current
+            : next
+        ))
+      })
+    }
+    update()
+    window.addEventListener('resize', update)
+    visualViewport?.addEventListener('resize', update)
+    visualViewport?.addEventListener('scroll', update)
+    return () => {
+      window.removeEventListener('resize', update)
+      visualViewport?.removeEventListener('resize', update)
+      visualViewport?.removeEventListener('scroll', update)
+      if (frame) window.cancelAnimationFrame(frame)
+    }
+  }, [])
   const [activeFrameId, setActiveFrameId] = useState('')
   const [activeFrameKind, setActiveFrameKind] = useState('image')
   const [frameForm, setFrameForm] = useState(DEFAULT_FRAME_FORM)
@@ -5729,6 +5884,40 @@ export default function App() {
       setOpenMenu(null)
     }
   }, [refreshOverlayStates, scheduleOverlayRefresh, flushPendingFrameFormWrite])
+
+  const closeActiveGeneratorPanel = useCallback((options = {}) => {
+    // Commit the last prompt edit before closing, then clear both the React
+    // target and Excalidraw's native selection. Clearing only the panel state
+    // makes the next selection/onChange immediately reopen the same panel.
+    flushPendingFrameFormWrite()
+    attachmentPanelLockRef.current = null
+    attachmentPanelInteractionRef.current = false
+    canvasPickerRef.current = null
+    canvasPickerFrameIdRef.current = ''
+    setCanvasPicker(null)
+    activeFrameIdRef.current = ''
+    pendingPanelFrameRef.current = null
+    selectedGeneratedResultRef.current = null
+    setActiveFrameId('')
+    setPendingPanelFrame(null)
+    setSelectedGeneratedResult(null)
+    setOpenMenu(null)
+
+    if (!api || options.clearCanvasSelection === false) return
+    const elements = api.getSceneElementsIncludingDeleted?.() ?? []
+    const currentAppState = api.getAppState?.() ?? {}
+    const selectedElementIds = {}
+    const nextAppState = { ...currentAppState, selectedElementIds }
+    suppressNextChangeRef.current = true
+    api.updateScene({
+      appState: { selectedElementIds },
+      captureUpdate: CaptureUpdateAction.NEVER
+    })
+    const nextScene = createScene(elements, nextAppState, api.getFiles?.() ?? {})
+    latestSceneRef.current = nextScene
+    refreshOverlayStates(nextScene)
+    scheduleSelectionSave(nextScene)
+  }, [api, flushPendingFrameFormWrite, refreshOverlayStates, scheduleSelectionSave])
 
   useEffect(() => {
     if (initialScene) syncGeneratorUi(initialScene)
@@ -6762,6 +6951,7 @@ export default function App() {
 
     let pointerIsDown = false
     let lastPointer = null
+    let canvasTapStart = null
     let rafId = 0
     let wheelTrailFrames = 0
     let hoverClearTimer = 0
@@ -6846,28 +7036,91 @@ export default function App() {
       if (wheelTrailFrames > 0) rafId = requestAnimationFrame(trailHoverUpdate)
       else rafId = 0
     }
-    const onPointerMove = (event) => scheduleHoverUpdate(event)
+    const onPointerMove = (event) => {
+      if (canvasTapStart && event.pointerId === canvasTapStart.pointerId) {
+        const dx = event.clientX - canvasTapStart.clientX
+        const dy = event.clientY - canvasTapStart.clientY
+        if (Math.hypot(dx, dy) > (event.pointerType === 'touch' ? 12 : 7)) {
+          canvasTapStart.moved = true
+        }
+      }
+      scheduleHoverUpdate(event)
+    }
     const onPointerDown = (event) => {
       pointerIsDown = true
       // Remember the scene-space point of this click so handleChange can
       // re-select a generator frame if Excalidraw lands the selection on empty
       // interior or a child element ("click doesn't register" fix).
-      if (event) {
+      const isCanvasSurface = event?.target instanceof HTMLCanvasElement
+      if (event && isCanvasSurface) {
         const appState = api.getAppState?.() ?? {}
         const zoom = Math.max(0.1, Number(appState.zoom?.value) || 1)
         const rootRect = root.getBoundingClientRect()
-        lastPointerDownCanvasRef.current = {
+        const scenePoint = {
           x: (event.clientX - rootRect.left) / zoom - (Number(appState.scrollX) || 0),
-          y: (event.clientY - rootRect.top) / zoom - (Number(appState.scrollY) || 0),
-          time: Date.now()
+          y: (event.clientY - rootRect.top) / zoom - (Number(appState.scrollY) || 0)
         }
+        lastPointerDownCanvasRef.current = { ...scenePoint, time: Date.now() }
+        canvasTapStart = event.isPrimary === false || event.button !== 0
+          ? null
+          : {
+              pointerId: event.pointerId,
+              pointerType: event.pointerType,
+              clientX: event.clientX,
+              clientY: event.clientY,
+              scenePoint,
+              time: Date.now(),
+              moved: false
+            }
+      } else {
+        canvasTapStart = null
       }
       if (rafId) cancelAnimationFrame(rafId)
       rafId = 0
       hideHover()
     }
-    const onPointerUp = () => {
+    const onPointerUp = (event) => {
       pointerIsDown = false
+      const completedTap = canvasTapStart && event.pointerId === canvasTapStart.pointerId
+        ? canvasTapStart
+        : null
+      canvasTapStart = null
+      if (
+        completedTap &&
+        !completedTap.moved &&
+        Date.now() - completedTap.time < 800 &&
+        !canvasPickerRef.current &&
+        !isDraggingGeneratorRef.current
+      ) {
+        // Excalidraw's touch selection updates can arrive without a usable
+        // React selection transition when bitmap previews are rendered by the
+        // lightweight phone overlay. Resolve the tapped scene element
+        // directly after Excalidraw finishes the gesture so mobile follows the
+        // desktop contract exactly: frame/result => panel, everything else =>
+        // no panel.
+        window.setTimeout(() => {
+          if (!api || canvasPickerRef.current) return
+          const elements = api.getSceneElementsIncludingDeleted?.() ?? api.getSceneElements?.() ?? []
+          const panelTarget = panelTargetElementAtScenePoint(elements, completedTap.scenePoint)
+          if (!panelTarget) {
+            closeActiveGeneratorPanel({ clearCanvasSelection: false })
+            return
+          }
+          const currentAppState = api.getAppState?.() ?? {}
+          const selectedElementIds = { [panelTarget.id]: true }
+          const nextAppState = { ...currentAppState, selectedElementIds }
+          const nextScene = createScene(elements, nextAppState, api.getFiles?.() ?? {})
+          latestSceneRef.current = nextScene
+          suppressNextChangeRef.current = true
+          api.updateScene({
+            appState: { selectedElementIds },
+            captureUpdate: CaptureUpdateAction.NEVER
+          })
+          syncGeneratorUi(nextScene)
+          refreshOverlayStates(nextScene)
+          scheduleSelectionSave(nextScene)
+        }, 0)
+      }
       wheelTrailFrames = 4
       if (rafId) cancelAnimationFrame(rafId)
       rafId = requestAnimationFrame(trailHoverUpdate)
@@ -6910,7 +7163,7 @@ export default function App() {
       if (rafId) cancelAnimationFrame(rafId)
       window.clearTimeout(hoverClearTimer)
     }
-  }, [api])
+  }, [api, closeActiveGeneratorPanel, refreshOverlayStates, scheduleSelectionSave, syncGeneratorUi])
 
   useEffect(() => {
     return () => {
@@ -8544,7 +8797,6 @@ export default function App() {
     activeFrameIdRef.current = ''
     setActiveFrameId('')
 
-    let keepGeneratingFrame = false
 
     // 複数指定の再生成では、新しいフレームの右にクローンを並べる。
     if (requestedGenerationCount > 1 && extraFrameIds.length === 0) {
@@ -8644,22 +8896,13 @@ export default function App() {
         },
         body: JSON.stringify(useAsyncGeneration ? { ...body, async: true } : body)
       })
-      const payload = await response.json().catch(() => ({}))
+      let payload = await response.json().catch(() => ({}))
       if (!response.ok || payload.error) {
         throw new Error(payload.error || `Generation failed: ${response.status}`)
       }
       if (payload.async) {
-        keepGeneratingFrame = true
-        window.setTimeout(() => {
-          setGeneratingFrameIds((current) => {
-            const next = new Set(current)
-            next.delete(generationAnchorId)
-            for (const extraId of extraFrameIds) next.delete(extraId)
-            return next
-          })
-          setGeneratorFramesRemoteGenerating([generationAnchorId, ...extraFrameIds], false)
-        }, 10 * 60 * 1000)
-        return
+        if (!payload.jobId) throw new Error('生成ジョブIDを取得できませんでした。')
+        payload = await waitForCanvasGenerationJob(payload.jobId)
       }
       if (Array.isArray(payload.generationErrors) && payload.generationErrors.length > 0) {
         setGenerationError(
@@ -8763,15 +9006,13 @@ export default function App() {
         scheduleSelectionSave(errorScene)
       }
     } finally {
-      if (!keepGeneratingFrame) {
-        setGeneratingFrameIds((current) => {
-          const next = new Set(current)
-          next.delete(generationAnchorId)
-          next.delete(optimisticGenerationId)
-          for (const extraId of extraFrameIds) next.delete(extraId)
-          return next
-        })
-      }
+      setGeneratingFrameIds((current) => {
+        const next = new Set(current)
+        next.delete(generationAnchorId)
+        next.delete(optimisticGenerationId)
+        for (const extraId of extraFrameIds) next.delete(extraId)
+        return next
+      })
     }
   }, [api, applyRemoteScene, ensureBuzzAssistLoggedIn, focusGeneratingFrameGrid, frameForm, generatingFrameIds, insertGeneratorFrame, openHermesSetupDialog, prehydrateResultFiles, refreshHermesStatus, refreshOverlayStates, saveCanvas, scheduleCanvasSave, scheduleSelectionSave, selectedGeneratedResult, setGeneratorFramesRemoteGenerating, spawnExtraGeneratingFrames, updateActiveFrameElement])
 
@@ -9248,7 +9489,7 @@ export default function App() {
   )
   const isUtilityPanelKind = activeFrameKind === 'subtitle' || activeFrameKind === 'silenceCut'
   const panelPlacement = showPromptPanel
-    ? getPanelPlacementFromViewportTarget(activePanelTarget, activeFrameKind)
+    ? getPanelPlacementFromViewportTarget(activePanelTarget, activeFrameKind, visualViewportMetrics)
     : null
   const panelStyle = panelPlacement
     ? {
@@ -9587,8 +9828,9 @@ export default function App() {
           translates them (handleChange fast path) instead of re-rendering
           every overlay per frame. Two layers because the stacking interleaves
           with Excalidraw's canvases: media previews sit UNDER the interactive
-          canvas (z-2, so selection borders paint above them) while frames,
-          headers, and the toolbar sit ABOVE it. Keep position-fixed UI
+          canvas (so selection borders paint above them) while playback
+          controls, frames, headers, and the toolbar sit ABOVE it. Keep
+          position-fixed UI
           (modals, backdrop, panel) OUTSIDE — a transformed ancestor would
           re-anchor them. */}
       <div ref={overlayUnderLayerRef} className="lovart-canvas-overlay-layer is-under-canvas">
@@ -9596,15 +9838,22 @@ export default function App() {
           <CanvasImagePreviewOverlay key={image.id} image={image} />
         ))}
         {videoPlaybackOverlays.map((video) => (
-          <VideoCanvasOverlay
+          <VideoCanvasMediaOverlay
             key={video.id}
             video={video}
             isHovered={hoveredVideoPlaybackId === video.id}
-            onExpand={setExpandedVideoPlayback}
           />
         ))}
       </div>
       <div ref={overlayLayerRef} className="lovart-canvas-overlay-layer is-above-canvas">
+      {videoPlaybackOverlays.map((video) => (
+        <VideoCanvasControlsOverlay
+          key={`controls-${video.id}`}
+          video={video}
+          isHovered={hoveredVideoPlaybackId === video.id}
+          onExpand={setExpandedVideoPlayback}
+        />
+      ))}
       {frameOverlays.map((overlay) => {
         const isGenerating = generatingFrameIds.has(overlay.id) || overlay.remoteGenerating
         const isVideo = overlay.kind === 'video'
@@ -10074,6 +10323,24 @@ export default function App() {
             menuButton?.click()
           }}
         >
+          <button
+            type="button"
+            className="lovart-panel-close"
+            data-lovart-panel-close="true"
+            aria-label="入力欄を閉じる"
+            title="入力欄を閉じる"
+            onPointerDown={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+            }}
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              closeActiveGeneratorPanel()
+            }}
+          >
+            <CloseIcon />
+          </button>
           <div
             className={[
               'lovart-prompt-wrap',
@@ -10101,6 +10368,11 @@ export default function App() {
                     : undefined
               }
               placeholder="今日は何をしますか？"
+              enterKeyHint="send"
+              inputMode="text"
+              autoCapitalize="sentences"
+              autoCorrect="on"
+              spellCheck
               value={frameForm.prompt}
               onChange={(event) => updateFrameForm('prompt', event.target.value)}
               onFocus={() => setOpenMenu(null)}
@@ -11081,12 +11353,35 @@ export default function App() {
           onMouseDown={(event) => event.stopPropagation()}
           onClick={(event) => event.stopPropagation()}
         >
+          <button
+            type="button"
+            className="lovart-panel-close"
+            data-lovart-panel-close="true"
+            aria-label="入力欄を閉じる"
+            title="入力欄を閉じる"
+            onPointerDown={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+            }}
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              closeActiveGeneratorPanel()
+            }}
+          >
+            <CloseIcon />
+          </button>
           <div
             className={`lovart-utility-tray-wrap${trayOpen ? ' is-open' : ''}`}
             onMouseLeave={() => setUtilityTrayHovered(false)}
           >
             <textarea
               className="lovart-ai-prompt"
+              enterKeyHint="send"
+              inputMode="text"
+              autoCapitalize="sentences"
+              autoCorrect="on"
+              spellCheck
               placeholder="今日は何をしますか？"
               value={isSilencePanel ? frameForm.silenceCutInstruction : frameForm.subtitlePrompt}
               onChange={(event) =>

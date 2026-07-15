@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import { execFile, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdir, open, readFile, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensureManagedCloudflared, MANAGED_CLOUDFLARED_VERSION } from "../lib/cloudflaredProvision.mjs";
 
 const isWindows = process.platform === "win32";
 
@@ -47,6 +48,7 @@ Options:
   --access-token <token>       URL token for tunnel access. Defaults to a generated token.
   --reuse-local                Reuse canvas/.server.json instead of starting a tunnel-ready canvas server.
   --restart                    Restart an existing tunnel session.
+  --no-auto-download           Do not download BuzzAssist's verified cloudflared helper when no system copy exists.
 
 Cloudflare (default provider):
   Zero-config quick tunnel (random *.trycloudflare.com URL, no bandwidth cap, no account).
@@ -96,6 +98,16 @@ async function commandAvailable(commandName, args = ["--version"]) {
     return true;
   } catch {
     return false;
+  }
+}
+
+async function readCloudflaredVersion(executable) {
+  try {
+    const { stdout, stderr } = await execFileAsync(executable, ["--version"], { timeout: 10_000 });
+    const output = `${stdout}\n${stderr}`.trim();
+    return output.match(/cloudflared\s+version\s+([^\s]+)/i)?.[1] || output.split(/\r?\n/)[0] || "unknown";
+  } catch {
+    return "unknown";
   }
 }
 
@@ -225,6 +237,8 @@ function resolveConfig() {
     canvasSessionName: readArg("--canvas-session-name") || process.env.BUZZASSIST_CANVAS_TMUX_SESSION || DEFAULT_CANVAS_SESSION,
     reuseLocal: hasArg("--reuse-local") || /^(1|true|yes)$/i.test(String(process.env.BUZZASSIST_TUNNEL_REUSE_LOCAL || "")),
     compression: !hasArg("--no-compression") && !/^(0|false|no)$/i.test(String(process.env.BUZZASSIST_TUNNEL_COMPRESSION || "true")),
+    autoDownloadCloudflared: !hasArg("--no-auto-download") && !/^(0|false|no)$/i.test(String(process.env.BUZZASSIST_CLOUDFLARED_AUTO_DOWNLOAD || "true")),
+    cloudflaredPath: String(process.env.BUZZASSIST_CLOUDFLARED_PATH || "").trim(),
   };
 }
 
@@ -242,8 +256,8 @@ function ngrokInstallHelp() {
 
 function cloudflaredInstallHelp() {
   return [
-    "cloudflared is required for the Cloudflare Canvas Tunnel.",
-    "Install it:",
+    `BuzzAssist could not prepare its verified cloudflared ${MANAGED_CLOUDFLARED_VERSION} helper.`,
+    "You can install cloudflared manually instead:",
     "  macOS:   brew install cloudflared",
     "  Windows: winget install Cloudflare.cloudflared",
     "  Linux:   https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/",
@@ -253,18 +267,39 @@ function cloudflaredInstallHelp() {
 }
 
 async function ensureCloudflaredReady(config) {
-  if (!await commandAvailable("cloudflared", ["--version"])) {
+  let executable = "";
+  let source = "";
+  if (config.cloudflaredPath) {
+    if (!await commandAvailable(config.cloudflaredPath, ["--version"])) {
+      throw new Error(`BUZZASSIST_CLOUDFLARED_PATH is not executable: ${config.cloudflaredPath}`);
+    }
+    executable = resolve(config.cloudflaredPath);
+    source = "environment";
+  } else if (await commandAvailable("cloudflared", ["--version"])) {
+    executable = await resolveExecutable("cloudflared");
+    source = "system";
+  } else if (config.autoDownloadCloudflared) {
+    console.log(`Cloudflare helper was not found. Preparing verified cloudflared ${MANAGED_CLOUDFLARED_VERSION} in BuzzAssist's user tools directory...`);
+    try {
+      const managed = await ensureManagedCloudflared();
+      executable = managed.executablePath;
+      source = managed.source;
+      console.log(managed.downloaded ? "Cloudflare helper: downloaded and verified." : "Cloudflare helper: verified cached copy.");
+    } catch (error) {
+      throw new Error(`${error.message}\n${cloudflaredInstallHelp()}`);
+    }
+  } else {
     throw new Error(cloudflaredInstallHelp());
   }
+  config.cloudflaredExecutable = executable;
+  config.cloudflaredSource = source;
+  config.cloudflaredVersion = await readCloudflaredVersion(executable);
   if (config.cfHostname) {
     // Named tunnel needs the account cert produced by `cloudflared tunnel login`.
     let hasCert = false;
-    try {
-      await execFileAsync("test", ["-f", join(process.env.HOME || "", ".cloudflared", "cert.pem")]);
-      hasCert = true;
-    } catch {
-      hasCert = false;
-    }
+    const userHome = process.env.HOME || process.env.USERPROFILE || "";
+    try { hasCert = (await stat(join(userHome, ".cloudflared", "cert.pem"))).isFile(); }
+    catch { hasCert = false; }
     if (!hasCert) {
       throw new Error([
         `A fixed hostname (${config.cfHostname}) needs a logged-in cloudflared.`,
@@ -430,7 +465,7 @@ function tunnelSpawn(config, paths, localBaseUrl) {
   const args = config.cfHostname
     ? ["--no-autoupdate", "--loglevel", "info", "tunnel", "run", "--url", localBaseUrl, config.cfTunnelName]
     : ["--no-autoupdate", "--loglevel", "info", "tunnel", "--url", localBaseUrl];
-  return { file: "cloudflared", args, cwd: repoRoot, env: process.env, logFile: paths.logFile };
+  return { file: config.cloudflaredExecutable || "cloudflared", args, cwd: repoRoot, env: process.env, logFile: paths.logFile };
 }
 
 function portFromUrl(url) {
@@ -511,7 +546,7 @@ async function resolvePublicUrl(config, paths) {
 async function ensureCloudflareDnsRoute(config) {
   if (config.provider !== "cloudflare" || !config.cfHostname) return;
   try {
-    await execFileAsync("cloudflared", ["tunnel", "route", "dns", config.cfTunnelName, config.cfHostname], { timeout: 20_000 });
+    await execFileAsync(config.cloudflaredExecutable || "cloudflared", ["tunnel", "route", "dns", config.cfTunnelName, config.cfHostname], { timeout: 20_000 });
   } catch (error) {
     const message = String(error.stderr || error.message || "");
     if (!/already|exists|record with that host/i.test(message)) {
@@ -615,6 +650,11 @@ async function start() {
     ok: false,
     state: "starting",
     provider: config.provider,
+    ...(config.provider === "cloudflare" ? {
+      cloudflaredVersion: config.cloudflaredVersion,
+      cloudflaredSource: config.cloudflaredSource,
+      cloudflaredExecutable: config.cloudflaredExecutable,
+    } : {}),
     localBaseUrl,
     managedCanvas,
     canvasPid,
@@ -667,6 +707,11 @@ async function start() {
     managedCanvas,
     projectDir: config.projectDir,
     canvasDir: config.canvasDir,
+    ...(config.provider === "cloudflare" ? {
+      cloudflaredVersion: config.cloudflaredVersion,
+      cloudflaredSource: config.cloudflaredSource,
+      cloudflaredExecutable: config.cloudflaredExecutable,
+    } : {}),
     statusFile: paths.statusFile,
     logFile: paths.logFile,
     startedAt: new Date().toISOString(),

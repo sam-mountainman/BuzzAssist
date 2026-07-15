@@ -119,7 +119,7 @@ const MEDIA_GENERATION_AGENT_INSTRUCTIONS = [
   ASK_USER_QUESTION_STYLE_GUIDE,
   STAGED_MEDIA_SETTINGS_GUIDE,
   "Each project gets its own <current-project>/canvas directory, assets folder, and canvas/.server.json. Canvas tools auto-start that project's local static canvas server on an available port; multiple projects may run on different localhost ports.",
-  "For phone/mobile access to the exact same full Excalidraw UI, use buzzassist_canvas_tunnel_start/status/stop. This starts an ngrok Canvas Tunnel with a generated access URL; Remote Canvas is not required for same-UI access.",
+  "For phone/mobile access to the exact same full Excalidraw UI, use buzzassist_canvas_tunnel_start/status/stop. Cloudflare Quick Tunnel is the default and needs no account; if cloudflared is missing, BuzzAssist downloads and SHA-256 verifies its pinned official helper in the user's BuzzAssist tools directory. Remote Canvas is not required for same-UI access.",
   "For Codex and Claude Code interactive UI, always try the host in-app browser/browser tool first for the local BUZZASSIST_CANVAS_URL and use MCP tools for stable reads/writes. Use the explicit openExternalBrowser fallback only when that host does not expose an in-app Browser capability. render_buzzassist_canvas_widget remains an experimental MCP Apps entrypoint only; do not use it for normal Codex or Claude Code work unless the user explicitly asks to test the widget.",
   "To attach selected canvas images/videos/SRT/XML into the current chat, use prepare_canvas_attachments or read_canvas_attachment_bundle. Do not rely on OS GUI paste automation for media attachments.",
 ].join(" ");
@@ -336,10 +336,16 @@ async function runCanvasTunnelCommand(action, args = {}) {
   ];
 
   if (action === "start") {
+    const provider = nonEmptyString(args.provider);
+    if (provider) commandArgs.push("--provider", provider);
+    else if (nonEmptyString(args.ngrokAuthtoken)) commandArgs.push("--provider", "ngrok");
     if (args.restart === true) commandArgs.push("--restart");
     if (args.reuseLocal === true) commandArgs.push("--reuse-local");
     if (nonEmptyString(args.localUrl)) commandArgs.push("--local-url", nonEmptyString(args.localUrl));
     if (nonEmptyString(args.ngrokAuthtoken)) commandArgs.push("--ngrok-authtoken", nonEmptyString(args.ngrokAuthtoken));
+    if (nonEmptyString(args.cfHostname)) commandArgs.push("--cf-hostname", nonEmptyString(args.cfHostname));
+    if (nonEmptyString(args.cfTunnelName)) commandArgs.push("--cf-tunnel-name", nonEmptyString(args.cfTunnelName));
+    if (args.autoDownloadCloudflared === false) commandArgs.push("--no-auto-download");
     if (nonEmptyString(args.accessToken)) commandArgs.push("--access-token", nonEmptyString(args.accessToken));
     if (args.basicAuth === true) commandArgs.push("--basic-auth");
     if (nonEmptyString(args.user)) commandArgs.push("--user", nonEmptyString(args.user));
@@ -2377,21 +2383,25 @@ function toolDefinitions() {
     {
       name: TOOL_CANVAS_TUNNEL_START,
       title: "Start BuzzAssist Canvas Tunnel",
-      description: "Start an ngrok tunnel for the same full local Excalidraw canvas UI, protected by a generated access URL. Use for phone/mobile access when the user wants the exact local canvas UI.",
+      description: "Start a protected tunnel for the same full local Excalidraw canvas UI. Cloudflare Quick Tunnel is the zero-account default; when cloudflared is missing, BuzzAssist downloads a pinned official binary into the user's private tools directory and verifies its SHA-256 before execution. Use ngrok only when provider is explicitly set to ngrok.",
       inputSchema: {
         type: "object",
         properties: {
           projectDir: { type: "string", description: "Absolute project directory containing canvas/." },
           canvasDir: { type: "string", description: "Absolute canvas directory. Overrides projectDir." },
+          provider: { type: "string", enum: ["cloudflare", "ngrok"], description: "Tunnel provider. Defaults to cloudflare." },
+          cfHostname: { type: "string", description: "Optional fixed Cloudflare hostname. Requires prior cloudflared login and a named tunnel." },
+          cfTunnelName: { type: "string", description: "Cloudflare named tunnel for cfHostname. Defaults to buzzassist-canvas." },
+          autoDownloadCloudflared: { type: "boolean", description: "Automatically download and verify BuzzAssist's pinned official cloudflared helper if no system copy exists. Defaults to true." },
           ngrokAuthtoken: { type: "string", description: "Optional personal ngrok authtoken to configure before starting." },
           accessToken: { type: "string", description: "Optional URL access token. Defaults to a generated token." },
-          basicAuth: { type: "boolean", description: "Also enable ngrok Basic Auth. Defaults to false because some in-app browsers do not show the auth prompt." },
+          basicAuth: { type: "boolean", description: "For ngrok only: also enable Basic Auth. Defaults to false because some in-app browsers do not show the auth prompt." },
           user: { type: "string", description: "Basic Auth user when --basic-auth is enabled. Defaults to buzzassist." },
           password: { type: "string", description: "Basic Auth password when --basic-auth is enabled. Defaults to a generated password." },
           localUrl: { type: "string", description: "Existing local canvas URL to expose. Usually omitted so the tool starts a tunnel-ready canvas server." },
           reuseLocal: { type: "boolean", description: "Reuse canvas/.server.json instead of starting a tunnel-ready canvas server. Use only when the local server already allows the tunnel origin." },
           restart: { type: "boolean", description: "Restart an existing tunnel. Defaults to false." },
-          compression: { type: "boolean", description: "Enable ngrok gzip compression. Defaults to true." },
+          compression: { type: "boolean", description: "For ngrok only: enable gzip compression. Defaults to true." },
         },
         additionalProperties: false,
       },
@@ -2405,7 +2415,7 @@ function toolDefinitions() {
     {
       name: TOOL_CANVAS_TUNNEL_STATUS,
       title: "BuzzAssist Canvas Tunnel Status",
-      description: "Return the current ngrok Canvas Tunnel URL, access URL, optional Basic Auth credentials, local canvas URL, and status file path.",
+      description: "Return the current Canvas Tunnel provider, public/access URL, optional Basic Auth credentials, local canvas URL, and status file path.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2424,7 +2434,7 @@ function toolDefinitions() {
     {
       name: TOOL_CANVAS_TUNNEL_STOP,
       title: "Stop BuzzAssist Canvas Tunnel",
-      description: "Stop the ngrok Canvas Tunnel and any tunnel-managed canvas server.",
+      description: "Stop the current Canvas Tunnel and any tunnel-managed canvas server.",
       inputSchema: {
         type: "object",
         properties: {
