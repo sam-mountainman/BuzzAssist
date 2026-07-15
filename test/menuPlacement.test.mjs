@@ -32,7 +32,7 @@ test('generator menus scroll inside the viewport without hiding utility attachme
 
   assert.match(appSource, /getViewportConstrainedMenuShift\(menu\.getBoundingClientRect\(\), viewport, gutter\)/)
   assert.match(css, /\.lovart-menu\[data-lovart-menu\][\s\S]*?max-height: var\(--lovart-menu-max-height[\s\S]*?overflow-y: auto/)
-  assert.match(css, /\.lovart-ai-panel\.has-open-menu > \.lovart-panel-close[\s\S]*?opacity: 0/)
+  assert.doesNotMatch(css, /\.lovart-panel-close/)
   assert.doesNotMatch(appSource, /menu-over-tray/)
   assert.doesNotMatch(css, /\.lovart-utility-panel\.menu-over-tray[\s\S]*?opacity:\s*0/)
 })

@@ -2045,6 +2045,36 @@ function generatedResultFileIds(scene, anchorIds) {
   return fileIds
 }
 
+// A fast generation can replace its frame before the browser has applied the
+// preceding Generating... scene event. In that race there is no live anchor ID
+// to connect the result to, so discover every newly-arrived generated bitmap
+// whose bytes are not in Excalidraw's runtime file store yet.
+function generatedAssetFileIdsNeedingHydration(scene, runtimeFiles = {}) {
+  const fileIds = new Set()
+  for (const element of scene?.elements ?? []) {
+    if (
+      element?.type !== 'image' ||
+      element.isDeleted ||
+      !element.fileId ||
+      element.customData?.codexMediaKind === 'video'
+    ) {
+      continue
+    }
+    const isGenerated =
+      element.customData?.codexGeneratedImage === true ||
+      Boolean(element.customData?.codexGenerationModel) ||
+      Boolean(element.customData?.codexAnchorElementId)
+    if (!isGenerated || !isAssetBackedFileRecord(scene?.files?.[element.fileId])) continue
+    const runtimeFile = runtimeFiles?.[element.fileId]
+    const alreadyHydrated =
+      typeof runtimeFile?.dataURL === 'string' &&
+      runtimeFile.dataURL.startsWith('data:') &&
+      runtimeFile.dataURL !== CANVAS_ASSET_PLACEHOLDER_DATA_URL
+    if (!alreadyHydrated) fileIds.add(element.fileId)
+  }
+  return fileIds
+}
+
 async function hydrateSceneAssetBackedFilesWithTimeout(scene, options = {}, timeoutMs = 1200) {
   let timeoutId = 0
   try {
@@ -2543,15 +2573,10 @@ function getPanelPlacementFromViewportTarget(target, kind = 'image', viewportOve
       // width would collapse the bar pills; keep the desktop's max width.
       ? 560
       : clamp(Math.round(frameViewportWidth * 0.9), GENERATOR_PANEL_IMAGE_MIN_WIDTH, GENERATOR_PANEL_IMAGE_MAX_WIDTH)
-  // Phones: keep the EXACT desktop panel (same internal layout, no reflow) and
-  // shrink it visually with a CSS scale so it fits the screen width. The
-  // content remains the desktop UI; only the outer placement is clamped so the
-  // prompt stays reachable after the user pans or zooms the canvas.
+  // Phones keep the exact desktop panel (same internal layout, no reflow) and
+  // shrink it visually with a CSS scale so it fits the screen width.
   const viewport = viewportOverride || readVisualViewportMetrics()
   const viewportWidth = Math.max(0, Number(viewport.width) || 0)
-  const viewportHeight = Math.max(0, Number(viewport.height) || 0)
-  const viewportOffsetLeft = Number(viewport.offsetLeft) || 0
-  const viewportOffsetTop = Number(viewport.offsetTop) || 0
   const isCompactViewport = viewportWidth > 0 && viewportWidth <= 900
   const viewportGutter = isCompactViewport
     ? GENERATOR_PANEL_COMPACT_GUTTER
@@ -2563,24 +2588,11 @@ function getPanelPlacementFromViewportTarget(target, kind = 'image', viewportOve
   const rawLeft = Math.round((Number(target?.left) || 0) + frameViewportWidth / 2 - panelWidth / 2)
   const targetTop = Number(target?.top) || 0
   const rawTop = Math.round(targetTop + frameViewportHeight + 4)
-  const panelVisualWidth = panelWidth * panelScale
-  const transformInsetX = (panelWidth - panelVisualWidth) / 2
-  // Clamp the floating prompt on desktop as well as mobile. The canvas shell
-  // intentionally clips overflow; leaving desktop placement unconstrained
-  // made the panel disappear into the right/bottom edge and removed the blank
-  // gutter users rely on to dismiss it with an outside click.
-  const minLeft = viewportOffsetLeft + viewportGutter - transformInsetX
-  const maxLeft = viewportOffsetLeft + viewportWidth - viewportGutter - panelVisualWidth - transformInsetX
-  const panelEstimatedHeight = isVideo ? 280 : kind === 'subtitle' || kind === 'silenceCut' ? 220 : GENERATOR_PANEL_ESTIMATED_HEIGHT + 24
-  const panelVisualHeight = panelEstimatedHeight * panelScale
-  const minTop = viewportOffsetTop + viewportGutter
-  const maxTop = viewportOffsetTop + viewportHeight - viewportGutter - panelVisualHeight
-  const left = viewportWidth > 0
-    ? clamp(rawLeft, minLeft, Math.max(minLeft, maxLeft))
-    : rawLeft
-  const top = viewportHeight > 0
-    ? clamp(rawTop, minTop, Math.max(minTop, maxTop))
-    : rawTop
+  // Keep the prompt physically attached to its canvas target. It must move
+  // beyond every viewport edge with the frame instead of sticking to an
+  // invisible top/bottom/left/right wall.
+  const left = rawLeft
+  const top = rawTop
 
   return {
     left,
@@ -5333,6 +5345,11 @@ export default function App() {
   const hasLocalChangesRef = useRef(false)
   const localChangeVersionRef = useRef(0)
   const lastSyncedFingerprintRef = useRef('')
+  // File-watcher and explicit focus broadcasts can arrive back-to-back when a
+  // fast generation replaces its Generating... frame. Keep those remote scene
+  // loads strictly ordered so a stale placeholder cannot apply after the
+  // hydrated result image.
+  const remoteCanvasEventQueueRef = useRef(Promise.resolve())
   const pendingOverlaySceneRef = useRef(null)
   const overlayRefreshFrameRef = useRef(0)
   // Pan fast path: overlays are positioned in viewport px at build time; a
@@ -6043,6 +6060,10 @@ export default function App() {
     api.updateScene({
       elements: restoredElements,
       files: constrainedFiles,
+      // Excalidraw normally adds only missing file ids. If the same id already
+      // produced a missing-image cache entry, replace that placeholder record
+      // with the hydrated bitmap bytes and force a fresh decode.
+      replaceFiles: true,
       captureUpdate: CaptureUpdateAction.NEVER
     })
     refreshOverlayStates(nextScene)
@@ -6072,7 +6093,7 @@ export default function App() {
   // 先にハイドレートしても打ち消される — Excalidrawのfilesストアに直接
   // addFilesしておけば、要素が現れた瞬間から画像が表示される。
   const prehydrateResultFiles = useCallback(async (scene, fileIds, timeoutMs = 8000) => {
-    if (!api || !(fileIds instanceof Set) || fileIds.size === 0) return
+    if (!api || !(fileIds instanceof Set) || fileIds.size === 0) return []
     const records = []
     let timeoutId = 0
     try {
@@ -6088,6 +6109,7 @@ export default function App() {
       window.clearTimeout(timeoutId)
     }
     if (records.length > 0) api.addFiles(records)
+    return records
   }, [api])
 
   const scheduleVisibleAssetHydration = useCallback((scene) => {
@@ -6535,7 +6557,16 @@ export default function App() {
         scrollY: currentAppState.scrollY,
         zoom: currentAppState.zoom
       }
-      const nextScene = { ...normalized, appState: nextAppState }
+      const prehydratedFiles = (Array.isArray(options.prehydratedFiles) ? options.prehydratedFiles : [])
+        .filter((file) => file?.id && typeof file?.dataURL === 'string' && file.dataURL.startsWith('data:'))
+      const prehydratedFileMap = Object.fromEntries(prehydratedFiles.map((file) => [file.id, file]))
+      const nextScene = {
+        ...normalized,
+        files: prehydratedFiles.length > 0
+          ? { ...normalized.files, ...prehydratedFileMap }
+          : normalized.files,
+        appState: nextAppState
+      }
       latestSceneRef.current = nextScene
       syncGeneratorUi(nextScene)
       const fileRecords = Object.values(normalized.files)
@@ -6566,6 +6597,12 @@ export default function App() {
         api.updateScene({
           elements: normalized.elements,
           appState: nextAppState,
+          ...(prehydratedFiles.length > 0
+            ? {
+                files: { ...(api.getFiles?.() ?? {}), ...prehydratedFileMap },
+                replaceFiles: true
+              }
+            : {}),
           captureUpdate: CaptureUpdateAction.NEVER
         })
         if (shouldApplyViewport && focusedElements.length > 0) {
@@ -6652,13 +6689,17 @@ export default function App() {
         )
         const resultAnchorIds = new Set([...generatingFrameIdsRef.current, ...remoteGeneratingFrameIds])
         const resultFileIds = generatedResultFileIds(payload.scene, resultAnchorIds)
-        if (resultFileIds.size > 0) {
-          await prehydrateResultFiles(payload.scene, resultFileIds)
+        for (const fileId of generatedAssetFileIdsNeedingHydration(payload.scene, api.getFiles?.() ?? {})) {
+          resultFileIds.add(fileId)
         }
+        const prehydratedFiles = resultFileIds.size > 0
+          ? await prehydrateResultFiles(payload.scene, resultFileIds)
+          : []
         applyRemoteScene(payload.scene, {
           applySelection: eventPayload.applySelection === true,
           applyViewport: eventPayload.applyViewport === true,
-          focusElementIds
+          focusElementIds,
+          prehydratedFiles
         })
       } catch (error) {
         applyingRemoteRef.current = false
@@ -6667,11 +6708,30 @@ export default function App() {
     }
 
     const events = createCanvasEventSource(CANVAS_EVENTS_ENDPOINT)
-    events.addEventListener('canvas-changed', loadRemoteCanvas)
+    let closed = false
+    const queueRemoteCanvasLoad = (event) => {
+      // EventSource reuses MessageEvent objects internally in some WebKit
+      // builds. Snapshot the payload before entering the async queue.
+      const data = typeof event?.data === 'string' ? event.data : ''
+      remoteCanvasEventQueueRef.current = remoteCanvasEventQueueRef.current
+        .catch(() => {})
+        .then(async () => {
+          if (closed) return
+          await loadRemoteCanvas({ data })
+          // applyRemoteScene commits through a zero-delay timer. Let that
+          // commit finish before the next canvas event begins fetching.
+          await new Promise((resolve) => window.setTimeout(resolve, 0))
+        })
+    }
+    events.addEventListener('canvas-changed', queueRemoteCanvasLoad)
     events.onerror = (error) => {
       console.warn('Codex Excalidraw live refresh disconnected.', error)
     }
-    return () => events.close()
+    return () => {
+      closed = true
+      events.removeEventListener('canvas-changed', queueRemoteCanvasLoad)
+      events.close()
+    }
   }, [api, applyRemoteScene, prehydrateResultFiles])
 
   useEffect(() => {
@@ -8693,16 +8753,13 @@ export default function App() {
     refreshOverlayStates(nextScene)
   }, [api, refreshOverlayStates])
 
-  // Match the chat/MCP generation path: fit the complete Generating... grid
-  // into the viewport without selecting it, so no resize/rotation handles are
-  // shown while the jobs are running.
+  // Match the chat/MCP generation path: fit the live Generating... placeholder
+  // or complete grid into the viewport without selecting it, so no
+  // resize/rotation handles are shown while the jobs are running.
   const focusGeneratingFrameGrid = useCallback((elementIds = []) => {
     if (!api) return
     const requestedIds = new Set(elementIds.filter(Boolean))
-    // A single output must keep the user's camera exactly where it is.
-    // This guard makes that invariant explicit even if a future caller forgets
-    // to check the requested count before asking for grid focus.
-    if (requestedIds.size <= 1) return
+    if (requestedIds.size === 0) return
     window.requestAnimationFrame(() => {
       const frames = api
         .getSceneElements()
@@ -8823,9 +8880,7 @@ export default function App() {
     if (!isRegeneratingResult && requestedGenerationCount > 1) {
       extraFrameIds = spawnExtraGeneratingFrames(anchorElement, anchorElementId, requestedGenerationCount - 1)
     }
-    if (!isRegeneratingResult && requestedGenerationCount > 1) {
-      focusGeneratingFrameGrid([anchorElementId, ...extraFrameIds])
-    }
+    if (!isRegeneratingResult) focusGeneratingFrameGrid([anchorElementId, ...extraFrameIds])
     const clearOptimisticGeneration = () => {
       setGeneratingFrameIds((current) => {
         const next = new Set(current)
@@ -8893,9 +8948,7 @@ export default function App() {
     if (requestedGenerationCount > 1 && extraFrameIds.length === 0) {
       extraFrameIds = spawnExtraGeneratingFrames(generationAnchorElement, generationAnchorId, requestedGenerationCount - 1)
     }
-    if (isRegeneratingResult && requestedGenerationCount > 1) {
-      focusGeneratingFrameGrid([generationAnchorId, ...extraFrameIds])
-    }
+    if (isRegeneratingResult) focusGeneratingFrameGrid([generationAnchorId, ...extraFrameIds])
 
     try {
       await saveCanvas(latestSceneRef.current)
@@ -9016,9 +9069,9 @@ export default function App() {
         const resultFileIds = new Set(
           [payload.fileId, ...((Array.isArray(payload.extras) ? payload.extras : []).map((extra) => extra.fileId))].filter(Boolean)
         )
-        if (resultFileIds.size > 0) {
-          await prehydrateResultFiles(nextScene, resultFileIds)
-        }
+        const prehydratedFiles = resultFileIds.size > 0
+          ? await prehydrateResultFiles(nextScene, resultFileIds)
+          : []
         // サーバーが要求枚数より少なく返した場合、残ったプレースホルダー
         // フレームは削除する。
         const consumedExtras = Array.isArray(payload.extras) ? payload.extras.length : 0
@@ -9033,7 +9086,7 @@ export default function App() {
         }
         // After generation the server replaces the frame with the result and
         // selects it; apply that selection so the result's panel opens.
-        applyRemoteScene(nextScene, { force: true, applySelection: true })
+        applyRemoteScene(nextScene, { force: true, applySelection: true, prehydratedFiles })
         if (leftoverFrameIds.length > 0) scheduleCanvasSave(latestSceneRef.current)
       }
     } catch (error) {
@@ -10414,24 +10467,6 @@ export default function App() {
             menuButton?.click()
           }}
         >
-          <button
-            type="button"
-            className="lovart-panel-close"
-            data-lovart-panel-close="true"
-            aria-label="入力欄を閉じる"
-            title="入力欄を閉じる"
-            onPointerDown={(event) => {
-              event.preventDefault()
-              event.stopPropagation()
-            }}
-            onClick={(event) => {
-              event.preventDefault()
-              event.stopPropagation()
-              closeActiveGeneratorPanel()
-            }}
-          >
-            <CloseIcon />
-          </button>
           <div
             className={[
               'lovart-prompt-wrap',
@@ -11444,24 +11479,6 @@ export default function App() {
           onMouseDown={(event) => event.stopPropagation()}
           onClick={(event) => event.stopPropagation()}
         >
-          <button
-            type="button"
-            className="lovart-panel-close"
-            data-lovart-panel-close="true"
-            aria-label="入力欄を閉じる"
-            title="入力欄を閉じる"
-            onPointerDown={(event) => {
-              event.preventDefault()
-              event.stopPropagation()
-            }}
-            onClick={(event) => {
-              event.preventDefault()
-              event.stopPropagation()
-              closeActiveGeneratorPanel()
-            }}
-          >
-            <CloseIcon />
-          </button>
           <div
             className={`lovart-utility-tray-wrap${trayOpen ? ' is-open' : ''}`}
             onMouseLeave={() => setUtilityTrayHovered(false)}

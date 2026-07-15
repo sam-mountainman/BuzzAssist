@@ -719,46 +719,6 @@ a.lovart-error-action {
   overscroll-behavior: contain;
 }
 
-.lovart-panel-close {
-  position: absolute;
-  top: 7px;
-  right: 7px;
-  z-index: 30;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  color: #7b8491;
-  cursor: pointer;
-  background: rgb(245 246 249 / 0.9);
-  border: 1px solid #e2e5eb;
-  border-radius: 50%;
-  transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease;
-}
-
-.lovart-panel-close:hover,
-.lovart-panel-close:focus-visible {
-  color: #3f4652;
-  background: #ffffff;
-  border-color: #cbd1dc;
-  outline: none;
-}
-
-.lovart-panel-close svg {
-  width: 12px;
-  height: 12px;
-}
-
-/* A dropdown can overlap the panel close button when the panel is pinned to a
-   viewport edge. The backdrop still closes the dropdown; reveal the panel
-   close button again after that first click. */
-.lovart-ai-panel.has-open-menu > .lovart-panel-close {
-  pointer-events: none;
-  opacity: 0;
-}
-
 .lovart-ai-prompt {
   width: 100%;
   min-height: 56px;

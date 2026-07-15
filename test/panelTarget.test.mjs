@@ -124,9 +124,9 @@ test("agent batch generation defaults to 2 rows x 5 columns with 10 parallel job
   assert.match(mcpSource, /Defaults to 5 \(10-job chunks render as 2 rows × 5 columns\)/);
   assert.match(mcpSource, /const generated = await runWithConcurrency\(chunkJobs, concurrency/);
   assert.match(mcpSource, /requestGeneratingFramesFocus\(args, frames\)/);
-  assert.match(mcpSource, /if \(elementIds\.length <= 1\) return null/);
+  assert.match(mcpSource, /if \(elementIds\.length === 0\) return null/);
   assert.match(mcpSource, /applySelection: false,\s*applyViewport: true/);
-  assert.match(mcpSource, /Single-item jobs never move the viewport/);
+  assert.match(mcpSource, /live Generating\.\.\. placeholder or grid/);
   assert.match(appSource, /const columnsPerRow = 5/);
   assert.match(appSource, /Math\.floor\(\(i \+ 1\) \/ columnsPerRow\)/);
   assert.match(appSource, /previousGeneratorFrameIdsRef\.current = new Set\(\s*elementsWithClones\.filter\(isGeneratorFrame\)/);
@@ -140,8 +140,8 @@ test("agent batch generation defaults to 2 rows x 5 columns with 10 parallel job
   assert.match(appSource, /function focusCanvasElementsWithSafeArea\(api, elements = \[\]\)/);
   assert.match(appSource, /api\.scrollToContent\(elements, \{\s*fitToContent: true,\s*animate: true,\s*duration: GENERATOR_SCROLL_ANIMATION_MS,\s*viewportZoomFactor: GENERATOR_FOCUS_ZOOM_FACTOR,\s*canvasOffsets: buzzAssistCanvasFocusOffsets\(\)\s*\}\)/);
   assert.match(appSource, /focusCanvasElementsWithSafeArea\(api, frames\)/);
-  assert.match(appSource, /if \(!isRegeneratingResult && requestedGenerationCount > 1\)[\s\S]*focusGeneratingFrameGrid\(\[anchorElementId, \.\.\.extraFrameIds\]\)/);
-  assert.match(appSource, /if \(isRegeneratingResult && requestedGenerationCount > 1\)[\s\S]*focusGeneratingFrameGrid\(\[generationAnchorId, \.\.\.extraFrameIds\]\)/);
+  assert.match(appSource, /if \(!isRegeneratingResult\) focusGeneratingFrameGrid\(\[anchorElementId, \.\.\.extraFrameIds\]\)/);
+  assert.match(appSource, /if \(isRegeneratingResult\) focusGeneratingFrameGrid\(\[generationAnchorId, \.\.\.extraFrameIds\]\)/);
   assert.match(appSource, /lastCreatedGeo\?\.id && elements\.some/);
   assert.match(appSource, /element\.id === lastCreatedGeo\.id && !element\.isDeleted && isGeneratorFrame\(element\)/);
   assert.match(appSource, /MAX_CHATGPT_IMAGE_COUNT = 10/);
@@ -174,7 +174,7 @@ test("remote MCP focus events select and center only requested results", async (
   assert.match(appSource, /const focusElementIds = \[\.\.\.new Set/);
   assert.match(appSource, /Object\.fromEntries\(focusElementIds\.map\(\(id\) => \[id, true\]\)\)/);
   assert.match(appSource, /fingerprint === lastSyncedFingerprintRef\.current && !shouldApplyFocus/);
-  assert.match(appSource, /focusElementIds\r?\n\s*\}\)/);
+  assert.match(appSource, /focusElementIds,\s*prehydratedFiles\s*\}\)/);
   assert.match(appSource, /focusCanvasElementsWithSafeArea\(api, focusedElements\)/);
   assert.match(viteSource, /FOCUS_REQUEST_FILE_NAME/);
   assert.match(viteSource, /async function consumeCanvasFocusRequest\(\)/);
@@ -223,7 +223,7 @@ test("uploaded canvas media does not open the generator prompt panel", async () 
   assert.doesNotMatch(match[1], /isCanvasVideoElement\(element\)/);
 });
 
-test("generated media can reopen its prompt and every generator panel can be closed", async () => {
+test("generated media can reopen its prompt and panels close from the canvas instead of an inner X", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
   const imageResult = source.match(/function isGeneratedImageResult\(element\) \{\r?\n([\s\S]*?)\r?\n\}/);
   assert.ok(imageResult, "Missing isGeneratedImageResult");
@@ -231,8 +231,8 @@ test("generated media can reopen its prompt and every generator panel can be clo
   assert.match(imageResult[1], /codexGenerationPrompt/);
   assert.match(imageResult[1], /codexInsertedImage === true/);
   assert.match(source, /const closeActiveGeneratorPanel = useCallback\(\(options = \{\}\) => \{/);
-  assert.match(source, /data-lovart-panel-close="true"/);
-  assert.match(source, /aria-label="入力欄を閉じる"/);
+  assert.doesNotMatch(source, /data-lovart-panel-close="true"/);
+  assert.doesNotMatch(source, /aria-label="入力欄を閉じる"/);
   assert.match(source, /selectedElementIds = \{\}/);
   assert.match(source, /setSelectedGeneratedResult\(null\)/);
 });
@@ -590,20 +590,18 @@ test("prompt panel keeps the desktop layout, scaled and kept reachable on phones
   // desktop placement.
   assert.match(source, /const rawLeft = Math\.round\(\(Number\(target\?\.left\) \|\| 0\) \+ frameViewportWidth \/ 2 - panelWidth \/ 2\)/);
   assert.match(source, /const rawTop = Math\.round\(targetTop \+ frameViewportHeight \+ 4\)/);
-  assert.match(source, /const left = viewportWidth > 0\s*\?\s*clamp\(rawLeft, minLeft, Math\.max\(minLeft, maxLeft\)\)\s*:\s*rawLeft/);
-  assert.match(source, /const top = viewportHeight > 0\s*\?\s*clamp\(rawTop, minTop, Math\.max\(minTop, maxTop\)\)\s*:\s*rawTop/);
+  assert.match(source, /const left = rawLeft/);
+  assert.match(source, /const top = rawTop/);
   assert.match(source, /left,\s*top,/);
   // Phones shrink the whole panel with a CSS scale instead of reflowing it, so
-  // the mobile UI is pixel-identical to desktop, just smaller. The outer
-  // placement is clamped after scaling so it stays reachable while panning;
-  // desktop uses the same clamp with a wider outside-click gutter.
+  // the mobile UI is pixel-identical to desktop, just smaller. Placement stays
+  // attached to the frame and is not clamped to the visual viewport.
   // Use the visual viewport rather than the layout viewport so the same
   // placement is recalculated when the software keyboard opens.
   assert.match(source, /const isCompactViewport = viewportWidth > 0 && viewportWidth <= 900/);
   assert.match(source, /function readVisualViewportMetrics\(\)/);
   assert.match(source, /visualViewport\?\.addEventListener\('resize', update\)/);
   assert.match(source, /const panelScale = isCompactViewport\s*\?\s*Math\.min\(1, Math\.max\(1, viewportWidth - viewportGutter \* 2\) \/ desiredWidth\)/);
-  assert.match(source, /const transformInsetX = \(panelWidth - panelVisualWidth\) \/ 2/);
   assert.match(source, /transform: panelPlacement\.scale && panelPlacement\.scale < 1 \? `scale\(\$\{panelPlacement\.scale\}\)` : 'none'/);
   assert.match(source, /transformOrigin: 'top center'/);
   assert.match(source, /if \(kind === 'subtitle'\) return 300/);
@@ -645,14 +643,14 @@ test("empty local canvas clicks close the prompt without closing on another pane
   assert.match(source, /document\.removeEventListener\('click', closePromptFromEmptyCanvasClick, true\)/);
 });
 
-test("desktop prompt placement keeps an outside-click gutter at every viewport edge", async () => {
+test("prompt placement follows its frame beyond every viewport edge", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
 
-  assert.match(source, /const GENERATOR_PANEL_COMPACT_GUTTER = 16/);
-  assert.match(source, /const GENERATOR_PANEL_DESKTOP_GUTTER = 24/);
-  assert.match(source, /const viewportGutter = isCompactViewport/);
-  assert.match(source, /const left = viewportWidth > 0\s*\? clamp\(rawLeft, minLeft, Math\.max\(minLeft, maxLeft\)\)/);
-  assert.match(source, /const top = viewportHeight > 0\s*\? clamp\(rawTop, minTop, Math\.max\(minTop, maxTop\)\)/);
+  const placement = source.match(/function getPanelPlacementFromViewportTarget[\s\S]*?\n\}/)?.[0] ?? '';
+  assert.match(placement, /const left = rawLeft/);
+  assert.match(placement, /const top = rawTop/);
+  assert.doesNotMatch(placement, /clamp\(rawLeft/);
+  assert.doesNotMatch(placement, /clamp\(rawTop/);
 });
 
 test("phone tunnel renders images via capped overlays instead of hydrating Excalidraw files", async () => {
@@ -736,10 +734,12 @@ test("generator creation keeps a moved viewport instead of focusing every new fr
   assert.match(source, /targetScrollY = targetScreenY \/ targetZoom - frameCenterY/);
 });
 
-test("single generation preserves the live viewport while clearing selection handles", async () => {
+test("single generation focuses its Generating placeholder while clearing selection handles", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
 
-  assert.match(source, /if \(requestedIds\.size <= 1\) return/);
+  assert.match(source, /if \(requestedIds\.size === 0\) return/);
+  assert.match(source, /if \(!isRegeneratingResult\) focusGeneratingFrameGrid\(\[anchorElementId, \.\.\.extraFrameIds\]\)/);
+  assert.match(source, /if \(isRegeneratingResult\) focusGeneratingFrameGrid\(\[generationAnchorId, \.\.\.extraFrameIds\]\)/);
   assert.match(source, /function canvasViewportSnapshot\(appState = \{\}\) \{/);
   assert.match(source, /const captureGenerationSubmitViewport = useCallback\(\(event\) => \{\s*\/\/ Keep focus in the prompt[\s\S]*?event\.preventDefault\(\)\s*event\.stopPropagation\(\)/);
   assert.match(source, /const submitViewport = generationSubmitViewportRef\.current \?\? canvasViewportSnapshot\(api\.getAppState\(\)\)/);
@@ -748,6 +748,21 @@ test("single generation preserves the live viewport while clearing selection han
   assert.match(source, /api\.updateScene\(\{\s*appState: \{ \.\.\.stableViewport, selectedElementIds \},\s*captureUpdate: CaptureUpdateAction\.NEVER/);
   assert.match(source, /const hasGeneratingFrame = generatingFrameIds\.size > 0 \|\| frameOverlays\.some\(\(overlay\) => overlay\.remoteGenerating\)/);
   assert.match(source, /showPromptPanel \|\| managedSelectionActive \|\| hasGeneratingFrame \? ' hide-generator-props'/);
+});
+
+test("fast remote generations hydrate result bytes even when the placeholder event is skipped", async () => {
+  const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+
+  assert.match(source, /function generatedAssetFileIdsNeedingHydration\(scene, runtimeFiles = \{\}\) \{/);
+  assert.match(source, /for \(const fileId of generatedAssetFileIdsNeedingHydration\(payload\.scene, api\.getFiles\?\.\(\) \?\? \{\}\)\)/);
+  assert.match(source, /prehydratedFiles\s*\}\)/);
+  assert.match(source, /files: \{ \.\.\.\(api\.getFiles\?\.\(\) \?\? \{\}\), \.\.\.prehydratedFileMap \}/);
+  assert.match(source, /replaceFiles:\s*true/);
+  assert.match(source, /const remoteCanvasEventQueueRef = useRef\(Promise\.resolve\(\)\)/);
+  assert.match(source, /const queueRemoteCanvasLoad = \(event\) => \{/);
+  assert.match(source, /remoteCanvasEventQueueRef\.current = remoteCanvasEventQueueRef\.current[\s\S]*?await loadRemoteCanvas\(\{ data \}\)/);
+  assert.match(source, /events\.addEventListener\('canvas-changed', queueRemoteCanvasLoad\)/);
+  assert.doesNotMatch(source, /hydration trace/);
 });
 
 test("attachments from a generated result panel do not fall back to another frame", async () => {
@@ -856,6 +871,6 @@ test("remote scene application preserves current selection before syncing UI", a
   assert.match(applyRemote[1], /const requestedSelectedElementIds = options\.applySelection[\s\S]*?: currentAppState\.selectedElementIds \?\? \{\}/);
   assert.match(applyRemote[1], /Object\.entries\(requestedSelectedElementIds\)\.filter\([\s\S]*?!generatingFrameIdsRef\.current\.has\(id\)/);
   assert.match(applyRemote[1], /selectedElementIds: nextSelectedElementIds/);
-  assert.match(applyRemote[1], /const nextScene = \{ \.\.\.normalized, appState: nextAppState \}/);
+  assert.match(applyRemote[1], /const nextScene = \{[\s\S]*?\.\.\.normalized,[\s\S]*?appState: nextAppState\s*\}/);
   assert.match(applyRemote[1], /syncGeneratorUi\(nextScene\)/);
 });
