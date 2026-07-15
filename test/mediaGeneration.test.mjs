@@ -20,6 +20,7 @@ import {
   isGrokVideoModel,
   isRetryableGrokRateLimit,
   normalizeCodexImageCount,
+  normalizeGrokImageResolution,
   normalizeGrokGenerationCount,
   normalizeMediaBatchColumns,
   normalizeMediaBatchConcurrency,
@@ -75,6 +76,16 @@ test("local Grok accepts 1-10 independent image and video runs", () => {
   assert.equal(normalizeGrokGenerationCount("6"), 6);
   assert.equal(normalizeGrokGenerationCount(0), 1);
   assert.equal(normalizeGrokGenerationCount(99), 10);
+});
+
+test("Grok image requests keep pixel dimensions out of the resolution tier", () => {
+  assert.equal(normalizeGrokImageResolution("1K"), "1k");
+  assert.equal(normalizeGrokImageResolution("2K"), "2k");
+  assert.equal(normalizeGrokImageResolution("4K"), "2k");
+  assert.equal(normalizeGrokImageResolution("1024x1024"), "1k");
+  assert.equal(normalizeGrokImageResolution("1024x1536"), "1k");
+  assert.equal(normalizeGrokImageResolution("1536x1024"), "1k");
+  assert.equal(normalizeGrokImageResolution("4096x2304"), "2k");
 });
 
 test("Grok image count runs independent bridge requests", async () => {

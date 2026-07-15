@@ -1,0 +1,56 @@
+name: Publish stable Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: buzzassist-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify tag and plugin versions
+        run: npm run release:verify -- "$GITHUB_REF_NAME"
+      - name: Run full validation
+        run: npm test
+      - name: Build distributable bundles
+        run: |
+          npm run build
+          npm run build:widget
+      - name: Pack and checksum
+        id: pack
+        shell: bash
+        run: |
+          package_file="$(npm pack --silent)"
+          sha256sum "$package_file" > "$package_file.sha256"
+          echo "package_file=$package_file" >> "$GITHUB_OUTPUT"
+      - name: Publish verified stable Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_FILE: ${{ steps.pack.outputs.package_file }}
+        shell: bash
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$PACKAGE_FILE" "$PACKAGE_FILE.sha256" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$PACKAGE_FILE" "$PACKAGE_FILE.sha256" \
+              --verify-tag \
+              --generate-notes \
+              --title "BuzzAssist $GITHUB_REF_NAME"
+          fi

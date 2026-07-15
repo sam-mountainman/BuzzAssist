@@ -18,7 +18,7 @@ import {
   runWithConcurrency
 } from './lib/mediaGeneration.mjs'
 import { getBuzzAssistAuthStatus, loginBuzzAssistViaBrowser, resolveAuthFilePath } from './lib/buzzassistApi.mjs'
-import { FOCUS_REQUEST_FILE_NAME, OFFICIAL_EXCALIDRAW_README, createExcalidrawView, insertExcalidrawImage, insertExcalidrawSilenceCutResult, insertExcalidrawSubtitle, insertExcalidrawVideo, insertExcalidrawMediaBatch, performCanvasMaintenance, stripAssetBackedFileDataURLs, syncDeletedCanvasAssets, syncMissingCanvasAssets } from './lib/canvasScene.mjs'
+import { FOCUS_REQUEST_FILE_NAME, OFFICIAL_EXCALIDRAW_README, clearFrameGeneratingFlags, collectCanvasRecordedFileNames, createExcalidrawView, insertExcalidrawImage, insertExcalidrawSilenceCutResult, insertExcalidrawSubtitle, insertExcalidrawVideo, insertExcalidrawMediaBatch, loadScene, performCanvasMaintenance, stripAssetBackedFileDataURLs, syncDeletedCanvasAssets, syncMissingCanvasAssets } from './lib/canvasScene.mjs'
 import { streamZipStore } from './lib/zipStore.mjs'
 import { generateSubtitleSrt, refineSubtitleFromPlan, writeSubtitleWordsSidecar } from './lib/subtitleGeneration.mjs'
 import { silenceCutVideo } from './lib/tempoCut.mjs'
@@ -79,6 +79,8 @@ const mimeTypes = new Map([
 const canvasEventClients = new Set()
 let canvasEventVersion = 0
 const jsonWriteQueues = new Map()
+const generationJobs = new Map()
+const GENERATION_JOB_RETENTION_MS = 60 * 60 * 1000
 
 function sendJson(res, statusCode, payload) {
   res.statusCode = statusCode
@@ -95,10 +97,58 @@ function createGenerationJobId(kind) {
   return `${kind}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
 }
 
-function runBackgroundGeneration(jobId, task) {
+function generationPlaceholderIds(body = {}) {
+  return [
+    body.anchorElementId,
+    ...(Array.isArray(body.extraAnchorElementIds) ? body.extraAnchorElementIds : [])
+  ].filter((id) => typeof id === 'string' && id)
+}
+
+function generationErrorMessage(error) {
+  return error?.message || String(error || 'Generation failed.')
+}
+
+function scheduleGenerationJobCleanup(jobId) {
+  const timer = setTimeout(() => generationJobs.delete(jobId), GENERATION_JOB_RETENTION_MS)
+  timer.unref?.()
+}
+
+function runBackgroundGeneration(jobId, task, options = {}) {
+  generationJobs.set(jobId, {
+    jobId,
+    kind: options.kind || 'media',
+    status: 'running',
+    createdAt: Date.now(),
+    updatedAt: Date.now()
+  })
   Promise.resolve()
     .then(task)
-    .catch((error) => {
+    .then((result) => {
+      generationJobs.set(jobId, {
+        jobId,
+        kind: options.kind || result?.kind || 'media',
+        status: 'completed',
+        createdAt: generationJobs.get(jobId)?.createdAt || Date.now(),
+        updatedAt: Date.now(),
+        result
+      })
+      scheduleGenerationJobCleanup(jobId)
+    })
+    .catch(async (error) => {
+      try {
+        await options.onError?.(error)
+      } catch (cleanupError) {
+        console.error(`[canvas generation job ${jobId}] failed to clear placeholders: ${generationErrorMessage(cleanupError)}`)
+      }
+      generationJobs.set(jobId, {
+        jobId,
+        kind: options.kind || 'media',
+        status: 'failed',
+        createdAt: generationJobs.get(jobId)?.createdAt || Date.now(),
+        updatedAt: Date.now(),
+        error: generationErrorMessage(error)
+      })
+      scheduleGenerationJobCleanup(jobId)
       console.error(`[canvas generation job ${jobId}] ${error?.stack || error?.message || error}`)
     })
 }
@@ -374,6 +424,11 @@ function broadcastCanvasChanged(paths, options = {}) {
 }
 
 async function consumeCanvasFocusRequest() {
+  // Keep the one-shot request on disk until at least one canvas client is
+  // connected. Generation can finish before the host browser opens (or the
+  // previous project's localhost port can still be open), and consuming the
+  // request here would make the later canvas miss its focus entirely.
+  if (canvasEventClients.size === 0) return null
   try {
     const request = await readJsonFile(focusRequestFile)
     await rm(focusRequestFile, { force: true })
@@ -391,6 +446,15 @@ async function consumeCanvasFocusRequest() {
     console.warn('[canvas-focus] Failed to consume focus request:', error?.message || error)
     return null
   }
+}
+
+async function broadcastPendingCanvasFocusRequest() {
+  const focusRequest = await consumeCanvasFocusRequest()
+  if (!focusRequest) return
+  const fingerprint = await readJsonFile(canvasFile)
+    .then((scene) => sceneContentFingerprint(scene))
+    .catch(() => '')
+  broadcastCanvasChanged([canvasFile], { ...focusRequest, fingerprint })
 }
 
 function localAssetFilePathFromUrl(pathname) {
@@ -1601,6 +1665,9 @@ function configureCanvasServer(server) {
         res.write(': connected\n\n')
 
         canvasEventClients.add(res)
+        // A generation may have completed before this browser tab connected.
+        // Replay the pending focus request now that there is a real recipient.
+        void broadcastPendingCanvasFocusRequest()
         const heartbeat = setInterval(() => {
           res.write(`: heartbeat ${Date.now()}\n\n`)
         }, 25000)
@@ -1797,6 +1864,40 @@ function configureCanvasServer(server) {
         sendJson(res, 200, getGenerationCapabilities())
       })
 
+      // Tunnel clients cannot keep a paid generation POST open for several
+      // minutes. They submit an async job, then poll this short endpoint. SSE
+      // still refreshes the canvas quickly, but completion and failures no
+      // longer depend on a long-lived mobile EventSource connection.
+      server.middlewares.use('/api/generate/jobs', async (req, res) => {
+        if (req.method !== 'GET') {
+          res.statusCode = 405
+          res.setHeader('allow', 'GET')
+          res.end()
+          return
+        }
+        const pathname = new URL(req.url || '/', 'http://127.0.0.1').pathname
+        const jobId = decodeURIComponent(pathname.replace(/^\/+/, '')).trim()
+        if (!jobId) {
+          sendJson(res, 400, { error: 'Generation job id is required.' })
+          return
+        }
+        const job = generationJobs.get(jobId)
+        if (!job) {
+          sendJson(res, 404, { error: 'Generation job was not found or has expired.', jobId })
+          return
+        }
+        sendJson(res, 200, {
+          ok: job.status !== 'failed',
+          jobId,
+          kind: job.kind,
+          status: job.status,
+          createdAt: job.createdAt,
+          updatedAt: job.updatedAt,
+          ...(job.status === 'completed' && job.result ? job.result : {}),
+          ...(job.status === 'failed' ? { error: job.error } : {})
+        })
+      })
+
       server.middlewares.use('/api/buzzassist/auth-status', async (req, res) => {
         try {
           if (req.method !== 'GET') {
@@ -1943,7 +2044,22 @@ function configureCanvasServer(server) {
           if (wantsAsyncGeneration(req, body)) {
             const jobId = createGenerationJobId('image')
             sendJson(res, 202, { ok: true, async: true, jobId, kind: 'image' })
-            runBackgroundGeneration(jobId, runImageGeneration)
+            runBackgroundGeneration(jobId, async () => {
+              const { media, result } = await runImageGeneration()
+              return {
+                ok: true,
+                kind: 'image',
+                model: media.model,
+                generationErrors: media.generationErrors ?? [],
+                ...result
+              }
+            }, {
+              kind: 'image',
+              onError: async () => {
+                const cleared = await clearFrameGeneratingFlags({ canvasDir }, generationPlaceholderIds(body))
+                if (cleared.cleared > 0) broadcastCanvasChanged([canvasFile])
+              }
+            })
             return
           }
 
@@ -2067,7 +2183,22 @@ function configureCanvasServer(server) {
           if (wantsAsyncGeneration(req, body)) {
             const jobId = createGenerationJobId('video')
             sendJson(res, 202, { ok: true, async: true, jobId, kind: 'video' })
-            runBackgroundGeneration(jobId, runVideoGeneration)
+            runBackgroundGeneration(jobId, async () => {
+              const { media, result } = await runVideoGeneration()
+              return {
+                ok: true,
+                kind: 'video',
+                model: media.model,
+                generationErrors: media.generationErrors ?? [],
+                ...result
+              }
+            }, {
+              kind: 'video',
+              onError: async () => {
+                const cleared = await clearFrameGeneratingFlags({ canvasDir }, generationPlaceholderIds(body))
+                if (cleared.cleared > 0) broadcastCanvasChanged([canvasFile])
+              }
+            })
             return
           }
 
@@ -2805,10 +2936,12 @@ function configureCanvasServer(server) {
             return
           }
           const body = JSON.parse(await readRequestBody(req))
+          const existingFileNames = collectCanvasRecordedFileNames(await loadScene({ canvasDir }), { canvasDir })
           const cut = await silenceCutVideo({
             inputPath: body.videoPath,
             outputDir: canvasAssetsDir,
             fileName: body.fileName,
+            existingFileNames,
             model: body.model || 'elevenlabs-scribe-v2',
             fillerRemoval: body.fillerRemoval,
             coughRemoval: body.coughRemoval,

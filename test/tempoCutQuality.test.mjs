@@ -1,10 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 import {
   applySilenceCutDecisions,
   buildTempoCutRepeatRetakeCandidates,
   buildTempoCutScribePlan,
+  nextGeneratedSilenceCutName,
   snapCutRangesToEnergy,
 } from "../lib/tempoCut.mjs";
 import { ensureJapaneseTokenizer } from "../lib/subtitleGeneration.mjs";
@@ -23,6 +27,21 @@ function makeEnvelope(speechRanges, durationSeconds, hopSeconds = 0.01) {
 function word(text, start, end) {
   return { text, start, end, type: "word" };
 }
+
+test("automatic JetCut names continue after deleted and canvas-recorded XML files", async () => {
+  const canvasDir = await mkdtemp(join(tmpdir(), "excalidraw-jetcut-name-"));
+  try {
+    const assetsDir = join(canvasDir, "assets");
+    const trashDir = join(canvasDir, "assets-trash");
+    await mkdir(assetsDir, { recursive: true });
+    await mkdir(trashDir, { recursive: true });
+    await writeFile(join(trashDir, "JetCut1.xml"), "<xmeml />");
+
+    assert.equal(await nextGeneratedSilenceCutName(assetsDir, ["JetCut2.xml"]), "JetCut3.xml");
+  } finally {
+    await rm(canvasDir, { recursive: true, force: true });
+  }
+});
 
 test("cut boundaries snap to the real speech edges", () => {
   // Speech 0-1.0s and 3.0-4.0s; ASR-derived cut drifts into both words.

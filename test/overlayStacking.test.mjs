@@ -18,7 +18,9 @@ test("canvas managed overlays stay visible when media and generator frames overl
   const subtitleOverlayBuilder = sliceBetween(source, "function buildSubtitlePreviewOverlays", "// Fetched SRT text");
   const frameRenderer = sliceBetween(source, "{frameOverlays.map", "{subtitlePreviewOverlays.map");
   const imageHeaderRenderer = sliceBetween(source, "{selectedImageOverlays.map", "<div ref={hoverOverlayRef}");
-  const subtitleRenderer = sliceBetween(source, "function SubtitleCanvasOverlay", "function VideoCanvasOverlay");
+  const subtitleRenderer = sliceBetween(source, "function SubtitleCanvasOverlay", "function VideoCanvasMediaOverlay");
+  const videoMediaRenderer = sliceBetween(source, "function VideoCanvasMediaOverlay", "function VideoCanvasControlsOverlay");
+  const videoControlsRenderer = sliceBetween(source, "function VideoCanvasControlsOverlay", "function ExpandedVideoPlayer");
 
   assert.match(
     videoOverlayBuilder,
@@ -64,6 +66,16 @@ test("canvas managed overlays stay visible when media and generator frames overl
     subtitleRenderer,
     /isHeaderCoveredByLaterElement/,
     "SRT file headers should render independently of overlap order",
+  );
+  assert.match(
+    videoMediaRenderer,
+    /className="lovart-video-playback-overlay"/,
+    "video media should remain in the under-canvas rendering layer",
+  );
+  assert.match(
+    videoControlsRenderer,
+    /className="lovart-video-playback-ui"/,
+    "video controls should remain independently renderable above the interactive canvas",
   );
   assert.doesNotMatch(
     source,

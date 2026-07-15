@@ -37,7 +37,7 @@ https://github.com/sam-mountainman/BuzzAssist
 - Claude Codeへ渡した場合はClaude Codeだけを設定します。
 - 別ホストの設定を勝手に変更しません。
 - エージェントがリポジトリをclone/openし、依存関係の導入、UI build、プラグイン登録、MCP登録、キャンバス起動、HTTP疎通確認まで実行します。
-- 成功条件は、対象ホストが`buzzassist@buzzassist`をインストール済みとして報告し、`BUZZASSIST_CANVAS_CHECK=ok`が出ることです。
+- 成功条件は、対象ホストが`buzzassist@buzzassist`をインストール済みとして報告し、`BUZZASSIST_CANVAS_CHECK=ok`と`BUZZASSIST_AUTO_UPDATE=enabled`が出ることです。
 - インストール直後のタスクには新しいskills/MCP toolsが読み込まれない場合があります。セットアップ完了後は新しいCodexタスクまたはClaude Codeセッションを開始してください。キャンバスURL自体はセットアップしたタスクから開けます。
 
 セットアップ時の `--project-dir` は初回起動と、ホストがworkspace情報を
@@ -77,6 +77,7 @@ node scripts/setup-agents.mjs --agent codex --project-dir /path/to/active/projec
 ```text
 BUZZASSIST_CANVAS_URL=http://127.0.0.1:<port>/
 BUZZASSIST_CANVAS_CHECK=ok
+BUZZASSIST_AUTO_UPDATE=enabled
 ```
 
 `--tunnel` を付けた場合は、スマホ用のURLも出ます。
@@ -89,16 +90,50 @@ BUZZASSIST_TUNNEL_CHECK=ok
 
 Codex と Claude Code では、PC上のエージェント作業は `BUZZASSIST_CANVAS_URL` をまずin-app browser / browser toolで開きます。その機能が利用できない場合だけChromeへフォールバックします。スマホや別PCでは `BUZZASSIST_TUNNEL_ACCESS_URL` を開きます。
 
+## 安全な自動更新
+
+CodexまたはClaude Codeのセットアップに成功すると、BuzzAssistは同じホストを対象に安全な自動更新を登録します。macOSは`launchd`、Windowsはタスクスケジューラを使い、毎日ローカル時刻の03:17にGitHubの正式なstable Releaseだけを確認します。開発途中のmainブランチ、Draft、Prereleaseは自動導入しません。
+
+更新時は次を自動実行します。
+
+- ReleaseのバージョンとCodex・Claude Code両manifestの一致を検査
+- 依存関係の導入、キャンバスbuild、配布テストを更新用の隔離フォルダーで実行
+- 実MCPサーバーを起動し、tool listと`read_me`呼び出しまで検査
+- 現行pluginをバックアップしてから対象ホストを更新
+- 失敗時は現行版を復元し、壊れた版を有効にしない
+- BuzzAssistログイン、Lovart APIキーなどの認証情報と、各プロジェクトの`canvas/`は変更しない
+
+更新が成功した場合、開いているCodexタスクまたはClaude Codeセッションはそのまま動作し、次回ホスト再起動後に新しいskillsが確実に反映されます。状態・ログ・バックアップはユーザー領域の`~/.buzzassist/`に保存します。
+
+```bash
+# 登録状態と直近の結果
+npm run update:status
+
+# Release確認だけ（新しい版があっても導入しない）
+npm run update:check
+
+# 今すぐ安全な更新を実行
+npm run update:now
+
+# 定期更新を停止
+npm run update:disable
+```
+
+初回セットアップ時に定期更新を登録しない場合だけ`--no-auto-update`を付けてください。再度有効にする場合は通常のセットアップコマンドをもう一度実行します。CodexとClaude Codeの両方を明示的に同じPCへ設定する場合は、次を使えます。
+
+```bash
+node scripts/setup-agents.mjs --agents codex,claude --project-dir /path/to/active/project
+```
+
 ## 対応OS
 
 ### macOS
 
 ```bash
 brew install node
-brew install cloudflared
 ```
 
-ローカルキャンバスだけなら `cloudflared` は不要です。スマホアクセスを使う時だけ必要です。
+ローカルキャンバスだけなら `cloudflared` は不要です。スマホアクセス時も、未導入ならBuzzAssistが自動取得するため、事前インストールは必須ではありません。
 
 ### Windows
 
@@ -107,10 +142,9 @@ PowerShell で使う想定です。
 ```powershell
 winget install Git.Git
 winget install OpenJS.NodeJS.LTS
-winget install Cloudflare.cloudflared
 ```
 
-`cloudflared`はスマホ用Canvas Tunnelを使う場合だけ必要です。通常のローカル利用はGit、Node.js 20以上、CodexまたはClaude Codeがあればセットアップできます。
+`cloudflared`はスマホ用Canvas Tunnelで使います。通常のローカル利用はGit、Node.js 20以上、CodexまたはClaude Codeがあればセットアップできます。手動で導入しない場合はBuzzAssistがユーザー領域へ安全に取得します。
 
 Windows では `.sh` ではなく、次のように `.mjs` を直接実行します。
 
@@ -129,7 +163,7 @@ node scripts/setup-agents.mjs --agent claude --project-dir "C:\Users\Your Name\D
 
 ### Linux
 
-Node.js 20 以上と `cloudflared` があれば使えます。
+Node.js 20 以上があれば使えます。Canvas Tunnelの初回起動時に`cloudflared`が未導入ならBuzzAssistが自動取得します。
 
 ## 対応ホスト
 
@@ -199,10 +233,16 @@ npm run tunnel:stop
 
 既定は Cloudflare quick tunnel です。アカウントなしでランダムな `*.trycloudflare.com` URL を作れます。
 
+`cloudflared`がPCに入っていない場合も、BuzzAssistがCloudflare公式リリースを初回起動時にユーザー領域へ自動取得し、SHA-256検証後に使います。管理者権限は不要です。
+
+手動で管理したい場合は、次のコマンドで先にインストールできます。
+
 ```bash
 brew install cloudflared                 # macOS
 winget install Cloudflare.cloudflared    # Windows
 ```
+
+自動取得を無効にする場合は `--no-auto-download` または `BUZZASSIST_CLOUDFLARED_AUTO_DOWNLOAD=0` を指定してください。
 
 固定URLにしたい場合は、Cloudflareでドメインを管理したうえで、初回だけログインとnamed tunnel作成をします。
 

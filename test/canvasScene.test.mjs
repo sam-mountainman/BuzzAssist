@@ -8,6 +8,7 @@ import {
   insertExcalidrawMediaBatch,
   insertExcalidrawSilenceCutResult,
   insertExcalidrawSubtitle,
+  insertExcalidrawVideo,
   insertGeneratorFrameBatch,
   isSafeChildPath,
   normalizeScene,
@@ -177,8 +178,104 @@ test("batch images persist the same numbered file names in element and file meta
 
     assert.equal(result.fileName, "Image1.png");
     assert.equal(element.customData.codexMediaKind, "image");
+    assert.equal(element.customData.codexGeneratedImage, true);
     assert.equal(element.customData.codexFileName, "Image1.png");
     assert.equal(saved.files[result.fileId].name, "Image1.png");
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("automatic image names continue after trash, scene records, and earlier batch items", async () => {
+  const projectDir = await mkdtemp(join(tmpdir(), "excalidraw-batch-next-name-"));
+  try {
+    const canvasDir = join(projectDir, "canvas");
+    const assetsDir = join(canvasDir, "assets");
+    const trashDir = join(canvasDir, "assets-trash");
+    await mkdir(assetsDir, { recursive: true });
+    await mkdir(trashDir, { recursive: true });
+    await writeFile(join(assetsDir, "Image7 (10).png"), ONE_BY_ONE_PNG);
+    await writeFile(join(trashDir, "Image1.png"), ONE_BY_ONE_PNG);
+    await writeFile(join(canvasDir, "excalidraw-canvas.json"), JSON.stringify({
+      type: "excalidraw",
+      version: 2,
+      source: "test",
+      elements: [],
+      appState: {},
+      files: {
+        image2: {
+          id: "image2",
+          name: "Image2.png",
+          mimeType: "image/png",
+          dataURL: "/excalidraw-assets/Image2.png",
+          created: Date.now(),
+        },
+      },
+    }));
+
+    const results = await insertExcalidrawMediaBatch({
+      projectDir,
+      items: Array.from({ length: 3 }, () => ({
+        kind: "image",
+        mediaBuffer: ONE_BY_ONE_PNG,
+        mimeType: "image/png",
+      })),
+    });
+
+    assert.deepEqual(results.map((result) => result.fileName), ["Image8.png", "Image9.png", "Image10.png"]);
+    assert.equal(results.some((result) => result.fileName.includes("(")), false);
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("automatic video and subtitle names continue after deleted and recorded results", async () => {
+  const projectDir = await mkdtemp(join(tmpdir(), "excalidraw-media-next-name-"));
+  try {
+    const canvasDir = join(projectDir, "canvas");
+    const trashDir = join(canvasDir, "assets-trash");
+    await mkdir(trashDir, { recursive: true });
+    await writeFile(join(trashDir, "Video1.mp4"), "deleted video");
+    await writeFile(join(trashDir, "SRT1.srt"), "deleted subtitle");
+    await writeFile(join(canvasDir, "excalidraw-canvas.json"), JSON.stringify({
+      type: "excalidraw",
+      version: 2,
+      source: "test",
+      elements: [{
+        id: "recorded-subtitle",
+        type: "rectangle",
+        x: 0,
+        y: 0,
+        width: 205,
+        height: 364,
+        isDeleted: true,
+        customData: { codexFileName: "SRT2.srt" },
+      }],
+      appState: {},
+      files: {
+        video2: {
+          id: "video2",
+          name: "Video2.mp4",
+          mimeType: "image/svg+xml",
+          dataURL: "data:image/svg+xml,%3Csvg/%3E",
+          created: Date.now(),
+        },
+      },
+    }));
+
+    const video = await insertExcalidrawVideo({
+      projectDir,
+      mediaBuffer: Buffer.from("generated video"),
+      mimeType: "video/mp4",
+      posterDataURL: "data:image/svg+xml,%3Csvg/%3E",
+    });
+    const subtitle = await insertExcalidrawSubtitle({
+      projectDir,
+      srtText: "1\n00:00:00,000 --> 00:00:01,000\nテスト\n",
+    });
+
+    assert.equal(video.assetFile, join(canvasDir, "assets", "Video3.mp4"));
+    assert.equal(subtitle.assetFile, join(canvasDir, "assets", "SRT3.srt"));
   } finally {
     await rm(projectDir, { recursive: true, force: true });
   }
