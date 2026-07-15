@@ -751,6 +751,14 @@ a.lovart-error-action {
   height: 12px;
 }
 
+/* A dropdown can overlap the panel close button when the panel is pinned to a
+   viewport edge. The backdrop still closes the dropdown; reveal the panel
+   close button again after that first click. */
+.lovart-ai-panel.has-open-menu > .lovart-panel-close {
+  pointer-events: none;
+  opacity: 0;
+}
+
 .lovart-ai-prompt {
   width: 100%;
   min-height: 56px;
@@ -1302,6 +1310,25 @@ a.lovart-error-action {
   border: 1px solid #e3e5e8;
   border-radius: 12px;
   box-shadow: 0 4px 16px rgb(0 0 0 / 0.12);
+}
+
+/* App.jsx measures the open popover and writes these variables after layout.
+   The max bounds make long ratio/SRT/silence menus scrollable, while the
+   translation keeps every edge inside the same dismissible viewport gutter
+   as the generator panel itself. */
+.lovart-menu[data-lovart-menu] {
+  box-sizing: border-box;
+  max-width: var(--lovart-menu-max-width, calc(100dvw - 32px));
+  max-height: var(--lovart-menu-max-height, calc(100dvh - 32px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  transform: translate3d(
+    var(--lovart-menu-shift-x, 0),
+    var(--lovart-menu-shift-y, 0),
+    0
+  );
 }
 
 .lovart-menu.wide {
@@ -2775,14 +2802,6 @@ a.lovart-error-action {
   align-items: flex-end;
   overflow: visible;
   transition: bottom 0.15s ease, gap 0.15s ease, opacity 0.12s ease;
-}
-
-/* The bottom-row dropdowns (モデル/設定/用語) open across the slot tray, and
-   the rotated tilt-cards paint above them (transformed static elements ignore
-   z-index) — fade the tray out while one of those menus is open. */
-.lovart-utility-panel.menu-over-tray .lovart-utility-asset-tray {
-  pointer-events: none;
-  opacity: 0;
 }
 
 .lovart-utility-tray-wrap.is-open .lovart-utility-asset-tray {

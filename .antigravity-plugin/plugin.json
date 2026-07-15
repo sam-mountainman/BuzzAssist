@@ -1,6 +1,6 @@
 {
   "name": "buzzassist",
-  "version": "0.1.20",
+  "version": "0.1.21",
   "displayName": "BuzzAssist",
   "description": "BuzzAssist canvas, media generation, and Cloudflare Canvas Tunnel plugin for Antigravity.",
   "author": {
