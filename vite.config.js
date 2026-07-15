@@ -34,6 +34,7 @@ import { CANVAS_SERVER_PROTOCOL_VERSION, getOrCreateMcpToken, rejectDisallowedOr
 import { canvasAttachmentBundleToMcpResult, createCanvasAttachmentBundle, listCanvasAttachmentBundles, readCanvasAttachmentBundle } from './lib/canvasAttachmentBundle.mjs'
 import { openLocalFolder } from './lib/openLocalFolder.mjs'
 import { mergeLocalCanvasScenes } from './lib/localCanvasSceneMerge.mjs'
+import { withCanvasFileLock } from './lib/canvasFileLock.mjs'
 import { homedir, tmpdir } from 'node:os'
 
 const projectDir = resolve(process.env.EXCALIDRAW_PROJECT_DIR ?? process.cwd())
@@ -1799,34 +1800,45 @@ function configureCanvasServer(server) {
             const body = await readRequestBody(req)
             const payload = JSON.parse(body)
             const incomingScene = normalizeScene(payload)
-            let existingScene = normalizeScene(null)
-            try {
-              existingScene = normalizeScene(await readJsonFile(canvasFile))
-            } catch (error) {
-              if (error.code !== 'ENOENT') throw error
-            }
             if (!isScene(incomingScene)) {
               sendJson(res, 400, { error: 'Expected an Excalidraw scene.' })
               return
             }
-            if (incomingScene.elements.length === 0 && payload?.allowClearCanvas !== true) {
-              if (existingScene.elements.length > 0) {
-                sendJson(res, 409, {
-                  error: 'Refusing to replace a non-empty Excalidraw canvas with an empty scene.',
-                  existingElementCount: existingScene.elements.length
-                })
+            let scene = null
+            let assetSync = null
+            let emptySceneConflict = null
+            await withCanvasFileLock(canvasFile, async () => {
+              let existingScene = normalizeScene(null)
+              try {
+                existingScene = normalizeScene(await readJsonFile(canvasFile))
+              } catch (error) {
+                if (error.code !== 'ENOENT') throw error
+              }
+              if (
+                incomingScene.elements.length === 0 &&
+                payload?.allowClearCanvas !== true &&
+                existingScene.elements.length > 0
+              ) {
+                emptySceneConflict = existingScene.elements.length
                 return
               }
-            }
-            const scene = payload?.allowClearCanvas === true
-              ? incomingScene
-              : normalizeScene(mergeLocalCanvasScenes(existingScene, incomingScene))
+              scene = payload?.allowClearCanvas === true
+                ? incomingScene
+                : normalizeScene(mergeLocalCanvasScenes(existingScene, incomingScene))
 
-            // Strip inline base64 for file records verifiably backed by an
-            // on-disk asset (keeps drag-dropped images and video posters inline).
-            await stripAssetBackedFileDataURLs(scene)
-            await writeJsonAtomic(canvasFile, scene)
-            const assetSync = await syncDeletedCanvasAssets({ canvasDir }, scene)
+              // Strip inline base64 for file records verifiably backed by an
+              // on-disk asset (keeps drag-dropped images and video posters inline).
+              await stripAssetBackedFileDataURLs(scene)
+              await writeJsonAtomic(canvasFile, scene)
+              assetSync = await syncDeletedCanvasAssets({ canvasDir }, scene)
+            })
+            if (emptySceneConflict !== null) {
+              sendJson(res, 409, {
+                error: 'Refusing to replace a non-empty Excalidraw canvas with an empty scene.',
+                existingElementCount: emptySceneConflict
+              })
+              return
+            }
             // A stale browser tab may try to resurrect an element after its
             // backing file was deliberately removed in Finder/Explorer. Run
             // the missing-file invariant on every save, not only on unlink.

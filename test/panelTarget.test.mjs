@@ -762,7 +762,19 @@ test("fast remote generations hydrate result bytes even when the placeholder eve
   assert.match(source, /const queueRemoteCanvasLoad = \(event\) => \{/);
   assert.match(source, /remoteCanvasEventQueueRef\.current = remoteCanvasEventQueueRef\.current[\s\S]*?await loadRemoteCanvas\(\{ data \}\)/);
   assert.match(source, /events\.addEventListener\('canvas-changed', queueRemoteCanvasLoad\)/);
+  assert.match(source, /events\.onopen = \(\) => queueRemoteCanvasLoad\(\{ data: '' \}\)/);
+  assert.match(source, /const catchUpTimer = window\.setInterval/);
+  assert.match(source, /hasRemoteGeneratingFrame/);
+  assert.match(source, /window\.clearInterval\(catchUpTimer\)/);
   assert.doesNotMatch(source, /hydration trace/);
+});
+
+test("subtitle tools are explicitly excluded from image and storyboard requests", async () => {
+  const source = await readFile(new URL("../mcp/server.mjs", import.meta.url), "utf8");
+
+  assert.match(source, /Never use subtitle\/SRT tools for an image or storyboard request/);
+  assert.match(source, /ONLY use when the user explicitly requests subtitles, captions, or an SRT file from audio\/video/);
+  assert.match(source, /Never use for image generation, scene\/storyboard creation/);
 });
 
 test("attachments from a generated result panel do not fall back to another frame", async () => {
