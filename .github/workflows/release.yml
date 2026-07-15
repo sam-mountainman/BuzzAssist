@@ -37,7 +37,9 @@ jobs:
         id: pack
         shell: bash
         run: |
-          package_file="$(npm pack --silent)"
+          package_file="$(node -p 'const p = require("./package.json"); `${p.name.replace(/^@/, "").replace(/\//g, "-")}-${p.version}.tgz`')"
+          npm pack --silent > /tmp/buzzassist-npm-pack.log
+          test -f "$package_file"
           sha256sum "$package_file" > "$package_file.sha256"
           echo "package_file=$package_file" >> "$GITHUB_OUTPUT"
       - name: Publish verified stable Release
