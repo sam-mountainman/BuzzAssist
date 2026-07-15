@@ -464,16 +464,22 @@ test("download save dialog opens in the OS Downloads folder", async () => {
   // get a server-driven native save panel defaulting to Downloads instead.
   assert.match(source, /async function downloadAssetsViaServerDialog\(assets = \[\]\) \{/);
   assert.match(source, /canvasFetch\('\/api\/assets\/save-dialog'/);
-  assert.match(source, /payload\.ok \|\| payload\.cancelled/);
+  assert.match(source, /if \(response\.ok && payload\.ok\) return payload/);
+  assert.match(source, /if \(response\.ok && payload\.cancelled\) return payload/);
+  assert.match(source, /showDownloadStatus\('success'/);
+  assert.match(source, /showDownloadStatus\('error'/);
+  assert.match(source, /downloadStatusText && selectedCanvasDownloadOverlays\.length === 0/);
+  assert.match(source, /lovart-download-status-global/);
   assert.match(source, /await downloadAssetsViaServerDialog\(selectedCanvasDownloadAssets\)/);
   assert.match(viteSource, /server\.middlewares\.use\('\/api\/assets\/save-dialog'/);
   assert.match(viteSource, /async function chooseSaveDestination\(fileName\) \{/);
-  // NSSavePanel with extensionHidden=false keeps "name.png" fully visible in
-  // the Save As field regardless of the Finder hide-extensions preference.
-  assert.match(viteSource, /\$\.NSSavePanel\.savePanel/);
-  assert.match(viteSource, /panel\.extensionHidden = false/);
-  assert.match(viteSource, /panel\.directoryURL = \$\.NSURL\.fileURLWithPath\(\$\(defaultDir\)\)/);
+  // Standard Additions reliably returns the chosen POSIX path after Save.
+  assert.match(viteSource, /function runAppleScriptCapture\(script, timeoutMs = 10_000, env = \{\}\) \{/);
+  assert.match(viteSource, /choose file name with prompt "保存" default name defaultFileName default location/);
+  assert.match(viteSource, /return POSIX path of chosenFile/);
   assert.match(viteSource, /if \(suggestedExt && !extname\(basename\(destination\)\)\) \{/);
+  assert.match(viteSource, /savedInfo = await stat\(destination\)/);
+  assert.match(viteSource, /savedInfo\.size !== sourceInfo\.size/);
   assert.match(viteSource, /New-Object System\.Windows\.Forms\.SaveFileDialog/);
   assert.match(viteSource, /join\(homedir\(\), 'Downloads'\)/);
   assert.match(viteSource, /sendJson\(res, 200, \{ ok: false, cancelled: true \}\)/);
@@ -482,7 +488,9 @@ test("download save dialog opens in the OS Downloads folder", async () => {
   // Browser-picker fallback still hints at Downloads for real Chrome.
   assert.match(source, /startIn: 'downloads',/);
   assert.match(source, /id: `dl-\$\{Date\.now\(\)\.toString\(36\)\}/);
-  assert.match(source, /return saveDownloadAssetsWithPicker\(assets\)/);
+  assert.match(source, /if \(response\.status === 403\) \{/);
+  assert.match(source, /const ok = await saveDownloadAssetsWithPicker\(assets\)/);
+  assert.match(source, /throw new Error\(payload\.error \|\| `保存に失敗しました/);
 });
 
 test("selected SRT cards expose the toolbar plus a host-agent refine action", async () => {

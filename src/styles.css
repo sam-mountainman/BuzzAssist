@@ -1938,6 +1938,38 @@ a.lovart-error-action {
   background: #fff1f2;
 }
 
+/* Native save panels can temporarily clear the canvas selection. Keep the
+   save result visible even when the selection-owned toolbar disappears. */
+.lovart-download-status-global {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  z-index: 160;
+  padding: 7px 14px;
+  color: #374151;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  background: #ffffff;
+  border: 1px solid #ececf1;
+  border-radius: 9px;
+  box-shadow: 0 8px 24px rgb(17 24 39 / 0.16);
+  transform: translateX(-50%);
+}
+
+.lovart-download-status-global.is-success {
+  color: #15803d;
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.lovart-download-status-global.is-error {
+  color: #b91c1c;
+  border-color: #fecdd3;
+  background: #fff1f2;
+}
+
 .lovart-agent-chat-popover {
   position: absolute;
   z-index: 145;
