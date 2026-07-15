@@ -16,6 +16,7 @@ import {
   normalizeSubtitleCards,
   resolveCanvasDir,
   resolveFocusRequestFile,
+  saveScene,
   sanitizeFileName,
   writeCanvasFocusRequest,
 } from "../lib/canvasScene.mjs";
@@ -77,6 +78,59 @@ test("generator batches fill five columns before starting the second row", async
     const saved = JSON.parse(await readFile(join(projectDir, "canvas", "excalidraw-canvas.json"), "utf8"));
     const placeholders = saved.elements.filter((element) => element.customData?.codexGenerating === true);
     assert.equal(placeholders.length, 6);
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("concurrent stale canvas saves preserve independent generated results", async () => {
+  const projectDir = await mkdtemp(join(tmpdir(), "excalidraw-concurrent-save-"));
+  try {
+    const base = normalizeScene({
+      elements: [
+        { id: "frame-a", version: 1, versionNonce: 1, isDeleted: false, customData: { codexGenerating: true } },
+        { id: "frame-b", version: 1, versionNonce: 1, isDeleted: false, customData: { codexGenerating: true } },
+      ],
+      appState: {},
+      files: {},
+    });
+    await saveScene({ projectDir }, base);
+
+    const completedScene = (frameId, resultId, fileId) => normalizeScene({
+      ...structuredClone(base),
+      elements: [
+        ...base.elements.map((element) => element.id === frameId
+          ? { ...element, isDeleted: true, version: 2, versionNonce: 2 }
+          : element),
+        {
+          id: resultId,
+          type: "image",
+          fileId,
+          version: 1,
+          versionNonce: 1,
+          isDeleted: false,
+          customData: {
+            codexGeneratedImage: true,
+            codexMediaKind: "image",
+            codexAnchorElementId: frameId,
+          },
+        },
+      ],
+      files: { [fileId]: { id: fileId, dataURL: `/excalidraw-assets/${fileId}.png` } },
+    });
+
+    await Promise.all([
+      saveScene({ projectDir }, completedScene("frame-a", "result-a", "file-a")),
+      saveScene({ projectDir }, completedScene("frame-b", "result-b", "file-b")),
+    ]);
+
+    const saved = JSON.parse(await readFile(join(projectDir, "canvas", "excalidraw-canvas.json"), "utf8"));
+    assert.equal(saved.elements.find((element) => element.id === "frame-a").isDeleted, true);
+    assert.equal(saved.elements.find((element) => element.id === "frame-b").isDeleted, true);
+    assert.ok(saved.elements.some((element) => element.id === "result-a" && !element.isDeleted));
+    assert.ok(saved.elements.some((element) => element.id === "result-b" && !element.isDeleted));
+    assert.ok(saved.files["file-a"]);
+    assert.ok(saved.files["file-b"]);
   } finally {
     await rm(projectDir, { recursive: true, force: true });
   }

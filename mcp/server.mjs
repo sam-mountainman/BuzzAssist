@@ -39,6 +39,7 @@ import {
   clearFrameGeneratingFlags,
   insertGeneratorFrameBatch,
   performCanvasMaintenance,
+  saveScene as saveCanvasScene,
   syncDeletedCanvasAssets,
   writeCanvasFocusRequest,
 } from "../lib/canvasScene.mjs";
@@ -874,9 +875,7 @@ async function loadScene(args = {}) {
 }
 
 async function saveScene(args = {}, scene) {
-  const normalized = normalizeScene(scene);
-  await writeJsonAtomic(resolveCanvasFile(args), normalized);
-  await syncDeletedCanvasAssets(args, normalized);
+  return saveCanvasScene(args, scene);
 }
 
 function selectedIdsFromScene(scene) {
@@ -1892,7 +1891,7 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE_IMAGE,
       title: "Generate Excalidraw Image",
-      description: "Create Generating... frame(s), focus only multi-image grids, generate one image or 1-10 independent images on the ChatGPT/Codex or local Grok route, replace each frame as it finishes, and save the scene. Requires confirmedSettings=true unless using payloadPreview.",
+      description: "Use for still images, scene images, and storyboard frames. Create Generating... frame(s), generate one image or 1-10 independent images, replace each frame as it finishes, and save the scene. Never use subtitle/SRT tools for an image or storyboard request. Requires confirmedSettings=true unless using payloadPreview.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2003,7 +2002,7 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE_IMAGES_BATCH,
       title: "Generate Excalidraw Images (Batch)",
-      description: "Create image generator frames, run image jobs in chunks of 10, and replace each frame as results finish. Requires confirmedSettings=true unless using payloadPreview.",
+      description: "Use for multiple still images, scene images, or storyboard frames. Create image generator frames, run image jobs in chunks of 10, and replace each frame as results finish. Never route an image/storyboard request to subtitle/SRT tools. Requires confirmedSettings=true unless using payloadPreview.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2116,7 +2115,7 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE_SUBTITLES,
       title: "Generate Excalidraw Subtitles",
-      description: "Generate Japanese SRT subtitles, save the SRT under canvas/assets, and place an SRT card on the canvas. Requires confirmedSettings=true.",
+      description: "ONLY use when the user explicitly requests subtitles, captions, or an SRT file from audio/video. Never use for image generation, scene/storyboard creation, or merely because a text script was attached. Generate Japanese SRT, save it under canvas/assets, and place an SRT card on the canvas. Requires confirmedSettings=true.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2204,7 +2203,7 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE_SUBTITLES_BATCH,
       title: "Generate Excalidraw Subtitles (Batch)",
-      description: "Generate Japanese SRT subtitles for many audio/video files and place one SRT card per job. Requires confirmedSettings=true.",
+      description: "ONLY use when the user explicitly requests subtitles, captions, or SRT files for multiple audio/video inputs. Never use for image generation, scene/storyboard creation, or text scripts requesting images. Generate Japanese SRT files and place one SRT card per job. Requires confirmedSettings=true.",
       inputSchema: {
         type: "object",
         properties: {
