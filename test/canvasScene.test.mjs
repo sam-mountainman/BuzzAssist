@@ -334,8 +334,9 @@ test("normalizeSubtitleCards fixes saved landscape and square SRT cards", async 
     for (const element of saved.elements) {
       assert.equal(element.width, 205);
       assert.equal(element.height, 364);
-      assert.equal(element.backgroundColor, "#faf8ff");
+      assert.equal(element.backgroundColor, "#ffffff");
       assert.equal(element.strokeColor, "#d9d9d9");
+      assert.equal(element.roundness, null);
     }
   } finally {
     await rm(projectDir, { recursive: true, force: true });

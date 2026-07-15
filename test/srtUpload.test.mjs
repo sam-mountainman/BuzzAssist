@@ -19,6 +19,8 @@ test("uploaded .srt files become subtitle cards, not generic attachments", async
   assert.match(srtBranch, /codexMediaKind: 'subtitle'/, "card must carry the subtitle media kind");
   assert.match(srtBranch, /SUBTITLE_CARD_WIDTH/, "card must use the shared subtitle footprint");
   assert.match(srtBranch, /subtitleCueCount/, "cue count should be derived from the uploaded file");
+  assert.match(srtBranch, /backgroundColor: '#ffffff'/, "selected card inset should reveal a white backing");
+  assert.match(srtBranch, /roundness: null/, "selected card corners should remain square");
 });
 
 test("subtitle card footprint matches the server-side constant (205x364 portrait)", async () => {
