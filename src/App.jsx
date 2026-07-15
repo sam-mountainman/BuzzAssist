@@ -879,7 +879,7 @@ async function saveDownloadAssetsWithPicker(assets = []) {
 // to the browser-side picker/download.
 async function downloadAssetsViaServerDialog(assets = []) {
   const items = uniqueDownloadAssets(assets)
-  if (items.length === 0) return false
+  if (items.length === 0) return { ok: false, cancelled: true }
   try {
     const response = await canvasFetch('/api/assets/save-dialog', {
       method: 'POST',
@@ -887,11 +887,20 @@ async function downloadAssetsViaServerDialog(assets = []) {
       body: JSON.stringify({ assets: items })
     })
     const payload = await response.json().catch(() => ({}))
-    if (response.ok && (payload.ok || payload.cancelled)) return Boolean(payload.ok)
+    if (response.ok && payload.ok) return payload
+    if (response.ok && payload.cancelled) return payload
+    // Remote/tunnel operators cannot use the server-owned OS dialog. Keep the
+    // browser picker as their explicit fallback, but never hide a real local
+    // save failure behind a second, unrelated dialog.
+    if (response.status === 403) {
+      const ok = await saveDownloadAssetsWithPicker(assets)
+      return { ok, fallback: true, cancelled: !ok }
+    }
+    throw new Error(payload.error || `保存に失敗しました (${response.status})`)
   } catch (error) {
     console.warn('server save dialog failed:', error)
+    throw error
   }
-  return saveDownloadAssetsWithPicker(assets)
 }
 
 async function openCanvasAssetsFolder() {
@@ -4719,9 +4728,12 @@ export default function App() {
   const [subtitleScrollOffsets, setSubtitleScrollOffsets] = useState({})
   const [managedSelectionActive, setManagedSelectionActive] = useState(false)
   const [bulkDownloading, setBulkDownloading] = useState(false)
+  const [downloadStatus, setDownloadStatus] = useState('')
+  const [downloadStatusText, setDownloadStatusText] = useState('')
   // Synchronous double-click guard: React state updates too late to stop a
   // rapid second click from opening a second folder dialog.
   const bulkDownloadInFlightRef = useRef(false)
+  const downloadStatusResetTimerRef = useRef(0)
   const [agentAttachStatus, setAgentAttachStatus] = useState('')
   const [agentAttachStatusText, setAgentAttachStatusText] = useState('')
   const agentAttachResetTimerRef = useRef(0)
@@ -4879,6 +4891,19 @@ export default function App() {
 
   useEffect(() => () => {
     window.clearTimeout(agentAttachResetTimerRef.current)
+    window.clearTimeout(downloadStatusResetTimerRef.current)
+  }, [])
+
+  const showDownloadStatus = useCallback((status, message, delay = 3200) => {
+    window.clearTimeout(downloadStatusResetTimerRef.current)
+    setDownloadStatus(status)
+    setDownloadStatusText(message)
+    if (delay > 0) {
+      downloadStatusResetTimerRef.current = window.setTimeout(() => {
+        setDownloadStatus('')
+        setDownloadStatusText('')
+      }, delay)
+    }
   }, [])
 
   const selectedCanvasCopyTargetKey = useMemo(() => canvasAssetSelectionKey([
@@ -9802,6 +9827,12 @@ export default function App() {
             : agentAttachStatus === 'error'
               ? (agentAttachStatusText || 'コピーに失敗しました')
               : ''
+        const downloadToastText = bulkDownloading
+          ? '保存先を選択してください'
+          : downloadStatusText
+        const toolbarStatusText = downloadToastText || copyToastText
+        const toolbarStatusError = downloadStatus === 'error' || (!downloadToastText && agentAttachStatus === 'error')
+        const toolbarStatusSuccess = downloadStatus === 'success' || (!downloadToastText && copyDone)
         // The buttons keep their icons after a click — copy feedback lives in
         // a transient toast under the toolbar, never in the button itself.
         return (
@@ -9844,8 +9875,16 @@ export default function App() {
                 if (bulkDownloadInFlightRef.current) return
                 bulkDownloadInFlightRef.current = true
                 setBulkDownloading(true)
+                showDownloadStatus('saving', '保存先を選択してください', 0)
                 try {
-                  await downloadAssetsViaServerDialog(selectedCanvasDownloadAssets)
+                  const result = await downloadAssetsViaServerDialog(selectedCanvasDownloadAssets)
+                  if (result?.ok) {
+                    showDownloadStatus('success', `${result.savedName || (single ? selectedCanvasDownloadAssets[0]?.fileName : 'ZIP')} を保存しました`)
+                  } else if (result?.cancelled) {
+                    showDownloadStatus('cancelled', '保存をキャンセルしました', 2200)
+                  }
+                } catch (error) {
+                  showDownloadStatus('error', error.message || '保存に失敗しました', 4200)
                 } finally {
                   bulkDownloadInFlightRef.current = false
                   setBulkDownloading(false)
@@ -9944,17 +9983,25 @@ export default function App() {
                 <RefineSparkleIcon size={15} />
               </button>
             ) : null}
-            {copyToastText ? (
+            {toolbarStatusText ? (
               <div
-                className={`lovart-selection-toolbar-status${agentAttachStatus === 'error' ? ' is-error' : copyDone ? ' is-success' : ''}`}
+                className={`lovart-selection-toolbar-status${toolbarStatusError ? ' is-error' : toolbarStatusSuccess ? ' is-success' : ''}`}
                 role="status"
               >
-                {copyDone ? `✓ ${copyToastText}` : copyToastText}
+                {toolbarStatusSuccess ? `✓ ${toolbarStatusText}` : toolbarStatusText}
               </div>
             ) : null}
           </div>
         )
       })() : null}
+      {downloadStatusText && selectedCanvasDownloadOverlays.length === 0 ? (
+        <div
+          className={`lovart-download-status-global${downloadStatus === 'error' ? ' is-error' : downloadStatus === 'success' ? ' is-success' : ''}`}
+          role="status"
+        >
+          {downloadStatus === 'success' ? `✓ ${downloadStatusText}` : downloadStatusText}
+        </div>
+      ) : null}
       </div>
       <div ref={hoverOverlayRef} className="lovart-hover-border" style={{ display: 'none' }} />
 

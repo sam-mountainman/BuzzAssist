@@ -458,6 +458,40 @@ function runJxa(script, timeoutMs = 10_000, env = {}) {
   })
 }
 
+// Standard Additions' `choose file name` is more reliable than driving an
+// NSSavePanel through the JXA Objective-C bridge: it returns the selected
+// POSIX path only after the user confirms Save, and cancellation is reported
+// as AppleScript error -128. Keep a capturing variant here because the shared
+// runOsascript helper intentionally discards stdout.
+function runAppleScriptCapture(script, timeoutMs = 10_000, env = {}) {
+  return new Promise((resolveScript) => {
+    const child = spawn('osascript', [], {
+      env: { ...process.env, ...env },
+      stdio: ['pipe', 'pipe', 'pipe']
+    })
+    let stdout = ''
+    let stderr = ''
+    let settled = false
+    const finish = (result) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolveScript(result)
+    }
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL')
+      finish({ ok: false, stdout, error: 'macOSの保存ダイアログが応答しません。' })
+    }, timeoutMs)
+    child.stdout.on('data', (chunk) => { stdout += chunk })
+    child.stderr.on('data', (chunk) => { stderr += chunk })
+    child.on('error', (error) => finish({ ok: false, stdout, error: error.message }))
+    child.on('close', (code) => finish(code === 0
+      ? { ok: true, stdout: stdout.trim() }
+      : { ok: false, stdout, error: stderr.trim() }))
+    child.stdin.end(script)
+  })
+}
+
 async function copyTextToSystemClipboard(text = '') {
   const value = String(text ?? '')
   if (!value) throw new Error('コピーするテキストがありません。')
@@ -596,35 +630,20 @@ async function chooseSaveDestination(fileName) {
   const defaultDir = join(homedir(), 'Downloads')
   await mkdir(defaultDir, { recursive: true })
   if (process.platform === 'darwin') {
-    // NSSavePanel directly (not chooseFileName): extensionHidden=false keeps
-    // the full "name.png" visible in the Save As field regardless of the
-    // Finder "hide extensions" preference.
-    const jxaScript = `
-ObjC.import('Foundation')
-ObjC.import('AppKit')
-const env = $.NSProcessInfo.processInfo.environment
-const defaultDir = ObjC.unwrap(env.objectForKey('BUZZASSIST_SAVE_DEFAULT_DIR')) || ''
-const defaultName = ObjC.unwrap(env.objectForKey('BUZZASSIST_SAVE_DEFAULT_NAME')) || 'download'
-const app = Application.currentApplication()
-app.includeStandardAdditions = true
-app.activate()
-const panel = $.NSSavePanel.savePanel
-panel.title = '保存'
-panel.nameFieldStringValue = $(defaultName)
-panel.directoryURL = $.NSURL.fileURLWithPath($(defaultDir))
-panel.extensionHidden = false
-panel.canCreateDirectories = true
-const response = panel.runModal
-response == 1 ? ObjC.unwrap(panel.URL.path) : '__CANCELLED__'
+    const appleScript = `
+set defaultDirectory to system attribute "BUZZASSIST_SAVE_DEFAULT_DIR"
+set defaultFileName to system attribute "BUZZASSIST_SAVE_DEFAULT_NAME"
+set chosenFile to choose file name with prompt "保存" default name defaultFileName default location (POSIX file defaultDirectory)
+return POSIX path of chosenFile
 `
-    const result = await runJxa(jxaScript, 300_000, {
+    const result = await runAppleScriptCapture(appleScript, 300_000, {
       BUZZASSIST_SAVE_DEFAULT_DIR: defaultDir,
       BUZZASSIST_SAVE_DEFAULT_NAME: fileName
     })
     if (result.ok) {
       const chosen = String(result.stdout || '').trim()
-      if (!chosen || chosen === '__CANCELLED__') return null
-      return chosen
+      if (!chosen) throw new Error('保存先を取得できませんでした。もう一度保存してください。')
+      return resolve(chosen)
     }
     if (/user cancell?ed|-128/i.test(String(result.error || ''))) return null
     throw new Error(result.error || '保存ダイアログの表示に失敗しました。')
@@ -1528,8 +1547,15 @@ function configureCanvasServer(server) {
           if (suggestedExt && !extname(basename(destination))) {
             destination += suggestedExt
           }
+          await mkdir(dirname(destination), { recursive: true })
+          let savedInfo = null
           if (single) {
             await copyFile(assetPaths[0], destination)
+            savedInfo = await stat(destination)
+            const sourceInfo = await stat(assetPaths[0])
+            if (!savedInfo.isFile() || savedInfo.size !== sourceInfo.size) {
+              throw new Error('保存後のファイル検証に失敗しました。')
+            }
           } else {
             const entries = []
             for (const filePath of assetPaths) {
@@ -1542,8 +1568,18 @@ function configureCanvasServer(server) {
               out.on('finish', resolveZip)
               streamZipStore(entries, out).catch(rejectZip)
             })
+            savedInfo = await stat(destination)
+            if (!savedInfo.isFile() || savedInfo.size <= 0) {
+              throw new Error('保存後のZIPファイル検証に失敗しました。')
+            }
           }
-          sendJson(res, 200, { ok: true, path: destination, files: assetPaths.map((filePath) => basename(filePath)) })
+          sendJson(res, 200, {
+            ok: true,
+            path: destination,
+            savedName: basename(destination),
+            bytes: savedInfo?.size || 0,
+            files: assetPaths.map((filePath) => basename(filePath))
+          })
         } catch (error) {
           sendJson(res, 500, { ok: false, error: error.message })
         }
