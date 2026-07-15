@@ -42,6 +42,19 @@ test("remote result hydration blocks stale placeholder saves before adding files
   assert.ok(hydrateIndex > guardIndex);
 });
 
+test("direct generation hydration blocks stale placeholder saves before adding files", async () => {
+  const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const responseIndex = source.indexOf("const canvasResponse = await canvasFetch(CANVAS_ENDPOINT)");
+  const guardIndex = source.indexOf("applyingRemoteRef.current = true", responseIndex);
+  const hydrateIndex = source.indexOf("await prehydrateResultFiles(nextScene, resultFileIds)", responseIndex);
+  const applyIndex = source.indexOf("applyRemoteScene(nextScene, { force: true, applySelection: true })", responseIndex);
+
+  assert.ok(responseIndex >= 0);
+  assert.ok(guardIndex > responseIndex);
+  assert.ok(hydrateIndex > guardIndex);
+  assert.ok(applyIndex > hydrateIndex);
+});
+
 test("background hydration ignores files owned only by deleted canvas elements", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
 

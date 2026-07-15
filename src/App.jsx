@@ -8309,6 +8309,13 @@ export default function App() {
       if (canvasResponse.ok) {
         const canvasPayload = await canvasResponse.json()
         let nextScene = canvasPayload.scene
+        // api.addFiles() can synchronously emit onChange with the still-visible
+        // Generating placeholder. Block persistence before prehydrating the
+        // completed result, otherwise that stale scene can overwrite the
+        // server-side frame replacement while preserving only its file record.
+        window.clearTimeout(saveTimerRef.current)
+        saveTimerRef.current = null
+        applyingRemoteRef.current = true
         // 結果アセットを適用前にExcalidraw本体へ注入して、灰色フレームを
         // 見せずに完成画像を即表示する（Generating...はこの間表示されたまま）。
         const resultFileIds = new Set(
@@ -8335,6 +8342,7 @@ export default function App() {
         if (leftoverFrameIds.length > 0) scheduleCanvasSave(latestSceneRef.current)
       }
     } catch (error) {
+      applyingRemoteRef.current = false
       const message = error.message || '生成に失敗しました。'
       setGenerationError(message)
       if (generationRouteId === 'hermes' && /Grokの再ログインが必要です/.test(message)) {
