@@ -18,7 +18,7 @@ import {
   runWithConcurrency
 } from './lib/mediaGeneration.mjs'
 import { getBuzzAssistAuthStatus, loginBuzzAssistViaBrowser, resolveAuthFilePath } from './lib/buzzassistApi.mjs'
-import { FOCUS_REQUEST_FILE_NAME, OFFICIAL_EXCALIDRAW_README, createExcalidrawView, insertExcalidrawImage, insertExcalidrawSubtitle, insertExcalidrawVideo, insertExcalidrawMediaBatch, performCanvasMaintenance, stripAssetBackedFileDataURLs, syncDeletedCanvasAssets, syncMissingCanvasAssets } from './lib/canvasScene.mjs'
+import { FOCUS_REQUEST_FILE_NAME, OFFICIAL_EXCALIDRAW_README, createExcalidrawView, insertExcalidrawImage, insertExcalidrawSilenceCutResult, insertExcalidrawSubtitle, insertExcalidrawVideo, insertExcalidrawMediaBatch, performCanvasMaintenance, stripAssetBackedFileDataURLs, syncDeletedCanvasAssets, syncMissingCanvasAssets } from './lib/canvasScene.mjs'
 import { streamZipStore } from './lib/zipStore.mjs'
 import { generateSubtitleSrt, refineSubtitleFromPlan, writeSubtitleWordsSidecar } from './lib/subtitleGeneration.mjs'
 import { silenceCutVideo } from './lib/tempoCut.mjs'
@@ -2769,8 +2769,6 @@ function configureCanvasServer(server) {
             return
           }
           const body = JSON.parse(await readRequestBody(req))
-          // Output is a non-destructive Premiere XML written into
-          // canvas/assets (downloadable) — no canvas element is created.
           const cut = await silenceCutVideo({
             inputPath: body.videoPath,
             outputDir: canvasAssetsDir,
@@ -2790,6 +2788,39 @@ function configureCanvasServer(server) {
             preMarginSeconds: body.preMarginSeconds,
             postMarginSeconds: body.postMarginSeconds
           })
+          const inputExtension = extname(body.videoPath || '').toLowerCase()
+          const inputAsset = body.inputAsset && typeof body.inputAsset === 'object'
+            ? body.inputAsset
+            : {
+                id: `input-${Date.now().toString(36)}`,
+                name: basename(body.videoPath || 'input-video'),
+                kind: inputExtension === '.xml' ? 'xml' : 'video',
+                mimeType: inputExtension === '.xml' ? 'application/xml' : 'video/mp4',
+                path: resolve(body.videoPath || ''),
+                url: '',
+                dataURL: '',
+                thumbnail: '',
+                duration: cut.inputDuration
+              }
+          const placement = await insertExcalidrawSilenceCutResult({
+            canvasDir,
+            assetPath: cut.outputPath,
+            fileName: cut.fileName,
+            assetUrl: `/excalidraw-assets/${encodeURIComponent(cut.fileName)}`,
+            model: cut.model,
+            inputDuration: cut.inputDuration,
+            outputDuration: cut.outputDuration,
+            cutDuration: cut.cutDuration,
+            cutCount: cut.cutCount,
+            clipCount: cut.clipCount,
+            thresholdAuto: cut.thresholdAuto,
+            thresholdDbUsed: cut.thresholdDbUsed,
+            inputAsset,
+            anchorElementId: body.anchorElementId,
+            placement: body.placement,
+            replaceAnchor: body.replaceAnchor === true,
+            matchAnchor: body.matchAnchor === true
+          })
           sendJson(res, 200, {
             ok: true,
             kind: 'premiere-xml',
@@ -2802,8 +2833,12 @@ function configureCanvasServer(server) {
             thresholdDbUsed: cut.thresholdDbUsed,
             fileName: cut.fileName,
             assetPath: cut.outputPath,
-            assetUrl: `/excalidraw-assets/${cut.fileName}`
+            assetUrl: placement.assetUrl,
+            elementId: placement.elementId,
+            bounds: placement.bounds,
+            replacedAnchor: placement.replacedAnchor
           })
+          broadcastCanvasChanged([canvasFile, cut.outputPath])
         } catch (error) {
           sendJson(res, 500, { error: error.message })
         }

@@ -319,6 +319,18 @@ test("selected canvas media exposes clipboard and download controls without the 
   assert.match(styles, /background: #7c3aed/);
 });
 
+test("silence-cut completion replaces the generator with a normal XML canvas card", async () => {
+  const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const viteSource = await readFile(new URL("../vite.config.js", import.meta.url), "utf8");
+
+  assert.match(source, /inputAsset: savedForm\.silenceCutVideo,/);
+  assert.match(source, /anchorElementId,\s*placement: 'replace',\s*replaceAnchor: true,\s*matchAnchor: true/);
+  assert.doesNotMatch(source, /triggerAssetDownload\(payload\.assetUrl, payload\.fileName \|\| 'jetcut\.xml'\)/);
+  assert.match(viteSource, /insertExcalidrawSilenceCutResult\(\{/);
+  assert.match(viteSource, /replacedAnchor: placement\.replacedAnchor/);
+  assert.match(viteSource, /broadcastCanvasChanged\(\[canvasFile, cut\.outputPath\]\)/);
+});
+
 test("pure viewport pans translate the overlay layer and own-save echoes skip the scene refetch", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");

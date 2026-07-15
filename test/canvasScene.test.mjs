@@ -183,7 +183,7 @@ test("batch images persist the same numbered file names in element and file meta
   }
 });
 
-test("silence-cut XML results are inserted as canvas frames with output assets", async () => {
+test("silence-cut XML results replace generators with normal canvas attachment cards", async () => {
   const projectDir = await mkdtemp(join(tmpdir(), "excalidraw-silence-cut-result-"));
   try {
     const canvasDir = join(projectDir, "canvas");
@@ -191,6 +191,24 @@ test("silence-cut XML results are inserted as canvas frames with output assets",
     await mkdir(assetsDir, { recursive: true });
     const xmlPath = join(assetsDir, "cut.xml");
     await writeFile(xmlPath, "<xmeml version=\"4\"></xmeml>\n");
+    const anchor = {
+      id: "silence-generator",
+      type: "rectangle",
+      x: 120,
+      y: 80,
+      width: 364,
+      height: 205,
+      isDeleted: false,
+      customData: { "buzzassist.silenceCutGenerator.frame": true },
+    };
+    await writeFile(join(canvasDir, "excalidraw-canvas.json"), JSON.stringify({
+      type: "excalidraw",
+      version: 2,
+      source: "test",
+      elements: [anchor],
+      appState: { selectedElementIds: { [anchor.id]: true } },
+      files: {},
+    }));
 
     const result = await insertExcalidrawSilenceCutResult({
       projectDir,
@@ -202,17 +220,29 @@ test("silence-cut XML results are inserted as canvas frames with output assets",
       cutDuration: 20,
       cutCount: 3,
       clipCount: 4,
+      anchorElementId: anchor.id,
+      replaceAnchor: true,
+      matchAnchor: true,
     });
 
     const saved = JSON.parse(await readFile(join(canvasDir, "excalidraw-canvas.json"), "utf8"));
     const element = saved.elements.find((item) => item.id === result.elementId);
+    const replacedAnchor = saved.elements.find((item) => item.id === anchor.id);
 
-    assert.equal(element.customData["buzzassist.silenceCutGenerator.frame"], true);
+    assert.equal(replacedAnchor.isDeleted, true);
+    assert.equal(result.replacedAnchor, true);
+    assert.equal(element.type, "image");
+    assert.equal(element.customData["buzzassist.silenceCutGenerator.frame"], undefined);
     assert.equal(element.customData["buzzassist.imageGenerator.frame"], undefined);
-    assert.equal(element.customData.codexGenerating, false);
+    assert.equal(element.customData.codexMediaKind, "xml");
+    assert.equal(element.customData.codexAssetPath, xmlPath);
+    assert.equal(element.customData.codexAssetUrl, "/excalidraw-assets/cut.xml");
     assert.equal(element.customData.silenceCutOutputAsset.name, "cut.xml");
     assert.equal(element.customData.silenceCutOutputAsset.kind, "xml");
     assert.equal(element.customData.silenceCutOutputAsset.path, xmlPath);
+    assert.equal(saved.files[result.fileId].mimeType, "image/svg+xml");
+    assert.match(saved.files[result.fileId].dataURL, /^data:image\/svg\+xml;base64,/);
+    assert.deepEqual(result.bounds, { x: 120, y: 80, width: 364, height: 205 });
     assert.equal(saved.appState.selectedElementIds[result.elementId], true);
   } finally {
     await rm(projectDir, { recursive: true, force: true });
