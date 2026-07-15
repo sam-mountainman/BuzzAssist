@@ -360,6 +360,15 @@ images: lovart-midjourney  lovart-flux-2-max  lovart-nano-banana-pro  lovart-ide
 videos: lovart-veo-3-1  lovart-veo-3-1-fast  lovart-hailuo-2-3  lovart-kling-3-omni  lovart-wan-2-6
 ```
 
+### Lovart生成方法
+
+Lovart APIキーを保存すると、実行先メニューに「Lovart生成方法」が表示されます。
+
+- `∞ 無制限`（既定）: アカウントと選択モデルが無制限対象なら無制限で生成します。対象外のアカウント・モデルは、生成を止めずに高速へ自動切替します。
+- `⚡ 高速`: すべてLovartの高速モードで生成します。
+
+APIキー保存時にLovartの認証済みモード確認APIを呼ぶため、無効なキーは既存のキーを上書きしません。生成時にも利用可否を確認し、アカウント全体のモード変更が並列生成同士で競合しないよう直列化しています。設定は各ユーザーのホームディレクトリに保存されるため、GitHubリポジトリや配布パッケージへAPIキーやユーザー固有のモード状態は含まれません。
+
 BuzzAssist cloudモデル、cloud字幕、クレジット利用にはサインインが必要です。
 
 ```text
