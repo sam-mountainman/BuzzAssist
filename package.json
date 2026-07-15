@@ -1,6 +1,6 @@
 {
   "name": "buzzassist-canvas-mcp",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "description": "BuzzAssist project-local Excalidraw canvas plugin with MCP-backed tools for AI coding agents.",
   "homepage": "https://github.com/sam-mountainman/BuzzAssist",
   "repository": {

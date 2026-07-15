@@ -53,6 +53,8 @@ const GENERATOR_FRAME_MIN_SCENE_SIZE = 140
 const GENERATOR_PANEL_IMAGE_MIN_WIDTH = 420
 const GENERATOR_PANEL_IMAGE_MAX_WIDTH = 560
 const GENERATOR_PANEL_VIDEO_WIDTH = 580
+const GENERATOR_PANEL_COMPACT_GUTTER = 16
+const GENERATOR_PANEL_DESKTOP_GUTTER = 24
 const GENERATOR_SCROLL_ANIMATION_MS = 600
 const GENERATOR_FOCUS_VIEWPORT_PADDING = 16
 const GENERATOR_FOCUS_RAIL_GAP = 20
@@ -2550,8 +2552,11 @@ function getPanelPlacementFromViewportTarget(target, kind = 'image', viewportOve
   const viewportOffsetLeft = Number(viewport.offsetLeft) || 0
   const viewportOffsetTop = Number(viewport.offsetTop) || 0
   const isCompactViewport = viewportWidth > 0 && viewportWidth <= 900
+  const viewportGutter = isCompactViewport
+    ? GENERATOR_PANEL_COMPACT_GUTTER
+    : GENERATOR_PANEL_DESKTOP_GUTTER
   const panelScale = isCompactViewport
-    ? Math.min(1, (viewportWidth - 16) / desiredWidth)
+    ? Math.min(1, Math.max(1, viewportWidth - viewportGutter * 2) / desiredWidth)
     : 1
   const panelWidth = desiredWidth
   const rawLeft = Math.round((Number(target?.left) || 0) + frameViewportWidth / 2 - panelWidth / 2)
@@ -2559,16 +2564,20 @@ function getPanelPlacementFromViewportTarget(target, kind = 'image', viewportOve
   const rawTop = Math.round(targetTop + frameViewportHeight + 4)
   const panelVisualWidth = panelWidth * panelScale
   const transformInsetX = (panelWidth - panelVisualWidth) / 2
-  const minLeft = viewportOffsetLeft + 8 - transformInsetX
-  const maxLeft = viewportOffsetLeft + viewportWidth - 8 - panelVisualWidth - transformInsetX
+  // Clamp the floating prompt on desktop as well as mobile. The canvas shell
+  // intentionally clips overflow; leaving desktop placement unconstrained
+  // made the panel disappear into the right/bottom edge and removed the blank
+  // gutter users rely on to dismiss it with an outside click.
+  const minLeft = viewportOffsetLeft + viewportGutter - transformInsetX
+  const maxLeft = viewportOffsetLeft + viewportWidth - viewportGutter - panelVisualWidth - transformInsetX
   const panelEstimatedHeight = isVideo ? 280 : kind === 'subtitle' || kind === 'silenceCut' ? 220 : GENERATOR_PANEL_ESTIMATED_HEIGHT + 24
   const panelVisualHeight = panelEstimatedHeight * panelScale
-  const minTop = viewportOffsetTop + 8
-  const maxTop = viewportOffsetTop + viewportHeight - 8 - panelVisualHeight
-  const left = isCompactViewport
+  const minTop = viewportOffsetTop + viewportGutter
+  const maxTop = viewportOffsetTop + viewportHeight - viewportGutter - panelVisualHeight
+  const left = viewportWidth > 0
     ? clamp(rawLeft, minLeft, Math.max(minLeft, maxLeft))
     : rawLeft
-  const top = isCompactViewport && viewportHeight > 0
+  const top = viewportHeight > 0
     ? clamp(rawTop, minTop, Math.max(minTop, maxTop))
     : rawTop
 
