@@ -6039,7 +6039,7 @@ export default function App() {
   // large canvas over the tunnel streams dozens of files; rebuilding and
   // re-rendering the whole scene per file pins a phone CPU, so buffered files
   // are flushed together (throttled) into a single updateScene.
-  const flushHydratedFiles = useCallback(() => {
+  const flushHydratedFiles = useCallback(async () => {
     hydratedFlushTimerRef.current = 0
     const buffer = hydratedFileBufferRef.current
     if (!api || buffer.size === 0) return
@@ -6059,7 +6059,6 @@ export default function App() {
     // bytes through Excalidraw's own image-cache refresh path
     // (clearImageShapeCache + addNewImagesToImageCache).
     const storeFiles = api.getFiles?.() ?? latestSceneRef.current.files ?? {}
-    const currentElements = api.getSceneElementsIncludingDeleted?.() ?? latestSceneRef.current.elements
     const storeRecordHasBytes = (record) =>
       typeof record?.dataURL === 'string' &&
       record.dataURL.startsWith('data:') &&
@@ -6071,7 +6070,26 @@ export default function App() {
       if (storeFiles[file.id]) delete storeFiles[file.id]
     }
     api.addFiles(applicableFiles)
+
+    // Excalidraw rasterizes each element once per version. Bumping versions
+    // while the decode kicked off by addFiles above is still pending bakes
+    // the gray placeholder into the raster, and nothing regenerates it until
+    // the next zoom change. Decode the same bytes here first (the browser
+    // shares the work with Excalidraw's own decode of identical data URLs)
+    // and yield one task so its image-cache entries settle — only then bump
+    // the elements so the re-raster draws the real bitmap.
+    await Promise.all(
+      applicableFiles.map((file) => {
+        if (typeof file.dataURL !== 'string' || !file.dataURL.startsWith('data:')) return undefined
+        const probe = new Image()
+        probe.src = file.dataURL
+        return probe.decode().catch(() => undefined)
+      })
+    )
+    await new Promise((resolveDelay) => window.setTimeout(resolveDelay, 0))
+
     const fileIds = new Set(applicableFiles.map((file) => file.id))
+    const currentElements = api.getSceneElementsIncludingDeleted?.() ?? latestSceneRef.current.elements
     let touchedImage = false
     let restoredStatus = false
     const now = Date.now()
