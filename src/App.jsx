@@ -62,6 +62,10 @@ const GENERATOR_FOCUS_RAIL_GAP = 20
 const GENERATOR_FOCUS_ZOOM_FACTOR = 0.94
 const SAVE_DELAY_MS = 450
 const SELECTION_DELAY_MS = 180
+// Signature of "nothing selected" — used to seed the selection dedupe so a
+// freshly opened tab never pushes its initial empty selection over whatever
+// another tab (or the MCP server) last wrote to the shared selection file.
+const EMPTY_SELECTION_SIGNATURE = JSON.stringify({ selectedElementIds: [], selectedElements: [] })
 const CANVAS_ASSETS_ROUTE = '/excalidraw-assets/'
 const ASSET_HYDRATION_CONCURRENCY = 6
 const OVERLAY_RENDER_MARGIN = 320
@@ -5340,7 +5344,7 @@ export default function App() {
   const lastGeneratorPasteRef = useRef({ time: 0, sourceId: '', frameId: '' })
   const saveTimerRef = useRef(null)
   const selectionTimerRef = useRef(null)
-  const lastSelectionRef = useRef('')
+  const lastSelectionRef = useRef(EMPTY_SELECTION_SIGNATURE)
   const applyingRemoteRef = useRef(false)
   const hasLocalChangesRef = useRef(false)
   const localChangeVersionRef = useRef(0)
@@ -5550,6 +5554,24 @@ export default function App() {
     },
     [writeSelection]
   )
+
+  // The selection file is shared by every open canvas tab (last writer wins).
+  // The content dedupe above stops idle churn, but another tab can overwrite
+  // the file between this tab's writes — re-selecting the exact same element
+  // would then be skipped as a duplicate and attach flows would read a stale
+  // (often empty) selection. Any local interaction therefore forces the next
+  // selection save through, so the last-interacted tab always owns the file.
+  useEffect(() => {
+    const forceNextSelectionWrite = () => {
+      lastSelectionRef.current = ''
+    }
+    window.addEventListener('pointerdown', forceNextSelectionWrite, true)
+    window.addEventListener('focus', forceNextSelectionWrite)
+    return () => {
+      window.removeEventListener('pointerdown', forceNextSelectionWrite, true)
+      window.removeEventListener('focus', forceNextSelectionWrite)
+    }
+  }, [])
 
   const saveCanvas = useCallback(async (scene, options = {}) => {
     window.clearTimeout(saveTimerRef.current)
@@ -6027,26 +6049,27 @@ export default function App() {
     hydratedFileBufferRef.current = new Map()
     if (bufferedFiles.length === 0) return
 
-    // Excalidraw's addFiles silently SKIPS ids that already exist in its file
-    // store, so a hydrated record only ever lands when the id is still
-    // missing. Flushing records the store cannot accept (and bumping their
-    // elements below) changes nothing visible but fires onChange, which
-    // re-schedules hydration and re-flushes the same files forever — a
-    // permanent ~5Hz update loop for any asset image near the viewport. Only
-    // push files the store will actually take, plus ids whose image element
-    // errored and needs its decode retried now that the asset bytes resolve.
+    // Skip files whose store record already carries real bytes — re-pushing
+    // those is what created the endless flush loop (addFiles no-ops on
+    // existing ids, the element bump fires onChange, hydration re-schedules,
+    // repeat at ~5Hz forever). Everything else must actually LAND: Excalidraw
+    // ignores updateScene({files}) and addFiles skips existing ids, so a
+    // still-placeholder record (asset path or the gray 1px data URL) is
+    // deleted from the live store first, letting addFiles re-add the hydrated
+    // bytes through Excalidraw's own image-cache refresh path
+    // (clearImageShapeCache + addNewImagesToImageCache).
     const storeFiles = api.getFiles?.() ?? latestSceneRef.current.files ?? {}
     const currentElements = api.getSceneElementsIncludingDeleted?.() ?? latestSceneRef.current.elements
-    const erroredFileIds = new Set(
-      currentElements
-        .filter((element) => element?.type === 'image' && element.status === 'error' && element.fileId)
-        .map((element) => element.fileId)
-    )
-    const applicableFiles = bufferedFiles.filter(
-      (file) => !storeFiles[file.id] || erroredFileIds.has(file.id)
-    )
+    const storeRecordHasBytes = (record) =>
+      typeof record?.dataURL === 'string' &&
+      record.dataURL.startsWith('data:') &&
+      record.dataURL !== CANVAS_ASSET_PLACEHOLDER_DATA_URL
+    const applicableFiles = bufferedFiles.filter((file) => !storeRecordHasBytes(storeFiles[file.id]))
     if (applicableFiles.length === 0) return
 
+    for (const file of applicableFiles) {
+      if (storeFiles[file.id]) delete storeFiles[file.id]
+    }
     api.addFiles(applicableFiles)
     const fileIds = new Set(applicableFiles.map((file) => file.id))
     let touchedImage = false
