@@ -43,6 +43,59 @@ test("newer ordinary browser edits still win", () => {
   assert.equal(merged.elements.find((element) => element.id === "shape").x, 50);
 });
 
+test("a generated card anchored BESIDE real content never deletes that content", () => {
+  // Regression: a subtitle card placed next to a silence-cut XML card carries
+  // codexAnchorElementId pointing at the XML card. The anchor is real content
+  // (not a generator placeholder) and must survive the merge — deleting it
+  // also trashes its asset file via the deletion sync.
+  const current = {
+    elements: [
+      el("silence-cut_e2e.xml", 1, {
+        type: "rectangle",
+        customData: { codexMediaKind: "xml", codexFileName: "e2e.xml" },
+      }),
+      el("subtitle_e2e.srt", 1, {
+        type: "rectangle",
+        customData: {
+          codexGeneratedSubtitle: true,
+          codexMediaKind: "subtitle",
+          codexAnchorElementId: "silence-cut_e2e.xml",
+        },
+      }),
+    ],
+    appState: { selectedElementIds: { "silence-cut_e2e.xml": true } },
+    files: {},
+  };
+  const incoming = { elements: [], appState: { selectedElementIds: { "silence-cut_e2e.xml": true } }, files: {} };
+
+  const merged = mergeLocalCanvasScenes(current, incoming);
+
+  assert.equal(merged.elements.find((element) => element.id === "silence-cut_e2e.xml").isDeleted, false);
+  assert.equal(merged.elements.find((element) => element.id === "subtitle_e2e.srt").isDeleted, false);
+  assert.equal(merged.appState.selectedElementIds["silence-cut_e2e.xml"], true);
+});
+
+test("a real generator placeholder frame is still tombstoned after replacement", () => {
+  const current = {
+    elements: [
+      el("frame", 2, {
+        customData: { "buzzassist.imageGenerator.frame": true, role: "frame" },
+      }),
+      el("result", 1, {
+        type: "image",
+        customData: { codexGeneratedImage: true, codexAnchorElementId: "frame" },
+      }),
+    ],
+    appState: {},
+    files: {},
+  };
+  const incoming = { elements: [], appState: {}, files: {} };
+
+  const merged = mergeLocalCanvasScenes(current, incoming);
+  assert.equal(merged.elements.find((element) => element.id === "frame").isDeleted, true);
+  assert.equal(merged.elements.find((element) => element.id === "result").isDeleted, false);
+});
+
 test("deleting a generated result allows an undo to restore its placeholder", () => {
   const current = {
     elements: [
