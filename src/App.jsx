@@ -5523,15 +5523,20 @@ export default function App() {
 
   const writeSelection = useCallback(async (scene) => {
     const selection = getSelectionSnapshot(scene)
-    const serialized = JSON.stringify(selection)
-    if (serialized === lastSelectionRef.current) return
-    lastSelectionRef.current = serialized
+    // Dedupe on selection CONTENT only — updatedAt changes on every snapshot,
+    // so including it would rewrite an identical selection on every onChange.
+    const signature = JSON.stringify({
+      selectedElementIds: selection.selectedElementIds,
+      selectedElements: selection.selectedElements
+    })
+    if (signature === lastSelectionRef.current) return
+    lastSelectionRef.current = signature
 
     try {
       await canvasFetch(SELECTION_ENDPOINT, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
-        body: serialized
+        body: JSON.stringify(selection)
       })
     } catch (error) {
       console.error(error)
@@ -6022,9 +6027,28 @@ export default function App() {
     hydratedFileBufferRef.current = new Map()
     if (bufferedFiles.length === 0) return
 
-    api.addFiles(bufferedFiles)
-    const fileIds = new Set(bufferedFiles.map((file) => file.id))
+    // Excalidraw's addFiles silently SKIPS ids that already exist in its file
+    // store, so a hydrated record only ever lands when the id is still
+    // missing. Flushing records the store cannot accept (and bumping their
+    // elements below) changes nothing visible but fires onChange, which
+    // re-schedules hydration and re-flushes the same files forever — a
+    // permanent ~5Hz update loop for any asset image near the viewport. Only
+    // push files the store will actually take, plus ids whose image element
+    // errored and needs its decode retried now that the asset bytes resolve.
+    const storeFiles = api.getFiles?.() ?? latestSceneRef.current.files ?? {}
     const currentElements = api.getSceneElementsIncludingDeleted?.() ?? latestSceneRef.current.elements
+    const erroredFileIds = new Set(
+      currentElements
+        .filter((element) => element?.type === 'image' && element.status === 'error' && element.fileId)
+        .map((element) => element.fileId)
+    )
+    const applicableFiles = bufferedFiles.filter(
+      (file) => !storeFiles[file.id] || erroredFileIds.has(file.id)
+    )
+    if (applicableFiles.length === 0) return
+
+    api.addFiles(applicableFiles)
+    const fileIds = new Set(applicableFiles.map((file) => file.id))
     let touchedImage = false
     let restoredStatus = false
     const now = Date.now()
@@ -6049,8 +6073,8 @@ export default function App() {
     if (!touchedImage) return
 
     const currentAppState = api.getAppState?.() ?? latestSceneRef.current.appState
-    const currentFiles = { ...(api.getFiles?.() ?? latestSceneRef.current.files ?? {}) }
-    for (const file of bufferedFiles) currentFiles[file.id] = file
+    const currentFiles = { ...storeFiles }
+    for (const file of applicableFiles) currentFiles[file.id] = file
     const constrainedFiles = memoryConstrained
       ? placeholderAssetBackedFilesOutside({ files: currentFiles }, visibleFileIds).files
       : currentFiles
