@@ -3392,6 +3392,13 @@ function normalizeGeneratorFrameVisuals(elements) {
   let changed = false
   const now = Date.now()
   const normalized = elements.map((element) => {
+    // Legacy subtitle/silence-cut cards can carry BOTH a generator-frame tag
+    // and result-card markers. They belong to normalizeTextPreviewCardVisuals
+    // (white card); treating them as frames here would ping-pong the element
+    // between the two normalizers forever, eating every real onChange (and
+    // with it panel opening and canvas-picker consumption) via the suppressed
+    // early-return below.
+    if (isGeneratedSubtitleResult(element) || isGeneratedSilenceCutResult(element)) return element
     const isFrame = isGeneratorFrame(element)
     const isResult = isGeneratedImageResult(element)
     if (!isFrame && !isResult) return element
@@ -7987,6 +7994,12 @@ export default function App() {
       const restoreFrameId = picker.frameId || canvasPickerFrameIdRef.current || ''
       const restoreResult = picker.selectedGeneratedResult || null
       const applyPickedAsset = (pickedAsset) => {
+        // One physical click can emit multiple onChange calls (pointerdown
+        // selection + pointerup commit). closeCanvasPicker below clears the
+        // picker via async state, so null the ref synchronously first or the
+        // second onChange consumes the same pick again and the asset is
+        // attached twice.
+        canvasPickerRef.current = null
         if (restoreFrameId) {
           activeFrameIdRef.current = restoreFrameId
         } else if (restoreResult?.elementId) {
