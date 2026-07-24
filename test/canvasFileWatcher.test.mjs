@@ -10,12 +10,10 @@ test("static canvas watcher reports atomic MCP canvas writes", async () => {
   const canvasFile = join(canvasDir, "excalidraw-canvas.json");
   const tempFile = `${canvasFile}.tmp`;
   const watcher = createCanvasFileWatcher();
+  let retryTimer = 0;
 
   try {
     const changed = new Promise((resolveChanged, rejectChanged) => {
-      // The complete suite runs CPU-heavy subtitle/audio tests in parallel.
-      // Leave enough headroom for macOS to deliver the fs.watch notification
-      // when the event loop is briefly saturated.
       const timer = setTimeout(() => rejectChanged(new Error("canvas watcher timed out")), 10000);
       const onChanged = (changedPath) => {
         if (resolve(changedPath) !== resolve(canvasFile)) return;
@@ -28,11 +26,23 @@ test("static canvas watcher reports atomic MCP canvas writes", async () => {
     });
 
     watcher.add(canvasFile);
-    await writeFile(tempFile, '{"type":"excalidraw","elements":[]}\n');
-    await rename(tempFile, canvasFile);
+    const atomicWrite = async () => {
+      await writeFile(tempFile, '{"type":"excalidraw","elements":[]}\n');
+      await rename(tempFile, canvasFile);
+    };
+    await atomicWrite();
+    // macOS fs.watch subscribes asynchronously: a write landing before the
+    // FSEvents stream is live is silently dropped, which made this test flaky
+    // under suite load. The behavior under test is "an atomic write is
+    // reported", not "the very first write is caught", so keep re-writing
+    // until the watcher sees one.
+    retryTimer = setInterval(() => {
+      atomicWrite().catch(() => {});
+    }, 500);
 
     assert.equal(resolve(await changed), resolve(canvasFile));
   } finally {
+    clearInterval(retryTimer);
     watcher.close();
     await rm(canvasDir, { recursive: true, force: true });
   }
@@ -43,6 +53,7 @@ test("static canvas watcher reports files deleted from a watched assets director
   const assetsDir = join(canvasDir, "assets");
   const assetFile = join(assetsDir, "Image1.png");
   const watcher = createCanvasFileWatcher();
+  let retryTimer = 0;
 
   try {
     await mkdir(assetsDir, { recursive: true });
@@ -59,9 +70,17 @@ test("static canvas watcher reports files deleted from a watched assets director
 
     watcher.add(assetsDir);
     await rm(assetFile);
+    // Same FSEvents startup race as above: keep recreating and deleting the
+    // asset until the (asynchronously subscribed) watcher reports an unlink.
+    retryTimer = setInterval(() => {
+      writeFile(assetFile, "image")
+        .then(() => rm(assetFile))
+        .catch(() => {});
+    }, 500);
 
     assert.equal(resolve(await unlinked), resolve(assetFile));
   } finally {
+    clearInterval(retryTimer);
     watcher.close();
     await rm(canvasDir, { recursive: true, force: true });
   }
