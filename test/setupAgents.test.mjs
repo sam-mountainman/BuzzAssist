@@ -71,6 +71,7 @@ test("all canvas skills bind tool calls to the current host project", async () =
     "excalidraw-subtitle-gen",
     "excalidraw-silence-cut",
     "excalidraw-official-mcp",
+    "excalidraw-speech-bubbles",
   ];
   for (const skillName of skillNames) {
     const source = await readFile(new URL(`../skills/${skillName}/SKILL.md`, import.meta.url), "utf8");
