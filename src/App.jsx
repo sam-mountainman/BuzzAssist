@@ -7490,6 +7490,14 @@ export default function App() {
     (nextForm, resultOverride) => {
       const result = resultOverride || selectedGeneratedResultRef.current
       if (!api || !result?.elementId) return
+      const pendingWrite = pendingFrameFormWriteRef.current
+      if (pendingWrite?.result?.elementId === result.elementId) {
+        // Attachment uploads and canvas picks derive from the latest form
+        // state. Drop an older debounced prompt/settings write so it cannot
+        // run afterward and erase the newly attached assets.
+        pendingFrameFormWriteRef.current = null
+        window.clearTimeout(pendingWrite.timer)
+      }
       const elements = api.getSceneElementsIncludingDeleted()
       const resultElement = elements.find((element) => element.id === result.elementId)
       if (!isGeneratedResult(resultElement)) return
@@ -7748,13 +7756,23 @@ export default function App() {
   }, [])
 
   const getAttachmentDestinationFrameId = useCallback(() => {
-    if (activeFrameIdRef.current) return activeFrameIdRef.current
+    const elements = api?.getSceneElementsIncludingDeleted?.() ?? []
+    const elementsById = new Map(elements.map((element) => [element.id, element]))
+    const activeFrameId = activeFrameIdRef.current
+    if (activeFrameId && isGeneratorFrame(elementsById.get(activeFrameId))) return activeFrameId
     // When editing a generated result, there is intentionally no backing
     // generator frame yet. Keep attachments on the visible form instead of
     // writing them into whichever frame was focused previously.
-    if (selectedGeneratedResultRef.current) return ''
-    return lastFocusedFrameIdRef.current || ''
-  }, [])
+    if (
+      selectedGeneratedResultRef.current?.elementId ||
+      selectedGeneratedResult?.elementId ||
+      attachmentPanelLockRef.current?.selectedGeneratedResult?.elementId
+    ) return ''
+    const selectedIds = getSelectedIds(api?.getAppState?.() ?? {})
+    if (panelMediaTargetIdFromSelection(selectedIds, elementsById)) return ''
+    const lastFocusedFrameId = lastFocusedFrameIdRef.current || ''
+    return isGeneratorFrame(elementsById.get(lastFocusedFrameId)) ? lastFocusedFrameId : ''
+  }, [api, selectedGeneratedResult])
 
   const pinAttachmentPanelTarget = useCallback((frameId = '', selectedGeneratedResult = null, ttlMs = 30000) => {
     const normalizedFrameId = frameId || ''
@@ -7785,10 +7803,26 @@ export default function App() {
   }, [])
 
   const beginAttachmentPanelLock = useCallback(() => {
-    const frameId = getAttachmentDestinationFrameId()
-    const selectedGeneratedResult = frameId ? null : snapshotSelectedGeneratedResult(selectedGeneratedResultRef.current)
-    return pinAttachmentPanelTarget(frameId, selectedGeneratedResult)
-  }, [getAttachmentDestinationFrameId, pinAttachmentPanelTarget])
+    const elements = api?.getSceneElementsIncludingDeleted?.() ?? []
+    const elementsById = new Map(elements.map((element) => [element.id, element]))
+    const selectedResultId = panelMediaTargetIdFromSelection(
+      getSelectedIds(api?.getAppState?.() ?? {}),
+      elementsById
+    )
+    const selectedResultElement = selectedResultId ? elementsById.get(selectedResultId) : null
+    const currentResult =
+      snapshotSelectedGeneratedResult(selectedGeneratedResultRef.current) ||
+      snapshotSelectedGeneratedResult(selectedGeneratedResult) ||
+      (selectedResultElement
+        ? {
+            id: `result:${selectedResultElement.id}`,
+            elementId: selectedResultElement.id,
+            kind: panelMediaKindFromElement(selectedResultElement)
+          }
+        : null)
+    const frameId = currentResult ? '' : getAttachmentDestinationFrameId()
+    return pinAttachmentPanelTarget(frameId, currentResult)
+  }, [api, getAttachmentDestinationFrameId, pinAttachmentPanelTarget, selectedGeneratedResult])
 
   const releaseAttachmentPanelLockSoon = useCallback((delay = 1400) => {
     const token = attachmentPanelLockRef.current?.token
@@ -7817,10 +7851,34 @@ export default function App() {
     (target, assetOrAssets, frameIdOverride, options = {}) => {
       const assets = (Array.isArray(assetOrAssets) ? assetOrAssets : [assetOrAssets]).filter(Boolean)
       if (assets.length === 0) return
-      const frameId = frameIdOverride || activeFrameIdRef.current
-      const selectedResult = !frameId
-        ? (options.selectedGeneratedResult || selectedGeneratedResultRef.current)
+      const elementsAtStart = api?.getSceneElementsIncludingDeleted?.() ?? []
+      const candidateFrameId = frameIdOverride || activeFrameIdRef.current
+      const candidateFrame = elementsAtStart.find((element) => element.id === candidateFrameId)
+      const frameId = isGeneratorFrame(candidateFrame) ? candidateFrameId : ''
+      let selectedResult = !frameId
+        ? (
+            options.selectedGeneratedResult ||
+            attachmentPanelLockRef.current?.selectedGeneratedResult ||
+            selectedGeneratedResultRef.current ||
+            snapshotSelectedGeneratedResult(selectedGeneratedResult)
+          )
         : null
+      if (!frameId && !selectedResult?.elementId) {
+        const elements = api?.getSceneElementsIncludingDeleted?.() ?? []
+        const elementsById = new Map(elements.map((element) => [element.id, element]))
+        const selectedResultId = panelMediaTargetIdFromSelection(
+          getSelectedIds(api?.getAppState?.() ?? {}),
+          elementsById
+        )
+        const selectedResultElement = selectedResultId ? elementsById.get(selectedResultId) : null
+        if (selectedResultElement) {
+          selectedResult = {
+            id: `result:${selectedResultElement.id}`,
+            elementId: selectedResultElement.id,
+            kind: panelMediaKindFromElement(selectedResultElement)
+          }
+        }
+      }
       if (selectedResult?.elementId) {
         activeFrameIdRef.current = ''
         selectedGeneratedResultRef.current = selectedResult
@@ -7829,19 +7887,19 @@ export default function App() {
         setActiveFrameKind(selectedResult.kind)
       }
       if (!frameId || frameId === activeFrameIdRef.current) {
-        let nextForm = null
-        setFrameForm((current) => {
-          nextForm = assets.reduce((form, asset) => mergeAssetIntoForm(form, target, asset), current)
-          return nextForm
-        })
-        window.setTimeout(() => {
-          if (!nextForm) return
-          if (selectedResult?.elementId && !frameId) {
-            updateGeneratedResultElement(nextForm, selectedResult)
-          } else {
-            updateActiveFrameElement(nextForm, frameId || undefined)
-          }
-        }, 0)
+        // Compute before scheduling React state. In concurrent rendering the
+        // functional updater may run after a 0ms timer; the old flow therefore
+        // updated the thumbnail but skipped the element/customData write.
+        const nextForm = assets.reduce(
+          (form, asset) => mergeAssetIntoForm(form, target, asset),
+          frameForm
+        )
+        setFrameForm(nextForm)
+        if (selectedResult?.elementId && !frameId) {
+          updateGeneratedResultElement(nextForm, selectedResult)
+        } else {
+          updateActiveFrameElement(nextForm, frameId || undefined)
+        }
         return
       }
       // The upload outlived the user's attention — they switched frames while
@@ -7852,7 +7910,7 @@ export default function App() {
       const merged = assets.reduce((form, asset) => mergeAssetIntoForm(form, target, asset), frameFormFromElement(element))
       updateActiveFrameElement(merged, frameId)
     },
-    [api, updateActiveFrameElement, updateGeneratedResultElement]
+    [api, frameForm, selectedGeneratedResult, updateActiveFrameElement, updateGeneratedResultElement]
   )
 
   const openCanvasPicker = useCallback((target) => {
@@ -7861,10 +7919,10 @@ export default function App() {
       setOpenMenu(null)
       return
     }
-    const { frameId, selectedGeneratedResult } = beginAttachmentPanelLock()
+    const { token, frameId, selectedGeneratedResult } = beginAttachmentPanelLock()
     canvasPickerFrameIdRef.current = frameId
-    canvasPickerRef.current = { target, frameId, selectedGeneratedResult }
-    setCanvasPicker({ target, frameId, selectedGeneratedResult })
+    canvasPickerRef.current = { target, token, frameId, selectedGeneratedResult }
+    setCanvasPicker({ target, token, frameId, selectedGeneratedResult })
     setOpenMenu(null)
   }, [beginAttachmentPanelLock])
 
@@ -7875,15 +7933,19 @@ export default function App() {
   }, [beginAttachmentPanelLock])
 
   const restoreGeneratorUploadFrame = useCallback(() => {
-    const frameId = pendingGeneratorUploadFrameIdRef.current
+    const pendingFrameId = pendingGeneratorUploadFrameIdRef.current
+    const selectedResult = pendingGeneratorUploadResultRef.current
+    pendingGeneratorUploadFrameIdRef.current = ''
+    pendingGeneratorUploadResultRef.current = null
+    const frame = api?.getSceneElementsIncludingDeleted?.().find((element) => element.id === pendingFrameId)
+    const frameId = isGeneratorFrame(frame) ? pendingFrameId : ''
     if (frameId) {
       pinAttachmentPanelTarget(frameId, null)
-    } else if (pendingGeneratorUploadResultRef.current?.elementId) {
-      const selectedResult = pendingGeneratorUploadResultRef.current
+    } else if (selectedResult?.elementId) {
       pinAttachmentPanelTarget('', selectedResult)
     }
     return frameId
-  }, [pinAttachmentPanelTarget])
+  }, [api, pinAttachmentPanelTarget])
 
   const closeCanvasPicker = useCallback((options = {}) => {
     canvasPickerRef.current = null
@@ -8016,13 +8078,23 @@ export default function App() {
         releaseAttachmentPanelLockSoon()
         const restoreElementId = restoreFrameId || restoreResult?.elementId || ''
         if (api && restoreElementId) {
-          window.setTimeout(() => {
+          const restoreSelectionAfterPick = () => {
+            if (
+              picker.token &&
+              attachmentPanelLockRef.current?.token !== picker.token
+            ) return
             suppressNextChangeRef.current = true
             api.updateScene({
               appState: { selectedElementIds: { [restoreElementId]: true } },
               captureUpdate: CaptureUpdateAction.NEVER
             })
-          }, 0)
+          }
+          // Excalidraw can emit its pointer-up selection after the first
+          // zero-delay restore. Re-apply the destination while the attachment
+          // lock is active so the picked source never becomes the panel owner.
+          for (const delay of [0, 80, 240]) {
+            window.setTimeout(restoreSelectionAfterPick, delay)
+          }
         }
       }
       if (picker.target === 'subtitleScript') {
@@ -8056,12 +8128,12 @@ export default function App() {
   const onImageUploadChange = useCallback(async (event) => {
     const files = Array.from(event.target.files || [])
     event.target.value = ''
+    const uploadSelectedResult = pendingGeneratorUploadResultRef.current
+    const uploadFrameId = restoreGeneratorUploadFrame()
     if (files.length === 0) {
       releaseAttachmentPanelLockSoon()
       return
     }
-    const uploadSelectedResult = pendingGeneratorUploadResultRef.current
-    const uploadFrameId = restoreGeneratorUploadFrame() || activeFrameIdRef.current
     try {
       const assets = await Promise.all(
         files
@@ -8081,6 +8153,8 @@ export default function App() {
   const onVideoFrameUploadChange = useCallback(async (event) => {
     const files = Array.from(event.target.files || [])
     event.target.value = ''
+    const uploadSelectedResult = pendingGeneratorUploadResultRef.current
+    const uploadFrameId = restoreGeneratorUploadFrame()
     if (files.length === 0) {
       releaseAttachmentPanelLockSoon()
       return
@@ -8089,8 +8163,6 @@ export default function App() {
     const expectedKind = getUploadTargetKind(target)
     // Pin the destination now: large files upload for a long time and the
     // user may click other frames meanwhile — the asset must still land here.
-    const uploadSelectedResult = pendingGeneratorUploadResultRef.current
-    const uploadFrameId = restoreGeneratorUploadFrame() || activeFrameIdRef.current
     setGenerationError('')
     try {
       const uploadableFiles = files.filter((file) => {
@@ -11512,12 +11584,12 @@ export default function App() {
           setOpenMenu(null)
           const file = event.target.files?.[0]
           event.target.value = ''
+          const uploadSelectedResult = pendingGeneratorUploadResultRef.current
+          const uploadFrameId = restoreGeneratorUploadFrame()
           if (!file) {
             releaseAttachmentPanelLockSoon()
             return
           }
-          const uploadSelectedResult = pendingGeneratorUploadResultRef.current
-          const uploadFrameId = restoreGeneratorUploadFrame() || activeFrameIdRef.current
           file.text()
             .then((text) => {
               addAssetToFrame('subtitleScript', {
