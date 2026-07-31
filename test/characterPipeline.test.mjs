@@ -51,6 +51,30 @@ test("script cast extraction keeps visual speakers and accepts explicit characte
   assert.ok(!cast.some((entry) => entry.name === "ナレーション" || entry.name === "BGM"));
 });
 
+test("script cast extraction ignores title and cut headers and trims punctuation before dialogue quotes", () => {
+  const script = `
+タイトル：契約書の罠を見抜いた助っ人
+
+【カット1：夜のオフィス】
+ナレーション：田中だけが残業していた。
+田中 悠斗：「また僕だけ残業か……」
+
+【カット2：黒川が契約書を投げる】
+黒川 部長：「今夜中に送れ」
+佐藤 誠司：「送る前に見せてください」
+`;
+  const cast = extractCastFromScript(script, {
+    cast: [
+      { name: "田中 悠斗", role: "per-video" },
+      { name: "黒川 部長", role: "per-video" },
+      { name: "佐藤 誠司", role: "fixed" },
+    ],
+  });
+
+  assert.deepEqual(cast.map((entry) => entry.name), ["田中 悠斗", "黒川 部長", "佐藤 誠司"]);
+  assert.equal(cast.find((entry) => entry.name === "佐藤 誠司").role, "fixed");
+});
+
 test("workflow matches reusable fixed cast but keeps other-episode cast isolated", async () => {
   const projectDir = await mkdtemp(path.join(os.tmpdir(), "buzzassist-character-match-"));
   try {

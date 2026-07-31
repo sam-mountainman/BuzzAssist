@@ -1,0 +1,54 @@
+{
+  "episodeId": "manga-office-reversal-001",
+  "title": "契約書の罠を見抜いた助っ人",
+  "candidateCount": 3,
+  "defaultRole": "per-video",
+  "channelStylePrompt": "High-quality Japanese web manga for a YouTube drama channel aimed at men aged 40 to 50. Clean professional line art, mature realistic anime proportions, expressive but not chibi, restrained cinematic color palette, crisp cel shading, readable silhouettes, consistent office architecture and lighting, premium commercial illustration quality. No speech bubbles, no captions, no text, no logos, no watermark.",
+  "cast": [
+    {
+      "name": "田中 悠斗",
+      "role": "per-video",
+      "aliases": ["田中", "悠斗"],
+      "description": "28-year-old Japanese male office worker. He looks ordinary, slightly timid and tired rather than handsome. Slim build, average height, narrow oval face, modest dark-brown eyes, straight eyebrows, short slightly messy black hair with a soft side part. Navy business suit, plain white shirt, muted blue tie, black belt and black leather shoes.",
+      "invariants": [
+        "28歳の日本人男性",
+        "短く少し乱れた黒髪と柔らかい横分け",
+        "細身で平均身長",
+        "紺色のスーツ、白シャツ、くすんだ青いネクタイ",
+        "眼鏡なし、ひげなし、派手な装飾なし",
+        "華やかなイケメンではなく冴えない若手会社員"
+      ],
+      "negativePrompt": "blond hair, gray hair, glasses, beard, muscular body, glamorous handsome idol, teenage boy, elderly man, red tie, charcoal suit"
+    },
+    {
+      "name": "黒川 部長",
+      "role": "per-video",
+      "aliases": ["黒川", "部長"],
+      "description": "45-year-old Japanese male department manager with an intimidating presence. Broad shoulders, tall and stocky build, square face, thick straight eyebrows, narrow stern eyes, prominent nose, black hair combed straight back with subtle gray at the temples. Charcoal business suit, white shirt, deep burgundy tie, polished black shoes.",
+      "invariants": [
+        "45歳の日本人男性",
+        "肩幅が広い大柄な体格",
+        "四角い顔、太い眉、細く厳しい目",
+        "黒髪のオールバック、こめかみに少量の白髪",
+        "チャコールグレーのスーツ、白シャツ、濃いえんじ色のネクタイ",
+        "威圧的な管理職"
+      ],
+      "negativePrompt": "young slim man, messy fringe, blue tie, navy suit, round gentle face, glasses, full gray hair, smiling friendly expression, same face as Tanaka"
+    },
+    {
+      "name": "佐藤 誠司",
+      "role": "fixed",
+      "aliases": ["佐藤", "誠司", "助っ人"],
+      "description": "55-year-old Japanese male specialist who becomes the recurring helper of the channel. Calm, intelligent and trustworthy. Medium build, upright posture, slightly long rectangular face, warm dark eyes, fine smile lines, short neatly trimmed salt-and-pepper hair, thin silver rectangular glasses. Dark olive three-piece suit, ivory shirt, brown knit tie, vintage silver wristwatch.",
+      "invariants": [
+        "55歳の日本人男性",
+        "短く整えた白髪交じりの髪",
+        "細い銀縁の長方形眼鏡",
+        "穏やかな目元と薄い笑いじわ",
+        "濃いオリーブ色の三つ揃い、アイボリーのシャツ、茶色のニットタイ",
+        "落ち着きと知性のある固定助っ人"
+      ],
+      "negativePrompt": "young man, black messy hair, no glasses, intimidating manager, broad stocky body, navy suit, burgundy tie, same face as Kurokawa or Tanaka"
+    }
+  ]
+}

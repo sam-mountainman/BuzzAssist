@@ -1,0 +1,62 @@
+[
+  {
+    "id": "cut-01",
+    "fileName": "manga-office-001-cut-01.png",
+    "characters": ["田中 悠斗"],
+    "prompt": "Wide establishing shot of a nearly empty modern Japanese office at 10 PM. Tanaka Yuto works alone at a desk under cool fluorescent lights, surrounded by a few contract pages and a laptop. Tired posture, quiet pressure, cinematic depth, no readable text."
+  },
+  {
+    "id": "cut-02",
+    "fileName": "manga-office-001-cut-02.png",
+    "characters": ["田中 悠斗", "黒川 部長"],
+    "prompt": "Medium two-shot in the same office. Manager Kurokawa throws a contract onto Tanaka's desk while looming over him. Tanaka recoils slightly in his chair. Preserve their clearly different age, face, hair, build, suit color and tie color; no face blending, no readable text."
+  },
+  {
+    "id": "cut-03",
+    "fileName": "manga-office-001-cut-03.png",
+    "characters": ["田中 悠斗"],
+    "prompt": "Close-up of Tanaka Yuto holding the contract, anxious and suspicious, a small bead of sweat at his temple. His short slightly messy black hair, ordinary narrow face, navy suit and muted blue tie remain exact. Office background softly out of focus, no readable text."
+  },
+  {
+    "id": "cut-04",
+    "fileName": "manga-office-001-cut-04.png",
+    "characters": ["黒川 部長"],
+    "prompt": "Low-angle close medium shot of Manager Kurokawa leaning forward with one palm on the desk, intimidating glare and compressed lips. Broad stocky frame, square face, slicked-back black hair with gray temples, charcoal suit and burgundy tie. Dramatic office lighting, no readable text."
+  },
+  {
+    "id": "cut-05",
+    "fileName": "manga-office-001-cut-05.png",
+    "characters": ["佐藤 誠司", "黒川 部長"],
+    "prompt": "Office doorway composition. Sato Seiji enters calmly and raises one hand to pause the situation while Kurokawa turns toward him in irritation. Keep Sato's silver rectangular glasses, salt-and-pepper hair and olive three-piece suit distinct from Kurokawa's stocky charcoal-suit silhouette. No readable text."
+  },
+  {
+    "id": "cut-06",
+    "fileName": "manga-office-001-cut-06.png",
+    "characters": ["佐藤 誠司"],
+    "prompt": "Over-desk medium shot of Sato Seiji carefully inspecting the contract and a laptop audit history. Calm analytical expression, silver rectangular glasses catching a subtle reflection, olive three-piece suit. Contract contains only abstract illegible marks, no readable text."
+  },
+  {
+    "id": "cut-07",
+    "fileName": "manga-office-001-cut-07.png",
+    "characters": ["田中 悠斗", "佐藤 誠司"],
+    "prompt": "Collaborative two-shot at Tanaka's desk. Sato points to two documents displayed side by side while Tanaka realizes the evidence, shifting from fear to determination. Keep both identities separate and exact; Tanaka navy suit and black messy hair, Sato olive suit, gray hair and silver glasses. No readable text."
+  },
+  {
+    "id": "cut-08",
+    "fileName": "manga-office-001-cut-08.png",
+    "characters": ["田中 悠斗", "黒川 部長", "佐藤 誠司"],
+    "prompt": "Cinematic three-person confrontation in the same office. Tanaka stands at frame left holding the evidence with new resolve, Kurokawa stands center-right shouting defensively, and Sato stands calmly between and slightly behind them. Strictly preserve three distinct identities, ages, faces, hairstyles, builds and suit colors; no duplicated person, no attribute transfer, no readable text."
+  },
+  {
+    "id": "cut-09",
+    "fileName": "manga-office-001-cut-09.png",
+    "characters": ["黒川 部長"],
+    "prompt": "Tight close-up of Kurokawa losing composure, eyes widened and sweat visible as his intimidation collapses. Keep his square mature face, thick eyebrows, slicked-back black hair with gray temples, charcoal suit and burgundy tie. No readable text."
+  },
+  {
+    "id": "cut-10",
+    "fileName": "manga-office-001-cut-10.png",
+    "characters": ["田中 悠斗", "佐藤 誠司"],
+    "prompt": "Warm resolution two-shot at dawn near the office windows. Tanaka gives a relieved grateful smile while Sato answers with a calm encouraging smile. Keep exact approved identities and outfits. Soft early sunlight replaces the cold night lighting, hopeful but grounded, no readable text."
+  }
+]

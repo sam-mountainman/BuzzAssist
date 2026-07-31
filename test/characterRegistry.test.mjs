@@ -7,6 +7,7 @@ import path from "node:path";
 import {
   buildCharacterIdentityPrompt,
   normalizeCharacterRegistry,
+  optimizeCharacterBindingsForGeneration,
   readCharacterRegistry,
   resolveCharacterBindings,
   resolveCharacterReferencePaths,
@@ -91,6 +92,24 @@ test("character aliases resolve to an identity pack with explicit multi-characte
   assert.match(prompt, /田中 \[hero\]: use reference image 4 only/);
   assert.match(prompt, /Never blend faces, hair, clothing/);
   assert.match(prompt, /Must preserve: 銀縁眼鏡; 短い白髪/);
+});
+
+test("three-or-more-character generation keeps only the primary identity sheet per character", () => {
+  const bindings = ["hero", "manager", "helper"].map((id) => ({
+    id,
+    referenceImagePaths: [`/${id}-identity.png`, `/${id}-expressions.png`],
+  }));
+
+  const optimized = optimizeCharacterBindingsForGeneration(bindings);
+  assert.deepEqual(optimized.map((binding) => binding.referenceImagePaths), [
+    ["/hero-identity.png"],
+    ["/manager-identity.png"],
+    ["/helper-identity.png"],
+  ]);
+  assert.deepEqual(
+    optimizeCharacterBindingsForGeneration(bindings.slice(0, 2)).map((binding) => binding.referenceImagePaths),
+    bindings.slice(0, 2).map((binding) => binding.referenceImagePaths),
+  );
 });
 
 test("character registry round-trips through canvas/characters.json", async () => {
