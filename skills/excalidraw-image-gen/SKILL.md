@@ -120,6 +120,7 @@ AI holders are rectangle elements with:
 5. 全キャラがreadyになった後だけ `generate_character_storyboard` を呼ぶ。各シーンの `characters` / `characterIds` を明示する。サーバーが設定画とキャラ別identity lockを自動追加する
 
 複数キャラが同じシーンに出る場合、参照画像の割り当てと「顔・髪・服・年齢を混ぜない」指示が自動付与される。ただし生成モデルのドリフトを完全には保証できないため、完成画像は人物ごとに目視確認する。
+3人以上が同じ画像に出る場合は、処理時間と参照過多を抑えるため、各キャラの採用設定画（identity）1枚だけを自動投入する。1〜2人では設定画と表情・角度シートの2枚を維持する。
 
 ## Workflow
 

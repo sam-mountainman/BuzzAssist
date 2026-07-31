@@ -47,6 +47,7 @@ import {
 } from "../lib/canvasScene.mjs";
 import {
   buildCharacterIdentityPrompt,
+  optimizeCharacterBindingsForGeneration,
   readCharacterRegistry,
   resolveCharacterBindings,
 } from "../lib/characterRegistry.mjs";
@@ -1372,8 +1373,8 @@ async function generateExcalidrawImagesBatch(args = {}) {
     ...jobs.map((job) => job?.characterIds ?? job?.character_ids),
   ].some((list) => Array.isArray(list) && list.length > 0);
   const characterRegistry = characterIdsRequested ? await readCharacterRegistry(args) : null;
-  const characterBindingsForJob = (job = {}) =>
-    characterRegistry
+  const characterBindingsForJob = (job = {}) => {
+    const bindings = characterRegistry
       ? resolveCharacterBindings(
           characterRegistry,
           [
@@ -1385,6 +1386,8 @@ async function generateExcalidrawImagesBatch(args = {}) {
           { projectDir: args.projectDir, canvasDir: args.canvasDir },
         )
       : [];
+    return optimizeCharacterBindingsForGeneration(bindings);
+  };
   const sharedExplicitReferenceImagePaths = mergeReferenceImagePaths(
     args.referenceImagePaths,
     args.reference_image_paths,
