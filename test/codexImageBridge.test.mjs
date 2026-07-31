@@ -60,3 +60,10 @@ test("Codex image generation recovers from deleted working directories", async (
   assert.match(media, /cwd: options\.cwd \|\| safeProcessCwd\(\)/);
   assert.match(media, /cwd: getEnv\("CODEX_IMAGE_BRIDGE_CWD"\) \|\| safeProcessCwd\(\)/);
 });
+
+test("ChatGPT/Codex image prompts treat attached references as binding inputs", async () => {
+  const source = await readFile(new URL("../scripts/codex-image-bridge.mjs", import.meta.url), "utf8");
+  assert.match(source, /Treat every attached image as a binding visual reference/);
+  assert.match(source, /Preserve the depicted character, person, product, or subject identity/);
+  assert.match(source, /Do not ignore or replace the references with unrelated subjects/);
+});

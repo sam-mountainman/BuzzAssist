@@ -1,0 +1,77 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { access, mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+test("MCP batch payload previews validate and do not start or mutate a canvas", async () => {
+  const projectDir = await mkdtemp(path.join(os.tmpdir(), "buzzassist-batch-preview-"));
+  const canvasDir = path.join(projectDir, "canvas");
+  const client = new Client({ name: "buzzassist-batch-preview-test", version: "1.0.0" });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [path.join(repoRoot, "mcp", "server.mjs")],
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      CODEX: "1",
+      EXCALIDRAW_NO_AUTO_OPEN: "1",
+      EXCALIDRAW_PROJECT_DIR: projectDir,
+      EXCALIDRAW_CANVAS_DIR: canvasDir,
+    },
+    stderr: "pipe",
+  });
+
+  try {
+    await client.connect(transport);
+    const tools = await client.listTools();
+    for (const name of ["generate_excalidraw_images_batch", "generate_excalidraw_videos_batch"]) {
+      const tool = tools.tools.find((candidate) => candidate.name === name);
+      assert.ok(tool, `${name} should be registered`);
+      assert.ok(tool.inputSchema.properties.payloadPreview, `${name} should accept payloadPreview`);
+    }
+
+    const imagePreview = await client.callTool({
+      name: "generate_excalidraw_images_batch",
+      arguments: {
+        payloadPreview: true,
+        referenceImagePaths: ["/tmp/shared-character.png"],
+        jobs: [
+          { prompt: "local image", model: "gpt-image-2-codex", aspectRatio: "1:1" },
+          { prompt: "cloud image", model: "nano-banana-2", aspectRatio: "16:9", imageSize: "2K" },
+        ],
+      },
+    });
+    assert.equal(imagePreview.isError, undefined, JSON.stringify(imagePreview));
+    assert.equal(imagePreview.structuredContent.payloadPreview, true);
+    assert.equal(imagePreview.structuredContent.total, 2);
+    assert.equal(imagePreview.structuredContent.results[1].body.image_urls[0], "https://preview.invalid/image/shared-character.png");
+
+    const videoPreview = await client.callTool({
+      name: "generate_excalidraw_videos_batch",
+      arguments: {
+        payloadPreview: true,
+        jobs: [
+          { prompt: "local video", model: "grok-imagine-video-hermes", duration: "6" },
+          { prompt: "cloud video", model: "seedance-2-fast", duration: "5", resolution: "720p" },
+        ],
+      },
+    });
+    assert.equal(videoPreview.isError, undefined, JSON.stringify(videoPreview));
+    assert.equal(videoPreview.structuredContent.payloadPreview, true);
+    assert.equal(videoPreview.structuredContent.total, 2);
+    assert.equal(videoPreview.structuredContent.results[1].endpoint, "bytedance/seedance-2.0/fast/text-to-video");
+
+    await assert.rejects(access(path.join(canvasDir, ".server.json")));
+    await assert.rejects(access(path.join(canvasDir, "excalidraw-canvas.json")));
+  } finally {
+    await client.close().catch(() => {});
+    await transport.close().catch(() => {});
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});

@@ -21,6 +21,7 @@ import {
   isCodexImageModel,
   isGrokImageModel,
   isGrokVideoModel,
+  mergeReferenceImagePaths,
   normalizeCodexImageCount,
   normalizeGrokGenerationCount,
   normalizeMediaBatchColumns,
@@ -123,6 +124,7 @@ const MEDIA_GENERATION_AGENT_INSTRUCTIONS = [
   "For phone/mobile access to the exact same full Excalidraw UI, use buzzassist_canvas_tunnel_start/status/stop. Cloudflare Quick Tunnel is the default and needs no account; if cloudflared is missing, BuzzAssist downloads and SHA-256 verifies its pinned official helper in the user's BuzzAssist tools directory. Remote Canvas is not required for same-UI access.",
   "For Codex and Claude Code interactive UI, always try the host in-app browser/browser tool first for the local BUZZASSIST_CANVAS_URL and use MCP tools for stable reads/writes. Use the explicit openExternalBrowser fallback only when that host does not expose an in-app Browser capability. render_buzzassist_canvas_widget remains an experimental MCP Apps entrypoint only; do not use it for normal Codex or Claude Code work unless the user explicitly asks to test the widget.",
   "To attach selected canvas images/videos/SRT/XML into the current chat, use prepare_canvas_attachments or read_canvas_attachment_bundle. Do not rely on OS GUI paste automation for media attachments.",
+  "When the current chat includes an attached image and the user identifies it as a character, subject, product, or style reference, resolve its absolute local path and pass it in referenceImagePaths. For generate_excalidraw_images_batch, pass shared chat references once in the top-level referenceImagePaths field so every job inherits them; job-specific referenceImagePaths are merged with the shared list. Do not rely on the model merely seeing the chat attachment, and do not omit the path from the generation tool call. If the attachment role is ambiguous, ask whether it is a subject/style reference or another input before generating.",
 ].join(" ");
 
 function collectFocusElementIds(value, output = new Set()) {
@@ -1333,10 +1335,64 @@ async function generateExcalidrawImagesBatch(args = {}) {
   for (const job of jobs) {
     if (!nonEmptyString(job?.prompt)) throw new Error("Each image job requires a prompt.");
   }
+  const sharedReferenceImagePaths = mergeReferenceImagePaths(
+    args.referenceImagePaths,
+    args.reference_image_paths,
+  );
+  const referenceImagePathsForJob = (job = {}) => mergeReferenceImagePaths(
+    sharedReferenceImagePaths,
+    job.referenceImagePaths,
+    job.reference_image_paths,
+  );
+  const customDataForJob = (job = {}) => {
+    const customData = job.customData && typeof job.customData === "object" ? job.customData : {};
+    const paths = referenceImagePathsForJob(job);
+    if (paths.length === 0) return customData;
+    const existing = Array.isArray(customData.generatorReferenceImages)
+      ? customData.generatorReferenceImages.filter((asset) => asset && typeof asset === "object")
+      : [];
+    const existingPaths = new Set(existing.map((asset) => nonEmptyString(asset.path)).filter(Boolean));
+    return {
+      ...customData,
+      generatorReferenceImages: [
+        ...existing,
+        ...paths
+          .filter((path) => !existingPaths.has(path))
+          .map((path) => ({ kind: "image", path, name: basename(path) })),
+      ],
+    };
+  };
 
   const columns = normalizeMediaBatchColumns(args.columns);
   const gap = finiteNumber(Number(args.gap), 24);
   const concurrency = normalizeMediaBatchConcurrency(args.concurrency);
+  if (args.payloadPreview) {
+    const results = jobs.map((job) =>
+      buildGenerationPayloadPreview("image", {
+        ...job,
+        referenceImagePaths: referenceImagePathsForJob(job),
+      }),
+    );
+    return {
+      ok: true,
+      payloadPreview: true,
+      total: jobs.length,
+      succeeded: jobs.length,
+      failed: 0,
+      dryRun: true,
+      columns,
+      concurrency,
+      estimatedCredits: results.reduce(
+        (total, result) => total + (Number(result.estimatedCredits) || 0),
+        0,
+      ),
+      estimatedCostYen: results.reduce(
+        (total, result) => total + (Number(result.estimatedCostYen) || 0),
+        0,
+      ),
+      results,
+    };
+  }
   const dryRun = Boolean(args.dryRun);
   const results = new Array(jobs.length);
   const chunks = [];
@@ -1366,7 +1422,7 @@ async function generateExcalidrawImagesBatch(args = {}) {
             aspectRatio: job.aspectRatio ?? job.aspect_ratio ?? "1:1",
             quality: job.quality ?? "auto",
             imageSize: job.imageSize ?? job.size ?? "1K",
-            customData: job.customData,
+            customData: customDataForJob(job),
           })),
           columns,
           gap,
@@ -1389,7 +1445,7 @@ async function generateExcalidrawImagesBatch(args = {}) {
         aspectRatio: job.aspectRatio ?? job.aspect_ratio,
         imageSize: job.imageSize ?? job.size,
         fileName: job.fileName ?? job.imageName ?? job.image_name,
-        referenceImagePaths: job.referenceImagePaths ?? job.reference_image_paths,
+        referenceImagePaths: referenceImagePathsForJob(job),
       });
       if (dryRun) {
         return { media, placement: null, frame: null };
@@ -1419,7 +1475,7 @@ async function generateExcalidrawImagesBatch(args = {}) {
             generatorImageSize: job.imageSize ?? job.size ?? "1K",
             codexGenerationSource: media.source,
             sourceFrameId: frame?.elementId,
-            ...(job.customData && typeof job.customData === "object" ? job.customData : {}),
+            ...customDataForJob(job),
           },
         }),
       );
@@ -1490,6 +1546,28 @@ async function generateExcalidrawVideosBatch(args = {}) {
   const columns = normalizeMediaBatchColumns(args.columns);
   const gap = finiteNumber(Number(args.gap), 24);
   const concurrency = normalizeMediaBatchConcurrency(args.concurrency);
+  if (args.payloadPreview) {
+    const results = jobs.map((job) => buildGenerationPayloadPreview("video", job));
+    return {
+      ok: true,
+      payloadPreview: true,
+      total: jobs.length,
+      succeeded: jobs.length,
+      failed: 0,
+      dryRun: true,
+      columns,
+      concurrency,
+      estimatedCredits: results.reduce(
+        (total, result) => total + (Number(result.estimatedCredits) || 0),
+        0,
+      ),
+      estimatedCostYen: results.reduce(
+        (total, result) => total + (Number(result.estimatedCostYen) || 0),
+        0,
+      ),
+      results,
+    };
+  }
   const dryRun = Boolean(args.dryRun);
   const results = new Array(jobs.length);
   const chunks = [];
@@ -1914,7 +1992,7 @@ function toolDefinitions() {
           imageCount: { type: "number", minimum: 1, maximum: 10, description: "Image count. GPT Image 2 on ChatGPT/Codex and Grok Imagine on local Grok accept 1-10 independent parallel generations. Lovart limits remain model-specific (for example Nano Banana up to 4 and Seedream up to 6)." },
           modelVersion: { type: "string", description: "Midjourney model version (v8.1 / v7 / niji / niji7). Lovart route only." },
           detailRendering: { type: "boolean", description: "Midjourney 高精細レンダリング (high-detail rendering). Lovart route only." },
-          referenceImagePaths: { type: "array", items: { type: "string" }, description: "Optional local image references for Grok Imagine image edit." },
+          referenceImagePaths: { type: "array", items: { type: "string" }, description: "Absolute local character, subject, product, or style reference image paths. Passed to every supported generation route (including ChatGPT/Codex, Grok, BuzzAssist, and Lovart)." },
           reference_image_paths: { type: "array", items: { type: "string" }, description: "Alias for referenceImagePaths." },
           payloadPreview: { type: "boolean", description: "Return the resolved endpoint, request payload, and estimated BuzzAssist credits without generating." },
           placement: { type: "string", enum: ["right", "left", "below", "replace", "inside"] },
@@ -2021,7 +2099,8 @@ function toolDefinitions() {
                 aspectRatio: { type: "string", description: "Aspect ratio such as 1:1, 16:9, or 9:16." },
                 imageSize: { type: "string", description: "Image size or Grok resolution hint (1K/2K)." },
                 quality: { type: "string", description: "Quality hint. high maps to Grok quality mode." },
-                referenceImagePaths: { type: "array", items: { type: "string" }, description: "Optional local image references for Grok Imagine image edit." },
+                referenceImagePaths: { type: "array", items: { type: "string" }, description: "Optional job-specific local reference images. Merged with the batch-level shared references." },
+                reference_image_paths: { type: "array", items: { type: "string" }, description: "Alias for the job-specific referenceImagePaths." },
                 fileName: { type: "string", description: "Optional destination filename under canvas/assets/." },
                 customData: { type: "object", description: "Additional Excalidraw element customData." },
               },
@@ -2029,6 +2108,8 @@ function toolDefinitions() {
               additionalProperties: true,
             },
           },
+          referenceImagePaths: { type: "array", items: { type: "string" }, description: "Shared absolute local character, subject, product, or style reference image paths inherited by every image job in this batch." },
+          reference_image_paths: { type: "array", items: { type: "string" }, description: "Alias for the shared batch referenceImagePaths." },
           columns: { type: "number", description: "Grid columns. Defaults to 5 (10-job chunks render as 2 rows × 5 columns)." },
           gap: { type: "number", description: "Canvas units between grid cells. Defaults to 24." },
           concurrency: { type: "number", description: "Parallel generations per chunk. Defaults to 10 and is capped at 10." },
@@ -2042,6 +2123,7 @@ function toolDefinitions() {
           replaceAnchor: { type: "boolean", description: "Replace the anchor with the first Generating... frame." },
           selectCreated: { type: "boolean", description: "Select the inserted elements after saving." },
           focusCreated: { type: "boolean", description: "Focus the viewport on the live Generating... placeholder or grid without showing selection handles. Defaults to true." },
+          payloadPreview: { type: "boolean", description: "Return each resolved endpoint, request payload, and the aggregate estimated BuzzAssist credits without generating or changing the canvas." },
           confirmedSettings: { type: "boolean", description: "True only after the staged flow has separately resolved each model, execution route when applicable, and all model-specific batch settings; payloadPreview is exempt." },
           dryRun: { type: "boolean", description: "Generate without copying or saving." },
         },
@@ -2099,6 +2181,7 @@ function toolDefinitions() {
           replaceAnchor: { type: "boolean", description: "Replace the anchor with the first Generating... frame." },
           selectCreated: { type: "boolean", description: "Select the inserted elements after saving." },
           focusCreated: { type: "boolean", description: "Focus the viewport on the live Generating... placeholder or grid without showing selection handles. Defaults to true." },
+          payloadPreview: { type: "boolean", description: "Return each resolved endpoint, request payload, and the aggregate estimated BuzzAssist credits without generating or changing the canvas." },
           confirmedSettings: { type: "boolean", description: "True only after the staged flow has separately resolved each model, execution route when applicable, and all model-specific batch settings; payloadPreview is exempt." },
           dryRun: { type: "boolean", description: "Generate without copying or saving." },
         },
@@ -2803,7 +2886,7 @@ async function handleToolCall(params, progress = () => {}) {
     }
     delete gateArgs.confirmedSettings;
   }
-  if (CANVAS_AUTO_OPEN_TOOLS.has(params?.name)) {
+  if (CANVAS_AUTO_OPEN_TOOLS.has(params?.name) && params.arguments?.payloadPreview !== true) {
     progress(0, 1, "Opening Excalidraw canvas");
     await ensureCanvasVisible(params.arguments ?? {});
   }
@@ -3198,7 +3281,9 @@ async function handleToolCall(params, progress = () => {}) {
       content: [
         {
           type: "text",
-          text: `${result.dryRun ? "Planned" : "Generated"} ${result.succeeded}/${result.total} image(s) as a grid${result.failed ? `, ${result.failed} failed` : ""}.${result.dryRun ? "" : canvasHintText()}`,
+          text: result.payloadPreview
+            ? `Payload preview for ${result.total} image job(s): ~${result.estimatedCredits ?? "?"} credits total.`
+            : `${result.dryRun ? "Planned" : "Generated"} ${result.succeeded}/${result.total} image(s) as a grid${result.failed ? `, ${result.failed} failed` : ""}.${result.dryRun ? "" : canvasHintText()}`,
         },
       ],
       structuredContent: result,
@@ -3215,7 +3300,9 @@ async function handleToolCall(params, progress = () => {}) {
       content: [
         {
           type: "text",
-          text: `${result.dryRun ? "Planned" : "Generated"} ${result.succeeded}/${result.total} video media element(s) as a grid${result.failed ? `, ${result.failed} failed` : ""}.${result.dryRun ? "" : canvasHintText()}`,
+          text: result.payloadPreview
+            ? `Payload preview for ${result.total} video job(s): ~${result.estimatedCredits ?? "?"} credits total.`
+            : `${result.dryRun ? "Planned" : "Generated"} ${result.succeeded}/${result.total} video media element(s) as a grid${result.failed ? `, ${result.failed} failed` : ""}.${result.dryRun ? "" : canvasHintText()}`,
         },
       ],
       structuredContent: result,
