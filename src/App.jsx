@@ -32,6 +32,8 @@ const GENERATE_IMAGE_ENDPOINT = '/api/generate/image'
 const GENERATE_VIDEO_ENDPOINT = '/api/generate/video'
 const GENERATION_JOB_ENDPOINT = '/api/generate/jobs'
 const GENERATE_SUBTITLES_ENDPOINT = '/api/generate/subtitles'
+const CHARACTER_REGISTRY_ENDPOINT = '/api/characters'
+const CHARACTER_WORKFLOW_ENDPOINT = '/api/character-workflows'
 const SILENCE_CUT_ENDPOINT = '/api/video/silence-cut'
 const GENERATION_CAPABILITIES_ENDPOINT = '/api/generation-capabilities'
 const ASSET_UPLOAD_ENDPOINT = '/api/assets/upload'
@@ -1246,6 +1248,44 @@ const IMAGE_QUALITY_OPTIONS = [
   ['medium', 'Medium'],
   ['high', 'High']
 ]
+
+function characterPipelineStatusLabel(status) {
+  return {
+    draft: '下書き',
+    'awaiting-candidates': '候補生成待ち',
+    'generating-candidates': '候補生成中',
+    'awaiting-approval': '候補選択待ち',
+    'building-identity-pack': '設定画を作成中',
+    existing: '登録済み',
+    'needs-candidates': '候補が必要',
+    ready: '本編生成OK',
+    failed: '要再実行',
+    archived: 'アーカイブ'
+  }[status] || status || '未設定'
+}
+
+function characterReferencePreviewUrl(referencePath) {
+  const normalized = typeof referencePath === 'string' ? referencePath.trim().replace(/\\/g, '/') : ''
+  if (!normalized) return ''
+  const assetMarker = normalized.lastIndexOf('/assets/')
+  const relativePath = normalized.startsWith('assets/')
+    ? normalized.slice('assets/'.length)
+    : assetMarker >= 0
+      ? normalized.slice(assetMarker + '/assets/'.length)
+      : ''
+  if (!relativePath) return ''
+  return `/excalidraw-assets/${relativePath.split('/').map(encodeURIComponent).join('/')}`
+}
+
+function CharacterRegistryToolIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="9" cy="8" r="3" />
+      <path d="M3.5 19c.5-3.3 2.3-5 5.5-5s5 1.7 5.5 5" />
+      <path d="M16 7h5M16 11h5M17 15h4M17 19h4" />
+    </svg>
+  )
+}
 
 function ImageGeneratorToolIcon() {
   return (
@@ -3402,12 +3442,20 @@ function normalizeGeneratorFrameVisuals(elements) {
     const isFrame = isGeneratorFrame(element)
     const isResult = isGeneratedImageResult(element)
     if (!isFrame && !isResult) return element
+    const approvalStatus = element.customData?.buzzassistCharacterApprovalStatus
+    const isApprovedCharacterImage = approvalStatus === 'selected' || approvalStatus === 'approved'
     const spec = isFrame
       ? {
           strokeColor: GENERATOR_FRAME_BORDER_COLOR,
           backgroundColor: GENERATOR_FRAME_FILL_COLOR,
           strokeWidth: GENERATOR_FRAME_STROKE_WIDTH
         }
+      : isApprovedCharacterImage
+        ? {
+            strokeColor: '#22c55e',
+            backgroundColor: 'transparent',
+            strokeWidth: 4
+          }
       : {
           strokeColor: 'transparent',
           backgroundColor: 'transparent',
@@ -3744,6 +3792,12 @@ function buildFrameOverlays(scene) {
     overlays.push({
       id: element.id,
       kind,
+      label: typeof customData.buzzassistCharacterLabel === 'string'
+        ? customData.buzzassistCharacterLabel.trim()
+        : '',
+      approvalStatus: typeof customData.buzzassistCharacterApprovalStatus === 'string'
+        ? customData.buzzassistCharacterApprovalStatus
+        : '',
       isSelected: selectedIds.has(element.id),
       outputAsset: kind === 'silenceCut' ? (customData.silenceCutOutputAsset || null) : null,
       // MCP/batch jobs mark their placeholder frames so the browser shows
@@ -3763,6 +3817,10 @@ function buildFrameOverlays(scene) {
 
 function getCanvasMediaDisplayName(element, files = {}) {
   const customData = element?.customData ?? {}
+  const characterLabel = typeof customData.buzzassistCharacterLabel === 'string'
+    ? customData.buzzassistCharacterLabel.trim()
+    : ''
+  if (characterLabel) return characterLabel
   const file = element?.fileId ? files[element.fileId] : null
   const kind = canvasAssetKindFromElement(element)
   const fileName =
@@ -4998,6 +5056,89 @@ export default function App() {
       window.setTimeout(() => setChatSendStatus(''), 3200)
     }
   }, [])
+
+  const [characterManagerOpen, setCharacterManagerOpen] = useState(false)
+  const [characterManagerLoading, setCharacterManagerLoading] = useState(false)
+  const [characterManagerError, setCharacterManagerError] = useState('')
+  const [characterManagerStatus, setCharacterManagerStatus] = useState('')
+  const [characterRegistry, setCharacterRegistry] = useState({ characters: [], voices: [] })
+  const [characterWorkflows, setCharacterWorkflows] = useState([])
+
+  const refreshCharacterManager = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setCharacterManagerLoading(true)
+    setCharacterManagerError('')
+    try {
+      const [registryResponse, workflowResponse] = await Promise.all([
+        canvasFetch(CHARACTER_REGISTRY_ENDPOINT),
+        canvasFetch(CHARACTER_WORKFLOW_ENDPOINT)
+      ])
+      const [registryPayload, workflowPayload] = await Promise.all([
+        registryResponse.json().catch(() => ({})),
+        workflowResponse.json().catch(() => ({}))
+      ])
+      if (!registryResponse.ok) throw new Error(registryPayload.error || 'キャラ台帳を読み込めませんでした。')
+      if (!workflowResponse.ok) throw new Error(workflowPayload.error || 'キャラ制作状況を読み込めませんでした。')
+      setCharacterRegistry({
+        characters: Array.isArray(registryPayload.characters) ? registryPayload.characters : [],
+        voices: Array.isArray(registryPayload.voices) ? registryPayload.voices : []
+      })
+      setCharacterWorkflows(Array.isArray(workflowPayload.workflows) ? workflowPayload.workflows : [])
+    } catch (error) {
+      setCharacterManagerError(error.message || 'キャラ台帳を読み込めませんでした。')
+    } finally {
+      if (!silent) setCharacterManagerLoading(false)
+    }
+  }, [])
+
+  const openCharacterManager = useCallback(() => {
+    setOpenMenu(null)
+    setCharacterManagerStatus('')
+    setCharacterManagerOpen(true)
+  }, [])
+
+  useEffect(() => {
+    if (!characterManagerOpen) return
+    refreshCharacterManager()
+  }, [characterManagerOpen, refreshCharacterManager])
+
+  useEffect(() => {
+    if (!characterManagerOpen) return undefined
+    const intervalId = window.setInterval(() => refreshCharacterManager({ silent: true }), 3000)
+    return () => window.clearInterval(intervalId)
+  }, [characterManagerOpen, refreshCharacterManager])
+
+  const sendCharacterPipelineRequest = useCallback(async (message, pendingText) => {
+    setCharacterManagerStatus(pendingText)
+    let sent = null
+    try {
+      sent = await sendFollowUpThroughHostBridge(message)
+    } catch (error) {
+      console.warn('character pipeline host bridge failed:', error)
+    }
+    if (!sent?.sent) {
+      sent = await sendToChatApp({ app: 'codex', autoSend: true, text: message })
+    }
+    setCharacterManagerStatus(sent?.sent ? 'Codexへ依頼しました' : sent?.copied || sent?.ok ? '依頼文をコピーしました' : '依頼を送れませんでした')
+    return sent
+  }, [sendToChatApp])
+
+  const requestCharacterCandidates = useCallback((workflow) => {
+    const message = [
+      `BuzzAssistのキャラ制作ワークフロー「${workflow.id}」で、未生成の新キャラ候補を生成してください。`,
+      `generate_character_candidatesを使い、各キャラ${workflow.candidateCount || 3}案、モデル${workflow.model || 'gpt-image-2-codex'}、比率${workflow.aspectRatio || '16:9'}、解像度${workflow.imageSize || '2K'}、品質${workflow.quality || 'high'}でキャンバスにGenerating枠から生成してください。`,
+      '生成後は候補をキャラごとに比較できる状態にして、私の選択を待ってください。'
+    ].join('\n')
+    return sendCharacterPipelineRequest(message, '候補生成を依頼中…')
+  }, [sendCharacterPipelineRequest])
+
+  const requestCharacterApproval = useCallback((workflow, cast, candidate) => {
+    const message = [
+      `BuzzAssistのキャラ制作ワークフロー「${workflow.id}」で、キャラ「${cast.name}」（castId: ${cast.id}）の候補${candidate.index}（candidateId: ${candidate.id}）を採用します。`,
+      'approve_character_candidateを使い、この候補を参照して表情・顔角度シートを生成し、2枚の設定画をキャラ台帳へ登録してください。',
+      `生成設定はワークフローと同じモデル${workflow.model || 'gpt-image-2-codex'}、比率${workflow.aspectRatio || '16:9'}、解像度${workflow.imageSize || '2K'}、品質${workflow.quality || 'high'}を使ってください。`
+    ].join('\n')
+    return sendCharacterPipelineRequest(message, `${cast.name}の候補${candidate.index}を採用中…`)
+  }, [sendCharacterPipelineRequest])
 
   const copyHermesGrokSetupPrompt = useCallback(async () => {
     setChatSendStatus('sending')
@@ -10023,8 +10164,155 @@ export default function App() {
           </div>
         </div>
       ) : null}
+      {characterManagerOpen ? (
+        <div
+          className="character-manager-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label="キャラ台帳"
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget) setCharacterManagerOpen(false)
+          }}
+        >
+          <section className="character-manager-panel" onPointerDown={(event) => event.stopPropagation()}>
+            <header className="character-manager-header">
+              <div>
+                <div className="character-manager-eyebrow">BuzzAssist</div>
+                <h2>キャラ台帳</h2>
+                <p>台本から候補を作り、採用した2枚の設定画だけを本編へ使います。</p>
+              </div>
+              <div className="character-manager-header-actions">
+                <button type="button" onClick={() => refreshCharacterManager()} disabled={characterManagerLoading}>更新</button>
+                <button type="button" className="character-manager-close" aria-label="閉じる" onClick={() => setCharacterManagerOpen(false)}>
+                  <CloseIcon />
+                </button>
+              </div>
+            </header>
+
+            <div className="character-manager-summary">
+              <span><strong>{characterRegistry.characters.length}</strong> 登録済み</span>
+              <span><strong>{characterWorkflows.length}</strong> 制作ワークフロー</span>
+              <span><strong>{characterWorkflows.reduce((total, workflow) => total + (workflow.cast || []).filter((cast) => cast.status === 'awaiting-approval').length, 0)}</strong> 選択待ち</span>
+            </div>
+
+            {characterManagerError ? <div className="character-manager-error">{characterManagerError}</div> : null}
+            {characterManagerStatus ? <div className="character-manager-status">{characterManagerStatus}</div> : null}
+            {characterManagerLoading ? <div className="character-manager-loading">読み込み中…</div> : null}
+
+            <div className="character-manager-body">
+              <section className="character-manager-section">
+                <div className="character-manager-section-title">
+                  <h3>制作中</h3>
+                  <span>台本 → 候補 → 採用 → 表情シート → 本編</span>
+                </div>
+                {characterWorkflows.length === 0 ? (
+                  <div className="character-manager-empty">まだ制作ワークフローはありません。Codexへ台本を渡すとここに表示されます。</div>
+                ) : (
+                  <div className="character-workflow-list">
+                    {characterWorkflows.slice().reverse().map((workflow) => {
+                      const needsCandidates = (workflow.cast || []).some((cast) => cast.status === 'needs-candidates' || cast.status === 'failed')
+                      return (
+                        <article className="character-workflow-card" key={workflow.id}>
+                          <div className="character-workflow-head">
+                            <div>
+                              <strong>{workflow.title}</strong>
+                              <span>{workflow.episodeId || workflow.id}</span>
+                            </div>
+                            <span className={`character-status is-${workflow.status}`}>{characterPipelineStatusLabel(workflow.status)}</span>
+                          </div>
+                          {needsCandidates ? (
+                            <button type="button" className="character-workflow-generate" onClick={() => requestCharacterCandidates(workflow)}>
+                              新キャラを各{workflow.candidateCount || 3}案生成
+                            </button>
+                          ) : null}
+                          <div className="character-cast-list">
+                            {(workflow.cast || []).map((cast) => (
+                              <div className="character-cast-row" key={cast.id}>
+                                <div className="character-cast-head">
+                                  <div>
+                                    <strong>{cast.name}</strong>
+                                    <span>{cast.role === 'fixed' ? 'チャンネル共通' : 'この動画専用'}</span>
+                                  </div>
+                                  <span className={`character-status is-${cast.status}`}>{characterPipelineStatusLabel(cast.status)}</span>
+                                </div>
+                                {cast.candidates?.length ? (
+                                  <div className="character-candidate-grid">
+                                    {cast.candidates.map((candidate) => (
+                                      <div className={`character-candidate-card is-${candidate.status}`} key={candidate.id}>
+                                        <div className="character-candidate-image">
+                                          {candidate.assetUrl ? <img src={candidate.assetUrl} alt={`${cast.name} 候補${candidate.index}`} /> : <span>{characterPipelineStatusLabel(candidate.status)}</span>}
+                                        </div>
+                                        <div className="character-candidate-foot">
+                                          <span>候補{candidate.index}</span>
+                                          {candidate.status === 'generated' ? (
+                                            <button type="button" onClick={() => requestCharacterApproval(workflow, cast, candidate)}>これを採用</button>
+                                          ) : candidate.status === 'selected' ? <strong>採用済み</strong> : null}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : null}
+                              </div>
+                            ))}
+                          </div>
+                        </article>
+                      )
+                    })}
+                  </div>
+                )}
+              </section>
+
+              <section className="character-manager-section">
+                <div className="character-manager-section-title">
+                  <h3>登録済みキャラ</h3>
+                  <span>本編生成でキャラIDを指定できます</span>
+                </div>
+                {characterRegistry.characters.length === 0 ? (
+                  <div className="character-manager-empty">採用済みキャラはまだいません。</div>
+                ) : (
+                  <div className="character-registry-grid">
+                    {characterRegistry.characters.map((character) => (
+                      <article className="character-registry-card" key={character.id}>
+                        <div className="character-registry-thumbs">
+                          {(character.referenceImagePaths || []).slice(0, 2).map((path, index) => {
+                            const previewUrl = characterReferencePreviewUrl(path)
+                            return previewUrl
+                              ? <img key={`${path}-${index}`} src={previewUrl} alt="" />
+                              : <span key={`${path}-${index}`} aria-label="参照画像を表示できません" />
+                          })}
+                        </div>
+                        <strong>{character.name}</strong>
+                        <code>{character.id}</code>
+                        <span>{character.role === 'fixed' ? 'チャンネル共通' : character.episodeId || '動画専用'}</span>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
+          </section>
+        </div>
+      ) : null}
       {api ? (
         <div className="lovart-ai-rail">
+          <button
+            type="button"
+            className="lovart-ai-button"
+            aria-label="キャラ台帳"
+            data-lovart-tooltip="キャラ台帳"
+            data-lovart-action="character-registry"
+            onPointerDown={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+            }}
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              openCharacterManager()
+            }}
+          >
+            <CharacterRegistryToolIcon />
+          </button>
           <button
             type="button"
             className="lovart-ai-button"
@@ -10165,7 +10453,7 @@ export default function App() {
         const isGenerating = generatingFrameIds.has(overlay.id) || overlay.remoteGenerating
         const isVideo = overlay.kind === 'video'
         const isUtilityFrame = overlay.kind === 'subtitle' || overlay.kind === 'silenceCut'
-        const overlayTitle =
+        const overlayTitle = overlay.label || (
           overlay.kind === 'video'
             ? 'Video Generator'
             : overlay.kind === 'subtitle'
@@ -10175,6 +10463,7 @@ export default function App() {
                 : overlay.kind === 'lovart'
                   ? 'Lovart Generator'
                   : 'Image Generator'
+        )
         const overlayMetrics = getFrameOverlayMetrics(overlay.width, overlay.height)
         const showFrameHeader = overlayMetrics.showHeader
         return (

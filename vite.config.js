@@ -20,6 +20,7 @@ import {
 import { getBuzzAssistAuthStatus, loginBuzzAssistViaBrowser, resolveAuthFilePath } from './lib/buzzassistApi.mjs'
 import { FOCUS_REQUEST_FILE_NAME, OFFICIAL_EXCALIDRAW_README, clearFrameGeneratingFlags, collectCanvasRecordedFileNames, createExcalidrawView, insertExcalidrawImage, insertExcalidrawSilenceCutResult, insertExcalidrawSubtitle, insertExcalidrawVideo, insertExcalidrawMediaBatch, loadScene, performCanvasMaintenance, stripAssetBackedFileDataURLs, syncDeletedCanvasAssets, syncMissingCanvasAssets } from './lib/canvasScene.mjs'
 import { readCharacterRegistry, writeCharacterRegistry } from './lib/characterRegistry.mjs'
+import { prepareCharacterWorkflow, readCharacterWorkflowStore } from './lib/characterPipeline.mjs'
 import { streamZipStore } from './lib/zipStore.mjs'
 import { generateSubtitleSrt, refineSubtitleFromPlan, writeSubtitleWordsSidecar } from './lib/subtitleGeneration.mjs'
 import { silenceCutVideo } from './lib/tempoCut.mjs'
@@ -1866,6 +1867,38 @@ function configureCanvasServer(server) {
         }
       })
 
+      server.middlewares.use('/api/character-workflows/analyze', async (req, res) => {
+        try {
+          if (req.method !== 'POST') {
+            res.statusCode = 405
+            res.setHeader('allow', 'POST')
+            res.end()
+            return
+          }
+          const body = JSON.parse(await readRequestBody(req))
+          const workflow = await prepareCharacterWorkflow({ canvasDir, ...body })
+          sendJson(res, 200, { ok: true, workflow })
+          broadcastCanvasChanged([join(canvasDir, 'character-workflows.json')])
+        } catch (error) {
+          sendJson(res, 500, { error: error.message })
+        }
+      })
+
+      server.middlewares.use('/api/character-workflows', async (req, res) => {
+        try {
+          if (req.method !== 'GET') {
+            res.statusCode = 405
+            res.setHeader('allow', 'GET')
+            res.end()
+            return
+          }
+          const store = await readCharacterWorkflowStore({ canvasDir })
+          sendJson(res, 200, { ok: true, ...store })
+        } catch (error) {
+          sendJson(res, 500, { error: error.message })
+        }
+      })
+
       server.middlewares.use('/api/generation-capabilities', async (req, res) => {
         if (req.method !== 'GET') {
           res.statusCode = 405
@@ -2520,7 +2553,9 @@ function configureCanvasServer(server) {
           }
           if (req.method === 'PUT' || req.method === 'POST') {
             const body = JSON.parse((await readRequestBody(req)) || '{}')
-            sendJson(res, 200, await writeCharacterRegistry({ canvasDir }, body))
+            const registry = await writeCharacterRegistry({ canvasDir }, body)
+            sendJson(res, 200, registry)
+            broadcastCanvasChanged([join(canvasDir, 'characters.json')])
             return
           }
           res.statusCode = 405

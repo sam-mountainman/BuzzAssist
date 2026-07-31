@@ -311,6 +311,11 @@ BuzzAssist は内部的に2つの Excalidraw 系MCPエントリを持ちます�
 - `generate_excalidraw_video`: 動画生成してキャンバスへ挿入
 - `generate_excalidraw_images_batch`: 複数の画像生成フレームを作って順次生成
 - `generate_excalidraw_videos_batch`: 複数の動画生成フレームを作って順次生成
+- `analyze_character_script`: 台本から登場人物を抽出し、固定キャラ台帳と照合
+- `get_character_pipeline`: キャラ候補・採用・登録・本編生成の進行状況を取得
+- `generate_character_candidates`: 新キャラごとに既定3案の設定シートをキャンバスへ生成
+- `approve_character_candidate`: 採用案から表情・顔角度シートを生成し、2枚の設定画をキャラ台帳へ登録
+- `generate_character_storyboard`: 採用済みキャラIDを固定して本編・絵コンテ画像を生成
 - `generate_excalidraw_subtitles`: 音声から日本語SRTを生成してカード配置
 - `silence_cut_excalidraw_video`: Premiere XMLまたは動画から無音カットXMLを作成
 - `prepare_canvas_attachments`: キャンバスで選択中の画像・動画・SRT・XMLを現在のチャットへ添付bundleとして読み込む
@@ -441,6 +446,16 @@ HTTPでも同じbackendを使えます。
 POST /api/generate/images/batch
 POST /api/generate/videos/batch
 ```
+
+## キャラクター制作パイプライン
+
+台本から抽出した新キャラは、いきなり本編へ使いません。`canvas/character-workflows.json` に制作中の候補を保存し、キャラごとに3案をキャンバスで比較します。ユーザーが1案を採用すると、その案を参照した表情・顔角度シートを追加生成し、採用済みの2枚だけを `canvas/characters.json` と `canvas/assets/characters/` へ登録します。
+
+`fixed` はチャンネル共通の助っ人・サブキャラ、`per-video` はその動画だけの主人公・敵です。後者には `episodeId` が付き、別動画の同名人物を誤って使い回しません。本編生成時は `characterIds` ごとに参照画像と不変条件が割り当てられ、複数人シーンには顔・髪・服を混ぜないidentity lockが自動で追加されます。
+
+キャンバス右側の「キャラ台帳」から、制作中の3案、選択待ち、採用済み2枚、固定／動画専用の区分を確認できます。
+
+設計メモ: [docs/character-pipeline-r1-architecture.md](docs/character-pipeline-r1-architecture.md)
 
 ## ホスト構成ファイル
 
