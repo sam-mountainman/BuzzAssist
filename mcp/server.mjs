@@ -22,6 +22,7 @@ import {
   isGrokImageModel,
   isGrokVideoModel,
   mergeReferenceImagePaths,
+  nextBatchChunkOrigin,
   normalizeCodexImageCount,
   normalizeGrokGenerationCount,
   normalizeMediaBatchColumns,
@@ -44,6 +45,7 @@ import {
   syncDeletedCanvasAssets,
   writeCanvasFocusRequest,
 } from "../lib/canvasScene.mjs";
+import { readCharacterRegistry, resolveCharacterReferencePaths } from "../lib/characterRegistry.mjs";
 import { refineSilenceCutFromPlan, silenceCutVideo } from "../lib/tempoCut.mjs";
 import { estimateCreditsForJob } from "../lib/mediaCredits.mjs";
 import { isFalImageModel, isFalVideoModel, previewFalImageRequest, previewFalVideoRequest } from "../lib/falMediaGeneration.mjs";
@@ -125,6 +127,7 @@ const MEDIA_GENERATION_AGENT_INSTRUCTIONS = [
   "For Codex and Claude Code interactive UI, always try the host in-app browser/browser tool first for the local BUZZASSIST_CANVAS_URL and use MCP tools for stable reads/writes. Use the explicit openExternalBrowser fallback only when that host does not expose an in-app Browser capability. render_buzzassist_canvas_widget remains an experimental MCP Apps entrypoint only; do not use it for normal Codex or Claude Code work unless the user explicitly asks to test the widget.",
   "To attach selected canvas images/videos/SRT/XML into the current chat, use prepare_canvas_attachments or read_canvas_attachment_bundle. Do not rely on OS GUI paste automation for media attachments.",
   "When the current chat includes an attached image and the user identifies it as a character, subject, product, or style reference, resolve its absolute local path and pass it in referenceImagePaths. For generate_excalidraw_images_batch, pass shared chat references once in the top-level referenceImagePaths field so every job inherits them; job-specific referenceImagePaths are merged with the shared list. Do not rely on the model merely seeing the chat attachment, and do not omit the path from the generation tool call. If the attachment role is ambiguous, ask whether it is a subject/style reference or another input before generating.",
+  "The project may keep a character registry at canvas/characters.json (キャラ台帳) mapping character ids to reference images, style prompts, and voices. When the user names a registered character, pass characterIds on generate_excalidraw_image or generate_excalidraw_images_batch instead of re-attaching the same reference images; the server resolves them into referenceImagePaths. Register new recurring characters there (via /api/characters or by editing the file) rather than repeating loose reference paths across sessions.",
 ].join(" ");
 
 function collectFocusElementIds(value, output = new Set()) {
@@ -1335,14 +1338,30 @@ async function generateExcalidrawImagesBatch(args = {}) {
   for (const job of jobs) {
     if (!nonEmptyString(job?.prompt)) throw new Error("Each image job requires a prompt.");
   }
+  const characterIdsRequested = [
+    args.characterIds,
+    args.character_ids,
+    ...jobs.map((job) => job?.characterIds ?? job?.character_ids),
+  ].some((list) => Array.isArray(list) && list.length > 0);
+  const characterRegistry = characterIdsRequested ? await readCharacterRegistry(args) : null;
+  const characterReferencePathsFor = (ids, aliasIds) =>
+    characterRegistry
+      ? resolveCharacterReferencePaths(
+          characterRegistry,
+          [...(Array.isArray(ids) ? ids : []), ...(Array.isArray(aliasIds) ? aliasIds : [])],
+          { projectDir: args.projectDir, canvasDir: args.canvasDir },
+        )
+      : [];
   const sharedReferenceImagePaths = mergeReferenceImagePaths(
     args.referenceImagePaths,
     args.reference_image_paths,
+    characterReferencePathsFor(args.characterIds, args.character_ids),
   );
   const referenceImagePathsForJob = (job = {}) => mergeReferenceImagePaths(
     sharedReferenceImagePaths,
     job.referenceImagePaths,
     job.reference_image_paths,
+    characterReferencePathsFor(job.characterIds, job.character_ids),
   );
   const customDataForJob = (job = {}) => {
     const customData = job.customData && typeof job.customData === "object" ? job.customData : {};
@@ -1396,6 +1415,7 @@ async function generateExcalidrawImagesBatch(args = {}) {
   const dryRun = Boolean(args.dryRun);
   const results = new Array(jobs.length);
   const chunks = [];
+  let chunkOrigin = null;
 
   for (const [chunkIndex, chunk] of chunkMediaBatchJobs(jobs, DEFAULT_MEDIA_BATCH_CHUNK_SIZE).entries()) {
     const chunkJobs = chunk.jobs;
@@ -1408,7 +1428,9 @@ async function generateExcalidrawImagesBatch(args = {}) {
           matchAnchor: args.matchAnchor,
           replaceAnchor: args.replaceAnchor,
         }
-      : {};
+      : chunkOrigin
+        ? { x: chunkOrigin.x, y: chunkOrigin.y }
+        : {};
     const frames = dryRun
       ? []
       : await insertGeneratorFrameBatch({
@@ -1429,6 +1451,7 @@ async function generateExcalidrawImagesBatch(args = {}) {
           selectCreated: args.selectCreated === true,
           focusCreated: false,
         });
+    chunkOrigin = nextBatchChunkOrigin(frames, gap, chunkOrigin);
 
     await requestGeneratingFramesFocus(args, frames);
 
@@ -1571,6 +1594,7 @@ async function generateExcalidrawVideosBatch(args = {}) {
   const dryRun = Boolean(args.dryRun);
   const results = new Array(jobs.length);
   const chunks = [];
+  let chunkOrigin = null;
 
   for (const [chunkIndex, chunk] of chunkMediaBatchJobs(jobs, DEFAULT_MEDIA_BATCH_CHUNK_SIZE).entries()) {
     const chunkJobs = chunk.jobs;
@@ -1583,7 +1607,9 @@ async function generateExcalidrawVideosBatch(args = {}) {
           matchAnchor: args.matchAnchor,
           replaceAnchor: args.replaceAnchor,
         }
-      : {};
+      : chunkOrigin
+        ? { x: chunkOrigin.x, y: chunkOrigin.y }
+        : {};
     const frames = dryRun
       ? []
       : await insertGeneratorFrameBatch({
@@ -1605,6 +1631,7 @@ async function generateExcalidrawVideosBatch(args = {}) {
           selectCreated: args.selectCreated === true,
           focusCreated: false,
         });
+    chunkOrigin = nextBatchChunkOrigin(frames, gap, chunkOrigin);
 
     await requestGeneratingFramesFocus(args, frames);
 
@@ -1994,6 +2021,8 @@ function toolDefinitions() {
           detailRendering: { type: "boolean", description: "Midjourney 高精細レンダリング (high-detail rendering). Lovart route only." },
           referenceImagePaths: { type: "array", items: { type: "string" }, description: "Absolute local character, subject, product, or style reference image paths. Passed to every supported generation route (including ChatGPT/Codex, Grok, BuzzAssist, and Lovart)." },
           reference_image_paths: { type: "array", items: { type: "string" }, description: "Alias for referenceImagePaths." },
+          characterIds: { type: "array", items: { type: "string" }, description: "Character ids (or names) from the canvas/characters.json registry. Each id resolves to that character's registered reference images, which are merged into referenceImagePaths so the cast keeps a consistent appearance." },
+          character_ids: { type: "array", items: { type: "string" }, description: "Alias for characterIds." },
           payloadPreview: { type: "boolean", description: "Return the resolved endpoint, request payload, and estimated BuzzAssist credits without generating." },
           placement: { type: "string", enum: ["right", "left", "below", "replace", "inside"] },
           margin: { type: "number" },
@@ -2101,6 +2130,8 @@ function toolDefinitions() {
                 quality: { type: "string", description: "Quality hint. high maps to Grok quality mode." },
                 referenceImagePaths: { type: "array", items: { type: "string" }, description: "Optional job-specific local reference images. Merged with the batch-level shared references." },
                 reference_image_paths: { type: "array", items: { type: "string" }, description: "Alias for the job-specific referenceImagePaths." },
+                characterIds: { type: "array", items: { type: "string" }, description: "Job-specific character ids from canvas/characters.json. Resolved reference images merge with the shared batch references." },
+                character_ids: { type: "array", items: { type: "string" }, description: "Alias for the job-specific characterIds." },
                 fileName: { type: "string", description: "Optional destination filename under canvas/assets/." },
                 customData: { type: "object", description: "Additional Excalidraw element customData." },
               },
@@ -2110,6 +2141,8 @@ function toolDefinitions() {
           },
           referenceImagePaths: { type: "array", items: { type: "string" }, description: "Shared absolute local character, subject, product, or style reference image paths inherited by every image job in this batch." },
           reference_image_paths: { type: "array", items: { type: "string" }, description: "Alias for the shared batch referenceImagePaths." },
+          characterIds: { type: "array", items: { type: "string" }, description: "Shared character ids from canvas/characters.json. Their registered reference images are inherited by every image job in this batch." },
+          character_ids: { type: "array", items: { type: "string" }, description: "Alias for the shared batch characterIds." },
           columns: { type: "number", description: "Grid columns. Defaults to 5 (10-job chunks render as 2 rows × 5 columns)." },
           gap: { type: "number", description: "Canvas units between grid cells. Defaults to 24." },
           concurrency: { type: "number", description: "Parallel generations per chunk. Defaults to 10 and is capped at 10." },

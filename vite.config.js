@@ -19,6 +19,7 @@ import {
 } from './lib/mediaGeneration.mjs'
 import { getBuzzAssistAuthStatus, loginBuzzAssistViaBrowser, resolveAuthFilePath } from './lib/buzzassistApi.mjs'
 import { FOCUS_REQUEST_FILE_NAME, OFFICIAL_EXCALIDRAW_README, clearFrameGeneratingFlags, collectCanvasRecordedFileNames, createExcalidrawView, insertExcalidrawImage, insertExcalidrawSilenceCutResult, insertExcalidrawSubtitle, insertExcalidrawVideo, insertExcalidrawMediaBatch, loadScene, performCanvasMaintenance, stripAssetBackedFileDataURLs, syncDeletedCanvasAssets, syncMissingCanvasAssets } from './lib/canvasScene.mjs'
+import { readCharacterRegistry, writeCharacterRegistry } from './lib/characterRegistry.mjs'
 import { streamZipStore } from './lib/zipStore.mjs'
 import { generateSubtitleSrt, refineSubtitleFromPlan, writeSubtitleWordsSidecar } from './lib/subtitleGeneration.mjs'
 import { silenceCutVideo } from './lib/tempoCut.mjs'
@@ -2500,6 +2501,26 @@ function configureCanvasServer(server) {
             await mkdir(canvasDir, { recursive: true })
             await writeFile(glossaryFile, `${JSON.stringify({ terms }, null, 2)}\n`)
             sendJson(res, 200, { terms })
+            return
+          }
+          res.statusCode = 405
+          res.setHeader('allow', 'GET, PUT')
+          res.end()
+        } catch (error) {
+          sendJson(res, 500, { error: error.message })
+        }
+      })
+
+      // Channel character registry (キャラ台帳): canvas/characters.json.
+      server.middlewares.use('/api/characters', async (req, res) => {
+        try {
+          if (req.method === 'GET') {
+            sendJson(res, 200, await readCharacterRegistry({ canvasDir }))
+            return
+          }
+          if (req.method === 'PUT' || req.method === 'POST') {
+            const body = JSON.parse((await readRequestBody(req)) || '{}')
+            sendJson(res, 200, await writeCharacterRegistry({ canvasDir }, body))
             return
           }
           res.statusCode = 405

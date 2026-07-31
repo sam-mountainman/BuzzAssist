@@ -90,6 +90,24 @@ AI holders are rectangle elements with:
 }
 ```
 
+## キャラ台帳（canvas/characters.json）
+
+- プロジェクトには登場キャラクター・小道具・舞台の台帳 `canvas/characters.json` を置ける。各エントリは `{ id, name, kind: "character"|"prop"|"location", role: "fixed"|"per-video", referenceImagePaths, stylePrompt, notes }`
+- ユーザーが台帳に登録済みのキャラ名を出したら、参照画像を再添付せず `characterIds`（バッチはトップレベル or ジョブ個別）を渡す。サーバーが台帳を引いて設定画を `referenceImagePaths` に自動マージする
+- 新しい固定キャラ・武器・舞台を登録するときは、`reference-sheet-prompts.md` のテンプレートで設定シートを清書モデル（GPT Image 2 / Nano Banana 2 等）で生成し、`canvas/assets/characters/` に保存してから台帳にパスを登録する
+- 動画単位の主人公（毎回変わるが1本の中では固定）は、制作開始時に型からシートを生成して `role: "per-video"` で一時登録し、その動画の生成にだけ `characterIds` で参照させる
+- 未知のIDを渡すと登録済みID一覧つきのエラーが返る。勝手に近いIDへ読み替えず、ユーザーに確認するか台帳へ登録してから再実行する
+
+```json
+{
+  "characterIds": ["sukketo-ojisan"],
+  "jobs": [
+    { "prompt": "助っ人のおじさんが主人公を励ますシーン", "model": "gpt-image-2-codex", "aspectRatio": "16:9" }
+  ],
+  "confirmedSettings": true
+}
+```
+
 ## Workflow
 
 1. Read the selection with the plugin `get_excalidraw_selection` tool, passing
