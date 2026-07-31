@@ -149,8 +149,9 @@ test("agent batch generation defaults to 2 rows x 5 columns with 10 parallel job
   assert.match(appSource, /resolveGatingImageModel\(model\) === 'gpt-image-2-codex'/);
   assert.match(mcpSource, /GPT Image 2 on the ChatGPT\/Codex route and Grok Imagine on the local Grok route, image count is 1-10/);
   assert.match(mcpSource, /jobs: Array\.from\(\{ length: requestedCount \}/);
-  assert.match(mcpSource, /const sharedReferenceImagePaths = mergeReferenceImagePaths\(/);
-  assert.match(mcpSource, /const referenceImagePathsForJob = \(job = \{\}\) => mergeReferenceImagePaths\(\s*sharedReferenceImagePaths,\s*job\.referenceImagePaths,\s*job\.reference_image_paths/);
+  assert.match(mcpSource, /const sharedExplicitReferenceImagePaths = mergeReferenceImagePaths\(/);
+  assert.match(mcpSource, /const explicitReferenceImagePathsForJob = \(job = \{\}\) => mergeReferenceImagePaths\(\s*sharedExplicitReferenceImagePaths,\s*job\.referenceImagePaths,\s*job\.reference_image_paths/);
+  assert.match(mcpSource, /const referenceImagePathsForJob = \(job = \{\}\) => \{[\s\S]*return mergeReferenceImagePaths\(\s*explicitReferenceImagePathsForJob\(job\),\s*\.\.\.bindings\.map/);
   assert.match(mcpSource, /referenceImagePaths: referenceImagePathsForJob\(job\)/);
   assert.match(mcpSource, /Shared absolute local character, subject, product, or style reference image paths inherited by every image job/);
   assert.match(mcpSource, /generatorReferenceImages: \[/);

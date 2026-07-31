@@ -1,0 +1,4 @@
+interface:
+  display_name: "Manga Speech Bubbles R3"
+  short_description: "Place editable manga speech bubbles on the Excalidraw canvas"
+  default_prompt: "Use $buzzassist:excalidraw-speech-bubbles to place editable Japanese manga speech bubbles on the selected canvas artwork."
