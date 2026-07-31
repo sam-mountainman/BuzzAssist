@@ -220,7 +220,9 @@ function buildImagePrompt(payload) {
   if (aspectRatio) lines.push(`Aspect ratio: ${aspectRatio}.`);
   if (imageSize) lines.push(`Image size: ${imageSize}.`);
   if (quality && quality.toLowerCase() !== "auto") lines.push(`Quality: ${quality}.`);
-  if (hasReferenceImages(payload)) lines.push("Use the attached reference image inputs when they help.");
+  if (hasReferenceImages(payload)) {
+    lines.push("Treat every attached image as a binding visual reference. Preserve the depicted character, person, product, or subject identity and recognizable appearance across the output; when an attachment is a style reference, match that style. Do not ignore or replace the references with unrelated subjects.");
+  }
   return lines.join("\n");
 }
 

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +19,7 @@ import {
   isGrokImageModel,
   isGrokVideoModel,
   isRetryableGrokRateLimit,
+  mergeReferenceImagePaths,
   normalizeCodexImageCount,
   normalizeGrokImageResolution,
   normalizeGrokGenerationCount,
@@ -27,12 +28,47 @@ import {
   sanitizeGrokVideoDuration,
 } from "../lib/mediaGeneration.mjs";
 
+test("shared and job-specific reference image paths merge without omissions or duplicates", () => {
+  assert.deepEqual(
+    mergeReferenceImagePaths(
+      [" /tmp/character.png ", "/tmp/style.png"],
+      ["/tmp/character.png", "", null],
+      undefined,
+      ["/tmp/pose.png"],
+    ),
+    ["/tmp/character.png", "/tmp/style.png", "/tmp/pose.png"],
+  );
+});
+
 test("media batch defaults to 10 concurrent jobs laid out as 2 rows x 5 columns", () => {
   assert.equal(DEFAULT_MEDIA_BATCH_CONCURRENCY, 10);
   assert.equal(DEFAULT_MEDIA_BATCH_COLUMNS, 5);
   assert.equal(DEFAULT_MEDIA_BATCH_CHUNK_SIZE, 10);
   assert.equal(normalizeMediaBatchConcurrency(undefined), 10);
   assert.equal(normalizeMediaBatchColumns(undefined), 5);
+});
+
+test("image and video batch tools expose a no-write payload preview", async () => {
+  const source = await readFile(new URL("../mcp/server.mjs", import.meta.url), "utf8");
+
+  assert.match(
+    source,
+    /async function generateExcalidrawImagesBatch[\s\S]*?if \(args\.payloadPreview\)[\s\S]*?buildGenerationPayloadPreview\("image"/,
+  );
+  assert.match(
+    source,
+    /async function generateExcalidrawVideosBatch[\s\S]*?if \(args\.payloadPreview\)[\s\S]*?buildGenerationPayloadPreview\("video"/,
+  );
+  assert.equal(
+    source.match(/aggregate estimated BuzzAssist credits without generating or changing the canvas/g)?.length,
+    2,
+  );
+  assert.match(
+    source,
+    /CANVAS_AUTO_OPEN_TOOLS\.has\(params\?\.name\) && params\.arguments\?\.payloadPreview !== true/,
+  );
+  assert.match(source, /Payload preview for \$\{result\.total\} image job/);
+  assert.match(source, /Payload preview for \$\{result\.total\} video job/);
 });
 
 test("ChatGPT GPT Image 2 returns every requested independent image", async () => {

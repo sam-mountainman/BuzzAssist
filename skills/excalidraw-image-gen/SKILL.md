@@ -70,6 +70,26 @@ AI holders are rectangle elements with:
 
 ユーザーがモデルまたは実行先を変更したら、対応しなくなった後続設定だけを破棄して質問し直し、引き続き有効な回答は保持します。
 
+## チャット添付の参照画像
+
+- ユーザーがチャットへ画像を添付し、キャラクター・人物・商品・被写体・画風の参照だと明示した場合、その添付の絶対ローカルパスを必ず `referenceImagePaths` に渡す。会話上で画像を見ただけの状態で生成ツールを呼んではいけない
+- 添付の用途が不明な場合だけ、生成前に「被写体／画風の参照」「開始フレーム」「その他」のどれかを確認する
+- 一括生成では、全ジョブへ同じ配列を複製せず、`generate_excalidraw_images_batch` のトップレベル `referenceImagePaths` に共通参照を1回指定する。サーバーが全ジョブへ継承し、ジョブ固有の参照があれば重複を除いて追加する
+- モデルごとの参照画像上限は各生成経路の制約に従う。上限を超える添付を勝手に捨てず、ユーザーに絞り込みを依頼する
+
+```json
+{
+  "referenceImagePaths": [
+    "/absolute/path/to/attached-character-reference.png"
+  ],
+  "jobs": [
+    { "prompt": "同じキャラクターが朝の街を歩く", "model": "gpt-image-2-codex", "aspectRatio": "16:9" },
+    { "prompt": "同じキャラクターがカフェで座る", "model": "gpt-image-2-codex", "aspectRatio": "16:9" }
+  ],
+  "confirmedSettings": true
+}
+```
+
 ## Workflow
 
 1. Read the selection with the plugin `get_excalidraw_selection` tool, passing
