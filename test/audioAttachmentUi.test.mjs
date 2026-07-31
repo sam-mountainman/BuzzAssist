@@ -74,7 +74,8 @@ test("subtitle utility attachments collapse until hover, menu, or attachment", a
   assert.match(appSource, /openCanvasPicker\('subtitleScript'\)/);
   assert.match(appSource, /onOpen=\{rememberGeneratorUploadFrame\}[\s\S]*?onChange=\{handleScriptFileChange\}/);
   assert.match(appSource, /const uploadSelectedResult = pendingGeneratorUploadResultRef\.current/);
-  assert.match(appSource, /const uploadFrameId = restoreGeneratorUploadFrame\(\) \|\| activeFrameIdRef\.current/);
+  assert.match(appSource, /const uploadFrameId = restoreGeneratorUploadFrame\(\)/);
+  assert.doesNotMatch(appSource, /restoreGeneratorUploadFrame\(\) \|\| activeFrameIdRef\.current/);
   assert.match(appSource, /addAssetToFrame\('subtitleScript', \{/);
   assert.match(appSource, /selectedGeneratedResult: uploadFrameId \? null : uploadSelectedResult/);
 });

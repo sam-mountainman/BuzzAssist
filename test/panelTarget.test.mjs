@@ -149,6 +149,11 @@ test("agent batch generation defaults to 2 rows x 5 columns with 10 parallel job
   assert.match(appSource, /resolveGatingImageModel\(model\) === 'gpt-image-2-codex'/);
   assert.match(mcpSource, /GPT Image 2 on the ChatGPT\/Codex route and Grok Imagine on the local Grok route, image count is 1-10/);
   assert.match(mcpSource, /jobs: Array\.from\(\{ length: requestedCount \}/);
+  assert.match(mcpSource, /const sharedReferenceImagePaths = mergeReferenceImagePaths\(/);
+  assert.match(mcpSource, /const referenceImagePathsForJob = \(job = \{\}\) => mergeReferenceImagePaths\(\s*sharedReferenceImagePaths,\s*job\.referenceImagePaths,\s*job\.reference_image_paths/);
+  assert.match(mcpSource, /referenceImagePaths: referenceImagePathsForJob\(job\)/);
+  assert.match(mcpSource, /Shared absolute local character, subject, product, or style reference image paths inherited by every image job/);
+  assert.match(mcpSource, /generatorReferenceImages: \[/);
   assert.match(appSource, /const requestedGenerationCount = kind === 'image'/);
   assert.match(appSource, /videoCount: requestedGenerationCount/);
   assert.match(appSource, /extraAnchorElementIds: extraFrameIds/);
@@ -781,15 +786,21 @@ test("attachments from a generated result panel do not fall back to another fram
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
 
   assert.match(source, /const getAttachmentDestinationFrameId = useCallback\(\(\) => \{/);
-  assert.match(source, /if \(activeFrameIdRef\.current\) return activeFrameIdRef\.current/);
-  assert.match(source, /if \(selectedGeneratedResultRef\.current\) return ''/);
-  assert.match(source, /return lastFocusedFrameIdRef\.current \|\| ''/);
-  assert.match(source, /const frameId = getAttachmentDestinationFrameId\(\)/);
+  assert.match(source, /if \(activeFrameId && isGeneratorFrame\(elementsById\.get\(activeFrameId\)\)\) return activeFrameId/);
+  assert.match(source, /selectedGeneratedResultRef\.current\?\.elementId \|\|[\s\S]*?selectedGeneratedResult\?\.elementId/);
+  assert.match(source, /panelMediaTargetIdFromSelection\(selectedIds, elementsById\)/);
+  assert.match(source, /return isGeneratorFrame\(elementsById\.get\(lastFocusedFrameId\)\) \? lastFocusedFrameId : ''/);
+  assert.match(source, /const frameId = currentResult \? '' : getAttachmentDestinationFrameId\(\)/);
   assert.match(source, /function snapshotSelectedGeneratedResult\(result\)/);
-  assert.match(source, /const selectedGeneratedResult = frameId \? null : snapshotSelectedGeneratedResult\(selectedGeneratedResultRef\.current\)/);
-  assert.match(source, /canvasPickerRef\.current = \{ target, frameId, selectedGeneratedResult \}/);
+  assert.match(source, /const currentResult =[\s\S]*?snapshotSelectedGeneratedResult\(selectedGeneratedResultRef\.current\)[\s\S]*?snapshotSelectedGeneratedResult\(selectedGeneratedResult\)/);
+  assert.match(source, /selectedResultElement[\s\S]*?elementId: selectedResultElement\.id/);
+  assert.match(source, /canvasPickerRef\.current = \{ target, token, frameId, selectedGeneratedResult \}/);
   assert.match(source, /selectedGeneratedResult: restoreResult/);
-  assert.match(source, /const selectedResult = !frameId[\s\S]*?options\.selectedGeneratedResult \|\| selectedGeneratedResultRef\.current/);
+  assert.match(
+    source,
+    /let selectedResult = !frameId[\s\S]*?options\.selectedGeneratedResult \|\|[\s\S]*?attachmentPanelLockRef\.current\?\.selectedGeneratedResult \|\|[\s\S]*?selectedGeneratedResultRef\.current \|\|[\s\S]*?snapshotSelectedGeneratedResult\(selectedGeneratedResult\)/
+  );
+  assert.match(source, /if \(!frameId && !selectedResult\?\.elementId\)[\s\S]*?panelMediaTargetIdFromSelection/);
   assert.match(source, /const restoreResult = picker\.selectedGeneratedResult \|\| null/);
   assert.match(source, /selectedGeneratedResultRef\.current = restoreResult/);
   assert.match(source, /const restoreElementId = restoreFrameId \|\| restoreResult\?\.elementId \|\| ''/);
@@ -801,8 +812,16 @@ test("attachments from a generated result panel do not fall back to another fram
   assert.match(source, /const attachmentLock = attachmentPanelLockRef\.current/);
   assert.match(source, /if \(attachmentLock\.frameId && isGeneratorFrame\(elementsById\.get\(attachmentLock\.frameId\)\)\)/);
   assert.match(source, /attachmentLock\.selectedGeneratedResult\?\.elementId && isPanelMediaTargetElement/);
-  assert.match(source, /const \{ frameId, selectedGeneratedResult \} = beginAttachmentPanelLock\(\)/);
+  assert.match(source, /const \{ token, frameId, selectedGeneratedResult \} = beginAttachmentPanelLock\(\)/);
+  assert.match(source, /for \(const delay of \[0, 80, 240\]\)/);
+  assert.match(source, /attachmentPanelLockRef\.current\?\.token !== picker\.token/);
   assert.match(source, /pendingGeneratorUploadResultRef\.current = selectedGeneratedResult/);
+  assert.match(source, /pendingGeneratorUploadFrameIdRef\.current = ''/);
+  assert.match(source, /pendingGeneratorUploadResultRef\.current = null/);
+  assert.match(source, /const frameId = isGeneratorFrame\(frame\) \? pendingFrameId : ''/);
+  assert.match(source, /const frameId = isGeneratorFrame\(candidateFrame\) \? candidateFrameId : ''/);
+  assert.match(source, /const nextForm = assets\.reduce\([\s\S]*?frameForm[\s\S]*?setFrameForm\(nextForm\)/);
+  assert.doesNotMatch(source, /setFrameForm\(\(current\) => \{\s*nextForm = assets\.reduce/);
   assert.match(source, /releaseAttachmentPanelLockSoon\(\)/);
   assert.match(source, /const updateGeneratedResultElement = useCallback/);
   assert.match(source, /isGeneratedResult\(resultElement\)/);
@@ -863,6 +882,8 @@ test("stale saves cannot mark newer canvas changes as synced", async () => {
   assert.match(source, /const changeVersion = localChangeVersionRef\.current \+ 1/);
   assert.match(source, /localChangeVersionRef\.current = changeVersion/);
   assert.match(source, /saveCanvas\(latestSceneRef\.current \?\? scene, \{ changeVersion \}\)/);
+  assert.match(source, /pendingWrite\?\.result\?\.elementId === result\.elementId/);
+  assert.match(source, /erase the newly attached assets/);
 });
 
 test("deferred internal scene updates only suppress the updateScene echo", async () => {
