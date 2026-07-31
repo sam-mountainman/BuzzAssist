@@ -45,7 +45,26 @@ import {
   syncDeletedCanvasAssets,
   writeCanvasFocusRequest,
 } from "../lib/canvasScene.mjs";
-import { readCharacterRegistry, resolveCharacterReferencePaths } from "../lib/characterRegistry.mjs";
+import {
+  buildCharacterIdentityPrompt,
+  readCharacterRegistry,
+  resolveCharacterBindings,
+} from "../lib/characterRegistry.mjs";
+import {
+  buildCharacterCandidateJobs,
+  buildCharacterStoryboardJobs,
+  buildExpressionSheetJob,
+  finalizeApprovedCharacter,
+  findWorkflowCandidate,
+  findWorkflowCast,
+  getCharacterWorkflow,
+  markCharacterCandidatesGenerating,
+  prepareCharacterWorkflow,
+  readCharacterWorkflowStore,
+  recordCharacterCandidateResults,
+  updateCharacterWorkflow,
+  validateStoryboardCharacterBindings,
+} from "../lib/characterPipeline.mjs";
 import { refineSilenceCutFromPlan, silenceCutVideo } from "../lib/tempoCut.mjs";
 import { estimateCreditsForJob } from "../lib/mediaCredits.mjs";
 import { isFalImageModel, isFalVideoModel, previewFalImageRequest, previewFalVideoRequest } from "../lib/falMediaGeneration.mjs";
@@ -82,6 +101,11 @@ const TOOL_GENERATE_IMAGE = "generate_excalidraw_image";
 const TOOL_GENERATE_VIDEO = "generate_excalidraw_video";
 const TOOL_GENERATE_IMAGES_BATCH = "generate_excalidraw_images_batch";
 const TOOL_GENERATE_VIDEOS_BATCH = "generate_excalidraw_videos_batch";
+const TOOL_ANALYZE_CHARACTER_SCRIPT = "analyze_character_script";
+const TOOL_GET_CHARACTER_PIPELINE = "get_character_pipeline";
+const TOOL_GENERATE_CHARACTER_CANDIDATES = "generate_character_candidates";
+const TOOL_APPROVE_CHARACTER_CANDIDATE = "approve_character_candidate";
+const TOOL_GENERATE_CHARACTER_STORYBOARD = "generate_character_storyboard";
 const TOOL_BUZZASSIST_LOGIN = "buzzassist_login";
 const TOOL_BUZZASSIST_AUTH_STATUS = "buzzassist_auth_status";
 const TOOL_SETUP_HERMES = "setup_hermes_grok";
@@ -128,6 +152,7 @@ const MEDIA_GENERATION_AGENT_INSTRUCTIONS = [
   "To attach selected canvas images/videos/SRT/XML into the current chat, use prepare_canvas_attachments or read_canvas_attachment_bundle. Do not rely on OS GUI paste automation for media attachments.",
   "When the current chat includes an attached image and the user identifies it as a character, subject, product, or style reference, resolve its absolute local path and pass it in referenceImagePaths. For generate_excalidraw_images_batch, pass shared chat references once in the top-level referenceImagePaths field so every job inherits them; job-specific referenceImagePaths are merged with the shared list. Do not rely on the model merely seeing the chat attachment, and do not omit the path from the generation tool call. If the attachment role is ambiguous, ask whether it is a subject/style reference or another input before generating.",
   "The project may keep a character registry at canvas/characters.json (キャラ台帳) mapping character ids to reference images, style prompts, and voices. When the user names a registered character, pass characterIds on generate_excalidraw_image or generate_excalidraw_images_batch instead of re-attaching the same reference images; the server resolves them into referenceImagePaths. Register new recurring characters there (via /api/characters or by editing the file) rather than repeating loose reference paths across sessions.",
+  "For a new script, use analyze_character_script then generate_character_candidates. Generate three candidates per new character by default, wait for the user to choose, call approve_character_candidate to build the expression/angle sheet and register the identity pack, then generate_character_storyboard. Never register an unapproved candidate in characters.json.",
 ].join(" ");
 
 function collectFocusElementIds(value, output = new Set()) {
@@ -641,6 +666,9 @@ function registerBuzzAssistWidget(server) {
 const SETTINGS_CONFIRMATION_TOOLS = new Map([
   [TOOL_GENERATE_IMAGE, "image"],
   [TOOL_GENERATE_IMAGES_BATCH, "image"],
+  [TOOL_GENERATE_CHARACTER_CANDIDATES, "image"],
+  [TOOL_APPROVE_CHARACTER_CANDIDATE, "image"],
+  [TOOL_GENERATE_CHARACTER_STORYBOARD, "image"],
   [TOOL_GENERATE_VIDEO, "video"],
   [TOOL_GENERATE_VIDEOS_BATCH, "video"],
   [TOOL_GENERATE_SUBTITLES, "subtitle"],
@@ -1344,35 +1372,66 @@ async function generateExcalidrawImagesBatch(args = {}) {
     ...jobs.map((job) => job?.characterIds ?? job?.character_ids),
   ].some((list) => Array.isArray(list) && list.length > 0);
   const characterRegistry = characterIdsRequested ? await readCharacterRegistry(args) : null;
-  const characterReferencePathsFor = (ids, aliasIds) =>
+  const characterBindingsForJob = (job = {}) =>
     characterRegistry
-      ? resolveCharacterReferencePaths(
+      ? resolveCharacterBindings(
           characterRegistry,
-          [...(Array.isArray(ids) ? ids : []), ...(Array.isArray(aliasIds) ? aliasIds : [])],
+          [
+            ...(Array.isArray(args.characterIds) ? args.characterIds : []),
+            ...(Array.isArray(args.character_ids) ? args.character_ids : []),
+            ...(Array.isArray(job.characterIds) ? job.characterIds : []),
+            ...(Array.isArray(job.character_ids) ? job.character_ids : []),
+          ],
           { projectDir: args.projectDir, canvasDir: args.canvasDir },
         )
       : [];
-  const sharedReferenceImagePaths = mergeReferenceImagePaths(
+  const sharedExplicitReferenceImagePaths = mergeReferenceImagePaths(
     args.referenceImagePaths,
     args.reference_image_paths,
-    characterReferencePathsFor(args.characterIds, args.character_ids),
   );
-  const referenceImagePathsForJob = (job = {}) => mergeReferenceImagePaths(
-    sharedReferenceImagePaths,
+  const explicitReferenceImagePathsForJob = (job = {}) => mergeReferenceImagePaths(
+    sharedExplicitReferenceImagePaths,
     job.referenceImagePaths,
     job.reference_image_paths,
-    characterReferencePathsFor(job.characterIds, job.character_ids),
   );
+  const referenceImagePathsForJob = (job = {}) => {
+    const bindings = characterBindingsForJob(job);
+    return mergeReferenceImagePaths(
+      explicitReferenceImagePathsForJob(job),
+      ...bindings.map((binding) => binding.referenceImagePaths),
+    );
+  };
+  const resolvedPromptForJob = (job = {}) => {
+    const bindings = characterBindingsForJob(job);
+    const identityPrompt = buildCharacterIdentityPrompt(bindings, {
+      startReferenceIndex: explicitReferenceImagePathsForJob(job).length + 1,
+    });
+    return identityPrompt ? `${job.prompt}\n\n${identityPrompt}` : job.prompt;
+  };
   const customDataForJob = (job = {}) => {
     const customData = job.customData && typeof job.customData === "object" ? job.customData : {};
     const paths = referenceImagePathsForJob(job);
-    if (paths.length === 0) return customData;
+    const bindings = characterBindingsForJob(job);
     const existing = Array.isArray(customData.generatorReferenceImages)
       ? customData.generatorReferenceImages.filter((asset) => asset && typeof asset === "object")
       : [];
     const existingPaths = new Set(existing.map((asset) => nonEmptyString(asset.path)).filter(Boolean));
     return {
       ...customData,
+      ...(bindings.length > 0
+        ? {
+            generatorCharacterIds: bindings.map((binding) => binding.id),
+            generatorCharacterBindings: bindings.map((binding) => ({
+              id: binding.id,
+              name: binding.name,
+              role: binding.role,
+              episodeId: binding.episodeId,
+              referenceImagePaths: binding.referenceImagePaths,
+              invariants: binding.invariants,
+            })),
+            generatorResolvedPrompt: resolvedPromptForJob(job),
+          }
+        : {}),
       generatorReferenceImages: [
         ...existing,
         ...paths
@@ -1389,6 +1448,7 @@ async function generateExcalidrawImagesBatch(args = {}) {
     const results = jobs.map((job) =>
       buildGenerationPayloadPreview("image", {
         ...job,
+        prompt: resolvedPromptForJob(job),
         referenceImagePaths: referenceImagePathsForJob(job),
       }),
     );
@@ -1465,6 +1525,7 @@ async function generateExcalidrawImagesBatch(args = {}) {
     const generated = await runWithConcurrency(chunkJobs, concurrency, async (job, index) => {
       const media = await generateImageMedia({
         ...job,
+        prompt: resolvedPromptForJob(job),
         aspectRatio: job.aspectRatio ?? job.aspect_ratio,
         imageSize: job.imageSize ?? job.size,
         fileName: job.fileName ?? job.imageName ?? job.image_name,
@@ -1488,7 +1549,7 @@ async function generateExcalidrawImagesBatch(args = {}) {
           customData: {
             codexGeneratedImage: true,
             codexGenerationModel: media.model,
-            codexGenerationPrompt: job.prompt,
+            codexGenerationPrompt: resolvedPromptForJob(job),
             codexGenerationAspectRatio: job.aspectRatio ?? job.aspect_ratio,
             codexGenerationQuality: job.quality,
             generatorPrompt: job.prompt,
@@ -1991,6 +2052,188 @@ function toolDefinitions() {
         destructiveHint: false,
         idempotentHint: false,
         openWorldHint: false,
+      },
+    },
+    {
+      name: TOOL_ANALYZE_CHARACTER_SCRIPT,
+      title: "Analyze Character Script",
+      description: "Parse a script into a local character-production workflow, match registered recurring characters, and identify only the new characters that need design candidates. Does not generate media.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          scriptText: { type: "string", description: "Script text. Speaker labels such as 名前：セリフ are detected automatically." },
+          scriptPath: { type: "string", description: "Absolute UTF-8 script path. Used when scriptText is omitted." },
+          cast: {
+            type: "array",
+            description: "Optional explicit/override cast. Use this when the agent can infer characters the deterministic parser cannot.",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                role: { type: "string", enum: ["fixed", "per-video"] },
+                aliases: { type: "array", items: { type: "string" } },
+                description: { type: "string" },
+                invariants: { type: "array", items: { type: "string" } },
+                negativePrompt: { type: "string" },
+                stylePrompt: { type: "string" },
+                voiceId: { type: "string" },
+              },
+              required: ["name"],
+              additionalProperties: false,
+            },
+          },
+          episodeId: { type: "string", description: "Episode/video scope id for per-video characters." },
+          title: { type: "string" },
+          defaultRole: { type: "string", enum: ["fixed", "per-video"] },
+          candidateCount: { type: "number", minimum: 1, maximum: 10, description: "Candidates per new character. Defaults to 3." },
+          channelStylePrompt: { type: "string", description: "Channel-wide manga style/visual language." },
+          projectDir: { type: "string" },
+          canvasDir: { type: "string" },
+        },
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    {
+      name: TOOL_GET_CHARACTER_PIPELINE,
+      title: "Get Character Pipeline",
+      description: "Read character workflows and their candidate/approval/identity-pack status from canvas/character-workflows.json.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workflowId: { type: "string" },
+          projectDir: { type: "string" },
+          canvasDir: { type: "string" },
+        },
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    {
+      name: TOOL_GENERATE_CHARACTER_CANDIDATES,
+      title: "Generate Character Candidates",
+      description: "Create all Generating... frames first, then generate the configured number of distinct character-sheet candidates for every new character in a workflow. Defaults to 3 candidates per character. Requires confirmed image settings.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workflowId: { type: "string", description: "Existing workflow id from analyze_character_script." },
+          scriptText: { type: "string", description: "Optional shortcut: create a workflow first when workflowId is omitted." },
+          scriptPath: { type: "string" },
+          cast: { type: "array", items: { type: "object", additionalProperties: true } },
+          episodeId: { type: "string" },
+          candidateCount: { type: "number", minimum: 1, maximum: 10 },
+          channelStylePrompt: { type: "string" },
+          model: { type: "string", enum: IMAGE_MODEL_IDS },
+          aspectRatio: { type: "string" },
+          imageSize: { type: "string" },
+          quality: { type: "string" },
+          columns: { type: "number", description: "Grid columns. Defaults to candidateCount so each character reads as one row when possible." },
+          concurrency: { type: "number" },
+          anchorElementId: { type: "string" },
+          placement: { type: "string", enum: ["right", "left", "below", "replace", "inside"] },
+          margin: { type: "number" },
+          payloadPreview: { type: "boolean" },
+          confirmedSettings: { type: "boolean" },
+          projectDir: { type: "string" },
+          canvasDir: { type: "string" },
+        },
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+    },
+    {
+      name: TOOL_APPROVE_CHARACTER_CANDIDATE,
+      title: "Approve Character Candidate",
+      description: "Select one generated candidate, generate its expression/head-angle sheet, copy the two approved references into canvas/assets/characters, and register the final character in characters.json. Requires confirmed image settings.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workflowId: { type: "string" },
+          castId: { type: "string", description: "Workflow cast id or character name." },
+          candidateId: { type: "string" },
+          candidateIndex: { type: "number", minimum: 1, maximum: 10 },
+          model: { type: "string", enum: IMAGE_MODEL_IDS },
+          aspectRatio: { type: "string" },
+          imageSize: { type: "string" },
+          quality: { type: "string" },
+          payloadPreview: { type: "boolean" },
+          confirmedSettings: { type: "boolean" },
+          projectDir: { type: "string" },
+          canvasDir: { type: "string" },
+        },
+        required: ["workflowId", "castId"],
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+    },
+    {
+      name: TOOL_GENERATE_CHARACTER_STORYBOARD,
+      title: "Generate Character Storyboard",
+      description: "Generate storyboard/main-scene images from a ready character workflow. Each scene is bound to approved character ids; multi-character scenes receive an automatic identity-lock prompt. Requires confirmed image settings.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workflowId: { type: "string" },
+          scenes: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                prompt: { type: "string" },
+                characters: { type: "array", items: { type: "string" } },
+                characterIds: { type: "array", items: { type: "string" } },
+                fileName: { type: "string" },
+                model: { type: "string", enum: IMAGE_MODEL_IDS },
+                aspectRatio: { type: "string" },
+                imageSize: { type: "string" },
+                quality: { type: "string" },
+              },
+              required: ["prompt"],
+              additionalProperties: false,
+            },
+          },
+          model: { type: "string", enum: IMAGE_MODEL_IDS },
+          aspectRatio: { type: "string" },
+          imageSize: { type: "string" },
+          quality: { type: "string" },
+          columns: { type: "number" },
+          concurrency: { type: "number" },
+          anchorElementId: { type: "string" },
+          placement: { type: "string", enum: ["right", "left", "below", "replace", "inside"] },
+          payloadPreview: { type: "boolean" },
+          confirmedSettings: { type: "boolean" },
+          projectDir: { type: "string" },
+          canvasDir: { type: "string" },
+        },
+        required: ["workflowId", "scenes"],
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
       },
     },
     {
@@ -2894,12 +3137,46 @@ const CANVAS_AUTO_OPEN_TOOLS = new Set([
   TOOL_GENERATE_VIDEO,
   TOOL_GENERATE_IMAGES_BATCH,
   TOOL_GENERATE_VIDEOS_BATCH,
+  TOOL_GENERATE_CHARACTER_CANDIDATES,
+  TOOL_APPROVE_CHARACTER_CANDIDATE,
+  TOOL_GENERATE_CHARACTER_STORYBOARD,
   TOOL_GENERATE_SUBTITLES,
   TOOL_GENERATE_SUBTITLES_BATCH,
   TOOL_REFINE_SUBTITLES,
   TOOL_SILENCE_CUT_VIDEO,
   TOOL_REFINE_SILENCE_CUT,
 ]);
+
+async function markCharacterApprovalOnCanvas(args = {}, details = {}) {
+  const scene = await loadScene(args);
+  let changed = false;
+  const now = Date.now();
+  scene.elements = scene.elements.map((element) => {
+    const customData = element?.customData ?? {};
+    const sameWorkflow = customData.buzzassistCharacterWorkflowId === details.workflowId;
+    const sameCast = customData.buzzassistCharacterCastId === details.castId;
+    const isCandidate = sameWorkflow && sameCast && customData.buzzassistCharacterCandidate === true;
+    const isExpression = element.id === details.expressionElementId;
+    if (!isCandidate && !isExpression) return element;
+    const selected = isCandidate && customData.buzzassistCharacterCandidateId === details.candidateId;
+    changed = true;
+    return {
+      ...element,
+      strokeColor: selected || isExpression ? "#22c55e" : "transparent",
+      strokeWidth: selected || isExpression ? 4 : 1,
+      customData: {
+        ...customData,
+        buzzassistCharacterApprovalStatus: isExpression ? "approved" : selected ? "selected" : "rejected",
+        ...(selected || isExpression ? { buzzassistCharacterApprovedCharacterId: details.characterId } : {}),
+      },
+      version: (Number(element.version) || 1) + 1,
+      versionNonce: Math.floor(Math.random() * 2 ** 31),
+      updated: now,
+    };
+  });
+  if (changed) await saveCanvasScene(args, scene);
+  return { changed };
+}
 
 async function handleToolCall(params, progress = () => {}) {
   const settingsGateKind = SETTINGS_CONFIRMATION_TOOLS.get(params?.name);
@@ -2922,6 +3199,234 @@ async function handleToolCall(params, progress = () => {}) {
   if (CANVAS_AUTO_OPEN_TOOLS.has(params?.name) && params.arguments?.payloadPreview !== true) {
     progress(0, 1, "Opening Excalidraw canvas");
     await ensureCanvasVisible(params.arguments ?? {});
+  }
+  if (params?.name === TOOL_ANALYZE_CHARACTER_SCRIPT) {
+    const args = params.arguments ?? {};
+    progress(0, 1, "Analyzing script cast");
+    const workflow = await prepareCharacterWorkflow(args);
+    progress(1, 1, "Character workflow ready");
+    const existing = workflow.cast.filter((cast) => cast.status === "existing");
+    const newCast = workflow.cast.filter((cast) => cast.status === "needs-candidates");
+    return {
+      content: [{
+        type: "text",
+        text: `Character workflow ${workflow.id}: ${workflow.cast.length} visual character(s), ${existing.length} matched to the registry, ${newCast.length} need ${workflow.candidateCount} candidate(s) each.`,
+      }],
+      structuredContent: { workflow, existingCharacters: existing, newCharacters: newCast },
+    };
+  }
+
+  if (params?.name === TOOL_GET_CHARACTER_PIPELINE) {
+    const args = params.arguments ?? {};
+    const store = await readCharacterWorkflowStore(args);
+    const registry = await readCharacterRegistry(args);
+    const workflowId = nonEmptyString(args.workflowId);
+    const workflow = workflowId ? getCharacterWorkflow(store, workflowId) : null;
+    if (workflowId && !workflow) {
+      return {
+        content: [{ type: "text", text: `Unknown character workflow: ${workflowId}.` }],
+        isError: true,
+      };
+    }
+    return {
+      content: [{
+        type: "text",
+        text: workflow
+          ? `Character workflow ${workflow.id}: ${workflow.status}; ${workflow.cast.length} cast member(s).`
+          : `${store.workflows.length} character workflow(s); ${registry.characters.length} approved registry character(s).`,
+      }],
+      structuredContent: workflow ? { workflow, registry } : { ...store, registry },
+    };
+  }
+
+  if (params?.name === TOOL_GENERATE_CHARACTER_CANDIDATES) {
+    const args = params.arguments ?? {};
+    const workflowId = nonEmptyString(args.workflowId);
+    const store = workflowId ? await readCharacterWorkflowStore(args) : null;
+    let workflow = workflowId ? getCharacterWorkflow(store, workflowId) : null;
+    if (workflowId && !workflow) throw new Error(`Unknown character workflow: ${workflowId}.`);
+    if (!workflow) workflow = await prepareCharacterWorkflow(args);
+    const jobs = await buildCharacterCandidateJobs(workflow, args);
+    if (jobs.length === 0) {
+      return {
+        content: [{ type: "text", text: `Workflow ${workflow.id} has no new characters that need candidates.` }],
+        structuredContent: { workflow, total: 0, succeeded: 0, failed: 0, results: [] },
+      };
+    }
+    progress(0, jobs.length, `Preparing ${jobs.length} character candidates`);
+    if (!args.payloadPreview) await markCharacterCandidatesGenerating(args, workflow.id, jobs);
+    let batch;
+    try {
+      batch = await generateExcalidrawImagesBatch({
+        ...args,
+        jobs,
+        columns: args.columns ?? workflow.candidateCount,
+        concurrency: args.concurrency ?? DEFAULT_MEDIA_BATCH_CONCURRENCY,
+        focusCreated: true,
+      });
+    } catch (error) {
+      if (!args.payloadPreview) {
+        await updateCharacterWorkflow(args, workflow.id, (current) => {
+          current.cast = current.cast.map((entry) => entry.status === "generating-candidates"
+            ? {
+                ...entry,
+                status: "needs-candidates",
+                candidates: entry.candidates.map((candidate) => candidate.status === "generating"
+                  ? { ...candidate, status: "failed", error: error.message }
+                  : candidate),
+              }
+            : entry);
+          current.status = "awaiting-candidates";
+          return current;
+        }).catch(() => {});
+      }
+      throw error;
+    }
+    const updatedWorkflow = args.payloadPreview
+      ? workflow
+      : await recordCharacterCandidateResults(args, workflow.id, jobs, batch.results);
+    if (!args.payloadPreview) await requestCanvasFocus(args, batch);
+    progress(jobs.length, jobs.length, "Character candidates complete");
+    return {
+      content: [{
+        type: "text",
+        text: batch.payloadPreview
+          ? `Payload preview for ${jobs.length} character candidate(s): ~${batch.estimatedCredits ?? "?"} credits.`
+          : `Generated ${batch.succeeded}/${batch.total} character candidate(s). Workflow ${workflow.id} is ${updatedWorkflow.status}; wait for the user to choose one candidate per new character.`,
+      }],
+      structuredContent: { ...batch, workflow: updatedWorkflow },
+    };
+  }
+
+  if (params?.name === TOOL_APPROVE_CHARACTER_CANDIDATE) {
+    const args = params.arguments ?? {};
+    const store = await readCharacterWorkflowStore(args);
+    const workflow = getCharacterWorkflow(store, args.workflowId);
+    if (!workflow) throw new Error(`Unknown character workflow: ${args.workflowId}.`);
+    const cast = findWorkflowCast(workflow, args.castId);
+    if (!cast) throw new Error(`Unknown workflow character: ${args.castId}.`);
+    const selector = args.candidateId ?? args.candidateIndex;
+    const candidate = findWorkflowCandidate(cast, selector);
+    if (!candidate) throw new Error(`Unknown candidate for ${cast.name}: ${selector ?? "not specified"}.`);
+    const expressionJob = buildExpressionSheetJob(workflow, cast, candidate, args);
+    if (!args.payloadPreview) {
+      await updateCharacterWorkflow(args, workflow.id, (current) => {
+        current.status = "building-identity-pack";
+        current.cast = current.cast.map((entry) => entry.id === cast.id
+          ? { ...entry, status: "building-identity-pack", selectedCandidateId: candidate.id }
+          : entry);
+        return current;
+      });
+    }
+    progress(0, 1, `Building ${cast.name} identity pack`);
+    let batch;
+    try {
+      batch = await generateExcalidrawImagesBatch({
+        ...args,
+        jobs: [expressionJob],
+        columns: 1,
+        concurrency: 1,
+        anchorElementId: candidate.elementId,
+        placement: "below",
+        focusCreated: true,
+      });
+    } catch (error) {
+      if (!args.payloadPreview) {
+        await updateCharacterWorkflow(args, workflow.id, (current) => {
+          current.status = "awaiting-approval";
+          current.cast = current.cast.map((entry) => entry.id === cast.id
+            ? { ...entry, status: "awaiting-approval" }
+            : entry);
+          return current;
+        }).catch(() => {});
+      }
+      throw error;
+    }
+    if (args.payloadPreview) {
+      return {
+        content: [{ type: "text", text: `Payload preview for ${cast.name}'s expression/angle sheet: ~${batch.estimatedCredits ?? "?"} credits.` }],
+        structuredContent: { ...batch, workflow, cast, candidate },
+      };
+    }
+    const expressionResult = batch.results.find((result) => !result.error);
+    if (!expressionResult) {
+      await updateCharacterWorkflow(args, workflow.id, (current) => {
+        current.status = "awaiting-approval";
+        current.cast = current.cast.map((entry) => entry.id === cast.id
+          ? { ...entry, status: "awaiting-approval" }
+          : entry);
+        return current;
+      });
+      throw new Error(batch.results.map((result) => result.error).filter(Boolean).join("\n") || "Expression sheet generation failed.");
+    }
+    const finalized = await finalizeApprovedCharacter({
+      ...args,
+      workflowId: workflow.id,
+      castId: cast.id,
+      candidateId: candidate.id,
+      expressionResult,
+    });
+    await markCharacterApprovalOnCanvas(args, {
+      workflowId: workflow.id,
+      castId: cast.id,
+      candidateId: candidate.id,
+      characterId: finalized.character.id,
+      expressionElementId: expressionResult.elementId,
+    });
+    await requestCanvasFocus(args, expressionResult);
+    progress(1, 1, `${cast.name} registered`);
+    return {
+      content: [{
+        type: "text",
+        text: `Approved ${cast.name} candidate ${candidate.index}; generated the expression/angle sheet and registered ${finalized.character.id} with a two-image identity pack.`,
+      }],
+      structuredContent: { ...finalized, expressionResult },
+    };
+  }
+
+  if (params?.name === TOOL_GENERATE_CHARACTER_STORYBOARD) {
+    const args = params.arguments ?? {};
+    const store = await readCharacterWorkflowStore(args);
+    const workflow = getCharacterWorkflow(store, args.workflowId);
+    if (!workflow) throw new Error(`Unknown character workflow: ${args.workflowId}.`);
+    const jobs = buildCharacterStoryboardJobs(workflow, args.scenes, args);
+    const validation = validateStoryboardCharacterBindings(workflow, jobs);
+    progress(0, jobs.length, `Preparing ${jobs.length} bound storyboard scenes`);
+    const batch = await generateExcalidrawImagesBatch({
+      ...args,
+      jobs,
+      columns: args.columns ?? DEFAULT_MEDIA_BATCH_COLUMNS,
+      concurrency: args.concurrency ?? DEFAULT_MEDIA_BATCH_CONCURRENCY,
+      focusCreated: true,
+    });
+    let updatedWorkflow = workflow;
+    if (!args.payloadPreview) {
+      updatedWorkflow = await updateCharacterWorkflow(args, workflow.id, (current) => {
+        current.scenes = jobs.map((job, index) => ({
+          id: job.customData.buzzassistCharacterSceneId,
+          index: index + 1,
+          prompt: job.prompt,
+          characterIds: job.characterIds,
+          status: batch.results[index]?.error ? "failed" : "generated",
+          elementId: batch.results[index]?.elementId || "",
+          assetFile: batch.results[index]?.assetFile || "",
+          assetUrl: batch.results[index]?.assetUrl || "",
+          error: batch.results[index]?.error || "",
+        }));
+        return current;
+      });
+      await requestCanvasFocus(args, batch);
+    }
+    progress(jobs.length, jobs.length, "Character storyboard complete");
+    return {
+      content: [{
+        type: "text",
+        text: batch.payloadPreview
+          ? `Payload preview for ${jobs.length} identity-bound storyboard scene(s): ~${batch.estimatedCredits ?? "?"} credits.`
+          : `Generated ${batch.succeeded}/${batch.total} identity-bound storyboard scene(s)${validation.warnings.length ? ` with ${validation.warnings.length} binding warning(s)` : ""}.`,
+      }],
+      structuredContent: { ...batch, validation, workflow: updatedWorkflow },
+    };
   }
   if (params?.name === TOOL_GENERATE_SUBTITLES) {
     const args = params.arguments ?? {};

@@ -92,10 +92,11 @@ AI holders are rectangle elements with:
 
 ## キャラ台帳（canvas/characters.json）
 
-- プロジェクトには登場キャラクター・小道具・舞台の台帳 `canvas/characters.json` を置ける。各エントリは `{ id, name, kind: "character"|"prop"|"location", role: "fixed"|"per-video", referenceImagePaths, stylePrompt, notes }`
+- プロジェクトには登場キャラクター・小道具・舞台の台帳 `canvas/characters.json` を置ける。各エントリは `{ id, name, kind: "character"|"prop"|"location", role: "fixed"|"per-video", status, episodeId, aliases, description, invariants, negativePrompt, referenceImagePaths, stylePrompt, voiceId, notes }`
 - ユーザーが台帳に登録済みのキャラ名を出したら、参照画像を再添付せず `characterIds`（バッチはトップレベル or ジョブ個別）を渡す。サーバーが台帳を引いて設定画を `referenceImagePaths` に自動マージする
-- 新しい固定キャラ・武器・舞台を登録するときは、`reference-sheet-prompts.md` のテンプレートで設定シートを清書モデル（GPT Image 2 / Nano Banana 2 等）で生成し、`canvas/assets/characters/` に保存してから台帳にパスを登録する
-- 動画単位の主人公（毎回変わるが1本の中では固定）は、制作開始時に型からシートを生成して `role: "per-video"` で一時登録し、その動画の生成にだけ `characterIds` で参照させる
+- 新キャラの候補や選択待ち状態は `canvas/character-workflows.json` に保存する。ユーザーが採用していない候補を `characters.json` へ登録してはいけない
+- 採用後は、候補の三面図・ディテールシートと、その候補を参照して生成した表情・顔角度シートの2枚を `canvas/assets/characters/` へ保存する。`characters.json` の `referenceImagePaths` にはこの2枚を登録する
+- 動画単位の主人公（毎回変わるが1本の中では固定）は `role: "per-video"` と `episodeId` を付ける。他動画の同名キャラへ誤って再利用しない。助っ人・サブキャラなどチャンネル共通キャラは `role: "fixed"` にする
 - 未知のIDを渡すと登録済みID一覧つきのエラーが返る。勝手に近いIDへ読み替えず、ユーザーに確認するか台帳へ登録してから再実行する
 
 ```json
@@ -107,6 +108,18 @@ AI holders are rectangle elements with:
   "confirmedSettings": true
 }
 ```
+
+### 台本から新キャラを作る標準フロー
+
+台本を受け取ったら、次の順番を崩さない。
+
+1. `analyze_character_script` へ台本を渡す。`名前：セリフ`、`【名前】`、`名前「セリフ」` を抽出し、固定キャラは既存台帳と照合する。エージェントが台本から外見・役割を読める場合は `cast` に `description`、`invariants`、`role` を補足する
+2. 画像設定を確認後、`generate_character_candidates` を `confirmedSettings: true` で呼ぶ。新キャラごとに既定3案をキャンバスへ `Generating...` 枠から生成する。候補はキャラ名と候補番号で表示される
+3. 全候補を見せ、ユーザーの採用を待つ。自動採用は禁止
+4. ユーザーが選んだら `approve_character_candidate` を呼ぶ。選択候補を参照した表情・顔角度シートを生成し、2枚のidentity packを台帳へ登録する
+5. 全キャラがreadyになった後だけ `generate_character_storyboard` を呼ぶ。各シーンの `characters` / `characterIds` を明示する。サーバーが設定画とキャラ別identity lockを自動追加する
+
+複数キャラが同じシーンに出る場合、参照画像の割り当てと「顔・髪・服・年齢を混ぜない」指示が自動付与される。ただし生成モデルのドリフトを完全には保証できないため、完成画像は人物ごとに目視確認する。
 
 ## Workflow
 

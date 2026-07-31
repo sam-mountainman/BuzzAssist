@@ -30,11 +30,48 @@ test("MCP batch payload previews validate and do not start or mutate a canvas", 
   try {
     await client.connect(transport);
     const tools = await client.listTools();
-    for (const name of ["generate_excalidraw_images_batch", "generate_excalidraw_videos_batch"]) {
+    for (const name of [
+      "generate_excalidraw_images_batch",
+      "generate_excalidraw_videos_batch",
+      "analyze_character_script",
+      "get_character_pipeline",
+      "generate_character_candidates",
+      "approve_character_candidate",
+      "generate_character_storyboard",
+    ]) {
       const tool = tools.tools.find((candidate) => candidate.name === name);
       assert.ok(tool, `${name} should be registered`);
-      assert.ok(tool.inputSchema.properties.payloadPreview, `${name} should accept payloadPreview`);
+      if (name.startsWith("generate_") || name === "approve_character_candidate") {
+        assert.ok(tool.inputSchema.properties.payloadPreview, `${name} should accept payloadPreview`);
+      }
     }
+
+    const analyzed = await client.callTool({
+      name: "analyze_character_script",
+      arguments: {
+        scriptText: "田中：残業はつらい。\n佐藤：私が助けます。",
+        episodeId: "preview-episode",
+        candidateCount: 3,
+        projectDir,
+        canvasDir,
+      },
+    });
+    assert.equal(analyzed.isError, undefined, JSON.stringify(analyzed));
+    assert.equal(analyzed.structuredContent.workflow.cast.length, 2);
+
+    const candidatePreview = await client.callTool({
+      name: "generate_character_candidates",
+      arguments: {
+        workflowId: analyzed.structuredContent.workflow.id,
+        payloadPreview: true,
+        projectDir,
+        canvasDir,
+      },
+    });
+    assert.equal(candidatePreview.isError, undefined, JSON.stringify(candidatePreview));
+    assert.equal(candidatePreview.structuredContent.payloadPreview, true);
+    assert.equal(candidatePreview.structuredContent.total, 6);
+    assert.ok(candidatePreview.structuredContent.results.every((result) => result.local === true));
 
     const imagePreview = await client.callTool({
       name: "generate_excalidraw_images_batch",
