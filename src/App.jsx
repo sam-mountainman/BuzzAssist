@@ -2779,7 +2779,7 @@ function selectedSpeechBubbleOverlayFromScene(scene) {
   return {
     id: element.id,
     version: Number(element.version) || 0,
-    profileId: element.customData?.buzzassistSpeechBubbleProfileId || 'reference-video-v1'
+    profileId: element.customData?.buzzassistSpeechBubbleProfileId || 'reference-video-locked-v2'
   }
 }
 
@@ -2793,7 +2793,7 @@ function buildSpeechBubbleControlOverlays(scene) {
     controls.push({
       id: element.id,
       version: Number(element.version) || 0,
-      profileId: element.customData?.buzzassistSpeechBubbleProfileId || 'reference-video-v1',
+      profileId: element.customData?.buzzassistSpeechBubbleProfileId || 'reference-video-locked-v2',
       left: placement.left + Math.max(8, placement.width - 78),
       top: placement.top + 8
     })
@@ -10168,7 +10168,7 @@ export default function App() {
               <span>BuzzAssist</span>
               <strong>吹き出し調整</strong>
             </div>
-            <small>{speechBubbleEditor?.profile?.name || '参考動画・漫画本編 v1'}</small>
+            <small>{speechBubbleEditor?.profile?.name || '参考動画・本編完全寄せ v2'}</small>
           </div>
 
           {speechBubbleEditorLoading && !speechBubbleEditor ? (

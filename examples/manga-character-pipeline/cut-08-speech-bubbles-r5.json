@@ -1,18 +1,16 @@
 {
   "width": 1672,
   "height": 941,
-  "title": "manga-office-001 cut-08 R5 speech bubble",
-  "profileId": "reference-video-v1",
+  "title": "manga-office-001 cut-08 reference-video locked speech bubble",
+  "profileId": "reference-video-locked-v2",
   "bubbles": [
     {
       "id": "cut08-kurokawa",
       "order": 1,
-      "text": "勝手な推測で私を疑うのか！",
-      "emphasis": "私を疑う",
-      "accentColor": "#e53935",
+      "text": "勝手な推測で\n私を疑うのか！",
       "preset": "dialogue",
       "side": "right",
-      "tail": true,
+      "tail": false,
       "tailAngleOffset": 0,
       "tailLengthScale": 0.75,
       "speakerHint": {
@@ -21,8 +19,8 @@
         "facing": "left",
         "faceBounds": { "x": 0.60, "y": 0.02, "width": 0.18, "height": 0.32 }
       },
-      "bounds": { "x": 0.79, "y": 0.16, "width": 0.165, "height": 0.62 },
-      "fontWeight": 500,
+      "bounds": { "x": 0.805, "y": 0.08, "width": 0.137, "height": 0.43 },
+      "fontWeight": 600,
       "maxColumns": 5
     }
   ],

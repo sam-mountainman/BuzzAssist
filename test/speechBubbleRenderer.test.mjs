@@ -7,7 +7,7 @@ import {
   renderSpeechBubbleSvg,
 } from "../lib/speechBubbleRenderer.mjs";
 
-test("R5 renderer uses reference-video Mincho type and one integrated curved tail path", () => {
+test("R5 locked-reference renderer uses Mincho type and one integrated curved tail path", () => {
   const result = renderSpeechBubbleSvg({
     width: 1672,
     height: 941,
@@ -24,7 +24,8 @@ test("R5 renderer uses reference-video Mincho type and one integrated curved tai
 
   assert.match(result.svg, /writing-mode="vertical-rl"/);
   assert.match(result.svg, /Hiragino Mincho ProN/);
-  assert.match(result.svg, /font-weight="500"/);
+  assert.match(result.svg, /data-profile="reference-video-locked-v2"/);
+  assert.match(result.svg, /font-weight="600"/);
   assert.match(result.svg, /data-tail="integrated"/);
   assert.match(result.svg, /<path d="M [^"]+ Q [^"]+" fill="#ffffff" stroke="#111111"/);
   assert.equal((result.svg.match(/<path /g) || []).length, 1);
@@ -44,6 +45,44 @@ test("reference-video profile defaults to a clean no-tail ellipse", () => {
   });
   assert.match(result.svg, /data-tail="none"/);
   assert.doesNotMatch(result.svg, / Q /);
+  assert.doesNotMatch(result.svg, /fill="#e53935"/);
+});
+
+test("locked reference profile preserves semantic newlines as video-style vertical columns", () => {
+  const result = renderSpeechBubbleSvg({
+    width: 1280,
+    height: 720,
+    bubbles: [{
+      text: "標高が高いところは\n肌寒いね。大丈夫？",
+      target: { x: 0.75, y: 0.25 },
+    }],
+  });
+
+  const bounds = result.plan.bubbles[0].bounds;
+  assert.equal(result.profile.id, "reference-video-locked-v2");
+  assert.equal(result.quality[0].columns, 2);
+  assert.equal(result.quality[0].overflow, false);
+  assert.ok(bounds.width / 1280 >= 0.13 && bounds.width / 1280 <= 0.15);
+  assert.ok(bounds.height / 720 >= 0.49 && bounds.height / 720 <= 0.56);
+  assert.match(result.svg, />標高が高いところは<\/tspan>/);
+  assert.match(result.svg, />肌寒いね。大丈夫？<\/tspan>/);
+});
+
+test("three semantic columns reproduce the measured long-dialogue proportions", () => {
+  const result = renderSpeechBubbleSvg({
+    width: 1280,
+    height: 720,
+    bubbles: [{
+      text: "欲張りプレート…\n何かと思えば\n大人向けのお子様ランチ？",
+      target: { x: 0.78, y: 0.30 },
+    }],
+  });
+
+  const bounds = result.plan.bubbles[0].bounds;
+  assert.equal(result.quality[0].columns, 3);
+  assert.ok(bounds.width / 1280 >= 0.17 && bounds.width / 1280 <= 0.18);
+  assert.ok(bounds.height / 720 >= 0.66 && bounds.height / 720 <= 0.69);
+  assert.equal(result.quality[0].overflow, false);
 });
 
 test("long reference-style dialogue can expand beyond three vertical columns", () => {
