@@ -52,7 +52,7 @@ description: Add or revise professional Japanese manga speech bubbles, narration
 ## 実行手順
 
 1. 対象画像を選び、`get_excalidraw_selection` でIDを取得する。
-2. `profileId: "reference-video-v1"` と `dryRun: true` で実行する。
+2. `profileId: "reference-video-locked-v2"` と `dryRun: true` で実行する。参考動画に合わせる場合、意味の切れ目ごとに `text` を改行し、その改行を右から左への縦列として保持する。
 3. `overflow: false`、`tooSmall: false`、`placementScore < 500`、顔重なり0.5%以下、重要物重なり10%以下、全体占有26%以下を確認する。
 4. 不合格なら `force` せず画像を再構図する。
 5. 合格後に `dryRun` を外して透明SVGを重ねる。
