@@ -28,6 +28,7 @@ import { providerIconDataUri } from './providerIcons.js'
 
 const CANVAS_ENDPOINT = '/api/canvas'
 const CANVAS_EVENTS_ENDPOINT = '/api/canvas-events'
+const SPEECH_BUBBLE_ENDPOINT = '/api/speech-bubbles'
 const GENERATE_IMAGE_ENDPOINT = '/api/generate/image'
 const GENERATE_VIDEO_ENDPOINT = '/api/generate/video'
 const GENERATION_JOB_ENDPOINT = '/api/generate/jobs'
@@ -2746,6 +2747,7 @@ function generatorFrameTagFor(kind) {
 
 function isGeneratedImageResult(element) {
   const customData = element?.customData ?? {}
+  if (isSpeechBubbleOverlay(element)) return false
   const hasGenerationMetadata = Boolean(
     customData.codexGenerationPrompt ||
     customData.generatorPrompt ||
@@ -2760,6 +2762,43 @@ function isGeneratedImageResult(element) {
       (customData.codexGeneratedImage === true ||
         (customData.codexMediaKind === 'image' && customData.codexInsertedImage === true && hasGenerationMetadata))
   )
+}
+
+function isSpeechBubbleOverlay(element) {
+  return Boolean(
+    !element?.isDeleted &&
+    ['r4', 'r5'].includes(element?.customData?.buzzassistSpeechBubbleOverlay)
+  )
+}
+
+function selectedSpeechBubbleOverlayFromScene(scene) {
+  const selectedIds = getSelectedIds(scene?.appState ?? {})
+  if (selectedIds.length !== 1) return null
+  const element = scene?.elements?.find((candidate) => candidate.id === selectedIds[0])
+  if (!isSpeechBubbleOverlay(element)) return null
+  return {
+    id: element.id,
+    version: Number(element.version) || 0,
+    profileId: element.customData?.buzzassistSpeechBubbleProfileId || 'reference-video-v1'
+  }
+}
+
+function buildSpeechBubbleControlOverlays(scene) {
+  const appState = scene?.appState ?? {}
+  const controls = []
+  for (const element of scene?.elements ?? []) {
+    if (!isSpeechBubbleOverlay(element)) continue
+    const placement = getFrameViewportPlacement(getElementGeometry(element), appState)
+    if (!shouldBuildViewportOverlay(placement, appState, new Set(), element.id)) continue
+    controls.push({
+      id: element.id,
+      version: Number(element.version) || 0,
+      profileId: element.customData?.buzzassistSpeechBubbleProfileId || 'reference-video-v1',
+      left: placement.left + Math.max(8, placement.width - 78),
+      top: placement.top + 8
+    })
+  }
+  return controls
 }
 
 function isGeneratedVideoResult(element) {
@@ -3875,6 +3914,9 @@ function buildSelectedImageOverlays(scene) {
 
   for (const element of scene.elements) {
     if (!isCanvasAttachableElement(element)) continue
+    // Transparent speech-bubble overlays share the source image bounds. A
+    // second media header would overprint the source image's name and size.
+    if (isSpeechBubbleOverlay(element)) continue
     const placement = getFrameViewportPlacement(getElementGeometry(element), appState)
     if (!shouldBuildViewportOverlay(placement, appState, selectedIds, element.id)) continue
     const pixelSize = getCanvasMediaPixelSize(element, scene.files)
@@ -4969,6 +5011,13 @@ export default function App() {
   const [frameForm, setFrameForm] = useState(DEFAULT_FRAME_FORM)
   const [frameOverlays, setFrameOverlays] = useState([])
   const [selectedImageOverlays, setSelectedImageOverlays] = useState([])
+  const [speechBubbleControlOverlays, setSpeechBubbleControlOverlays] = useState([])
+  const [selectedSpeechBubbleOverlay, setSelectedSpeechBubbleOverlay] = useState(null)
+  const [speechBubbleEditor, setSpeechBubbleEditor] = useState(null)
+  const [speechBubbleActiveId, setSpeechBubbleActiveId] = useState('')
+  const [speechBubbleEditorLoading, setSpeechBubbleEditorLoading] = useState(false)
+  const [speechBubbleEditorError, setSpeechBubbleEditorError] = useState('')
+  const [speechBubbleEditorStatus, setSpeechBubbleEditorStatus] = useState('')
   const [videoPlaybackOverlays, setVideoPlaybackOverlays] = useState([])
   const [subtitlePreviewOverlays, setSubtitlePreviewOverlays] = useState([])
   const [subtitleScrollOffsets, setSubtitleScrollOffsets] = useState({})
@@ -5491,6 +5540,8 @@ export default function App() {
   const videoFrameLeaveTimerRef = useRef(0)
   const lastGeneratorPasteRef = useRef({ time: 0, sourceId: '', frameId: '' })
   const saveTimerRef = useRef(null)
+  const speechBubblePatchTimerRef = useRef(null)
+  const speechBubblePendingPatchRef = useRef(null)
   const selectionTimerRef = useRef(null)
   const lastSelectionRef = useRef(EMPTY_SELECTION_SIGNATURE)
   const applyingRemoteRef = useRef(false)
@@ -5563,6 +5614,41 @@ export default function App() {
   useEffect(() => {
     selectedGeneratedResultRef.current = selectedGeneratedResult
   }, [selectedGeneratedResult])
+
+  useEffect(() => {
+    const elementId = selectedSpeechBubbleOverlay?.id
+    if (!elementId) {
+      window.clearTimeout(speechBubblePatchTimerRef.current)
+      speechBubblePendingPatchRef.current = null
+      setSpeechBubbleEditor(null)
+      setSpeechBubbleActiveId('')
+      setSpeechBubbleEditorError('')
+      setSpeechBubbleEditorStatus('')
+      return undefined
+    }
+
+    const controller = new AbortController()
+    setSpeechBubbleEditorLoading(true)
+    setSpeechBubbleEditorError('')
+    canvasFetch(`${SPEECH_BUBBLE_ENDPOINT}?elementId=${encodeURIComponent(elementId)}`, { signal: controller.signal })
+      .then(async (response) => {
+        const payload = await response.json()
+        if (!response.ok) throw new Error(payload.error || `Failed to load speech bubble: ${response.status}`)
+        setSpeechBubbleEditor(payload)
+        setSpeechBubbleActiveId((current) => (
+          payload.spec?.bubbles?.some((bubble) => bubble.id === current)
+            ? current
+            : payload.spec?.bubbles?.[0]?.id || ''
+        ))
+      })
+      .catch((error) => {
+        if (error.name !== 'AbortError') setSpeechBubbleEditorError(error.message)
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setSpeechBubbleEditorLoading(false)
+      })
+    return () => controller.abort()
+  }, [selectedSpeechBubbleOverlay?.id, selectedSpeechBubbleOverlay?.version])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -5806,6 +5892,13 @@ export default function App() {
     }
     setFrameOverlays(buildFrameOverlays(scene))
     setSelectedImageOverlays(buildSelectedImageOverlays(scene))
+    setSpeechBubbleControlOverlays(buildSpeechBubbleControlOverlays(scene))
+    const nextSpeechBubbleOverlay = selectedSpeechBubbleOverlayFromScene(scene)
+    setSelectedSpeechBubbleOverlay((current) => (
+      current?.id === nextSpeechBubbleOverlay?.id && current?.version === nextSpeechBubbleOverlay?.version
+        ? current
+        : nextSpeechBubbleOverlay
+    ))
     setVideoPlaybackOverlays(buildVideoPlaybackOverlays(scene))
     const subtitleOverlays = buildSubtitlePreviewOverlays(scene)
     subtitlePreviewOverlaysRef.current = subtitleOverlays
@@ -5830,6 +5923,49 @@ export default function App() {
         })
     )
   }, [])
+
+  const scheduleSpeechBubblePatch = useCallback((bubbleId, patch) => {
+    const elementId = selectedSpeechBubbleOverlay?.id
+    if (!elementId || !bubbleId) return
+    setSpeechBubbleEditor((current) => {
+      if (!current?.spec?.bubbles) return current
+      return {
+        ...current,
+        spec: {
+          ...current.spec,
+          bubbles: current.spec.bubbles.map((bubble) => (
+            bubble.id === bubbleId ? { ...bubble, ...patch } : bubble
+          ))
+        }
+      }
+    })
+    const pending = speechBubblePendingPatchRef.current
+    speechBubblePendingPatchRef.current = pending?.elementId === elementId && pending?.bubbleId === bubbleId
+      ? { ...pending, patch: { ...pending.patch, ...patch } }
+      : { elementId, bubbleId, patch: { ...patch } }
+    setSpeechBubbleEditorStatus('反映中…')
+    setSpeechBubbleEditorError('')
+    window.clearTimeout(speechBubblePatchTimerRef.current)
+    speechBubblePatchTimerRef.current = window.setTimeout(async () => {
+      const request = speechBubblePendingPatchRef.current
+      speechBubblePendingPatchRef.current = null
+      if (!request) return
+      try {
+        const response = await canvasFetch(SPEECH_BUBBLE_ENDPOINT, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(request)
+        })
+        const payload = await response.json()
+        if (!response.ok) throw new Error(payload.error || `Failed to update speech bubble: ${response.status}`)
+        setSpeechBubbleEditor(payload)
+        setSpeechBubbleEditorStatus('反映済み')
+      } catch (error) {
+        setSpeechBubbleEditorError(error.message)
+        setSpeechBubbleEditorStatus('')
+      }
+    }, 160)
+  }, [selectedSpeechBubbleOverlay?.id])
 
   // A generating placeholder is status UI, not an editable selection. Keep
   // Excalidraw's native selection handles off it even if an onChange/SSE echo
@@ -9698,6 +9834,15 @@ export default function App() {
     : false
   const activePanelTarget = livePanelTarget ?? activeOverlay ?? selectedGeneratedResult
   const showPromptPanel = Boolean(activePanelTarget && !isCurrentFrameGenerating)
+  const speechBubblePresets = [
+    ['dialogue', '通常'],
+    ['shout', '叫び'],
+    ['thought', '心の声'],
+    ['narration', 'ナレーション']
+  ]
+  const activeSpeechBubble = speechBubbleEditor?.spec?.bubbles?.find((bubble) => bubble.id === speechBubbleActiveId)
+    ?? speechBubbleEditor?.spec?.bubbles?.[0]
+    ?? null
   const hasGeneratingFrame = generatingFrameIds.size > 0 || frameOverlays.some((overlay) => overlay.remoteGenerating)
   const memoryConstrainedCanvas = isMemoryConstrainedCanvasRuntime()
   const imagePreviewOverlays = memoryConstrainedCanvas
@@ -9966,7 +10111,7 @@ export default function App() {
 
   return (
     <main
-      className={`codex-excalidraw-shell lovart-ai-root${showPromptPanel || managedSelectionActive || hasGeneratingFrame ? ' hide-generator-props' : ''}${memoryConstrainedCanvas ? ' is-memory-constrained-canvas' : ''}`}
+      className={`codex-excalidraw-shell lovart-ai-root${showPromptPanel || managedSelectionActive || selectedSpeechBubbleOverlay || hasGeneratingFrame ? ' hide-generator-props' : ''}${memoryConstrainedCanvas ? ' is-memory-constrained-canvas' : ''}`}
       aria-label="Codex Excalidraw canvas"
       onPointerDownCapture={closeOpenMenuIfOutsideGeneratorUi}
       onMouseDownCapture={closeOpenMenuIfOutsideGeneratorUi}
@@ -9981,6 +10126,134 @@ export default function App() {
         }}
         onChange={handleChange}
       />
+      {speechBubbleControlOverlays.map((overlay) => (
+        <button
+          type="button"
+          key={overlay.id}
+          className="speech-bubble-edit-badge"
+          style={{ left: `${overlay.left}px`, top: `${overlay.top}px` }}
+          onPointerDown={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            const scene = latestSceneRef.current
+            if (!scene || !api) return
+            const appState = {
+              ...(api.getAppState?.() ?? scene.appState ?? {}),
+              selectedElementIds: { [overlay.id]: true }
+            }
+            const nextScene = { ...scene, appState }
+            api.updateScene({ appState })
+            latestSceneRef.current = nextScene
+            setSelectedGeneratedResult(null)
+            setActiveFrameId('')
+            refreshOverlayStates(nextScene)
+            scheduleSelectionSave(nextScene)
+          }}
+        >
+          吹き出し
+        </button>
+      ))}
+      {selectedSpeechBubbleOverlay ? (
+        <aside
+          className="speech-bubble-editor-panel"
+          aria-label="吹き出し調整"
+          onPointerDown={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="speech-bubble-editor-heading">
+            <div>
+              <span>BuzzAssist</span>
+              <strong>吹き出し調整</strong>
+            </div>
+            <small>{speechBubbleEditor?.profile?.name || '参考動画・漫画本編 v1'}</small>
+          </div>
+
+          {speechBubbleEditorLoading && !speechBubbleEditor ? (
+            <div className="speech-bubble-editor-message">読み込み中…</div>
+          ) : null}
+          {speechBubbleEditorError ? (
+            <div className="speech-bubble-editor-error">{speechBubbleEditorError}</div>
+          ) : null}
+
+          {activeSpeechBubble ? (
+            <>
+              {speechBubbleEditor.spec.bubbles.length > 1 ? (
+                <label className="speech-bubble-editor-field">
+                  <span>吹き出し</span>
+                  <select value={activeSpeechBubble.id} onChange={(event) => setSpeechBubbleActiveId(event.target.value)}>
+                    {speechBubbleEditor.spec.bubbles.map((bubble, index) => (
+                      <option key={bubble.id} value={bubble.id}>{index + 1}. {bubble.text.slice(0, 12)}</option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+
+              <div className="speech-bubble-editor-field">
+                <span>種類</span>
+                <div className="speech-bubble-preset-grid">
+                  {speechBubblePresets.map(([value, label]) => (
+                    <button
+                      type="button"
+                      key={value}
+                      className={activeSpeechBubble.preset === value || (!activeSpeechBubble.preset && value === 'dialogue') ? 'is-active' : ''}
+                      onClick={() => scheduleSpeechBubblePatch(activeSpeechBubble.id, { preset: value })}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <label className="speech-bubble-tail-toggle">
+                <span>
+                  <strong>短い尻尾</strong>
+                  <small>参考動画に合わせ、必要な場面だけ使用</small>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={activeSpeechBubble.tail === true}
+                  disabled={activeSpeechBubble.preset === 'narration'}
+                  onChange={(event) => scheduleSpeechBubblePatch(activeSpeechBubble.id, { tail: event.target.checked })}
+                />
+              </label>
+
+              <label className="speech-bubble-editor-range">
+                <span><b>尻尾の角度</b><output>{Math.round(Number(activeSpeechBubble.tailAngleOffset) || 0)}°</output></span>
+                <input
+                  type="range"
+                  min="-45"
+                  max="45"
+                  step="1"
+                  value={Number(activeSpeechBubble.tailAngleOffset) || 0}
+                  disabled={activeSpeechBubble.tail !== true || activeSpeechBubble.preset === 'narration'}
+                  onChange={(event) => scheduleSpeechBubblePatch(activeSpeechBubble.id, { tailAngleOffset: Number(event.target.value) })}
+                />
+              </label>
+
+              <label className="speech-bubble-editor-range">
+                <span><b>尻尾の長さ</b><output>{Math.round((Number(activeSpeechBubble.tailLengthScale) || 1) * 100)}%</output></span>
+                <input
+                  type="range"
+                  min="0.45"
+                  max="1.55"
+                  step="0.05"
+                  value={Number(activeSpeechBubble.tailLengthScale) || 1}
+                  disabled={activeSpeechBubble.tail !== true || activeSpeechBubble.preset === 'narration'}
+                  onChange={(event) => scheduleSpeechBubblePatch(activeSpeechBubble.id, { tailLengthScale: Number(event.target.value) })}
+                />
+              </label>
+
+              <div className="speech-bubble-editor-foot">
+                <span>ブラウザSVG・背景透過</span>
+                <span className={speechBubbleEditorStatus === '反映済み' ? 'is-saved' : ''}>{speechBubbleEditorStatus || '自動保存'}</span>
+              </div>
+            </>
+          ) : null}
+        </aside>
+      ) : null}
       {buzzAssistLoginDialog ? (
         <div
           className="buzzassist-login-modal"

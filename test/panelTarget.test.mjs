@@ -753,7 +753,7 @@ test("single generation focuses its Generating placeholder while clearing select
   assert.match(source, /onPointerDownCapture=\{captureGenerationSubmitViewport\}/);
   assert.match(source, /api\.updateScene\(\{\s*appState: \{ \.\.\.stableViewport, selectedElementIds \},\s*captureUpdate: CaptureUpdateAction\.NEVER/);
   assert.match(source, /const hasGeneratingFrame = generatingFrameIds\.size > 0 \|\| frameOverlays\.some\(\(overlay\) => overlay\.remoteGenerating\)/);
-  assert.match(source, /showPromptPanel \|\| managedSelectionActive \|\| hasGeneratingFrame \? ' hide-generator-props'/);
+  assert.match(source, /showPromptPanel \|\| managedSelectionActive \|\| selectedSpeechBubbleOverlay \|\| hasGeneratingFrame \? ' hide-generator-props'/);
 });
 
 test("fast remote generations hydrate result bytes even when the placeholder event is skipped", async () => {

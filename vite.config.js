@@ -24,6 +24,7 @@ import { prepareCharacterWorkflow, readCharacterWorkflowStore } from './lib/char
 import { streamZipStore } from './lib/zipStore.mjs'
 import { generateSubtitleSrt, refineSubtitleFromPlan, writeSubtitleWordsSidecar } from './lib/subtitleGeneration.mjs'
 import { silenceCutVideo } from './lib/tempoCut.mjs'
+import { renderSpeechBubbleSvg, speechBubbleProfile } from './lib/speechBubbleRenderer.mjs'
 import {
   getLovartAuthStatus,
   getLovartModelCosts,
@@ -175,6 +176,53 @@ function readRequestBody(req) {
 function isSafeChildPath(parent, child) {
   const pathToChild = relative(parent, child)
   return pathToChild && !pathToChild.startsWith('..') && !pathToChild.includes(`..${sep}`)
+}
+
+function isSpeechBubbleOverlayElement(element) {
+  return Boolean(
+    element &&
+    !element.isDeleted &&
+    ['r4', 'r5'].includes(element.customData?.buzzassistSpeechBubbleOverlay)
+  )
+}
+
+function normalizeSpeechBubblePatch(patch = {}) {
+  const normalized = {}
+  if (['dialogue', 'narration', 'thought', 'shout'].includes(patch.preset)) {
+    normalized.preset = patch.preset
+  }
+  if (typeof patch.tail === 'boolean') normalized.tail = patch.tail
+  if (Number.isFinite(Number(patch.tailAngleOffset))) {
+    normalized.tailAngleOffset = Math.max(-60, Math.min(60, Number(patch.tailAngleOffset)))
+  }
+  if (Number.isFinite(Number(patch.tailLengthScale))) {
+    normalized.tailLengthScale = Math.max(0.45, Math.min(1.55, Number(patch.tailLengthScale)))
+  }
+  return normalized
+}
+
+async function speechBubbleEditorPayload(elementId) {
+  const scene = normalizeScene(await readJsonFile(canvasFile))
+  const overlay = scene.elements.find((element) => element.id === elementId && isSpeechBubbleOverlayElement(element))
+  if (!overlay) throw new Error(`Speech-bubble overlay not found: ${elementId}`)
+  const sourceFile = resolve(String(
+    overlay.customData?.buzzassistSpeechBubbleSpecFile ||
+    overlay.customData?.buzzassistSpeechBubbleSpec ||
+    ''
+  ))
+  const sourceDir = resolve(canvasDir, 'speech-bubbles')
+  if (!isSafeChildPath(sourceDir, sourceFile)) throw new Error('Unsafe speech-bubble source file path.')
+  const spec = await readJsonFile(sourceFile)
+  const profile = speechBubbleProfile(spec.profileId || overlay.customData?.buzzassistSpeechBubbleProfileId)
+  return {
+    overlay: {
+      id: overlay.id,
+      anchorElementId: overlay.customData?.codexAnchorElementId || spec.anchorElementId || '',
+      version: overlay.customData?.buzzassistSpeechBubbleOverlay || 'r5'
+    },
+    spec,
+    profile
+  }
 }
 
 function sanitizeAssetFileName(name, fallbackName = 'asset.bin') {
@@ -1856,6 +1904,131 @@ function configureCanvasServer(server) {
               missingAssetSync
             })
             broadcastCanvasChanged([canvasFile], { fingerprint: sceneContentFingerprint(persistedScene) })
+            return
+          }
+
+          res.statusCode = 405
+          res.setHeader('allow', 'GET, PUT')
+          res.end()
+        } catch (error) {
+          sendJson(res, 500, { error: error.message })
+        }
+      })
+
+      // R5 speech-bubble editor. The browser adjusts only small deterministic
+      // parameters and the server rewrites the existing transparent SVG. This
+      // keeps the canvas interactive without adding Sharp, fontkit, or face-ML
+      // dependencies to the one-command plugin install.
+      server.middlewares.use('/api/speech-bubbles', async (req, res) => {
+        try {
+          if (req.method === 'GET') {
+            const url = new URL(req.url || '/', 'http://localhost')
+            const elementId = String(url.searchParams.get('elementId') || '').trim()
+            if (!elementId) {
+              sendJson(res, 400, { error: 'elementId is required.' })
+              return
+            }
+            sendJson(res, 200, await speechBubbleEditorPayload(elementId))
+            return
+          }
+
+          if (req.method === 'PUT') {
+            const body = JSON.parse((await readRequestBody(req)) || '{}')
+            const elementId = String(body.elementId || '').trim()
+            const bubbleId = String(body.bubbleId || '').trim()
+            const patch = normalizeSpeechBubblePatch(body.patch)
+            if (!elementId || !bubbleId || Object.keys(patch).length === 0) {
+              sendJson(res, 400, { error: 'elementId, bubbleId, and an editable patch are required.' })
+              return
+            }
+
+            let responsePayload = null
+            await withCanvasFileLock(canvasFile, async () => {
+              const scene = normalizeScene(await readJsonFile(canvasFile))
+              const overlay = scene.elements.find((element) => element.id === elementId && isSpeechBubbleOverlayElement(element))
+              if (!overlay) throw new Error(`Speech-bubble overlay not found: ${elementId}`)
+
+              const sourceDir = resolve(canvasDir, 'speech-bubbles')
+              const sourceFile = resolve(String(
+                overlay.customData?.buzzassistSpeechBubbleSpecFile ||
+                overlay.customData?.buzzassistSpeechBubbleSpec ||
+                ''
+              ))
+              if (!isSafeChildPath(sourceDir, sourceFile)) throw new Error('Unsafe speech-bubble source file path.')
+              const spec = await readJsonFile(sourceFile)
+              const bubbleIndex = Array.isArray(spec.bubbles)
+                ? spec.bubbles.findIndex((bubble) => String(bubble.id || '') === bubbleId)
+                : -1
+              if (bubbleIndex < 0) throw new Error(`Speech bubble not found: ${bubbleId}`)
+
+              const bubbles = spec.bubbles.map((bubble, index) => (
+                index === bubbleIndex ? { ...bubble, ...patch } : bubble
+              ))
+              const profile = speechBubbleProfile(spec.profileId || overlay.customData?.buzzassistSpeechBubbleProfileId)
+              const rendered = renderSpeechBubbleSvg({
+                width: spec.imageSize?.width,
+                height: spec.imageSize?.height,
+                bubbles,
+                avoidRegions: Array.isArray(spec.avoidRegions) ? spec.avoidRegions : [],
+                profileId: profile.id,
+                title: `BuzzAssist R5 speech bubbles for ${spec.anchorElementId || overlay.customData?.codexAnchorElementId || elementId}`
+              })
+
+              const assetFile = resolve(String(overlay.customData?.codexAssetPath || ''))
+              if (!isSafeChildPath(canvasAssetsDir, assetFile)) throw new Error('Unsafe speech-bubble asset path.')
+              await writeFile(assetFile, rendered.svg, 'utf8')
+
+              const nextSpec = {
+                ...spec,
+                version: 'r5',
+                profileId: rendered.profile.id,
+                bubbles,
+                plan: rendered.plan,
+                quality: rendered.quality,
+                exportStrategy: rendered.exportStrategy,
+                updatedAt: new Date().toISOString()
+              }
+              await writeJsonAtomic(sourceFile, nextSpec)
+
+              const now = Date.now()
+              const elementIndex = scene.elements.findIndex((element) => element.id === elementId)
+              const anchorElementId = spec.anchorElementId || overlay.customData?.codexAnchorElementId || ''
+              const anchorElement = scene.elements.find((element) => element.id === anchorElementId && !element.isDeleted)
+              scene.elements[elementIndex] = {
+                ...overlay,
+                ...(anchorElement ? {
+                  x: anchorElement.x,
+                  y: anchorElement.y,
+                  width: anchorElement.width,
+                  height: anchorElement.height,
+                  angle: anchorElement.angle || 0
+                } : {}),
+                version: (Number(overlay.version) || 1) + 1,
+                versionNonce: Math.floor(Math.random() * 2 ** 31),
+                updated: now,
+                customData: {
+                  ...(overlay.customData || {}),
+                  buzzassistSpeechBubbleOverlay: 'r5',
+                  buzzassistSpeechBubbleSpecFile: sourceFile,
+                  buzzassistSpeechBubbleProfileId: rendered.profile.id,
+                  buzzassistSpeechBubbleExportStrategy: rendered.exportStrategy
+                }
+              }
+              await writeJsonAtomic(canvasFile, scene)
+              responsePayload = {
+                ok: true,
+                overlay: {
+                  id: elementId,
+                  anchorElementId,
+                  version: 'r5'
+                },
+                spec: nextSpec,
+                profile: rendered.profile,
+                editedBubble: bubbles[bubbleIndex]
+              }
+              broadcastCanvasChanged([canvasFile, assetFile, sourceFile], { fingerprint: sceneContentFingerprint(scene) })
+            })
+            sendJson(res, 200, responsePayload)
             return
           }
 

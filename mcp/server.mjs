@@ -70,6 +70,7 @@ import { refineSilenceCutFromPlan, silenceCutVideo } from "../lib/tempoCut.mjs";
 import { estimateCreditsForJob } from "../lib/mediaCredits.mjs";
 import { isFalImageModel, isFalVideoModel, previewFalImageRequest, previewFalVideoRequest } from "../lib/falMediaGeneration.mjs";
 import { generateSubtitleSrt, normalizeSubtitleHoldSeconds, refineSubtitleFromPlan, renderSrt, writeSubtitleWordsSidecar } from "../lib/subtitleGeneration.mjs";
+import { buildBubbleAwareCompositionPrompt, renderSpeechBubbleSvg, speechBubbleProfile } from "../lib/speechBubbleRenderer.mjs";
 import { startChatBridgeWorker } from "../lib/chatBridge.mjs";
 import {
   isCompatibleCanvasServerStatus,
@@ -97,6 +98,7 @@ const TOOL_OPEN_CANVAS = "open_buzzassist_canvas";
 const TOOL_CREATE_VIEW = "create_view";
 const TOOL_GET_SELECTION = "get_excalidraw_selection";
 const TOOL_INSERT_IMAGE = "insert_excalidraw_image";
+const TOOL_RENDER_SPEECH_BUBBLES = "render_excalidraw_speech_bubbles";
 const TOOL_INSERT_VIDEO = "insert_excalidraw_video";
 const TOOL_GENERATE_IMAGE = "generate_excalidraw_image";
 const TOOL_GENERATE_VIDEO = "generate_excalidraw_video";
@@ -1246,6 +1248,137 @@ async function insertExcalidrawImage(args = {}) {
   };
 }
 
+async function renderExcalidrawSpeechBubbles(args = {}) {
+  const scene = await loadScene(args);
+  const { selection } = await readSelectionState(args);
+  const elementsById = new Map(scene.elements.map((element) => [element.id, element]));
+  const anchorElementId = nonEmptyString(args.anchorElementId)
+    || nonEmptyString(args.sourceElementId)
+    || firstSelectedElementId(selection, scene);
+  if (!anchorElementId) throw new Error("Select a manga image or pass anchorElementId before rendering speech bubbles.");
+  const anchorElement = elementsById.get(anchorElementId);
+  if (!anchorElement || anchorElement.isDeleted) throw new Error(`Missing anchor image: ${anchorElementId}`);
+  if (anchorElement.type !== "image") throw new Error(`Speech-bubble anchor must be an image, received ${anchorElement.type ?? "unknown"}.`);
+
+  const anchorWidth = Math.max(1, finiteNumber(anchorElement.width, 1));
+  const anchorHeight = Math.max(1, finiteNumber(anchorElement.height, 1));
+  const pixelWidth = Math.max(1, Math.round(finiteNumber(
+    args.imageWidth,
+    anchorElement.customData?.codexPixelWidth ?? Math.max(1280, anchorWidth * 4),
+  )));
+  const pixelHeight = Math.max(1, Math.round(finiteNumber(
+    args.imageHeight,
+    anchorElement.customData?.codexPixelHeight ?? pixelWidth * (anchorHeight / anchorWidth),
+  )));
+  const bubbles = Array.isArray(args.bubbles) ? args.bubbles : [];
+  if (bubbles.length === 0) throw new Error("At least one speech bubble is required.");
+  const profile = speechBubbleProfile(args.profileId);
+
+  const rendered = renderSpeechBubbleSvg({
+    width: pixelWidth,
+    height: pixelHeight,
+    bubbles,
+    avoidRegions: Array.isArray(args.avoidRegions) ? args.avoidRegions : [],
+    profileId: profile.id,
+    title: `BuzzAssist R5 speech bubbles for ${anchorElementId}`,
+  });
+  const compositionPrompt = buildBubbleAwareCompositionPrompt({
+    bubbles,
+    preferredZones: Array.isArray(args.preferredZones) ? args.preferredZones : [],
+  });
+  const failedQuality = rendered.quality.filter((entry) => (
+    entry.overflow
+    || entry.tooSmall
+    || !Number.isFinite(entry.placementScore)
+    || entry.placementScore >= 500
+    || entry.faceOverlapRatio > 0.005
+    || entry.importantOverlapRatio > 0.10
+    || entry.frameCoverage > 0.26
+    || entry.tailLengthRatio > 0.06
+  ));
+  const needsRegeneration = failedQuality.length > 0 && args.force !== true;
+  const baseResult = {
+    ok: !needsRegeneration,
+    anchorElementId,
+    imageSize: { width: pixelWidth, height: pixelHeight },
+    profile: rendered.profile,
+    exportStrategy: rendered.exportStrategy,
+    plan: rendered.plan,
+    quality: rendered.quality,
+    failedQuality,
+    needsRegeneration,
+    compositionPrompt,
+    dryRun: Boolean(args.dryRun),
+  };
+  if (args.dryRun || needsRegeneration) return baseResult;
+
+  let removedOverlayIds = [];
+  if (args.replaceExisting !== false) {
+    const now = Date.now();
+    scene.elements = scene.elements.map((element) => {
+      const isEarlierOverlay = !element.isDeleted
+        && ["r4", "r5"].includes(element.customData?.buzzassistSpeechBubbleOverlay)
+        && element.customData?.codexAnchorElementId === anchorElementId;
+      if (!isEarlierOverlay) return element;
+      removedOverlayIds.push(element.id);
+      return {
+        ...element,
+        isDeleted: true,
+        version: (Number(element.version) || 1) + 1,
+        versionNonce: Math.floor(Math.random() * 2 ** 31),
+        updated: now,
+      };
+    });
+    if (removedOverlayIds.length > 0) await saveScene(args, scene);
+  }
+
+  const canvasDir = resolveCanvasDir(args);
+  const sourceDir = join(canvasDir, "speech-bubbles");
+  const sourceFile = join(sourceDir, `${sanitizeIdPart(anchorElementId)}.json`);
+  await mkdir(sourceDir, { recursive: true });
+  await writeFile(sourceFile, `${JSON.stringify({
+    version: "r5",
+    anchorElementId,
+    imageSize: { width: pixelWidth, height: pixelHeight },
+    profileId: rendered.profile.id,
+    bubbles,
+    avoidRegions: Array.isArray(args.avoidRegions) ? args.avoidRegions : [],
+    plan: rendered.plan,
+    quality: rendered.quality,
+    exportStrategy: rendered.exportStrategy,
+    updatedAt: new Date().toISOString(),
+  }, null, 2)}\n`, "utf8");
+
+  const placement = await insertExcalidrawImageMedia({
+    ...args,
+    anchorElementId,
+    sourceElementId: anchorElementId,
+    mediaBuffer: Buffer.from(rendered.svg, "utf8"),
+    imageSize: { width: pixelWidth, height: pixelHeight },
+    mimeType: "image/svg+xml",
+    fileName: nonEmptyString(args.fileName) || `speech-bubbles-${sanitizeIdPart(anchorElementId)}.svg`,
+    placement: "inside",
+    matchAnchor: true,
+    replaceAnchor: false,
+    displayWidth: anchorWidth,
+    displayHeight: anchorHeight,
+    customData: {
+      buzzassistSpeechBubbleOverlay: "r5",
+      buzzassistSpeechBubbleSpecFile: sourceFile,
+      buzzassistSpeechBubbleCount: bubbles.length,
+      buzzassistSpeechBubbleProfileId: rendered.profile.id,
+      buzzassistSpeechBubbleExportStrategy: rendered.exportStrategy,
+      bubbleAwareCompositionPrompt: compositionPrompt,
+    },
+  });
+  return {
+    ...baseResult,
+    ...placement,
+    sourceFile,
+    removedOverlayIds,
+  };
+}
+
 async function insertExcalidrawVideo(args = {}) {
   return insertExcalidrawVideoMedia(args);
 }
@@ -2013,6 +2146,108 @@ function toolDefinitions() {
           dryRun: { type: "boolean", description: "Calculate insertion without copying or saving." },
         },
         required: ["imagePath"],
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    {
+      name: TOOL_RENDER_SPEECH_BUBBLES,
+      title: "Render Professional Manga Speech Bubbles",
+      description: "Render R5 Japanese manga speech bubbles as a transparent browser-native SVG overlay on a selected or anchored image. Uses four reference-video presets, Mincho vertical typography, optional short integrated tails, upstream speaker hints, protected face/hand/prop regions, and editable JSON source metadata. No Sharp or other native rendering dependency is required.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          projectDir: { type: "string", description: "Absolute project directory containing canvas/." },
+          canvasDir: { type: "string", description: "Absolute canvas directory. Overrides projectDir." },
+          anchorElementId: { type: "string", description: "Image element that receives the transparent speech-bubble overlay." },
+          sourceElementId: { type: "string", description: "Alias for anchorElementId." },
+          imageWidth: { type: "number", description: "Optional source-frame pixel width. Inferred from the anchor when omitted." },
+          imageHeight: { type: "number", description: "Optional source-frame pixel height. Inferred from the anchor when omitted." },
+          profileId: { type: "string", description: "Speech-bubble channel profile. Defaults to reference-video-v1." },
+          bubbles: {
+            type: "array",
+            description: "Dialogue balloons in reading order. Coordinates may be normalized 0-1 or source-frame pixels.",
+            minItems: 1,
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                order: { type: "number" },
+                text: { type: "string" },
+                emphasis: { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] },
+                emphasisText: { type: "string" },
+                accentColor: { type: "string", description: "Six-digit hex color. Defaults to #e53935." },
+                inkColor: { type: "string", description: "Six-digit hex color. Defaults to #111111." },
+                preset: { type: "string", enum: ["dialogue", "narration", "thought", "shout"] },
+                side: { type: "string", enum: ["left", "right", "auto"] },
+                tail: { type: "boolean" },
+                tailAngleOffset: { type: "number", minimum: -60, maximum: 60, description: "Tail angle adjustment in degrees for the side panel." },
+                tailLengthScale: { type: "number", minimum: 0.45, maximum: 1.55, description: "Tail length multiplier for the side panel." },
+                fontSize: { type: "number" },
+                fontFamily: { type: "string", description: "Optional SVG font-family stack. The reference-video profile defaults to Japanese Mincho fonts." },
+                fontWeight: { type: "number", minimum: 400, maximum: 900, description: "Reference-video body text defaults to 500; use 700-900 only for shouting." },
+                maxColumns: { type: "number", minimum: 1, maximum: 6, description: "Maximum vertical columns. The August profile defaults to five." },
+                target: {
+                  type: "object",
+                  properties: { x: { type: "number" }, y: { type: "number" } },
+                  required: ["x", "y"],
+                  additionalProperties: false,
+                },
+                speakerHint: {
+                  type: "object",
+                  description: "Upstream cut-table hint used instead of face-detection ML.",
+                  properties: {
+                    position: { type: "string", enum: ["left", "center", "right", "左", "中央", "右"] },
+                    faceBand: { type: "string", description: "upper/middle/lower or Japanese equivalent." },
+                    facing: { type: "string", enum: ["left", "right", "front"] },
+                    faceBounds: {
+                      type: "object",
+                      properties: { x: { type: "number" }, y: { type: "number" }, width: { type: "number" }, height: { type: "number" } },
+                      required: ["x", "y", "width", "height"],
+                      additionalProperties: false,
+                    },
+                  },
+                  additionalProperties: false,
+                },
+                bounds: {
+                  type: "object",
+                  properties: {
+                    x: { type: "number" }, y: { type: "number" }, width: { type: "number" }, height: { type: "number" },
+                  },
+                  required: ["x", "y", "width", "height"],
+                  additionalProperties: false,
+                },
+              },
+              required: ["text"],
+              additionalProperties: false,
+            },
+          },
+          avoidRegions: {
+            type: "array",
+            description: "Protected face, mouth, hand, prop, evidence, body, or existing-text rectangles. Coordinates may be normalized 0-1 or pixels.",
+            items: {
+              type: "object",
+              properties: {
+                x: { type: "number" }, y: { type: "number" }, width: { type: "number" }, height: { type: "number" },
+                kind: { type: "string", enum: ["face", "mouth", "hand", "prop", "evidence", "body", "text", "unknown"] },
+                weight: { type: "number" },
+              },
+              required: ["x", "y", "width", "height"],
+              additionalProperties: false,
+            },
+          },
+          preferredZones: { type: "array", items: { type: "string" }, description: "Human-readable negative-space zones for the regeneration prompt." },
+          replaceExisting: { type: "boolean", description: "Delete an earlier R4/R5 overlay for the same anchor before inserting. Defaults to true." },
+          fileName: { type: "string", description: "Optional SVG asset filename under canvas/assets/." },
+          force: { type: "boolean", description: "Insert even when typography quality gates fail. Defaults to false." },
+          dryRun: { type: "boolean", description: "Plan and quality-check without writing the SVG or canvas element." },
+        },
+        required: ["bubbles"],
         additionalProperties: false,
       },
       annotations: {
@@ -3135,6 +3370,7 @@ async function silenceCutExcalidrawVideo(args = {}) {
 const CANVAS_AUTO_OPEN_TOOLS = new Set([
   TOOL_CREATE_VIEW,
   TOOL_INSERT_IMAGE,
+  TOOL_RENDER_SPEECH_BUBBLES,
   TOOL_INSERT_VIDEO,
   TOOL_GENERATE_IMAGE,
   TOOL_GENERATE_VIDEO,
@@ -3755,6 +3991,19 @@ async function handleToolCall(params, progress = () => {}) {
           text: `${result.dryRun ? "Planned" : "Inserted"} ${result.elementId} at (${result.bounds.x}, ${result.bounds.y}) sized ${result.bounds.width}x${result.bounds.height}.`,
         },
       ],
+      structuredContent: result,
+    };
+  }
+
+  if (params?.name === TOOL_RENDER_SPEECH_BUBBLES) {
+    const args = params.arguments ?? {};
+    const result = await renderExcalidrawSpeechBubbles(args);
+    if (!result.needsRegeneration) await requestCanvasFocus(args, result);
+    const summary = result.needsRegeneration
+      ? `Speech-bubble layout failed the R5 quality gate. Regenerate the artwork with the returned bubble-aware composition prompt.`
+      : `${result.dryRun ? "Planned" : "Rendered"} ${result.plan.bubbles.length} professional speech bubble(s) for ${result.anchorElementId}.`;
+    return {
+      content: [{ type: "text", text: summary }],
       structuredContent: result,
     };
   }
