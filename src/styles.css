@@ -20,6 +20,220 @@ body {
   height: 100%;
 }
 
+.speech-bubble-editor-panel {
+  position: fixed;
+  z-index: 32;
+  top: 176px;
+  right: 24px;
+  width: min(310px, calc(100vw - 32px));
+  padding: 18px;
+  border: 1px solid rgba(90, 69, 139, 0.16);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 18px 48px rgba(38, 26, 63, 0.18);
+  color: #241b34;
+  font-family: Inter, "Hiragino Sans", "Yu Gothic", sans-serif;
+  backdrop-filter: blur(18px);
+}
+
+.speech-bubble-edit-badge {
+  position: fixed;
+  z-index: 31;
+  min-width: 68px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid rgba(98, 65, 163, 0.28);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 5px 16px rgba(44, 25, 77, 0.16);
+  color: #6840b2;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+}
+
+.speech-bubble-edit-badge:hover {
+  border-color: #8d66d1;
+  background: #f2ebff;
+}
+
+.speech-bubble-editor-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.speech-bubble-editor-heading > div {
+  display: grid;
+  gap: 2px;
+}
+
+.speech-bubble-editor-heading span {
+  color: #7950c8;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.speech-bubble-editor-heading strong {
+  font-size: 17px;
+  line-height: 1.2;
+}
+
+.speech-bubble-editor-heading small {
+  max-width: 126px;
+  color: #7c718e;
+  font-size: 10px;
+  line-height: 1.35;
+  text-align: right;
+}
+
+.speech-bubble-editor-message,
+.speech-bubble-editor-error {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f6f1ff;
+  color: #6a5988;
+  font-size: 12px;
+}
+
+.speech-bubble-editor-error {
+  margin-bottom: 10px;
+  background: #fff0f0;
+  color: #b4232d;
+}
+
+.speech-bubble-editor-field,
+.speech-bubble-editor-range {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.speech-bubble-editor-field > span,
+.speech-bubble-editor-range b {
+  color: #5e536f;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.speech-bubble-editor-field select {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid #ddd4eb;
+  border-radius: 10px;
+  background: #fff;
+  color: #2f2540;
+}
+
+.speech-bubble-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.speech-bubble-preset-grid button {
+  min-height: 34px;
+  border: 1px solid #ddd4eb;
+  border-radius: 10px;
+  background: #fff;
+  color: #5f526f;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.speech-bubble-preset-grid button:hover,
+.speech-bubble-preset-grid button.is-active {
+  border-color: #9d7cdc;
+  background: #f2ebff;
+  color: #5d32a8;
+}
+
+.speech-bubble-tail-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 16px;
+  padding: 11px 12px;
+  border-radius: 12px;
+  background: #f8f5fc;
+}
+
+.speech-bubble-tail-toggle > span {
+  display: grid;
+  gap: 2px;
+}
+
+.speech-bubble-tail-toggle strong {
+  font-size: 12px;
+}
+
+.speech-bubble-tail-toggle small {
+  color: #81758f;
+  font-size: 9px;
+}
+
+.speech-bubble-tail-toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: #7950c8;
+}
+
+.speech-bubble-editor-range > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.speech-bubble-editor-range output {
+  color: #7950c8;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.speech-bubble-editor-range input[type="range"] {
+  width: 100%;
+  accent-color: #7950c8;
+}
+
+.speech-bubble-editor-range input:disabled {
+  opacity: 0.35;
+}
+
+.speech-bubble-editor-foot {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid #eee8f5;
+  color: #8b8198;
+  font-size: 10px;
+}
+
+.speech-bubble-editor-foot .is-saved {
+  color: #1f8b5e;
+  font-weight: 700;
+}
+
+@media (max-width: 720px) {
+  .speech-bubble-editor-panel {
+    top: auto;
+    right: 12px;
+    bottom: 76px;
+    left: 12px;
+    width: auto;
+    max-height: min(58vh, 520px);
+    overflow: auto;
+  }
+}
+
 .lovart-ai-root {
   position: relative;
   width: 100%;

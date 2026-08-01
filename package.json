@@ -54,6 +54,7 @@
     "release:verify": "node scripts/verify-release-version.mjs",
     "mcp": "node mcp/server.mjs",
     "preview": "node scripts/serve-canvas.mjs",
+    "speech-bubbles:render": "node scripts/render-speech-bubbles.mjs",
     "remote:start": "node scripts/remote-canvas-relay.mjs start",
     "remote:status": "node scripts/remote-canvas-relay.mjs status",
     "remote:stop": "node scripts/remote-canvas-relay.mjs stop",

@@ -13,6 +13,7 @@ function sliceBetween(source, startMarker, endMarker) {
 test("canvas headers use stored file names instead of generation prompts", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
   const displayNameHelper = sliceBetween(source, "function getCanvasMediaDisplayName", "function getCanvasMediaPixelSize");
+  const imageOverlayBuilder = sliceBetween(source, "function buildSelectedImageOverlays", "function buildVideoPlaybackOverlays");
   const subtitleOverlayBuilder = sliceBetween(source, "function buildSubtitlePreviewOverlays", "// Fetched SRT text");
 
   assert.match(
@@ -34,5 +35,10 @@ test("canvas headers use stored file names instead of generation prompts", async
     subtitleOverlayBuilder,
     /fileName: getCanvasMediaDisplayName\(element, scene\.files\)/,
     "SRT headers should use the same filename normalization as images and videos",
+  );
+  assert.match(
+    imageOverlayBuilder,
+    /isSpeechBubbleOverlay\(element\)/,
+    "transparent R4/R5 overlays should not draw a duplicate media header over their source image",
   );
 });

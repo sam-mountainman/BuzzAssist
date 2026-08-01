@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "defaultProfileId": "reference-video-v1",
+  "profiles": {
+    "reference-video-v1": {
+      "name": "参考動画・漫画本編 v1",
+      "fontFamily": "'Hiragino Mincho ProN','Yu Mincho','YuMincho','Noto Serif JP',serif",
+      "emphasisFontFamily": "'Hiragino Kaku Gothic ProN','Yu Gothic','Noto Sans JP',sans-serif",
+      "fontWeight": 500,
+      "shoutFontWeight": 800,
+      "fontSizeRatio": 0.047,
+      "minimumFontSizeRatio": 0.035,
+      "lineAdvance": 1.08,
+      "characterAdvance": 1.02,
+      "horizontalPadding": 0.72,
+      "verticalPadding": 0.66,
+      "strokeRatio": 0.0033,
+      "minimumStrokeWidth": 2.8,
+      "maximumStrokeWidth": 5.2,
+      "inkColor": "#111111",
+      "fillColor": "#ffffff",
+      "accentColor": "#e53935",
+      "tailDefault": false,
+      "tailMaximumFrameRatio": 0.034,
+      "tailMaximumBodyWidthRatio": 0.22,
+      "tailMaximumBodyHeightRatio": 0.11,
+      "tailGapRatio": 0.008,
+      "maxColumns": 5
+    }
+  }
+}
