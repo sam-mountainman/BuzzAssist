@@ -2779,7 +2779,7 @@ function selectedSpeechBubbleOverlayFromScene(scene) {
   return {
     id: element.id,
     version: Number(element.version) || 0,
-    profileId: element.customData?.buzzassistSpeechBubbleProfileId || 'reference-video-locked-v2'
+    profileId: element.customData?.buzzassistSpeechBubbleProfileId || 'reference-video-locked-v3'
   }
 }
 
@@ -2793,7 +2793,7 @@ function buildSpeechBubbleControlOverlays(scene) {
     controls.push({
       id: element.id,
       version: Number(element.version) || 0,
-      profileId: element.customData?.buzzassistSpeechBubbleProfileId || 'reference-video-locked-v2',
+      profileId: element.customData?.buzzassistSpeechBubbleProfileId || 'reference-video-locked-v3',
       left: placement.left + Math.max(8, placement.width - 78),
       top: placement.top + 8
     })

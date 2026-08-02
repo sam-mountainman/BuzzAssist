@@ -11,10 +11,32 @@ const panel = { width: 720, previewHeight: 405, height: 473 };
 const grid = { columns: 4, rows: 3, gap: 24, margin: 48, header: 112 };
 const outputPath = join(root, "canvas/assets/speech-bubble-reference-matrix-v1.svg");
 const reportPath = join(root, "canvas/speech-bubbles/reference-quality-matrix-v1.json");
-const backgroundFiles = [
-  "manga-office-001-cut-03.png",
-  "manga-office-001-cut-07.png",
-  "manga-office-001-cut-08.png",
+const backgroundSpecs = [
+  {
+    fileName: "manga-office-001-cut-03.png",
+    avoidRegions: [
+      { x: 0.33, y: 0.00, width: 0.43, height: 0.64, kind: "face" },
+      { x: 0.07, y: 0.55, width: 0.50, height: 0.45, kind: "prop" },
+    ],
+  },
+  {
+    fileName: "manga-office-001-cut-07.png",
+    avoidRegions: [
+      { x: 0.20, y: 0.03, width: 0.19, height: 0.36, kind: "face" },
+      { x: 0.61, y: 0.01, width: 0.18, height: 0.38, kind: "face" },
+      { x: 0.45, y: 0.48, width: 0.30, height: 0.28, kind: "hand" },
+    ],
+  },
+  {
+    fileName: "manga-office-001-cut-08.png",
+    avoidRegions: [
+      { x: 0.15, y: 0.04, width: 0.16, height: 0.31, kind: "face" },
+      { x: 0.42, y: 0.13, width: 0.14, height: 0.26, kind: "face" },
+      { x: 0.65, y: 0.02, width: 0.17, height: 0.31, kind: "face" },
+      { x: 0.48, y: 0.48, width: 0.23, height: 0.26, kind: "hand" },
+      { x: 0.23, y: 0.48, width: 0.19, height: 0.33, kind: "prop" },
+    ],
+  },
 ];
 
 const cases = [
@@ -31,24 +53,25 @@ const cases = [
   {
     id: "dialogue-three-columns",
     label: "通常会話 3列｜長セリフ",
+    backgroundIndex: 0,
     bubbles: [{ text: "元気にしてるか\n気になったの。\n私がいなくて寂しかったでしょ？", side: "right", speakerPosition: "right" }],
   },
   {
     id: "dialogue-four-columns",
-    label: "通常会話 4列｜密度上限",
-    bubbles: [{ columns: ["君は随分と", "絶望した顔を", "しているけど", "本当に辛いの？"], side: "left", speakerPosition: "left" }],
+    label: "長文自動組版｜3列上限・縦長",
+    bubbles: [{ text: "信用して\n来てくれた\nお客様を\n裏切るのは\n許されない", speakerPosition: "right" }],
   },
   {
-    id: "dialogue-five-columns",
-    label: "通常会話 5列｜文字欠落ゼロ",
-    bubbles: [{ columns: ["信用して", "来てくれた", "お客様を", "裏切るのは", "許されない"], side: "right", speakerPosition: "right" }],
+    id: "opposite-speaker-placement",
+    label: "配置｜話者の反対側・外側余白",
+    bubbles: [{ text: "君は随分と絶望した顔をしているけど", speakerPosition: "left" }],
   },
   {
     id: "two-speakers",
     label: "複数話者｜重なり回避",
     bubbles: [
-      { id: "speaker-a", text: "資料は確認した？", side: "left", speakerPosition: "left" },
-      { id: "speaker-b", text: "はい。問題ありません", side: "right", speakerPosition: "right" },
+      { id: "speaker-a", text: "資料は確認した？", speakerPosition: "left" },
+      { id: "speaker-b", text: "はい。問題ありません", speakerPosition: "right" },
     ],
     avoidRegions: [
       { x: 0.15, y: 0.12, width: 0.17, height: 0.20, kind: "face" },
@@ -62,13 +85,13 @@ const cases = [
   },
   {
     id: "shout",
-    label: "叫び｜8つの大きなトゲ",
-    bubbles: [{ preset: "shout", text: "同じ被害を受けて\n客足は遠のくわ", side: "right", speakerPosition: "right" }],
+    label: "強い発話｜通常と同じ滑らかな楕円",
+    bubbles: [{ preset: "shout", text: "同じ被害を受けて客足は遠のくわ", speakerPosition: "right" }],
   },
   {
     id: "thought",
-    label: "心の声｜控えめな波形",
-    bubbles: [{ preset: "thought", text: "そういう\nことか…", side: "left", speakerPosition: "left", tail: false }],
+    label: "心の声｜波形なし・滑らかな楕円",
+    bubbles: [{ preset: "thought", text: "そういうことか...", speakerPosition: "left", tail: false }],
   },
   {
     id: "optional-tail",
@@ -87,8 +110,8 @@ const cases = [
   },
   {
     id: "punctuation-and-digits",
-    label: "禁則・数字・括弧｜欠落ゼロ",
-    bubbles: [{ text: "2026年に\n『本当に？』と\n聞いたんです", side: "left", speakerPosition: "left" }],
+    label: "縦組み｜全角数字・縦三点リーダー",
+    bubbles: [{ text: "2026年に『本当に？』と聞いたんです...", speakerPosition: "left" }],
   },
 ];
 
@@ -107,29 +130,39 @@ function dataUri(fileName) {
   return `data:image/png;base64,${data}`;
 }
 
-function casePass(result) {
-  return result.quality.every((quality) => (
+function casePass(entry, result) {
+  const expectedShape = entry.bubbles.every((bubble) => bubble.preset === "narration") ? "rectangle" : "ellipse";
+  const shapePass = result.svg.includes(`data-shape="${expectedShape}"`)
+    && !result.svg.includes('text-orientation="mixed"');
+  const typographyPass = entry.id !== "punctuation-and-digits"
+    || (result.svg.includes("２０２６") && result.svg.includes("︙") && !result.svg.includes("2026"));
+  return shapePass && typographyPass && result.quality.every((quality) => (
     !quality.overflow
     && !quality.tooSmall
     && !quality.textLoss
+    && quality.columns <= 3
+    && quality.fontSize >= frame.height * 0.043
     && quality.faceOverlapRatio <= 0.01
     && quality.importantOverlapRatio <= 0.01
   ));
 }
 
-const backgrounds = backgroundFiles.map((fileName, index) => ({
+const backgrounds = backgroundSpecs.map(({ fileName }, index) => ({
   id: `background-${index}`,
   fileName,
   uri: dataUri(fileName),
 }));
 const renderedCases = cases.map((entry, index) => {
+  const backgroundIndex = Number.isInteger(entry.backgroundIndex) ? entry.backgroundIndex : index % backgroundSpecs.length;
+  const backgroundSpec = backgroundSpecs[backgroundIndex];
+  const avoidRegions = [...backgroundSpec.avoidRegions, ...(entry.avoidRegions ?? [])];
   const result = renderSpeechBubbleSvg({
     ...frame,
     bubbles: entry.bubbles,
-    avoidRegions: entry.avoidRegions ?? [],
+    avoidRegions,
     title: entry.label,
   });
-  return { ...entry, index, result, pass: casePass(result) };
+  return { ...entry, index, backgroundIndex, avoidRegions, result, pass: casePass(entry, result) };
 });
 
 const boardWidth = grid.margin * 2 + grid.columns * panel.width + (grid.columns - 1) * grid.gap;
@@ -147,7 +180,7 @@ const panels = renderedCases.map((entry) => {
   const y = grid.header + grid.margin + row * (panel.height + grid.gap);
   const scaleX = panel.width / frame.width;
   const scaleY = panel.previewHeight / frame.height;
-  const background = backgrounds[entry.index % backgrounds.length];
+  const background = backgrounds[entry.backgroundIndex];
   const metrics = entry.result.quality
     .map((quality) => `${quality.columns}列 ${Math.round(quality.fontSize)}px${quality.textLoss ? " 欠落" : ""}${quality.overflow ? " はみ出し" : ""}`)
     .join(" / ");
@@ -192,9 +225,10 @@ const report = {
   ],
   referenceObservations: [
     "Standard dialogue is a smooth white vertical ellipse with a thin black outline and no default tail.",
-    "Dialogue typography is black Mincho, vertically set, normally one to four semantic columns.",
+    "Dialogue typography is black Mincho, vertically set, and automatically reflowed to one to three columns.",
     "Narration is a white rectangle with a thin black outline.",
-    "Shout balloons use a small number of broad spikes, not a dense explosion shape.",
+    "Dialogue, internal voice, and strong speech use the same smooth oval in the locked reference videos.",
+    "ASCII digits become upright full-width digits and ellipses become a true vertical ellipsis.",
     "Balloons occupy outer negative-space zones and avoid faces, mouths, hands, and story-critical props.",
   ],
   summary: { passed: passCount, total: renderedCases.length },

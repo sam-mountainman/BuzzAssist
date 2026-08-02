@@ -15,40 +15,42 @@ test("one-to-five-character replies use the compact reference-video silhouette",
       bubbles: [{ id: text, text, target: { x: 0.78, y: 0.28 } }],
     });
     const bounds = result.plan.bubbles[0].bounds;
-    assert.ok(bounds.width / 1280 >= 0.085 && bounds.width / 1280 <= 0.131, text);
-    assert.ok(bounds.height / 720 >= 0.20 && bounds.height / 720 <= 0.341, text);
+    assert.ok(bounds.width / 1280 >= 0.055 && bounds.width / 1280 <= 0.096, text);
+    assert.ok(bounds.height / 720 >= 0.14 && bounds.height / 720 <= 0.301, text);
     assert.equal(result.quality[0].overflow, false, text);
     assert.equal(result.quality[0].textLoss, false, text);
   }
 });
 
-test("five explicit semantic columns are never truncated even in a deliberately tight box", () => {
-  const columns = ["信用して", "来てくれた", "お客様を", "裏切るのは", "許されない"];
+test("excess authoring line breaks reflow into a narrow three-column reference oval", () => {
+  const text = "信用して\n来てくれた\nお客様を\n裏切るのは\n許されない";
   const result = renderSpeechBubbleSvg({
-    width: 1280,
-    height: 720,
+    width: 1672,
+    height: 941,
     bubbles: [{
-      id: "five-columns",
-      columns,
-      bounds: { x: 0.70, y: 0.08, width: 0.15, height: 0.42 },
+      id: "reflowed-dialogue",
+      text,
       target: { x: 0.82, y: 0.26 },
     }],
   });
   const quality = result.quality[0];
-  assert.equal(quality.columns, 5);
-  assert.equal(quality.inputCharacterCount, columns.join("").length);
-  assert.equal(quality.renderedCharacterCount, columns.join("").length);
+  const bounds = result.plan.bubbles[0].bounds;
+  assert.equal(quality.columns, 3);
+  assert.equal(quality.inputCharacterCount, text.replace(/\s/g, "").length);
+  assert.equal(quality.renderedCharacterCount, text.replace(/\s/g, "").length);
   assert.equal(quality.textLoss, false);
-  assert.equal(quality.overflow, true, "tight boxes should fail visibly instead of dropping dialogue");
-  for (const column of columns) assert.match(result.svg, new RegExp(`>${column}</tspan>`));
+  assert.equal(quality.overflow, false);
+  assert.ok(bounds.width / 1672 <= 0.19);
+  assert.ok(bounds.height > bounds.width * 1.45);
+  assert.ok(quality.fontSize >= 941 * 0.043);
 });
 
-test("more than six explicit columns fail with an actionable split instruction", () => {
+test("more than three locked columns fail with a reference-video reflow instruction", () => {
   assert.throws(() => renderSpeechBubbleSvg({
     width: 1280,
     height: 720,
-    bubbles: [{ columns: ["一", "二", "三", "四", "五", "六", "七"] }],
-  }), /Split it into another bubble so no dialogue is lost/);
+    bubbles: [{ columns: ["一列目", "二列目", "三列目", "四列目"] }],
+  }), /Remove manual line breaks or split it into another bubble/);
 });
 
 test("two-speaker dialogue occupies separate outer zones and avoids protected faces", () => {
@@ -85,21 +87,38 @@ test("reference profile is resolution-stable at HD, source size, and Full HD", (
     assert.equal(result.quality[0].columns, 3);
     assert.equal(result.quality[0].overflow, false);
     assert.equal(result.quality[0].textLoss, false);
-    assert.ok(bounds.width / width >= 0.17 && bounds.width / width <= 0.19);
-    assert.ok(bounds.height / height >= 0.65 && bounds.height / height <= 0.72);
+    assert.ok(bounds.width / width >= 0.15 && bounds.width / width <= 0.19);
+    assert.ok(bounds.height / height >= 0.59 && bounds.height / height <= 0.72);
   }
 });
 
-test("shout preset uses eight broad spikes like the reference video", () => {
+test("dialogue, thought, and shout all use the same smooth reference-video oval", () => {
+  const paths = [];
+  for (const preset of ["dialogue", "thought", "shout"]) {
+    const result = renderSpeechBubbleSvg({
+      width: 1280,
+      height: 720,
+      bubbles: [{ id: preset, preset, text: "同じ被害を受けて客足は遠のくわ", bounds: { x: 0.70, y: 0.08, width: 0.18, height: 0.62 } }],
+    });
+    const group = result.svg.match(new RegExp(`<g id="${preset}"[\\s\\S]*?<\\/g>`))?.[0] ?? "";
+    assert.match(group, /data-shape="ellipse"/);
+    assert.doesNotMatch(group, /<circle| L /);
+    assert.match(group, /font-weight="500"/);
+    paths.push(group.match(/<path d="([^"]+)"/)?.[1]);
+  }
+  assert.equal(new Set(paths).size, 1);
+});
+
+test("vertical punctuation and digits use upright Japanese video typography", () => {
   const result = renderSpeechBubbleSvg({
-    width: 1280,
-    height: 720,
-    bubbles: [{ id: "shout", preset: "shout", text: "同じ被害を受けて\n客足は遠のくわ", target: { x: 0.74, y: 0.28 } }],
+    width: 1672,
+    height: 941,
+    bubbles: [{ text: "2026年に『本当に？』と聞いたんです..." }],
   });
-  const shoutGroup = result.svg.match(/<g id="shout"[\s\S]*?<\/g>/)?.[0] ?? "";
-  assert.equal((shoutGroup.match(/ L /g) || []).length, 15);
-  assert.match(shoutGroup, /font-weight="800"/);
-  assert.equal(result.quality[0].textLoss, false);
+  assert.match(result.svg, /text-orientation="upright"/);
+  assert.match(result.svg, /２０２６年/);
+  assert.match(result.svg, /︙/);
+  assert.doesNotMatch(result.svg, />2026|\.\.\./);
 });
 
 test("all four presets pass the no-loss readability gate", () => {
@@ -113,6 +132,6 @@ test("all four presets pass the no-loss readability gate", () => {
     const result = renderSpeechBubbleSvg({ width: 1280, height: 720, bubbles: [entry] });
     assert.equal(result.quality[0].textLoss, false, entry.preset);
     assert.equal(result.quality[0].tooSmall, false, entry.preset);
-    assert.ok(result.quality[0].fontSize >= 720 * 0.036, entry.preset);
+    assert.ok(result.quality[0].fontSize >= 720 * 0.043, entry.preset);
   }
 });

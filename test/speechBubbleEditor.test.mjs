@@ -11,14 +11,18 @@ test("R5 editor exposes a reliable badge and browser-native controls", async () 
   }
   assert.match(source, /tailAngleOffset/);
   assert.match(source, /tailLengthScale/);
+  assert.equal((source.match(/reference-video-locked-v3/g) || []).length, 2);
+  assert.doesNotMatch(source, /reference-video-locked-v2/);
   assert.match(source, /SPEECH_BUBBLE_ENDPOINT = '\/api\/speech-bubbles'/);
 });
 
 test("R5 rerender API overwrites SVG without native image dependencies", async () => {
   const viteSource = await readFile(new URL("../vite.config.js", import.meta.url), "utf8");
+  const mcpSource = await readFile(new URL("../mcp/server.mjs", import.meta.url), "utf8");
   const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
   assert.match(viteSource, /server\.middlewares\.use\('\/api\/speech-bubbles'/);
   assert.match(viteSource, /renderSpeechBubbleSvg\(/);
   assert.match(viteSource, /writeFile\(assetFile, rendered\.svg, 'utf8'\)/);
+  assert.match(mcpSource, /maxColumns: \{ type: "number", minimum: 1, maximum: 3/);
   assert.doesNotMatch(JSON.stringify(packageJson.dependencies), /sharp|fontkit/i);
 });
