@@ -14,6 +14,7 @@ description: Add or revise professional Japanese manga speech bubbles, narration
 - 現在のホストタスクのワークスペースルートを絶対パスの `projectDir` として、すべてのBuzzAssistツールへ渡す。
 - `render_excalidraw_speech_bubbles` を使う。Excalidrawの楕円・線・1文字改行の組み合わせは公開品質に使わない。
 - 通常吹き出しは滑らかな縦長楕円。尻尾なしを既定とし、必要な場面だけ短い尻尾を付ける。
+- 強い発話と心の声も、参考動画プロファイルでは通常会話と同じ滑らかな楕円にする。汎用漫画のトゲ型・雲型を混ぜない。
 - 尻尾ありは本体と尻尾を1つの閉じたSVGパスにする。顔を刺さない、口へ届かせない。
 - 4プリセットだけを使う: `dialogue` / `shout` / `thought` / `narration`。
 - 顔検出MLを足さない。台本・カット表から `speakerHint` を流す。
@@ -52,8 +53,8 @@ description: Add or revise professional Japanese manga speech bubbles, narration
 ## 実行手順
 
 1. 対象画像を選び、`get_excalidraw_selection` でIDを取得する。
-2. `profileId: "reference-video-locked-v2"` と `dryRun: true` で実行する。参考動画に合わせる場合、意味の切れ目ごとに `text` を改行し、その改行を右から左への縦列として保持する。
-3. `overflow: false`、`tooSmall: false`、`placementScore < 500`、顔重なり0.5%以下、重要物重なり10%以下、全体占有26%以下を確認する。
+2. `profileId: "reference-video-locked-v3"` と `dryRun: true` で実行する。台本の改行はソフト改行として扱い、本文を1〜3列へ自動で組み直す。列を固定する必要がある場合だけ `columns` を使う。
+3. `overflow: false`、`tooSmall: false`、`textLoss: false`、3列以下、`placementScore < 500`、顔重なり0.5%以下、重要物重なり10%以下、全体占有26%以下を確認する。
 4. 不合格なら `force` せず画像を再構図する。
 5. 合格後に `dryRun` を外して透明SVGを重ねる。
 6. キャンバスでオーバーレイを選び、右の「吹き出し調整」で種類・尻尾・角度・長さを微調整する。
@@ -61,11 +62,13 @@ description: Add or revise professional Japanese manga speech bubbles, narration
 
 ## 見た目の基準
 
-- 本編: 明朝体、font-weight 600、縦書き、白地、均一な余白、滑らかな楕円。
+- 本編: 明朝体、font-weight 500、画面高4.6%を基準にした縦書き、白地、均一な余白、滑らかな縦長楕円。
+- 数字・三点リーダー: 半角数字は全角の直立字形へ変換し、`...` / `…` は縦三点リーダー `︙` に正規化する。
 - 強調語: 既定は黒のまま。台本・演出で明示された場合だけ色や太さを変える。
-- 叫び: 8本の大きなトゲ＋太字。通常セリフを叫び型にしない。
-- 心の声: 雲型。尻尾は丸いビーズ。
+- 叫び: 通常会話と同じ滑らかな楕円。感情は絵・表情・本文で示す。
+- 心の声: 通常会話と同じ滑らかな楕円。波形やビーズは付けない。
 - ナレーション: 四角い白枠。尻尾なし。
+- 位置: 話者と同じ側へ重ねず、原則として反対側の外側余白か人物間の空白を使う。上〜中央を優先し、下端は最後の候補にする。
 - サムネイル用の極太ゴシックや派手な装飾は、本編プロファイルへ混ぜない。
 
 ## 完了条件

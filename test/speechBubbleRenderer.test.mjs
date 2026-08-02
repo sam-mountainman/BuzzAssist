@@ -7,7 +7,7 @@ import {
   renderSpeechBubbleSvg,
 } from "../lib/speechBubbleRenderer.mjs";
 
-test("R5 locked-reference renderer uses Mincho type and one integrated curved tail path", () => {
+test("R5 locked-reference renderer uses upright Mincho type and one integrated curved tail path", () => {
   const result = renderSpeechBubbleSvg({
     width: 1672,
     height: 941,
@@ -23,9 +23,10 @@ test("R5 locked-reference renderer uses Mincho type and one integrated curved ta
   });
 
   assert.match(result.svg, /writing-mode="vertical-rl"/);
+  assert.match(result.svg, /text-orientation="upright"/);
   assert.match(result.svg, /Hiragino Mincho ProN/);
-  assert.match(result.svg, /data-profile="reference-video-locked-v2"/);
-  assert.match(result.svg, /font-weight="600"/);
+  assert.match(result.svg, /data-profile="reference-video-locked-v3"/);
+  assert.match(result.svg, /font-weight="500"/);
   assert.match(result.svg, /data-tail="integrated"/);
   assert.match(result.svg, /<path d="M [^"]+ Q [^"]+" fill="#ffffff" stroke="#111111"/);
   assert.equal((result.svg.match(/<path /g) || []).length, 1);
@@ -48,7 +49,7 @@ test("reference-video profile defaults to a clean no-tail ellipse", () => {
   assert.doesNotMatch(result.svg, /fill="#e53935"/);
 });
 
-test("locked reference profile preserves semantic newlines as video-style vertical columns", () => {
+test("locked reference profile treats script newlines as soft breaks", () => {
   const result = renderSpeechBubbleSvg({
     width: 1280,
     height: 720,
@@ -59,13 +60,13 @@ test("locked reference profile preserves semantic newlines as video-style vertic
   });
 
   const bounds = result.plan.bubbles[0].bounds;
-  assert.equal(result.profile.id, "reference-video-locked-v2");
+  assert.equal(result.profile.id, "reference-video-locked-v3");
   assert.equal(result.quality[0].columns, 2);
   assert.equal(result.quality[0].overflow, false);
-  assert.ok(bounds.width / 1280 >= 0.13 && bounds.width / 1280 <= 0.15);
-  assert.ok(bounds.height / 720 >= 0.49 && bounds.height / 720 <= 0.56);
-  assert.match(result.svg, />標高が高いところは<\/tspan>/);
-  assert.match(result.svg, />肌寒いね。大丈夫？<\/tspan>/);
+  assert.ok(bounds.width / 1280 >= 0.12 && bounds.width / 1280 <= 0.15);
+  assert.ok(bounds.height / 720 >= 0.47 && bounds.height / 720 <= 0.62);
+  assert.doesNotMatch(result.svg, /\n/);
+  assert.equal(result.quality[0].inputCharacterCount, "標高が高いところは肌寒いね。大丈夫？".length);
 });
 
 test("three semantic columns reproduce the measured long-dialogue proportions", () => {
@@ -80,12 +81,12 @@ test("three semantic columns reproduce the measured long-dialogue proportions", 
 
   const bounds = result.plan.bubbles[0].bounds;
   assert.equal(result.quality[0].columns, 3);
-  assert.ok(bounds.width / 1280 >= 0.17 && bounds.width / 1280 <= 0.18);
-  assert.ok(bounds.height / 720 >= 0.66 && bounds.height / 720 <= 0.69);
+  assert.ok(bounds.width / 1280 >= 0.15 && bounds.width / 1280 <= 0.19);
+  assert.ok(bounds.height / 720 >= 0.48 && bounds.height / 720 <= 0.60);
   assert.equal(result.quality[0].overflow, false);
 });
 
-test("long reference-style dialogue can expand beyond three vertical columns", () => {
+test("long reference-style dialogue never widens beyond three columns and reports overflow", () => {
   const result = renderSpeechBubbleSvg({
     width: 1672,
     height: 941,
@@ -97,8 +98,9 @@ test("long reference-style dialogue can expand beyond three vertical columns", (
     }],
   });
 
-  assert.ok(result.quality[0].columns >= 4);
-  assert.equal(result.quality[0].overflow, false);
+  assert.equal(result.quality[0].columns, 3);
+  assert.equal(result.quality[0].overflow, true);
+  assert.equal(result.quality[0].textLoss, false);
   assert.ok(result.quality[0].frameCoverage < 0.26);
 });
 
@@ -132,6 +134,21 @@ test("R5 placement moves away from protected face regions", () => {
   const overlapWidth = Math.max(0, Math.min(bounds.x + bounds.width, face.x + face.width) - Math.max(bounds.x, face.x));
   const overlapHeight = Math.max(0, Math.min(bounds.y + bounds.height, face.y + face.height) - Math.max(bounds.y, face.y));
   assert.equal(overlapWidth * overlapHeight, 0);
+});
+
+test("default placement uses the negative space opposite the speaker", () => {
+  for (const speakerPosition of ["left", "right"]) {
+    const result = planSpeechBubbleLayout({
+      width: 1672,
+      height: 941,
+      bubbles: [{ text: "参考動画と同じ位置", speakerPosition }],
+    });
+    const bounds = result.bubbles[0].bounds;
+    const centerX = bounds.x + bounds.width / 2;
+    if (speakerPosition === "left") assert.ok(centerX >= 1672 / 2 - 1, "use the center gap or right outer space");
+    else assert.ok(centerX <= 1672 / 2 + 1, "use the center gap or left outer space");
+    assert.ok(bounds.y + bounds.height / 2 < 941 * 0.72);
+  }
 });
 
 test("cut-table speaker hints provide the mouth anchor without face-detection ML", () => {
