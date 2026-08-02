@@ -16,11 +16,22 @@ BuzzAssist R1 の「台本 → 新キャラ抽出 → 各3案 → 人が採用 �
 4. 採用後、設定画と表情・顔角度シートの2枚だけがキャラ台帳へ登録される。
 5. 1人、2人、3人の各カットで、顔・髪型・服・年齢・体格が混ざらない。
 6. 全10カットで画風、オフィス、人物の見た目が継続する。
+7. 本編カットごとに、シーン内容へ合う画風参照が最大2枚だけ自動選択される。
+8. 画風参照は線・塗り・背景・光・構図専用で、参照内の人物の顔や服はコピーされない。
+9. 3人カットではキャラ設定画を優先し、画風参照を1枚へ自動削減する。
+10. 画像には文字・吹き出しを描かず、話者の反対側に後工程用の余白を残す。
 
 ## ファイル
 
 - `test-case.json`: キャラ設計、画風、生成数などの入力値
+- `channel-visual-profiles.example.json`: 参考動画2本から固定した線・塗り・背景・構図・光・NG表現と、シーン別の画風参照
 - `script.txt`: 登場人物抽出に渡す台本
 - `scenes.json`: 採用後に生成する全10カット
+
+## 画風固定
+
+案件用の実ファイルは `canvas/channel-visual-profiles.json`、参照画像は `canvas/assets/style-references/` に置きます。`analyze_character_script` で `visualProfileId` を省略すると、そのファイルの `defaultProfileId` が使われます。
+
+本編では、`styleTags`（`interior` / `exterior` / `day` / `night` / `closeup` / `wide` / `dialogue` / `action`）から最適な参照を選びます。`shotType`、`camera`、`lighting`、`bubbleSafeZone` をシーンへ追加すると、参考動画のカメラ距離と吹き出し用余白まで固定できます。
 
 候補の採用は人が行います。候補を自動採用して本編へ進めるテストではありません。

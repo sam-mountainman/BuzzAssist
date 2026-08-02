@@ -122,6 +122,14 @@ AI holders are rectangle elements with:
 複数キャラが同じシーンに出る場合、参照画像の割り当てと「顔・髪・服・年齢を混ぜない」指示が自動付与される。ただし生成モデルのドリフトを完全には保証できないため、完成画像は人物ごとに目視確認する。
 3人以上が同じ画像に出る場合は、処理時間と参照過多を抑えるため、各キャラの採用設定画（identity）1枚だけを自動投入する。1〜2人では設定画と表情・角度シートの2枚を維持する。
 
+### チャンネル画風プロファイル
+
+- チャンネル固有の画風・背景・構図・光・カメラ距離は `canvas/channel-visual-profiles.json` に保存する。台本解析時に `visualProfileId` を指定するか、省略時は `defaultProfileId` を使う
+- 画風参照は `canvas/assets/style-references/` に置き、人物のidentity packとは分離する。画風参照からは線・塗り・パレット・背景仕上げ・光・構図だけを取り、参照内の顔・髪・服・文字・吹き出しをコピーさせない
+- 本編シーンには必要に応じて `styleTags`（`interior` / `exterior` / `day` / `night` / `closeup` / `wide` / `dialogue` / `action`）、`shotType`、`camera`、`lighting`、`bubbleSafeZone` を付ける
+- `generate_character_storyboard` はタグに合う画風参照を既定2枚まで自動選択し、その後ろへキャラ台帳のidentity参照を追加する。3人以上のカットはidentityを優先して画風参照を1枚へ減らす
+- ベース画像では文字・吹き出しを生成しない。`bubbleSafeZone` に話者の反対側の余白を残し、吹き出しは決定論的な後工程で重ねる
+
 ## Workflow
 
 1. Read the selection with the plugin `get_excalidraw_selection` tool, passing

@@ -65,6 +65,7 @@ import {
   recordCharacterCandidateResults,
   updateCharacterWorkflow,
   validateStoryboardCharacterBindings,
+  validateStoryboardVisualProfile,
 } from "../lib/characterPipeline.mjs";
 import { refineSilenceCutFromPlan, silenceCutVideo } from "../lib/tempoCut.mjs";
 import { estimateCreditsForJob } from "../lib/mediaCredits.mjs";
@@ -2325,6 +2326,7 @@ function toolDefinitions() {
           defaultRole: { type: "string", enum: ["fixed", "per-video"] },
           candidateCount: { type: "number", minimum: 1, maximum: 10, description: "Candidates per new character. Defaults to 3." },
           channelStylePrompt: { type: "string", description: "Channel-wide manga style/visual language." },
+          visualProfileId: { type: "string", description: "Project-local channel visual profile id from canvas/channel-visual-profiles.json. The default profile is used when omitted." },
           projectDir: { type: "string" },
           canvasDir: { type: "string" },
         },
@@ -2371,6 +2373,7 @@ function toolDefinitions() {
           episodeId: { type: "string" },
           candidateCount: { type: "number", minimum: 1, maximum: 10 },
           channelStylePrompt: { type: "string" },
+          visualProfileId: { type: "string" },
           model: { type: "string", enum: IMAGE_MODEL_IDS },
           aspectRatio: { type: "string" },
           imageSize: { type: "string" },
@@ -2446,6 +2449,12 @@ function toolDefinitions() {
                 aspectRatio: { type: "string" },
                 imageSize: { type: "string" },
                 quality: { type: "string" },
+                styleTags: { type: "array", items: { type: "string" }, description: "Visual-reference selectors such as interior, exterior, day, night, closeup, wide, dialogue, or action." },
+                shotType: { type: "string", description: "Shot language, for example eye-level medium two-shot or reaction close-up." },
+                camera: { type: "string" },
+                lighting: { type: "string" },
+                speakerPosition: { type: "string", enum: ["left", "center", "right", "左", "中央", "右"], description: "Speaker position used to reserve the opposite outer side for the later balloon." },
+                bubbleSafeZone: { type: "string", description: "Negative-space zone to reserve for the later deterministic speech-bubble overlay." },
               },
               required: ["prompt"],
               additionalProperties: false,
@@ -2455,6 +2464,7 @@ function toolDefinitions() {
           aspectRatio: { type: "string" },
           imageSize: { type: "string" },
           quality: { type: "string" },
+          maxStyleReferences: { type: "number", minimum: 1, maximum: 4, description: "Maximum channel style references per scene. Defaults to the visual profile, normally 2." },
           columns: { type: "number" },
           concurrency: { type: "number" },
           anchorElementId: { type: "string" },
@@ -3629,7 +3639,14 @@ async function handleToolCall(params, progress = () => {}) {
     const workflow = getCharacterWorkflow(store, args.workflowId);
     if (!workflow) throw new Error(`Unknown character workflow: ${args.workflowId}.`);
     const jobs = buildCharacterStoryboardJobs(workflow, args.scenes, args);
-    const validation = validateStoryboardCharacterBindings(workflow, jobs);
+    const characterValidation = validateStoryboardCharacterBindings(workflow, jobs);
+    const visualValidation = validateStoryboardVisualProfile(workflow, jobs);
+    const validation = {
+      ok: characterValidation.ok && visualValidation.ok,
+      warnings: [...characterValidation.warnings, ...visualValidation.warnings],
+      character: characterValidation,
+      visual: visualValidation,
+    };
     progress(0, jobs.length, `Preparing ${jobs.length} bound storyboard scenes`);
     const batch = await generateExcalidrawImagesBatch({
       ...args,
