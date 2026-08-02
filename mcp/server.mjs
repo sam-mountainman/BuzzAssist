@@ -52,9 +52,9 @@ import {
   resolveCharacterBindings,
 } from "../lib/characterRegistry.mjs";
 import {
+  buildApprovedIdentityPackJobs,
   buildCharacterCandidateJobs,
   buildCharacterStoryboardJobs,
-  buildExpressionSheetJob,
   finalizeApprovedCharacter,
   findWorkflowCandidate,
   findWorkflowCast,
@@ -67,6 +67,7 @@ import {
   validateStoryboardCharacterBindings,
   validateStoryboardVisualProfile,
 } from "../lib/characterPipeline.mjs";
+import { resolveChannelVisualProfileSnapshot } from "../lib/channelVisualProfile.mjs";
 import { refineSilenceCutFromPlan, silenceCutVideo } from "../lib/tempoCut.mjs";
 import { estimateCreditsForJob } from "../lib/mediaCredits.mjs";
 import { isFalImageModel, isFalVideoModel, previewFalImageRequest, previewFalVideoRequest } from "../lib/falMediaGeneration.mjs";
@@ -156,7 +157,7 @@ const MEDIA_GENERATION_AGENT_INSTRUCTIONS = [
   "To attach selected canvas images/videos/SRT/XML into the current chat, use prepare_canvas_attachments or read_canvas_attachment_bundle. Do not rely on OS GUI paste automation for media attachments.",
   "When the current chat includes an attached image and the user identifies it as a character, subject, product, or style reference, resolve its absolute local path and pass it in referenceImagePaths. For generate_excalidraw_images_batch, pass shared chat references once in the top-level referenceImagePaths field so every job inherits them; job-specific referenceImagePaths are merged with the shared list. Do not rely on the model merely seeing the chat attachment, and do not omit the path from the generation tool call. If the attachment role is ambiguous, ask whether it is a subject/style reference or another input before generating.",
   "The project may keep a character registry at canvas/characters.json (キャラ台帳) mapping character ids to reference images, style prompts, and voices. When the user names a registered character, pass characterIds on generate_excalidraw_image or generate_excalidraw_images_batch instead of re-attaching the same reference images; the server resolves them into referenceImagePaths. Register new recurring characters there (via /api/characters or by editing the file) rather than repeating loose reference paths across sessions.",
-  "For a new script, use analyze_character_script then generate_character_candidates. Generate three candidates per new character by default, wait for the user to choose, call approve_character_candidate to build the expression/angle sheet and register the identity pack, then generate_character_storyboard. Never register an unapproved candidate in characters.json.",
+  "For a new script, use analyze_character_script then generate_character_candidates. Generate three lightweight candidate cards per new character by default, wait for the user to choose, call approve_character_candidate to build the approved turnaround plus expression/angle sheet and register that two-image identity pack, then generate_character_storyboard. Never register an unapproved candidate in characters.json.",
 ].join(" ");
 
 function collectFocusElementIds(value, output = new Set()) {
@@ -1526,24 +1527,45 @@ async function generateExcalidrawImagesBatch(args = {}) {
     args.referenceImagePaths,
     args.reference_image_paths,
   );
-  const explicitReferenceImagePathsForJob = (job = {}) => mergeReferenceImagePaths(
-    sharedExplicitReferenceImagePaths,
-    job.referenceImagePaths,
-    job.reference_image_paths,
+  const styleReferenceImagePathsForJob = (job = {}) => mergeReferenceImagePaths(
+    job.customData?.buzzassistStyleReferencePaths,
+  );
+  const explicitReferenceImagePathsForJob = (job = {}) => {
+    const stylePaths = new Set(styleReferenceImagePathsForJob(job));
+    return mergeReferenceImagePaths(
+      sharedExplicitReferenceImagePaths,
+      job.referenceImagePaths,
+      job.reference_image_paths,
+    ).filter((path) => !stylePaths.has(path));
+  };
+  const identityReferenceImagePathsForJob = (job = {}) => mergeReferenceImagePaths(
+    ...characterBindingsForJob(job).map((binding) => binding.referenceImagePaths),
   );
   const referenceImagePathsForJob = (job = {}) => {
-    const bindings = characterBindingsForJob(job);
     return mergeReferenceImagePaths(
       explicitReferenceImagePathsForJob(job),
-      ...bindings.map((binding) => binding.referenceImagePaths),
+      identityReferenceImagePathsForJob(job),
+      styleReferenceImagePathsForJob(job),
     );
   };
   const resolvedPromptForJob = (job = {}) => {
     const bindings = characterBindingsForJob(job);
+    const explicitPaths = explicitReferenceImagePathsForJob(job);
+    const identityPaths = identityReferenceImagePathsForJob(job);
+    const stylePaths = styleReferenceImagePathsForJob(job);
     const identityPrompt = buildCharacterIdentityPrompt(bindings, {
-      startReferenceIndex: explicitReferenceImagePathsForJob(job).length + 1,
+      startReferenceIndex: explicitPaths.length + 1,
     });
-    return identityPrompt ? `${job.prompt}\n\n${identityPrompt}` : job.prompt;
+    const styleStartIndex = explicitPaths.length + identityPaths.length + 1;
+    const styleRolePrompt = stylePaths.length > 0
+      ? [
+          `Reference images ${styleStartIndex}-${styleStartIndex + stylePaths.length - 1} are CHANNEL STYLE-ONLY references.`,
+          "Use them only for linework, facial-drawing grammar, cel shading, palette, background finish, lighting, camera language, and visual density.",
+          "Do not reproduce any person, face, hairstyle, clothing, age, body shape, pose, or exact composition from those style references.",
+          "The script and the earlier character identity references control who appears in this scene.",
+        ].join(" ")
+      : "";
+    return [job.prompt, identityPrompt, styleRolePrompt].filter(Boolean).join("\n\n");
   };
   const customDataForJob = (job = {}) => {
     const customData = job.customData && typeof job.customData === "object" ? job.customData : {};
@@ -2362,7 +2384,7 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE_CHARACTER_CANDIDATES,
       title: "Generate Character Candidates",
-      description: "Create all Generating... frames first, then generate the configured number of distinct character-sheet candidates for every new character in a workflow. Defaults to 3 candidates per character. Requires confirmed image settings.",
+      description: "Create all Generating... frames first, then generate the configured number of distinct lightweight candidate cards for every new character in a workflow. Each card contains one full body and three head angles; defaults to 3 candidates per character. Requires confirmed image settings.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2400,7 +2422,7 @@ function toolDefinitions() {
     {
       name: TOOL_APPROVE_CHARACTER_CANDIDATE,
       title: "Approve Character Candidate",
-      description: "Select one generated candidate, generate its expression/head-angle sheet, copy the two approved references into canvas/assets/characters, and register the final character in characters.json. Requires confirmed image settings.",
+      description: "Select one generated candidate, generate its approved turnaround and expression/head-angle sheets, copy those two approved references into canvas/assets/characters, and register the final character in characters.json. Requires confirmed image settings.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2412,6 +2434,7 @@ function toolDefinitions() {
           aspectRatio: { type: "string" },
           imageSize: { type: "string" },
           quality: { type: "string" },
+          visualProfileId: { type: "string", description: "Optional live channel visual profile override. The workflow profile id is used by default." },
           payloadPreview: { type: "boolean" },
           confirmedSettings: { type: "boolean" },
           projectDir: { type: "string" },
@@ -2464,6 +2487,7 @@ function toolDefinitions() {
           aspectRatio: { type: "string" },
           imageSize: { type: "string" },
           quality: { type: "string" },
+          visualProfileId: { type: "string", description: "Optional live channel visual profile override. The workflow profile id is used by default." },
           maxStyleReferences: { type: "number", minimum: 1, maximum: 4, description: "Maximum channel style references per scene. Defaults to the visual profile, normally 2." },
           columns: { type: "number" },
           concurrency: { type: "number" },
@@ -3406,17 +3430,19 @@ async function markCharacterApprovalOnCanvas(args = {}, details = {}) {
     const sameCast = customData.buzzassistCharacterCastId === details.castId;
     const isCandidate = sameWorkflow && sameCast && customData.buzzassistCharacterCandidate === true;
     const isExpression = element.id === details.expressionElementId;
-    if (!isCandidate && !isExpression) return element;
+    const isTurnaround = element.id === details.turnaroundElementId;
+    const isIdentityPack = isExpression || isTurnaround;
+    if (!isCandidate && !isIdentityPack) return element;
     const selected = isCandidate && customData.buzzassistCharacterCandidateId === details.candidateId;
     changed = true;
     return {
       ...element,
-      strokeColor: selected || isExpression ? "#22c55e" : "transparent",
-      strokeWidth: selected || isExpression ? 4 : 1,
+      strokeColor: selected || isIdentityPack ? "#22c55e" : "transparent",
+      strokeWidth: selected || isIdentityPack ? 4 : 1,
       customData: {
         ...customData,
-        buzzassistCharacterApprovalStatus: isExpression ? "approved" : selected ? "selected" : "rejected",
-        ...(selected || isExpression ? { buzzassistCharacterApprovedCharacterId: details.characterId } : {}),
+        buzzassistCharacterApprovalStatus: isIdentityPack ? "approved" : selected ? "selected" : "rejected",
+        ...(selected || isIdentityPack ? { buzzassistCharacterApprovedCharacterId: details.characterId } : {}),
       },
       version: (Number(element.version) || 1) + 1,
       versionNonce: Math.floor(Math.random() * 2 ** 31),
@@ -3495,6 +3521,17 @@ async function handleToolCall(params, progress = () => {}) {
     let workflow = workflowId ? getCharacterWorkflow(store, workflowId) : null;
     if (workflowId && !workflow) throw new Error(`Unknown character workflow: ${workflowId}.`);
     if (!workflow) workflow = await prepareCharacterWorkflow(args);
+    const requestedVisualProfileId = nonEmptyString(args.visualProfileId) || workflow.visualProfileId;
+    const liveVisualProfile = requestedVisualProfileId
+      ? await resolveChannelVisualProfileSnapshot(args, requestedVisualProfileId)
+      : null;
+    if (liveVisualProfile) {
+      workflow = {
+        ...workflow,
+        visualProfileId: liveVisualProfile.id,
+        visualProfile: liveVisualProfile,
+      };
+    }
     const jobs = await buildCharacterCandidateJobs(workflow, args);
     if (jobs.length === 0) {
       return {
@@ -3550,14 +3587,25 @@ async function handleToolCall(params, progress = () => {}) {
   if (params?.name === TOOL_APPROVE_CHARACTER_CANDIDATE) {
     const args = params.arguments ?? {};
     const store = await readCharacterWorkflowStore(args);
-    const workflow = getCharacterWorkflow(store, args.workflowId);
+    let workflow = getCharacterWorkflow(store, args.workflowId);
     if (!workflow) throw new Error(`Unknown character workflow: ${args.workflowId}.`);
+    const requestedVisualProfileId = nonEmptyString(args.visualProfileId) || workflow.visualProfileId;
+    const liveVisualProfile = requestedVisualProfileId
+      ? await resolveChannelVisualProfileSnapshot(args, requestedVisualProfileId)
+      : null;
+    if (liveVisualProfile) {
+      workflow = {
+        ...workflow,
+        visualProfileId: liveVisualProfile.id,
+        visualProfile: liveVisualProfile,
+      };
+    }
     const cast = findWorkflowCast(workflow, args.castId);
     if (!cast) throw new Error(`Unknown workflow character: ${args.castId}.`);
     const selector = args.candidateId ?? args.candidateIndex;
     const candidate = findWorkflowCandidate(cast, selector);
     if (!candidate) throw new Error(`Unknown candidate for ${cast.name}: ${selector ?? "not specified"}.`);
-    const expressionJob = buildExpressionSheetJob(workflow, cast, candidate, args);
+    const identityPackJobs = buildApprovedIdentityPackJobs(workflow, cast, candidate, args);
     if (!args.payloadPreview) {
       await updateCharacterWorkflow(args, workflow.id, (current) => {
         current.status = "building-identity-pack";
@@ -3567,14 +3615,14 @@ async function handleToolCall(params, progress = () => {}) {
         return current;
       });
     }
-    progress(0, 1, `Building ${cast.name} identity pack`);
+    progress(0, identityPackJobs.length, `Building ${cast.name} identity pack`);
     let batch;
     try {
       batch = await generateExcalidrawImagesBatch({
         ...args,
-        jobs: [expressionJob],
-        columns: 1,
-        concurrency: 1,
+        jobs: identityPackJobs,
+        columns: 2,
+        concurrency: 2,
         anchorElementId: candidate.elementId,
         placement: "below",
         focusCreated: true,
@@ -3593,12 +3641,13 @@ async function handleToolCall(params, progress = () => {}) {
     }
     if (args.payloadPreview) {
       return {
-        content: [{ type: "text", text: `Payload preview for ${cast.name}'s expression/angle sheet: ~${batch.estimatedCredits ?? "?"} credits.` }],
+        content: [{ type: "text", text: `Payload preview for ${cast.name}'s turnaround and expression/angle sheets: ~${batch.estimatedCredits ?? "?"} credits.` }],
         structuredContent: { ...batch, workflow, cast, candidate },
       };
     }
-    const expressionResult = batch.results.find((result) => !result.error);
-    if (!expressionResult) {
+    const turnaroundResult = batch.results[0] && !batch.results[0].error ? batch.results[0] : null;
+    const expressionResult = batch.results[1] && !batch.results[1].error ? batch.results[1] : null;
+    if (!turnaroundResult || !expressionResult) {
       await updateCharacterWorkflow(args, workflow.id, (current) => {
         current.status = "awaiting-approval";
         current.cast = current.cast.map((entry) => entry.id === cast.id
@@ -3606,13 +3655,14 @@ async function handleToolCall(params, progress = () => {}) {
           : entry);
         return current;
       });
-      throw new Error(batch.results.map((result) => result.error).filter(Boolean).join("\n") || "Expression sheet generation failed.");
+      throw new Error(batch.results.map((result) => result.error).filter(Boolean).join("\n") || "Approved turnaround or expression sheet generation failed.");
     }
     const finalized = await finalizeApprovedCharacter({
       ...args,
       workflowId: workflow.id,
       castId: cast.id,
       candidateId: candidate.id,
+      turnaroundResult,
       expressionResult,
     });
     await markCharacterApprovalOnCanvas(args, {
@@ -3620,24 +3670,36 @@ async function handleToolCall(params, progress = () => {}) {
       castId: cast.id,
       candidateId: candidate.id,
       characterId: finalized.character.id,
+      turnaroundElementId: turnaroundResult.elementId,
       expressionElementId: expressionResult.elementId,
     });
     await requestCanvasFocus(args, expressionResult);
-    progress(1, 1, `${cast.name} registered`);
+    progress(identityPackJobs.length, identityPackJobs.length, `${cast.name} registered`);
     return {
       content: [{
         type: "text",
-        text: `Approved ${cast.name} candidate ${candidate.index}; generated the expression/angle sheet and registered ${finalized.character.id} with a two-image identity pack.`,
+        text: `Approved ${cast.name} candidate ${candidate.index}; generated the turnaround and expression/angle sheets and registered ${finalized.character.id} with a two-image identity pack.`,
       }],
-      structuredContent: { ...finalized, expressionResult },
+      structuredContent: { ...finalized, turnaroundResult, expressionResult },
     };
   }
 
   if (params?.name === TOOL_GENERATE_CHARACTER_STORYBOARD) {
     const args = params.arguments ?? {};
     const store = await readCharacterWorkflowStore(args);
-    const workflow = getCharacterWorkflow(store, args.workflowId);
+    let workflow = getCharacterWorkflow(store, args.workflowId);
     if (!workflow) throw new Error(`Unknown character workflow: ${args.workflowId}.`);
+    const requestedVisualProfileId = nonEmptyString(args.visualProfileId) || workflow.visualProfileId;
+    const liveVisualProfile = requestedVisualProfileId
+      ? await resolveChannelVisualProfileSnapshot(args, requestedVisualProfileId)
+      : null;
+    if (liveVisualProfile) {
+      workflow = {
+        ...workflow,
+        visualProfileId: liveVisualProfile.id,
+        visualProfile: liveVisualProfile,
+      };
+    }
     const jobs = buildCharacterStoryboardJobs(workflow, args.scenes, args);
     const characterValidation = validateStoryboardCharacterBindings(workflow, jobs);
     const visualValidation = validateStoryboardVisualProfile(workflow, jobs);

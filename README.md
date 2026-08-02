@@ -314,7 +314,7 @@ BuzzAssist は内部的に2つの Excalidraw 系MCPエントリを持ちます�
 - `analyze_character_script`: 台本から登場人物を抽出し、固定キャラ台帳と照合
 - `get_character_pipeline`: キャラ候補・採用・登録・本編生成の進行状況を取得
 - `generate_character_candidates`: 新キャラごとに既定3案の設定シートをキャンバスへ生成
-- `approve_character_candidate`: 採用案から表情・顔角度シートを生成し、2枚の設定画をキャラ台帳へ登録
+- `approve_character_candidate`: 採用案から三面図と表情・顔角度シートを生成し、その2枚をキャラ台帳へ登録
 - `generate_character_storyboard`: 採用済みキャラIDを固定して本編・絵コンテ画像を生成
 - `generate_excalidraw_subtitles`: 音声から日本語SRTを生成してカード配置
 - `silence_cut_excalidraw_video`: Premiere XMLまたは動画から無音カットXMLを作成

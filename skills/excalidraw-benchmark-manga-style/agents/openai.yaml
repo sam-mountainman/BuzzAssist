@@ -1,0 +1,4 @@
+interface:
+  display_name: "参考動画マンガテイスト固定"
+  short_description: "参考動画の画風だけを固定し、別人キャラと本編カットを生成"
+  default_prompt: "Use $excalidraw-benchmark-manga-style to generate an original manga character and scene that match the supplied reference-video style without copying character identity."
