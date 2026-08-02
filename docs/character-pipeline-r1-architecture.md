@@ -13,8 +13,8 @@ BuzzAssist needs to turn a YouTube manga script into repeatable image production
 Use a two-store, human-approved pipeline.
 
 - `canvas/character-workflows.json` owns in-progress work: script hash, cast extraction, fixed/per-video scope, three design candidates, selected candidate, expression sheet, and storyboard results.
-- `canvas/characters.json` owns only approved identities. Each approved character has an ID, scope, written invariants, and a two-image identity pack: the selected character sheet plus a derived expression/head-angle sheet.
-- Candidate generation uses the canonical prompt in `skills/excalidraw-image-gen/reference-sheet-prompts.md` and creates all `Generating...` frames before generation starts.
+- `canvas/characters.json` owns only approved identities. Each approved character has an ID, scope, written invariants, and a two-image identity pack generated after selection: an approved front/side/back turnaround plus an expression/head-angle sheet.
+- Candidate generation uses the lightweight candidate-card prompt in `skills/excalidraw-image-gen/reference-sheet-prompts.md` (one full body plus three head angles, no material/detail studies) and creates all `Generating...` frames before generation starts. After approval, the pipeline generates a separate turnaround and expression/angle sheet for the registered two-image identity pack.
 - Approval is an explicit user action. Only then is the expression sheet generated and the identity pack copied to `canvas/assets/characters/`.
 - Storyboard jobs refer to character IDs. The generation backend appends each character's references and a deterministic identity-lock prompt, including reference-image index ownership and anti-mixing instructions for group scenes.
 - `role: fixed` can be reused between episodes. `role: per-video` is reusable only inside the same `episodeId`.
@@ -26,7 +26,7 @@ script
   -> cast extraction and registry match
   -> three candidates for each new character
   -> user approval
-  -> expression/head-angle sheet
+  -> approved turnaround + expression/head-angle sheet
   -> approved two-image identity pack
   -> character-ID-bound storyboard/main scenes
 ```

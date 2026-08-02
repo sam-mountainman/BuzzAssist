@@ -57,8 +57,9 @@ test("channel visual profile selects scene-specific style references without tre
   assert.equal(references.length, 2);
   assert.equal(references[0].id, "night");
   const prompt = buildChannelVisualStylePrompt(profile, scene, references.length);
-  assert.match(prompt, /Reference images 1-2 are STYLE-ONLY references/);
-  assert.match(prompt, /Never copy their people, faces, hair, clothing/);
+  assert.match(prompt, /channel visual reference images are STYLE-ONLY/);
+  assert.match(prompt, /Create entirely new character identities/);
+  assert.match(prompt, /Never copy any reference person's face, hair, clothing/);
   assert.match(prompt, /STRICTLY AVOID: 3D, photorealistic, speech balloons/);
 });
 
@@ -79,7 +80,7 @@ test("character candidates and storyboard scenes inherit the locked channel prof
 
   const candidates = await buildCharacterCandidateJobs(workflow, { candidateCount: 1 });
   assert.equal(candidates.length, 1);
-  assert.equal(candidates[0].referenceImagePaths.length, 1);
+  assert.equal(candidates[0].referenceImagePaths.length, 2);
   assert.match(candidates[0].prompt, /CHANNEL VISUAL STYLE LOCK \[channel-lock\]/);
   assert.equal(candidates[0].customData.buzzassistChannelVisualProfileId, "channel-lock");
 
@@ -96,7 +97,7 @@ test("character candidates and storyboard scenes inherit the locked channel prof
   assert.equal(jobs.length, 1);
   assert.equal(jobs[0].referenceImagePaths.length, 2);
   assert.match(jobs[0].prompt, /Reserve clean negative space.*upper right/);
-  assert.match(jobs[0].prompt, /Reference images 1-2 are STYLE-ONLY references/);
+  assert.match(jobs[0].prompt, /channel visual reference images are STYLE-ONLY/);
   assert.equal(jobs[0].customData.buzzassistCharacterSceneSourcePrompt, "主人公が夜の住宅街で静かに振り返るクローズアップ");
   assert.equal(jobs[0].customData.buzzassistChannelVisualProfileId, "channel-lock");
   const visualValidation = validateStoryboardVisualProfile(readyWorkflow, jobs);

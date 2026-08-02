@@ -5,9 +5,9 @@ import os from "node:os";
 import path from "node:path";
 
 import {
+  buildApprovedIdentityPackJobs,
   buildCharacterCandidateJobs,
   buildCharacterStoryboardJobs,
-  buildExpressionSheetJob,
   extractCastFromScript,
   finalizeApprovedCharacter,
   getCharacterWorkflow,
@@ -101,7 +101,7 @@ test("workflow matches reusable fixed cast but keeps other-episode cast isolated
   }
 });
 
-test("new cast receives three labeled manga character-sheet candidates", async () => {
+test("new cast receives three labeled lightweight manga candidate cards", async () => {
   const projectDir = await mkdtemp(path.join(os.tmpdir(), "buzzassist-character-candidates-"));
   try {
     const workflow = await prepareCharacterWorkflow({
@@ -118,15 +118,17 @@ test("new cast receives three labeled manga character-sheet candidates", async (
       "田中｜候補2",
       "田中｜候補3",
     ]);
-    assert.ok(jobs.every((job) => job.prompt.includes("full-body three-view turnaround")));
-    assert.ok(jobs.every((job) => job.prompt.includes("high-quality hand-drawn Japanese manga / anime production")));
+    assert.ok(jobs.every((job) => job.prompt.includes("CHARACTER CANDIDATE CARD")));
+    assert.ok(jobs.every((job) => job.prompt.includes("exactly three head studies")));
+    assert.ok(jobs.every((job) => job.prompt.includes("No material swatches")));
+    assert.ok(jobs.every((job) => job.prompt.includes("Do not add realistic detail")));
     assert.ok(jobs.every((job) => job.customData.buzzassistCharacterCandidate === true));
   } finally {
     await rm(projectDir, { recursive: true, force: true });
   }
 });
 
-test("approval creates an expression sheet, copies two approved references, and registers the character", async () => {
+test("approval builds turnaround and expression sheets, then registers the two approved references", async () => {
   const projectDir = await mkdtemp(path.join(os.tmpdir(), "buzzassist-character-approval-"));
   try {
     const workflow = await prepareCharacterWorkflow({
@@ -157,10 +159,14 @@ test("approval creates an expression sheet, copies two approved references, and 
     assert.equal(cast.candidates.length, 3);
 
     const selected = cast.candidates[1];
-    const expressionJob = buildExpressionSheetJob(awaitingApproval, cast, selected);
+    const [turnaroundJob, expressionJob] = buildApprovedIdentityPackJobs(awaitingApproval, cast, selected);
+    assert.deepEqual(turnaroundJob.referenceImagePaths, [selected.assetFile]);
+    assert.match(turnaroundJob.prompt, /front, left-profile, and back full-body/);
     assert.deepEqual(expressionJob.referenceImagePaths, [selected.assetFile]);
     assert.match(expressionJob.prompt, /Every panel must depict the exact same person/);
+    const turnaroundFile = path.join(canvasAssets, "turnaround.png");
     const expressionFile = path.join(canvasAssets, "expression.png");
+    await writeFile(turnaroundFile, "fake-turnaround-png");
     await writeFile(expressionFile, "fake-expression-png");
 
     const finalized = await finalizeApprovedCharacter({
@@ -168,6 +174,11 @@ test("approval creates an expression sheet, copies two approved references, and 
       workflowId: workflow.id,
       castId: cast.id,
       candidateId: selected.id,
+      turnaroundResult: {
+        elementId: "turnaround-element",
+        assetFile: turnaroundFile,
+        assetUrl: "/excalidraw-assets/turnaround.png",
+      },
       expressionResult: {
         elementId: "expression-element",
         assetFile: expressionFile,

@@ -4,75 +4,75 @@
   "profiles": [
     {
       "id": "manga-channel-reference-video-v1",
-      "name": "運営者｜参考動画2本・画風固定 v1",
+      "name": "参考動画2本｜軽量マンガ画風のみ固定 v2",
       "status": "locked",
       "sourceVideos": [
         "https://www.youtube.com/watch?v=awAbZyTeE4g",
         "https://www.youtube.com/watch?v=2ycRncs4CKY"
       ],
       "maxStyleReferences": 2,
-      "stylePrompt": "Match the shared visual language of the two benchmark videos: clean commercial Japanese web-manga illustration for a long-form YouTube drama; mature realistic anime proportions around 6.5-7.5 heads tall; slim adult faces with restrained almond-shaped eyes, small simplified noses and mouths, pointed but not exaggerated chins, natural neck and shoulder proportions; dark charcoal-gray line art around 1-2 pixels at 640x360 rather than heavy pure-black ink; hair rendered as clean graphic masses with a few controlled highlight shapes, not individual photoreal strands; skin in pale warm ivory with restrained pink-gray shadow; two-stage cel shading softened by subtle airbrushed gradients; low-to-medium saturation with warm beige, muted brown, sage, dusty mauve, navy and cool blue accents; backgrounds are realistic Japanese rooms, cafes, offices, streets and coastal locations with believable furniture, architecture and scale, simplified into the same painted anime finish; premium but intentionally calm TV-anime/web-manga polish, never glossy game art.",
+      "stylePrompt": "Match only the shared production grammar of the benchmark videos: simple flat Japanese YouTube web-manga art at the visual information density of a clean 640x360 frame; mostly uniform thin charcoal-black contours; smooth uncomplicated face shapes; eyes made from a few clean strokes; a minimal single-line nose; a small simple mouth; pale flat skin with at most one restrained cel-shadow shape; hair drawn as a few broad graphic masses with one flat highlight band; clothes as broad flat fills with very few fold lines; light cream, muted blue, sage, dusty pink and brown palette; believable Japanese rooms, offices and streets simplified to visibly lower detail than the characters. Emotion comes from pose, gaze and mouth shape rather than wrinkles, facial planes or muscles. Keep the finish intentionally modest and readable, never realistic, gritty, glossy, cinematic or game-art-like.",
       "compositionPrompt": "Always output one full-bleed 16:9 illustration. Use mostly eye-level normal-lens framing equivalent to 35-70mm: medium two-shots for dialogue, clean reaction close-ups, occasional waist-up three-shots and sparse establishing wides. Place characters on thirds with readable silhouettes and grounded eyelines. Preserve a clean upper or outer negative-space zone opposite the current speaker for the later deterministic vertical speech bubble; never draw the bubble in the image. Do not center every actor symmetrically, use extreme wide-angle distortion, crop faces at the eyes/chin, or hide story-critical hands and props.",
       "shotRhythmPrompt": "For a sequence, target approximately 10% establishing/location shots, 55% medium or two-person dialogue shots, and 35% reaction close-ups. Alternate shot/reverse-shot and reaction framing; never repeat the same camera distance more than twice. Each still carries one clear action, emotion or reveal, with restrained acting except at the scripted climax.",
-      "continuityPrompt": "Character identity references override the people visible in style references. Keep each approved character's exact face, hair, age, body, clothing and accessories. Keep recurring locations on one stable architecture, furniture plan, palette, material treatment, time-of-day logic and key-light direction across all cuts. Props remain the same design and scale between shots.",
+      "continuityPrompt": "Character identity comes only from approved candidate, turnaround and expression sheets. Every benchmark image is STYLE-ONLY and must never supply a face, hair, age, body, clothing or pose. Keep each approved character's exact face, hair, age, build, clothing and accessories. Keep recurring locations on one stable architecture, furniture plan, palette, time-of-day logic and light direction across all cuts. Props remain the same design and scale between shots.",
       "outputPrompt": "Single 16:9 landscape frame, clean edges, no panel borders, no collage, no split screen, no built-in captions, no speech bubbles, no narration boxes, no readable text, no logos, no watermark. Leave all typography and balloons to BuzzAssist's deterministic overlay stage.",
-      "negativePrompt": "photorealistic skin, 3D render, game cinematic, Pixar/Disney look, chibi, super-deformed anatomy, western superhero anatomy, thick shonen speed-line ink, watercolor wash, oil paint, sketchy unfinished linework, neon cyberpunk grading, crushed blacks, orange-teal blockbuster grade, excessive depth-of-field blur, fisheye, dutch angle without story need, glamorous fashion-poster pose, duplicated people, mixed character identities, extra fingers, floating props, gibberish text, speech balloons, captions, UI, screenshot artifacts",
+      "negativePrompt": "realistic facial planes, angular cheekbone modeling, detailed lips, pores, stubble, deep wrinkles, under-eye bags, huge eyebrows, muscular neck, action-hero anatomy, gritty seinen face, yakuza-game rendering, thick aggressive ink, cross-hatching, individual hair strands, realistic fabric texture, glossy cinematic light, gradients, 3D render, photorealism, chibi, western superhero anatomy, neon grading, crushed blacks, orange-teal grade, excessive depth-of-field blur, fisheye, dutch angle without story need, duplicated people, copied benchmark identity, mixed character identities, gibberish text, speech balloons, captions, UI, screenshot artifacts",
       "referenceImages": [
         {
-          "id": "day-exterior",
-          "path": "assets/style-references/manga-channel-day-exterior.png",
+          "id": "linework-male",
+          "path": "assets/style-references/manga-channel-style-linework-male-v2.png",
+          "role": "character-style",
+          "tags": ["core", "male", "profile", "closeup", "linework", "hair"],
+          "notes": "STYLE-ONLY. Use first in candidate rounds for thin lines, minimal face grammar and broad hair masses. Never copy identity."
+        },
+        {
+          "id": "linework-female",
+          "path": "assets/style-references/manga-channel-style-linework-female-v2.png",
+          "role": "character-style",
+          "tags": ["core", "female", "closeup", "linework", "face"],
+          "notes": "STYLE-ONLY. Use second in candidate rounds for simple eyes, mouth and flat skin treatment. Never copy identity."
+        },
+        {
+          "id": "group-composition",
+          "path": "assets/style-references/manga-channel-style-group-composition-v2.png",
+          "role": "composition",
+          "tags": ["core", "interior", "dialogue", "medium", "character"],
+          "notes": "STYLE-ONLY. Medium dialogue framing, simplified room density and cast spacing."
+        },
+        {
+          "id": "action-prop",
+          "path": "assets/style-references/manga-channel-style-action-prop-v2.png",
+          "role": "composition",
+          "tags": ["interior", "action", "hands", "prop", "medium"],
+          "notes": "STYLE-ONLY. Clear gesture and prop interaction without cinematic rendering."
+        },
+        {
+          "id": "day-background",
+          "path": "assets/style-references/manga-channel-style-day-background-v2.png",
           "role": "background",
-          "tags": ["core", "exterior", "day", "medium", "character", "background"],
-          "notes": "Daylight palette, exterior background finish, adult facial proportions."
+          "tags": ["exterior", "day", "wide", "background"],
+          "notes": "STYLE-ONLY. Daylight palette and low-detail exterior finish."
         },
         {
-          "id": "dynamic-action",
-          "path": "assets/style-references/manga-channel-dynamic-closeup.png",
-          "role": "composition",
-          "tags": ["interior", "day", "action", "medium", "character"],
-          "notes": "Action readability, line weight, costume folds and restrained cel shading."
-        },
-        {
-          "id": "interior-action",
-          "path": "assets/style-references/manga-channel-interior-action.png",
-          "role": "character-style",
-          "tags": ["interior", "day", "dialogue", "closeup", "character"],
-          "notes": "Male profile, interior palette and clean neck/shoulder construction."
-        },
-        {
-          "id": "interior-two-shot",
-          "path": "assets/style-references/manga-channel-interior-two-shot.png",
-          "role": "composition",
-          "tags": ["core", "interior", "day", "dialogue", "medium", "character"],
-          "notes": "Relaxed two-person staging and realistic Japanese interior."
-        },
-        {
-          "id": "night-closeup",
-          "path": "assets/style-references/manga-channel-night-closeup.png",
-          "role": "character-style",
-          "tags": ["core", "exterior", "night", "closeup", "character", "lighting"],
-          "notes": "Eye rendering, pale skin shadows and cool night contrast."
-        },
-        {
-          "id": "night-profile",
-          "path": "assets/style-references/manga-channel-night-profile.png",
-          "role": "composition",
-          "tags": ["exterior", "night", "dialogue", "profile", "character", "lighting"],
-          "notes": "Side-profile dialogue framing and residential night background."
-        },
-        {
-          "id": "soft-interior",
-          "path": "assets/style-references/manga-channel-soft-interior.png",
-          "role": "character-style",
-          "tags": ["interior", "day", "closeup", "character", "lighting"],
-          "notes": "Male face shading, muted clothing and soft ambient light."
-        },
-        {
-          "id": "wide-interior",
-          "path": "assets/style-references/manga-channel-wide-action.png",
+          "id": "night-background",
+          "path": "assets/style-references/manga-channel-style-night-background-v2.png",
           "role": "background",
-          "tags": ["core", "interior", "day", "medium", "background"],
-          "notes": "Warm wood material, environmental detail density and line treatment."
+          "tags": ["exterior", "night", "wide", "background", "lighting"],
+          "notes": "STYLE-ONLY. Restrained night palette without neon or crushed blacks."
+        },
+        {
+          "id": "warm-interior",
+          "path": "assets/style-references/manga-channel-style-warm-interior-v2.png",
+          "role": "background",
+          "tags": ["interior", "warm", "day", "background"],
+          "notes": "STYLE-ONLY. Warm room palette, scale and simplified environmental detail."
+        },
+        {
+          "id": "neutral-interior",
+          "path": "assets/style-references/manga-channel-style-soft-interior-v2.png",
+          "role": "background",
+          "tags": ["interior", "neutral", "day", "background"],
+          "notes": "STYLE-ONLY. Soft neutral interior palette and low visual density."
         }
       ]
     }

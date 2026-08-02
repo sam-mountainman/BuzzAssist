@@ -11,6 +11,15 @@ canvas/characters.json（キャラ台帳）に登録する設定画（リファ�
   対象の記述に差し替えて使う。環境テンプレートは参照画像（`@.REF.`）を1枚添付して使う。
 - 生成したシートは台帳の `kind`（character / prop / location）に対応して登録する。
 
+## キャラクター候補カード（承認前）
+
+候補比較専用。まだ台帳へ登録しない。画風を固定する前に素材接写やゲーム設定画の情報量を
+要求すると写実方向へ寄りやすいため、候補段階は全身1点と顔3方向だけに絞る。
+
+~~~
+Create one simple 2D manga CHARACTER CANDIDATE CARD for an original character. Landscape 16:9, pure white background, generous spacing. Show exactly one front-facing full-body standing view plus exactly three head studies: front, gentle 3/4, and profile. Every view must be recognizably the same original person. Use the exact linework, face grammar, flat shading, hair treatment, palette, and visual information density required by the channel style lock. No material swatches, no garment/fabric/skin/hand/shoe close-ups, no realistic texture, no extra panels, no props, no captions, no readable text, no logo, no watermark, and no UI. Character setup: [Character appearance description]
+~~~
+
 ## キャラクターシート（kind: "character"）
 
 ~~~

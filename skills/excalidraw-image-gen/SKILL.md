@@ -114,9 +114,9 @@ AI holders are rectangle elements with:
 台本を受け取ったら、次の順番を崩さない。
 
 1. `analyze_character_script` へ台本を渡す。`名前：セリフ`、`【名前】`、`名前「セリフ」` を抽出し、固定キャラは既存台帳と照合する。エージェントが台本から外見・役割を読める場合は `cast` に `description`、`invariants`、`role` を補足する
-2. 画像設定を確認後、`generate_character_candidates` を `confirmedSettings: true` で呼ぶ。新キャラごとに既定3案をキャンバスへ `Generating...` 枠から生成する。候補はキャラ名と候補番号で表示される
+2. 画像設定を確認後、`generate_character_candidates` を `confirmedSettings: true` で呼ぶ。新キャラごとに既定3案の軽量候補カード（全身1点＋顔3方向）をキャンバスへ `Generating...` 枠から生成する。候補段階では素材・服・肌・靴の接写を作らない。候補はキャラ名と候補番号で表示される
 3. 全候補を見せ、ユーザーの採用を待つ。自動採用は禁止
-4. ユーザーが選んだら `approve_character_candidate` を呼ぶ。選択候補を参照した表情・顔角度シートを生成し、2枚のidentity packを台帳へ登録する
+4. ユーザーが選んだら `approve_character_candidate` を呼ぶ。選択候補を参照した採用三面図と表情・顔角度シートを生成し、その2枚をidentity packとして台帳へ登録する
 5. 全キャラがreadyになった後だけ `generate_character_storyboard` を呼ぶ。各シーンの `characters` / `characterIds` を明示する。サーバーが設定画とキャラ別identity lockを自動追加する
 
 複数キャラが同じシーンに出る場合、参照画像の割り当てと「顔・髪・服・年齢を混ぜない」指示が自動付与される。ただし生成モデルのドリフトを完全には保証できないため、完成画像は人物ごとに目視確認する。

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { access, mkdtemp, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +12,28 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 test("MCP batch payload previews validate and do not start or mutate a canvas", async () => {
   const projectDir = await mkdtemp(path.join(os.tmpdir(), "buzzassist-batch-preview-"));
   const canvasDir = path.join(projectDir, "canvas");
+  const identityOne = path.join(canvasDir, "assets", "characters", "hero-identity.png");
+  const identityTwo = path.join(canvasDir, "assets", "characters", "hero-expressions.png");
+  const styleOne = path.join(canvasDir, "assets", "style-references", "linework.png");
+  const styleTwo = path.join(canvasDir, "assets", "style-references", "lighting.png");
+  await mkdir(path.dirname(identityOne), { recursive: true });
+  await mkdir(path.dirname(styleOne), { recursive: true });
+  await writeFile(path.join(canvasDir, "characters.json"), `${JSON.stringify({
+    characters: [{
+      id: "hero",
+      name: "主人公",
+      kind: "character",
+      role: "fixed",
+      status: "approved",
+      description: "A newly designed protagonist who must not resemble a style-reference person.",
+      invariants: ["short black hair", "navy jacket"],
+      referenceImagePaths: [
+        "assets/characters/hero-identity.png",
+        "assets/characters/hero-expressions.png",
+      ],
+    }],
+    voices: [],
+  }, null, 2)}\n`, "utf8");
   const client = new Client({ name: "buzzassist-batch-preview-test", version: "1.0.0" });
   const transport = new StdioClientTransport({
     command: process.execPath,
@@ -88,6 +110,36 @@ test("MCP batch payload previews validate and do not start or mutate a canvas", 
     assert.equal(imagePreview.structuredContent.payloadPreview, true);
     assert.equal(imagePreview.structuredContent.total, 2);
     assert.equal(imagePreview.structuredContent.results[1].body.image_urls[0], "https://preview.invalid/image/shared-character.png");
+
+    const identityBeforeStylePreview = await client.callTool({
+      name: "generate_excalidraw_images_batch",
+      arguments: {
+        payloadPreview: true,
+        projectDir,
+        canvasDir,
+        jobs: [{
+          prompt: "Render the registered hero in the channel style while preserving a distinct new identity.",
+          model: "nano-banana-2",
+          aspectRatio: "16:9",
+          characterIds: ["hero"],
+          referenceImagePaths: [styleOne, styleTwo],
+          customData: {
+            buzzassistStyleReferencePaths: [styleOne, styleTwo],
+          },
+        }],
+      },
+    });
+    assert.equal(identityBeforeStylePreview.isError, undefined, JSON.stringify(identityBeforeStylePreview));
+    const identityBeforeStyleResult = identityBeforeStylePreview.structuredContent.results[0];
+    assert.deepEqual(identityBeforeStyleResult.body.image_urls, [
+      "https://preview.invalid/image/hero-identity.png",
+      "https://preview.invalid/image/hero-expressions.png",
+      "https://preview.invalid/image/linework.png",
+      "https://preview.invalid/image/lighting.png",
+    ]);
+    assert.match(identityBeforeStyleResult.body.prompt, /reference images 1-2 only for this character/i);
+    assert.match(identityBeforeStyleResult.body.prompt, /Reference images 3-4 are CHANNEL STYLE-ONLY references/);
+    assert.match(identityBeforeStyleResult.body.prompt, /Do not reproduce any person, face, hairstyle, clothing/);
 
     const videoPreview = await client.callTool({
       name: "generate_excalidraw_videos_batch",
