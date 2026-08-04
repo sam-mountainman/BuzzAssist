@@ -2215,6 +2215,13 @@ function toolDefinitions() {
                 fontFamily: { type: "string", description: "Optional SVG font-family stack. The reference-video profile defaults to Japanese Mincho fonts." },
                 fontWeight: { type: "number", minimum: 400, maximum: 900, description: "Reference-video body text defaults to 500; use 700-900 only for shouting." },
                 maxColumns: { type: "number", minimum: 1, maximum: 3, description: "Maximum vertical columns. The locked reference-video profile allows one to three columns." },
+                columns: {
+                  type: "array",
+                  minItems: 1,
+                  maxItems: 3,
+                  items: { type: "string" },
+                  description: "Optional human-approved semantic vertical columns in reading order. Use only when exact Japanese phrase breaks must be locked.",
+                },
                 target: {
                   type: "object",
                   properties: { x: { type: "number" }, y: { type: "number" } },
