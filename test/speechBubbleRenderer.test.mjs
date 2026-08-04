@@ -86,6 +86,47 @@ test("three semantic columns reproduce the measured long-dialogue proportions", 
   assert.equal(result.quality[0].overflow, false);
 });
 
+test("automatic Japanese columns avoid splitting a negative auxiliary from its phrase", () => {
+  const result = renderSpeechBubbleSvg({
+    width: 1672,
+    height: 941,
+    bubbles: [{
+      preset: "narration",
+      text: "時計は午後１０時。誰もいない営業部で、田中だけが契約書を直していた。",
+      target: { x: 0.75, y: 0.25 },
+    }],
+  });
+
+  assert.equal(result.quality[0].columns, 3);
+  assert.equal(result.quality[0].textLoss, false);
+  assert.ok(!result.quality[0].columnTexts.some((column) => column.endsWith("誰もい")));
+  assert.ok(!result.quality[0].columnTexts.some((column) => column.startsWith("ない")));
+  assert.deepEqual(result.quality[0].columnTexts, [
+    "時計は午後１０時。誰もいない",
+    "営業部で、田中だけが",
+    "契約書を直していた。",
+  ]);
+});
+
+test("explicit human-approved Japanese columns remain available through the renderer", () => {
+  const result = renderSpeechBubbleSvg({
+    width: 1672,
+    height: 941,
+    bubbles: [{
+      text: "田中、この条件のまま今夜中に先方へ送れ。余計な確認はするな",
+      columns: ["田中、この条件のまま", "今夜中に先方へ送れ。", "余計な確認はするな"],
+      target: { x: 0.75, y: 0.25 },
+    }],
+  });
+
+  assert.deepEqual(result.quality[0].columnTexts, [
+    "田中、この条件のまま",
+    "今夜中に先方へ送れ。",
+    "余計な確認はするな",
+  ]);
+  assert.equal(result.quality[0].textLoss, false);
+});
+
 test("long reference-style dialogue never widens beyond three columns and reports overflow", () => {
   const result = renderSpeechBubbleSvg({
     width: 1672,
