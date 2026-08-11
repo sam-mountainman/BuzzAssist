@@ -16,3 +16,4 @@ Youtube-AGI/
 **/CLAUDE.md
 .media/
 scripts/__pycache__/
+tmp/
