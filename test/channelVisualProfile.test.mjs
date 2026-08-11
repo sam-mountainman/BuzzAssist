@@ -27,6 +27,7 @@ async function fixture() {
     profiles: [{
       id: "channel-lock",
       name: "Channel lock",
+      referenceMeasurements: { version: 1, sampleCount: 80, sourceIds: ["video-a", "video-b"] },
       stylePrompt: "thin charcoal line art and restrained cel shading",
       compositionPrompt: "eye-level dialogue composition",
       shotRhythmPrompt: "alternate medium shots and close-ups",
@@ -49,6 +50,8 @@ test("channel visual profile selects scene-specific style references without tre
   const { projectDir, canvasDir } = await fixture();
   const profile = await resolveChannelVisualProfileSnapshot({ projectDir });
   assert.equal(profile.id, "channel-lock");
+  assert.equal(profile.referenceMeasurements.sampleCount, 80);
+  assert.deepEqual(profile.referenceMeasurements.sourceIds, ["video-a", "video-b"]);
   assert.equal(profile.referenceImages[0].path, join(canvasDir, "assets/style-references/core.png"));
 
   const scene = { prompt: "Night street reaction close-up", characterIds: ["hero"] };
@@ -120,6 +123,7 @@ test("character candidates and storyboard scenes inherit the locked channel prof
   }]);
   assert.equal(oppositeSide[0].customData.buzzassistSpeakerPosition, "right");
   assert.equal(oppositeSide[0].customData.buzzassistBubbleSafeZone, "upper left outer negative space");
-  assert.match(oppositeSide[0].prompt, /Shot type: eye-level medium two-shot/);
+  assert.match(oppositeSide[0].prompt, /Shot type: left three-quarter medium two-shot/);
+  assert.match(oppositeSide[0].prompt, /Camera: left three-quarter view/);
   assert.match(oppositeSide[0].prompt, /Lighting: soft natural or diffused daytime light/);
 });

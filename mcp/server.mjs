@@ -2,7 +2,7 @@
 import { copyFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { registerAppResource, registerAppTool } from "@modelcontextprotocol/ext-apps/server";
@@ -34,6 +34,7 @@ import { getBuzzAssistAuthStatus, loginBuzzAssistViaBrowser } from "../lib/buzza
 import {
   OFFICIAL_EXCALIDRAW_README,
   createExcalidrawView,
+  insertExcalidrawAudioResult,
   insertExcalidrawImage as insertExcalidrawImageMedia,
   insertExcalidrawSilenceCutResult,
   insertExcalidrawSubtitle,
@@ -73,6 +74,10 @@ import { estimateCreditsForJob } from "../lib/mediaCredits.mjs";
 import { isFalImageModel, isFalVideoModel, previewFalImageRequest, previewFalVideoRequest } from "../lib/falMediaGeneration.mjs";
 import { generateSubtitleSrt, normalizeSubtitleHoldSeconds, refineSubtitleFromPlan, renderSrt, writeSubtitleWordsSidecar } from "../lib/subtitleGeneration.mjs";
 import { buildBubbleAwareCompositionPrompt, renderSpeechBubbleSvg, speechBubbleProfile } from "../lib/speechBubbleRenderer.mjs";
+import { getElevenLabsStatus, listAllElevenLabsVoices, saveElevenLabsConfig, speechAssetPublicResult, writeSpeechAsset } from "../lib/speechGeneration.mjs";
+import { approveVoiceLibraryCasting, discoverVoiceLibraryCasting } from "../lib/voiceLibraryCasting.mjs";
+import { createEpisodeManifest, generateEpisodeSpeech, readEpisodeManifest, renderEpisodeVideo } from "../lib/mangaVideoPipeline.mjs";
+import { createMangaProductionDag, executeMangaProductionDag } from "../lib/mangaProductionDag.mjs";
 import { startChatBridgeWorker } from "../lib/chatBridge.mjs";
 import {
   isCompatibleCanvasServerStatus,
@@ -115,6 +120,11 @@ const TOOL_BUZZASSIST_LOGIN = "buzzassist_login";
 const TOOL_BUZZASSIST_AUTH_STATUS = "buzzassist_auth_status";
 const TOOL_SETUP_HERMES = "setup_hermes_grok";
 const TOOL_GENERATE_SUBTITLES = "generate_excalidraw_subtitles";
+const TOOL_GET_ELEVENLABS_VOICES = "get_elevenlabs_voices";
+const TOOL_MANAGE_ELEVENLABS_VOICE_LIBRARY = "manage_elevenlabs_voice_library";
+const TOOL_GENERATE_SPEECH = "generate_excalidraw_speech";
+const TOOL_BUILD_MANGA_VIDEO = "build_excalidraw_manga_video";
+const TOOL_RUN_MANGA_PRODUCTION_DAG = "run_excalidraw_manga_production_dag";
 const TOOL_GENERATE_SUBTITLES_BATCH = "generate_excalidraw_subtitles_batch";
 const TOOL_REFINE_SUBTITLES = "refine_excalidraw_subtitles";
 const TOOL_SILENCE_CUT_VIDEO = "silence_cut_excalidraw_video";
@@ -677,6 +687,7 @@ const SETTINGS_CONFIRMATION_TOOLS = new Map([
   [TOOL_GENERATE_VIDEO, "video"],
   [TOOL_GENERATE_VIDEOS_BATCH, "video"],
   [TOOL_GENERATE_SUBTITLES, "subtitle"],
+  [TOOL_GENERATE_SPEECH, "speech"],
   [TOOL_GENERATE_SUBTITLES_BATCH, "subtitle"],
   [TOOL_SILENCE_CUT_VIDEO, "silenceCut"],
 ]);
@@ -688,6 +699,8 @@ const SETTINGS_QUESTION_GUIDES = {
     "model (Grok Imagine / Seedance 2 / Kling v3 / Veo 3.1 / Wan 2.6 / Vidu Q2 …), 実行先 (execution route) whenever the chosen model can run on more than one of Grok(local) / Lovart / BuzzAssist API — show Lovart above BuzzAssist and prefer Lovart when both are viable (e.g. Grok Imagine → Grok or BuzzAssist; Kling / Seedance → Lovart or BuzzAssist), aspect ratio using a short valid preset list (normally 16:9 / 9:16 / 1:1; skip when the endpoint has none), duration using only model-valid choices (Grok CLI 6/10s only, Grok API 1-15s, Veo 4/6/8s, Wan 5/10/15s, Vidu 2-8s, Seedance 4-15s, Kling 2.6 5/10s), 本数 videoCount when supported (local Grok: 1-10 independent parallel generations), resolution when selectable (480p-4K), audio ON/OFF only when selectable, and attachment role/mode for start frame, end frame, reference image/video/audio, or motion source. Recommended defaults: Grok Imagine (Grok), 16:9, 6s, 720p, 1本.",
   subtitle:
     "mode (scripted aligns a provided script / scriptless transcribes), lineCount (1 or 2), and maxCharsPerLine. Recommended defaults: scripted when a script exists (otherwise scriptless), 2 lines, 30 chars.",
+  speech:
+    "model (Eleven v3 recommended / Multilingual v2 / Flash v2.5), ElevenLabs voice, speed, stability, and similarity. Recommended defaults: Eleven v3, a default ElevenLabs voice, speed 1.0, stability 0.5, similarity 0.75.",
   silenceCut:
     "input type (Premiere XML preferred, or video), model (elevenlabs-scribe-v2 for AI cleanup, or ffmpeg-local for offline threshold cuts), and, for scribe, the filler/cough/retake removal intensities (0-100). Recommended default: Premiere XML input, elevenlabs-scribe-v2, filler 40 / cough 0 / retake 0.",
 };
@@ -1521,7 +1534,15 @@ async function generateExcalidrawImagesBatch(args = {}) {
           { projectDir: args.projectDir, canvasDir: args.canvasDir },
         )
       : [];
-    return optimizeCharacterBindingsForGeneration(bindings);
+    const jobModel = nonEmptyString(job.model ?? args.model);
+    const grokReferenceLimit = jobModel === "grok-imagine-image-hermes" || jobModel === "grok-imagine-image-api";
+    return optimizeCharacterBindingsForGeneration(bindings, {
+      // Grok accepts three references total. Two-character scenes therefore
+      // use one approved identity image per person; single-character scenes
+      // can keep the identity and camera/angle sheets together.
+      multiCharacterThreshold: grokReferenceLimit ? 2 : 3,
+      maxReferencesPerCharacter: 1,
+    });
   };
   const sharedExplicitReferenceImagePaths = mergeReferenceImagePaths(
     args.referenceImagePaths,
@@ -2751,6 +2772,161 @@ function toolDefinitions() {
       },
     },
     {
+      name: TOOL_GET_ELEVENLABS_VOICES,
+      title: "Get ElevenLabs Voices",
+      description: "Return ElevenLabs connection status and every voice usable by the current account/workspace, following all pagination. Japanese-only filtering keeps native or verified Japanese candidates. Does not expose the API key.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          search: { type: "string", description: "Optional voice-name search." },
+          japaneseOnly: { type: "boolean", description: "Return only voices with Japanese-native or Japanese-verified metadata. Defaults to true." },
+          projectDir: { type: "string" },
+          canvasDir: { type: "string" },
+        },
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    },
+    {
+      name: TOOL_MANAGE_ELEVENLABS_VOICE_LIBRARY,
+      title: "Manage ElevenLabs Voice Library Casting",
+      description: "Search the complete public ElevenLabs Voice Library for native Japanese voices, rank them against each character's gender, voice age, personality, emotional range, and dialogue use case, and write a browser audition sheet. Discovery is read-only. The approve action requires previewConfirmed=true for every selection plus confirmedSettings=true, then adds only approved shared voices to My Voices and fixes the character-to-voice assignment.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          action: { type: "string", enum: ["audition", "approve"] },
+          episodeId: { type: "string", description: "Limit candidates to characters registered for this episode. Defaults to global." },
+          characterIds: { type: "array", items: { type: "string" }, description: "Optional exact character IDs to audition." },
+          candidateLimit: { type: "number", minimum: 2, maximum: 12, description: "Candidates shown per character. Defaults to 5." },
+          includeNarration: { type: "boolean", description: "Also audition a Japanese narrator. Defaults to true." },
+          planPath: { type: "string", description: "Audition JSON to approve. Optional when episodeId identifies the default plan path." },
+          selections: {
+            type: "array",
+            description: "Approved candidates after listening to their preview audio.",
+            items: {
+              type: "object",
+              properties: {
+                characterId: { type: "string" },
+                voiceId: { type: "string" },
+                newName: { type: "string", description: "Optional My Voices display name." },
+                previewConfirmed: { type: "boolean", description: "Must be true after the candidate preview was listened to." },
+              },
+              required: ["characterId", "voiceId", "previewConfirmed"],
+              additionalProperties: false,
+            },
+          },
+          confirmedSettings: { type: "boolean", description: "Required for approve because it changes My Voices and the local character registry." },
+          projectDir: { type: "string" },
+          canvasDir: { type: "string" },
+        },
+        required: ["action"],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    {
+      name: TOOL_GENERATE_SPEECH,
+      title: "Generate Excalidraw Speech",
+      description: "Generate Japanese speech with ElevenLabs (Eleven v3 by default), save mp3 plus character timing, and replace the generator frame with an audio card. Requires confirmedSettings=true.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          text: { type: "string", description: "Japanese narration or dialogue to synthesize." },
+          model: { type: "string", enum: ["eleven_v3", "eleven_multilingual_v2", "eleven_flash_v2_5"], description: "Defaults to eleven_v3." },
+          voiceId: { type: "string", description: "ElevenLabs default or library voice id." },
+          voiceName: { type: "string" },
+          stability: { type: "number", minimum: 0, maximum: 1 },
+          similarityBoost: { type: "number", minimum: 0, maximum: 1 },
+          speed: { type: "number", minimum: 0.7, maximum: 1.2 },
+          fileName: { type: "string" },
+          anchorElementId: { type: "string" },
+          placement: { type: "string", enum: ["right", "left", "below", "replace", "inside"] },
+          replaceAnchor: { type: "boolean" },
+          matchAnchor: { type: "boolean" },
+          confirmedSettings: { type: "boolean" },
+          projectDir: { type: "string" },
+          canvasDir: { type: "string" },
+        },
+        required: ["text", "voiceId"],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    {
+      name: TOOL_BUILD_MANGA_VIDEO,
+      title: "Build Excalidraw Manga Video",
+      description: "Plan, synthesize, or render a script-driven manga episode. Speech alignment controls cut duration and the visibility window of each deterministic speech bubble. Rendering uses ffmpeg with a source-viewpoint-preserving pull-out and no SFX by default; split layouts are flattened and moved as one completed page.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          action: { type: "string", enum: ["plan", "speech", "render", "full"], description: "plan creates the manifest/bubbles; speech generates all dialogue; render creates mp4; full runs all three." },
+          episodeId: { type: "string" },
+          manifestPath: { type: "string" },
+          scriptPath: { type: "string" },
+          scriptText: { type: "string" },
+          voiceId: { type: "string" },
+          voiceName: { type: "string" },
+          model: { type: "string", enum: ["eleven_v3", "eleven_multilingual_v2", "eleven_flash_v2_5"] },
+          autoCastVoices: { type: "boolean", description: "Automatically inspect every usable account voice and cast native Japanese voices by character age, gender and personality. Defaults to true during plan/full." },
+          preserveExistingVoices: { type: "boolean", description: "Keep an existing native-Japanese, non-duplicated character voice when it still fits. Defaults to true." },
+          forceVoiceCast: { type: "boolean", description: "Re-evaluate and replace even existing voice assignments." },
+          fileName: { type: "string" },
+          motion: { type: "string", enum: ["pull-out", "none"] },
+          bgmPath: { type: "string", description: "Optional absolute music path. It is looped and mixed under speech." },
+          bgmVolume: { type: "number", minimum: 0, maximum: 1, description: "BGM gain before mixing. Defaults to 0.1." },
+          normalizeMasterAudio: { type: "boolean", description: "Normalize the final voice+BGM mix. Defaults to true." },
+          masterTargetLufs: { type: "number", minimum: -24, maximum: -10, description: "Final integrated loudness target. Defaults to -14 LUFS." },
+          masterLoudnessRange: { type: "number", minimum: 1, maximum: 20, description: "Final loudness range target. Defaults to 7 LU." },
+          masterTruePeakDb: { type: "number", minimum: -9, maximum: -0.1, description: "Final true-peak ceiling. Defaults to -1.5 dBTP." },
+          width: { type: "number", minimum: 320 },
+          height: { type: "number", minimum: 180 },
+          fps: { type: "number", minimum: 12 },
+          preRollSeconds: { type: "number", minimum: 0, maximum: 3 },
+          interUtteranceGapSeconds: { type: "number", minimum: 0, maximum: 3 },
+          sameSpeakerGapSeconds: { type: "number", minimum: 0, maximum: 3, description: "Pause between consecutive lines by the same speaker. Defaults to 0.17s." },
+          speakerChangeGapSeconds: { type: "number", minimum: 0, maximum: 3, description: "Pause when the speaker changes. Defaults to 0.30s." },
+          emphasisGapSeconds: { type: "number", minimum: 0, maximum: 3, description: "Pause before utterances marked pauseClass=emphasis. Defaults to 0.50s." },
+          bubbleLeadSeconds: { type: "number", minimum: 0, maximum: 2 },
+          bubbleHoldSeconds: { type: "number", minimum: 0, maximum: 3 },
+          cutTailSeconds: { type: "number", minimum: 0, maximum: 3 },
+          speechConcurrency: { type: "number", minimum: 1, maximum: 8, description: "Parallel TTS jobs. Defaults to 4 and is capped at 8." },
+          renderConcurrency: { type: "number", minimum: 1, maximum: 4, description: "Parallel FFmpeg cut renders. Defaults to a CPU-bounded value from 2 to 4." },
+          utteranceIds: { type: "string", description: "Optional comma-separated utterance ids for a speech-only retry." },
+          cutIds: { type: "string", description: "Optional comma-separated cut ids to rerender; unchanged cuts are reused when safe." },
+          reuseRenderedCuts: { type: "boolean", description: "Reuse hash-matching cut renders for a remux or BGM-only pass." },
+          encodePreset: { type: "string", enum: ["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow"] },
+          force: { type: "boolean" },
+          projectDir: { type: "string" },
+          canvasDir: { type: "string" },
+        },
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    {
+      name: TOOL_RUN_MANGA_PRODUCTION_DAG,
+      title: "Run Excalidraw Manga Production DAG",
+      description: "Prepare, execute/resume, or inspect the checkpointed manga production DAG. Execute uses built-in fail-closed quality nodes and an optional explicit runtime handler module for production node kinds.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          action: { type: "string", enum: ["prepare", "execute", "status"] },
+          manifestPath: { type: "string" },
+          dagPath: { type: "string" },
+          statePath: { type: "string" },
+          handlerModulePath: { type: "string", description: "Optional absolute/local ESM module exporting `handlers` or default handler map." },
+          force: { type: "boolean" },
+          retryFailed: { type: "boolean" },
+          maximumAttemptsPerRun: { type: "number", minimum: 1, maximum: 5 },
+          projectDir: { type: "string" },
+          canvasDir: { type: "string" },
+        },
+        required: ["action"],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    },
+    {
       name: TOOL_GENERATE_SUBTITLES,
       title: "Generate Excalidraw Subtitles",
       description: "ONLY use when the user explicitly requests subtitles, captions, or an SRT file from audio/video. Never use for image generation, scene/storyboard creation, or merely because a text script was attached. Generate Japanese SRT, save it under canvas/assets, and place an SRT card on the canvas. Requires confirmedSettings=true.",
@@ -3753,6 +3929,165 @@ async function handleToolCall(params, progress = () => {}) {
       structuredContent: { ...batch, validation, workflow: updatedWorkflow },
     };
   }
+  if (params?.name === TOOL_GET_ELEVENLABS_VOICES) {
+    const args = params.arguments ?? {};
+    const status = await getElevenLabsStatus();
+    const voices = status.configured
+      ? await listAllElevenLabsVoices({ ...args, japaneseOnly: args.japaneseOnly !== false })
+      : { voices: [], totalCount: 0, hasMore: false };
+    return {
+      content: [{ type: "text", text: status.configured
+        ? `ElevenLabs is ready; found ${voices.totalCount} Japanese-capable voice(s) across ${voices.pageCount || 0} account page(s).`
+        : "ElevenLabs API key is not configured. Save it in the canvas Speech Generator first." }],
+      structuredContent: { status, ...voices },
+    };
+  }
+
+  if (params?.name === TOOL_MANAGE_ELEVENLABS_VOICE_LIBRARY) {
+    const args = params.arguments ?? {};
+    if (args.action === "audition") {
+      progress(0, 2, "Searching and scoring Japanese Voice Library candidates");
+      const result = await discoverVoiceLibraryCasting({
+        ...args,
+        episodeId: args.episodeId || "global",
+        includeNarration: args.includeNarration !== false,
+      });
+      progress(2, 2, "Voice Library audition sheet ready");
+      return {
+        content: [{
+          type: "text",
+          text: `Scored ${result.plan.catalog.sharedLibraryCount} public Japanese voice(s) plus ${result.plan.catalog.accountCount} account voice(s) for ${result.plan.entries.length} role(s). No voice was added. Listen in ${result.htmlPath} before approval.`,
+        }],
+        structuredContent: result,
+      };
+    }
+    if (args.action === "approve") {
+      if (args.confirmedSettings !== true) {
+        throw new Error("Voice Library approval requires confirmedSettings=true after every selected preview was heard.");
+      }
+      progress(0, 2, "Adding approved Voice Library selections");
+      const result = await approveVoiceLibraryCasting({
+        ...args,
+        confirmedVoiceAdds: true,
+      });
+      progress(2, 2, "Voice casting approved");
+      return {
+        content: [{
+          type: "text",
+          text: `Approved ${result.approvals.length} character voice assignment(s); only selected shared voices were added to My Voices.`,
+        }],
+        structuredContent: result,
+      };
+    }
+    throw new Error(`Unsupported Voice Library action: ${args.action || "(missing)"}`);
+  }
+
+  if (params?.name === TOOL_GENERATE_SPEECH) {
+    const args = params.arguments ?? {};
+    progress(0, 2, "Generating ElevenLabs speech");
+    const generated = await writeSpeechAsset(args);
+    progress(1, 2, "Placing audio on canvas");
+    const placement = await insertExcalidrawAudioResult({
+      ...args,
+      audioPath: generated.filePath,
+      assetUrl: generated.assetUrl,
+      fileName: generated.fileName,
+      mimeType: generated.mimeType,
+      provider: generated.provider,
+      model: generated.model,
+      voiceId: generated.voiceId,
+      voiceName: generated.voiceName,
+      text: generated.text,
+      durationSeconds: generated.durationSeconds,
+      alignmentPath: generated.alignmentPath,
+    });
+    await requestCanvasFocus(args, placement);
+    progress(2, 2, "Speech complete");
+    return {
+      content: [{ type: "text", text: `Generated ${generated.durationSeconds.toFixed(2)}s of ${generated.model} speech as ${generated.fileName}.${canvasHintText()}` }],
+      structuredContent: { ok: true, kind: "audio", speech: speechAssetPublicResult(generated), ...placement },
+    };
+  }
+
+  if (params?.name === TOOL_BUILD_MANGA_VIDEO) {
+    const args = params.arguments ?? {};
+    const action = args.action || "full";
+    let current = null;
+    if (action === "plan" || action === "full") {
+      progress(0, 3, "Planning manga episode");
+      current = await createEpisodeManifest(args);
+    }
+    if (action === "speech" || action === "full") {
+      progress(action === "full" ? 1 : 0, action === "full" ? 3 : 1, "Generating episode speech");
+      current = await generateEpisodeSpeech({ ...args, manifestPath: current?.filePath || args.manifestPath });
+      if (current.failedCount > 0) throw new Error(`${current.failedCount} utterance(s) failed during speech generation.`);
+    }
+    if (action === "render" || action === "full") {
+      progress(action === "full" ? 2 : 0, action === "full" ? 3 : 1, "Rendering manga video");
+      current = await renderEpisodeVideo({ ...args, manifestPath: current?.filePath || args.manifestPath });
+    }
+    if (!current) current = await readEpisodeManifest(args);
+    progress(action === "full" ? 3 : 1, action === "full" ? 3 : 1, "Manga video step complete");
+    return {
+      content: [{ type: "text", text: current.outputPath
+        ? `Rendered manga review video: ${current.outputPath}`
+        : `Manga episode ${action} complete: ${current.filePath}` }],
+      structuredContent: { ok: true, action, ...current },
+    };
+  }
+
+  if (params?.name === TOOL_RUN_MANGA_PRODUCTION_DAG) {
+    const args = params.arguments ?? {};
+    const action = args.action;
+    const projectDir = resolve(args.projectDir || process.cwd());
+    const manifestPath = resolve(args.manifestPath || join(
+      projectDir,
+      "canvas/manga-videos/manga-photo-homecoming-001/episode-manifest.json",
+    ));
+    const episodeDir = dirname(manifestPath);
+    const dagPath = resolve(args.dagPath || join(episodeDir, "production-dag-v8.json"));
+    const statePath = resolve(args.statePath || join(episodeDir, "production-dag-state.json"));
+    if (action === "prepare") {
+      progress(0, 1, "Preparing manga production DAG");
+      const { manifest } = await readEpisodeManifest({ ...args, manifestPath });
+      const dag = createMangaProductionDag({ manifest, imageModel: "gpt-image-2" });
+      await writeJsonAtomic(dagPath, dag);
+      progress(1, 1, "Manga production DAG prepared");
+      const result = { ok: true, action, dagPath, episodeId: dag.episodeId, nodeCount: dag.nodes.length, pools: dag.pools, paths: dag.paths };
+      return { content: [{ type: "text", text: `Prepared ${dag.nodes.length}-node manga production DAG: ${dagPath}` }], structuredContent: result };
+    }
+    if (action === "status") {
+      const state = JSON.parse(await readFile(statePath, "utf8"));
+      const result = { ok: true, action, statePath, summary: state.summary, metrics: state.metrics, updatedAt: state.updatedAt };
+      return { content: [{ type: "text", text: `Manga DAG status: ${JSON.stringify(state.summary)}` }], structuredContent: result };
+    }
+    if (action === "execute") {
+      progress(0, 1, "Executing manga production DAG");
+      const dag = JSON.parse(await readFile(dagPath, "utf8"));
+      let state;
+      try { state = JSON.parse(await readFile(statePath, "utf8")); } catch {}
+      let handlers = {};
+      if (args.handlerModulePath) {
+        const adapter = await import(`${pathToFileURL(resolve(args.handlerModulePath)).href}?v=${Date.now()}`);
+        handlers = adapter.handlers || adapter.default || {};
+        if (!handlers || typeof handlers !== "object") throw new Error("DAG handler module must export a handler map.");
+      }
+      state = await executeMangaProductionDag({
+        dag,
+        handlers,
+        state,
+        statePath,
+        force: args.force === true,
+        retryFailed: args.retryFailed !== false,
+        maximumAttemptsPerRun: Math.max(1, Math.min(5, Number(args.maximumAttemptsPerRun) || 2)),
+      });
+      progress(1, 1, "Manga production DAG checkpointed");
+      const result = { ok: state.summary.failed === 0, action, dagPath, statePath, summary: state.summary, metrics: state.metrics };
+      return { content: [{ type: "text", text: `Executed/checkpointed manga DAG: ${JSON.stringify(state.summary)}` }], structuredContent: result };
+    }
+    throw new Error(`Unsupported manga DAG action: ${action || "(missing)"}`);
+  }
+
   if (params?.name === TOOL_GENERATE_SUBTITLES) {
     const args = params.arguments ?? {};
     progress(0, 2, "Generating subtitles");

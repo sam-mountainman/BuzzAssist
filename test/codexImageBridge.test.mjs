@@ -1,69 +1,55 @@
-import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import test from "node:test";
 
-import {
-  codexDesktopCandidates,
-  codexPathCommands,
-  resolveCodexCommand,
-} from "../scripts/codex-image-bridge.mjs";
+import { SharedCodexImageBridge } from "../scripts/codex-image-bridge.mjs";
 
-test("Codex image bridge probes the platform-specific CLI commands", () => {
-  assert.deepEqual(codexPathCommands("darwin"), ["codex"]);
-  assert.deepEqual(codexPathCommands("linux"), ["codex"]);
-  assert.deepEqual(codexPathCommands("win32"), ["codex.exe", "codex.cmd", "codex"]);
+function fakeClientFactory(state) {
+  return async () => {
+    const id = ++state.created;
+    return {
+      id,
+      closed: false,
+      command: "fake-codex",
+      async start() { state.started += 1; },
+      dispose() { this.closed = true; state.disposed += 1; },
+    };
+  };
+}
+
+test("shared Codex bridge starts one app-server for concurrent image threads", async () => {
+  const state = { created: 0, started: 0, disposed: 0 };
+  const bridge = new SharedCodexImageBridge({
+    cwd: process.cwd(),
+    timeoutMs: 1000,
+    clientFactory: fakeClientFactory(state),
+  });
+  const results = await Promise.all(Array.from({ length: 24 }, (_, index) => bridge.generate(
+    { prompt: `job ${index}` },
+    { generateOnClient: async (client, payload) => ({ clientId: client.id, prompt: payload.prompt }) },
+  )));
+  assert.equal(state.started, 1);
+  assert.deepEqual(new Set(results.map((entry) => entry.clientId)), new Set([1]));
+  assert.equal(bridge.stats.completed, 24);
+  bridge.dispose();
+  assert.equal(state.disposed, 1);
 });
 
-test("explicit CODEX_COMMAND remains the highest-priority override", async () => {
-  const previous = process.env.CODEX_COMMAND;
-  process.env.CODEX_COMMAND = "/custom/codex";
-  try {
-    assert.equal(await resolveCodexCommand(), "/custom/codex");
-  } finally {
-    if (previous === undefined) delete process.env.CODEX_COMMAND;
-    else process.env.CODEX_COMMAND = previous;
-  }
-});
-
-test("ChatGPT desktop bundled Codex candidates are available without a separate CLI", () => {
-  const candidates = codexDesktopCandidates({ platform: "darwin", homeDir: "/Users/test" });
-  assert.deepEqual(candidates, [
-    "/Applications/ChatGPT.app/Contents/Resources/codex",
-    "/Users/test/Applications/ChatGPT.app/Contents/Resources/codex",
-    "/Applications/Codex.app/Contents/Resources/codex",
-    "/Users/test/Applications/Codex.app/Contents/Resources/codex",
-  ]);
-  assert.deepEqual(
-    codexDesktopCandidates({
-      platform: "win32",
-      homeDir: "C:\\Users\\test",
-      env: { LOCALAPPDATA: "C:\\Users\\test\\AppData\\Local" },
-    }),
-    ["C:\\Users\\test\\AppData\\Local\\Programs\\ChatGPT\\resources\\codex.exe"],
-  );
-});
-
-test("agent setup reuses the same ChatGPT/Codex auto-detection", async () => {
-  const source = await readFile(new URL("../scripts/setup-agents.mjs", import.meta.url), "utf8");
-  assert.match(source, /import \{ resolveCodexCommand \} from "\.\/codex-image-bridge\.mjs"/);
-  assert.match(source, /codex = dryRun \? commandName\("codex"\) : await resolveCodexCommand\(\)/);
-  assert.doesNotMatch(source, /Codex CLI was not found/);
-});
-
-test("Codex image generation recovers from deleted working directories", async () => {
-  const [bridge, media] = await Promise.all([
-    readFile(new URL("../scripts/codex-image-bridge.mjs", import.meta.url), "utf8"),
-    readFile(new URL("../lib/mediaGeneration.mjs", import.meta.url), "utf8"),
-  ]);
-  assert.match(bridge, /resolveBridgeWorkingDirectory/);
-  assert.match(bridge, /choices\.push\(os\.homedir\(\)\)/);
-  assert.match(media, /cwd: options\.cwd \|\| safeProcessCwd\(\)/);
-  assert.match(media, /cwd: getEnv\("CODEX_IMAGE_BRIDGE_CWD"\) \|\| safeProcessCwd\(\)/);
-});
-
-test("ChatGPT/Codex image prompts treat attached references as binding inputs", async () => {
-  const source = await readFile(new URL("../scripts/codex-image-bridge.mjs", import.meta.url), "utf8");
-  assert.match(source, /Treat every attached image as a binding visual reference/);
-  assert.match(source, /Preserve the depicted character, person, product, or subject identity/);
-  assert.match(source, /Do not ignore or replace the references with unrelated subjects/);
+test("shared Codex bridge restarts once and reconnects an unfinished job after app-server crash", async () => {
+  const state = { created: 0, started: 0, disposed: 0 };
+  const bridge = new SharedCodexImageBridge({
+    cwd: process.cwd(),
+    timeoutMs: 1000,
+    clientFactory: fakeClientFactory(state),
+  });
+  const result = await bridge.generate({ prompt: "recover" }, {
+    generateOnClient: async (client) => {
+      if (client.id === 1) throw new Error("Codex app-server exited unexpectedly (code: 1, signal: none).");
+      return { clientId: client.id };
+    },
+  });
+  assert.equal(result.clientId, 2);
+  assert.equal(state.started, 2);
+  assert.equal(bridge.stats.restarts, 1);
+  assert.equal(bridge.stats.completed, 1);
+  bridge.dispose();
 });

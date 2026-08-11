@@ -289,8 +289,8 @@ test("Grok OAuth refreshes before expiry, retries one rejected token, and reques
   }
 });
 
-test("media batch concurrency is capped at 10", () => {
-  assert.equal(normalizeMediaBatchConcurrency(99), 10);
+test("media batch concurrency accepts explicit values above the legacy cap", () => {
+  assert.equal(normalizeMediaBatchConcurrency(99), 99);
   assert.equal(normalizeMediaBatchConcurrency(0), 1);
   assert.equal(normalizeMediaBatchConcurrency(4.6), 5);
 });

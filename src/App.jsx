@@ -33,6 +33,9 @@ const GENERATE_IMAGE_ENDPOINT = '/api/generate/image'
 const GENERATE_VIDEO_ENDPOINT = '/api/generate/video'
 const GENERATION_JOB_ENDPOINT = '/api/generate/jobs'
 const GENERATE_SUBTITLES_ENDPOINT = '/api/generate/subtitles'
+const GENERATE_SPEECH_ENDPOINT = '/api/generate/speech'
+const ELEVENLABS_SETTINGS_ENDPOINT = '/api/elevenlabs/settings'
+const ELEVENLABS_VOICES_ENDPOINT = '/api/elevenlabs/voices'
 const CHARACTER_REGISTRY_ENDPOINT = '/api/characters'
 const CHARACTER_WORKFLOW_ENDPOINT = '/api/character-workflows'
 const SILENCE_CUT_ENDPOINT = '/api/video/silence-cut'
@@ -45,6 +48,7 @@ const AI_HOLDER_KEY = 'codexAiImageHolder'
 const GENERATOR_FRAME_TAG = 'buzzassist.imageGenerator.frame'
 const VIDEO_GENERATOR_FRAME_TAG = 'buzzassist.videoGenerator.frame'
 const SUBTITLE_GENERATOR_FRAME_TAG = 'buzzassist.subtitleGenerator.frame'
+const SPEECH_GENERATOR_FRAME_TAG = 'buzzassist.speechGenerator.frame'
 const SILENCE_CUT_GENERATOR_FRAME_TAG = 'buzzassist.silenceCutGenerator.frame'
 const LOVART_GENERATOR_FRAME_TAG = 'buzzassist.lovartGenerator.frame'
 const GENERATOR_FRAME_BORDER_COLOR = '#c4a5f7'
@@ -346,6 +350,13 @@ const DEFAULT_FRAME_FORM = {
   subtitleScriptName: '',
   subtitleGlossary: '',
   subtitleAudio: null,
+  speechText: '',
+  speechModel: 'eleven_v3',
+  speechVoiceId: '',
+  speechVoiceName: '',
+  speechStability: 0.5,
+  speechSimilarityBoost: 0.75,
+  speechSpeed: 1,
   silenceCutModel: 'elevenlabs-scribe-v2',
   silenceCutInstruction: '',
   silenceCutFillerRemoval: 40,
@@ -1265,7 +1276,7 @@ function characterPipelineStatusLabel(status) {
   }[status] || status || '未設定'
 }
 
-function characterReferencePreviewUrl(referencePath) {
+function canvasAssetPreviewUrlFromPath(referencePath) {
   const normalized = typeof referencePath === 'string' ? referencePath.trim().replace(/\\/g, '/') : ''
   if (!normalized) return ''
   const assetMarker = normalized.lastIndexOf('/assets/')
@@ -1324,6 +1335,15 @@ function SrtGeneratorToolIcon() {
       <path d="M4 12h16" />
       <path d="M16 8h4" />
       <path d="M16 16h4" />
+    </svg>
+  )
+}
+
+function SpeechGeneratorToolIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 12h2l1.5-5l3 10l3-13l3 16l2-8H20" />
+      <path d="M4 20h16" opacity=".35" />
     </svg>
   )
 }
@@ -2613,7 +2633,7 @@ function getPanelPlacementFromViewportTarget(target, kind = 'image', viewportOve
   const frameViewportHeight = Math.max(1, Number(target?.height) || 1)
   const desiredWidth = isVideo
     ? GENERATOR_PANEL_VIDEO_WIDTH
-    : kind === 'subtitle' || kind === 'silenceCut'
+    : kind === 'speech' || kind === 'subtitle' || kind === 'silenceCut'
       // The portrait SRT frame fits at a small zoom, so 0.9x its viewport
       // width would collapse the bar pills; keep the desktop's max width.
       ? 560
@@ -2718,6 +2738,10 @@ function isSubtitleGeneratorFrame(element) {
   return element?.customData?.[SUBTITLE_GENERATOR_FRAME_TAG] === true
 }
 
+function isSpeechGeneratorFrame(element) {
+  return element?.customData?.[SPEECH_GENERATOR_FRAME_TAG] === true
+}
+
 function isSilenceCutGeneratorFrame(element) {
   return element?.customData?.[SILENCE_CUT_GENERATOR_FRAME_TAG] === true
 }
@@ -2732,6 +2756,7 @@ function isGeneratorFrame(element) {
     (isImageGeneratorFrame(element) ||
       isVideoGeneratorFrame(element) ||
       isSubtitleGeneratorFrame(element) ||
+      isSpeechGeneratorFrame(element) ||
       isSilenceCutGeneratorFrame(element) ||
       isLovartGeneratorFrame(element))
   )
@@ -2740,6 +2765,7 @@ function isGeneratorFrame(element) {
 function generatorFrameTagFor(kind) {
   if (kind === 'video') return VIDEO_GENERATOR_FRAME_TAG
   if (kind === 'subtitle') return SUBTITLE_GENERATOR_FRAME_TAG
+  if (kind === 'speech') return SPEECH_GENERATOR_FRAME_TAG
   if (kind === 'silenceCut') return SILENCE_CUT_GENERATOR_FRAME_TAG
   if (kind === 'lovart') return LOVART_GENERATOR_FRAME_TAG
   return GENERATOR_FRAME_TAG
@@ -2906,6 +2932,7 @@ function panelMediaKindFromElement(element) {
 function getGeneratorKind(element) {
   if (isVideoGeneratorFrame(element)) return 'video'
   if (isSubtitleGeneratorFrame(element)) return 'subtitle'
+  if (isSpeechGeneratorFrame(element)) return 'speech'
   if (isSilenceCutGeneratorFrame(element)) return 'silenceCut'
   if (isLovartGeneratorFrame(element)) return 'lovart'
   return 'image'
@@ -2996,8 +3023,8 @@ function normalizeAssetList(value) {
     .filter((item) => item && typeof item === 'object')
     .map((item) => {
       const path = typeof item.path === 'string' ? item.path : ''
-      const url = typeof item.url === 'string' ? item.url : ''
-      const displayURL = url || path || ''
+      const sourceUrl = typeof item.url === 'string' ? item.url : ''
+      const url = normalizeCanvasAssetUrl(sourceUrl) || canvasAssetPreviewUrlFromPath(path) || sourceUrl
       const rawThumbnail = typeof item.thumbnail === 'string' ? item.thumbnail : ''
       const thumbnail = rawThumbnail.startsWith('data:image/')
         ? rawThumbnail
@@ -3006,6 +3033,7 @@ function normalizeAssetList(value) {
         : ''
       return {
         ...item,
+        url,
         dataURL: '',
         thumbnail
       }
@@ -3425,7 +3453,8 @@ function assetPreviewImageSrc(asset, posterByAssetUrl = null) {
     return VIDEO_POSTER_FALLBACK_DATA_URL
   }
   if (thumbnail && !thumbnail.startsWith('data:')) return thumbnail
-  return typeof asset?.url === 'string' ? asset.url : ''
+  const url = typeof asset?.url === 'string' ? asset.url : ''
+  return normalizeCanvasAssetUrl(url) || canvasAssetPreviewUrlFromPath(asset?.path) || url
 }
 
 function formatPlaybackDuration(seconds) {
@@ -3658,6 +3687,15 @@ function frameFormFromElement(element) {
     subtitleAudio: customData.subtitleAudioAsset && typeof customData.subtitleAudioAsset === 'object'
       ? customData.subtitleAudioAsset
       : null,
+    speechText: typeof customData.speechText === 'string' ? customData.speechText : '',
+    speechModel: ['eleven_v3', 'eleven_multilingual_v2', 'eleven_flash_v2_5'].includes(customData.speechModel)
+      ? customData.speechModel
+      : DEFAULT_FRAME_FORM.speechModel,
+    speechVoiceId: typeof customData.speechVoiceId === 'string' ? customData.speechVoiceId : '',
+    speechVoiceName: typeof customData.speechVoiceName === 'string' ? customData.speechVoiceName : '',
+    speechStability: clamp(finiteNumberOr(customData.speechStability, DEFAULT_FRAME_FORM.speechStability), 0, 1),
+    speechSimilarityBoost: clamp(finiteNumberOr(customData.speechSimilarityBoost, DEFAULT_FRAME_FORM.speechSimilarityBoost), 0, 1),
+    speechSpeed: clamp(finiteNumberOr(customData.speechSpeed, DEFAULT_FRAME_FORM.speechSpeed), 0.7, 1.2),
     silenceCutModel: customData.silenceCutModel === 'ffmpeg-local' ? 'ffmpeg-local' : DEFAULT_FRAME_FORM.silenceCutModel,
     silenceCutInstruction: typeof customData.silenceCutInstruction === 'string' ? customData.silenceCutInstruction : '',
     silenceCutFillerRemoval: clamp(finiteNumberOr(customData.silenceCutFillerRemoval, DEFAULT_FRAME_FORM.silenceCutFillerRemoval), 0, 100),
@@ -3685,6 +3723,17 @@ function frameFormFromElement(element) {
 }
 
 function frameCustomDataFromForm(kind, form) {
+  if (kind === 'speech') {
+    return {
+      speechText: form.speechText,
+      speechModel: form.speechModel,
+      speechVoiceId: form.speechVoiceId,
+      speechVoiceName: form.speechVoiceName,
+      speechStability: form.speechStability,
+      speechSimilarityBoost: form.speechSimilarityBoost,
+      speechSpeed: form.speechSpeed
+    }
+  }
   if (kind === 'subtitle') {
     return {
       subtitleMode: form.subtitleMode,
@@ -4878,6 +4927,7 @@ function generatorPanelReserveFor(kind) {
   if (kind === 'video') return 280
   // Utility panels are tall and must leave room above the bottom toolbar.
   if (kind === 'subtitle') return 300
+  if (kind === 'speech') return 360
   return 300
 }
 
@@ -4931,6 +4981,7 @@ function centeredGeneratorResize(frame, size, appState, kind) {
 
 function frameSizeFor(kind, form) {
   if (kind === 'video') return VIDEO_ASPECTS[form.videoAspectRatio] ?? VIDEO_ASPECTS['16:9']
+  if (kind === 'speech') return { width: 320, height: 180 }
   if (kind === 'subtitle') return { width: 205, height: 364 }
   if (kind === 'silenceCut') return { width: 364, height: 205 }
   if (kind === 'lovart') {
@@ -5037,6 +5088,10 @@ export default function App() {
   const [agentChatComposer, setAgentChatComposer] = useState(null)
   const agentChatInputRef = useRef(null)
   const [lovartAuth, setLovartAuth] = useState(null)
+  const [elevenLabsStatus, setElevenLabsStatus] = useState(null)
+  const [elevenLabsVoices, setElevenLabsVoices] = useState([])
+  const [elevenLabsApiKey, setElevenLabsApiKey] = useState('')
+  const [elevenLabsBusy, setElevenLabsBusy] = useState(false)
   const [lovartKeySaving, setLovartKeySaving] = useState(false)
   const [lovartKeyEditing, setLovartKeyEditing] = useState(false)
   const [lovartGenerationMode, setLovartGenerationMode] = useState(null)
@@ -5045,6 +5100,42 @@ export default function App() {
   const [hermesSetupDialog, setHermesSetupDialog] = useState(null)
   const [hermesSetupChecking, setHermesSetupChecking] = useState(false)
   const [chatSendStatus, setChatSendStatus] = useState('')
+
+  useEffect(() => {
+    if (activeFrameKind !== 'speech') return
+    let cancelled = false
+    const load = async () => {
+      setElevenLabsBusy(true)
+      try {
+        const statusResponse = await canvasFetch(ELEVENLABS_SETTINGS_ENDPOINT)
+        const status = await statusResponse.json().catch(() => ({}))
+        if (!statusResponse.ok) throw new Error(status.error || 'ElevenLabs設定を取得できません。')
+        if (cancelled) return
+        setElevenLabsStatus(status)
+        if (!status.configured) {
+          setElevenLabsVoices([])
+          return
+        }
+        const voicesResponse = await canvasFetch(ELEVENLABS_VOICES_ENDPOINT)
+        const voicesPayload = await voicesResponse.json().catch(() => ({}))
+        if (!voicesResponse.ok) throw new Error(voicesPayload.error || 'ElevenLabsの声一覧を取得できません。')
+        if (cancelled) return
+        const voices = Array.isArray(voicesPayload.voices) ? voicesPayload.voices : []
+        setElevenLabsVoices(voices)
+        setFrameForm((current) => {
+          if (current.speechVoiceId) return current
+          const preferred = voices.find((voice) => voice.id === status.defaultVoiceId) || voices[0]
+          return preferred ? { ...current, speechVoiceId: preferred.id, speechVoiceName: preferred.name } : current
+        })
+      } catch (error) {
+        if (!cancelled) setGenerationError(error.message || String(error))
+      } finally {
+        if (!cancelled) setElevenLabsBusy(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [activeFrameKind])
 
   // Bridge to the local Claude Code / Codex app. Files attach natively via
   // the OS open-file route (same route as drag & drop — no GUI keystrokes);
@@ -9600,8 +9691,42 @@ export default function App() {
     }
   }, [api, applyRemoteScene, ensureBuzzAssistLoggedIn, focusGeneratingFrameGrid, frameForm, generatingFrameIds, insertGeneratorFrame, openHermesSetupDialog, prehydrateResultFiles, refreshHermesStatus, refreshOverlayStates, saveCanvas, scheduleCanvasSave, scheduleSelectionSave, selectedGeneratedResult, setGeneratorFramesRemoteGenerating, spawnExtraGeneratingFrames, updateActiveFrameElement])
 
+  const saveElevenLabsSettings = useCallback(async () => {
+    if (!elevenLabsApiKey.trim()) {
+      setGenerationError('ElevenLabs APIキーを入力してください。')
+      return false
+    }
+    setElevenLabsBusy(true)
+    try {
+      const response = await canvasFetch(ELEVENLABS_SETTINGS_ENDPOINT, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ apiKey: elevenLabsApiKey.trim() })
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok || payload.error) throw new Error(payload.error || 'ElevenLabs設定を保存できません。')
+      const voicesResponse = await canvasFetch(ELEVENLABS_VOICES_ENDPOINT)
+      const voicesPayload = await voicesResponse.json().catch(() => ({}))
+      if (!voicesResponse.ok || voicesPayload.error) throw new Error(voicesPayload.error || '声一覧を取得できません。')
+      const voices = Array.isArray(voicesPayload.voices) ? voicesPayload.voices : []
+      setElevenLabsStatus({ ...payload, configured: true })
+      setElevenLabsVoices(voices)
+      setElevenLabsApiKey('')
+      if (!frameForm.speechVoiceId && voices[0]) {
+        patchFrameForm({ speechVoiceId: voices[0].id, speechVoiceName: voices[0].name })
+      }
+      setGenerationError('')
+      return true
+    } catch (error) {
+      setGenerationError(error.message || String(error))
+      return false
+    } finally {
+      setElevenLabsBusy(false)
+    }
+  }, [elevenLabsApiKey, frameForm.speechVoiceId, patchFrameForm])
+
   // Utility generation replaces its generator with a normal canvas result:
-  // an SRT card or a Premiere XML attachment card.
+  // an audio card, SRT card, or Premiere XML attachment card.
   const runUtilityGeneration = useCallback(async () => {
     if (!api) return
     const anchorElementId = activeFrameIdRef.current
@@ -9610,10 +9735,19 @@ export default function App() {
     const anchorElement = scene.elements.find((element) => element.id === anchorElementId)
     if (!anchorElement || !isGeneratorFrame(anchorElement)) return
     const kind = getGeneratorKind(anchorElement)
-    if (kind !== 'subtitle' && kind !== 'silenceCut') return
+    if (kind !== 'speech' && kind !== 'subtitle' && kind !== 'silenceCut') return
 
     const savedForm = { ...frameForm }
-    if (kind === 'subtitle') {
+    if (kind === 'speech') {
+      if (!savedForm.speechText.trim()) {
+        setGenerationError('読み上げる台本を入力してください。')
+        return
+      }
+      if (!savedForm.speechVoiceId) {
+        setGenerationError('ElevenLabsの声を選択してください。')
+        return
+      }
+    } else if (kind === 'subtitle') {
       if (!savedForm.subtitleAudio?.path) {
         setGenerationError('音声を添付してください。')
         return
@@ -9627,7 +9761,7 @@ export default function App() {
       return
     }
 
-    const utilityLabel = kind === 'subtitle' ? 'SRT生成' : '無音カット'
+    const utilityLabel = kind === 'speech' ? '音声生成' : kind === 'subtitle' ? 'SRT生成' : '無音カット'
     if (!(await ensureBuzzAssistLoggedIn({
       message: `${utilityLabel}を続けるにはBuzzAssistへのログインが必要です。`
     }))) return
@@ -9646,9 +9780,23 @@ export default function App() {
 
     try {
       await saveCanvas(latestSceneRef.current)
-      const endpoint = kind === 'subtitle' ? GENERATE_SUBTITLES_ENDPOINT : SILENCE_CUT_ENDPOINT
+      const endpoint = kind === 'speech' ? GENERATE_SPEECH_ENDPOINT : kind === 'subtitle' ? GENERATE_SUBTITLES_ENDPOINT : SILENCE_CUT_ENDPOINT
       const body =
-        kind === 'subtitle'
+        kind === 'speech'
+          ? {
+              text: savedForm.speechText.trim(),
+              model: savedForm.speechModel,
+              voiceId: savedForm.speechVoiceId,
+              voiceName: savedForm.speechVoiceName,
+              stability: savedForm.speechStability,
+              similarityBoost: savedForm.speechSimilarityBoost,
+              speed: savedForm.speechSpeed,
+              anchorElementId,
+              placement: 'replace',
+              replaceAnchor: true,
+              matchAnchor: false
+            }
+          : kind === 'subtitle'
           ? {
               audioPath: savedForm.subtitleAudio.path,
               scriptText: savedForm.subtitleMode === 'scripted' ? savedForm.subtitleScriptText : '',
@@ -10046,6 +10194,7 @@ export default function App() {
         if (!seconds) return null
         return estimateCreditsForJob({ kind: 'subtitle', model: 'elevenlabs-scribe-v2', durationSeconds: seconds }).credits
       }
+      if (activeFrameKind === 'speech') return null
       if (activeFrameKind === 'silenceCut') {
         if (frameForm.silenceCutModel !== 'elevenlabs-scribe-v2') return 0
         const seconds = Number(frameForm.silenceCutVideo?.duration) || 0
@@ -10080,7 +10229,7 @@ export default function App() {
       canUseVideoFrameTarget(frameForm.videoModel, frameForm.videoTab, 'end') &&
       (frameForm.videoStartFrame || frameForm.videoEndFrame)
   )
-  const isUtilityPanelKind = activeFrameKind === 'subtitle' || activeFrameKind === 'silenceCut'
+  const isUtilityPanelKind = activeFrameKind === 'speech' || activeFrameKind === 'subtitle' || activeFrameKind === 'silenceCut'
   const panelPlacement = showPromptPanel
     ? getPanelPlacementFromViewportTarget(activePanelTarget, activeFrameKind, visualViewportMetrics)
     : null
@@ -10548,7 +10697,7 @@ export default function App() {
                       <article className="character-registry-card" key={character.id}>
                         <div className="character-registry-thumbs">
                           {(character.referenceImagePaths || []).slice(0, 2).map((path, index) => {
-                            const previewUrl = characterReferencePreviewUrl(path)
+                            const previewUrl = canvasAssetPreviewUrlFromPath(path)
                             return previewUrl
                               ? <img key={`${path}-${index}`} src={previewUrl} alt="" />
                               : <span key={`${path}-${index}`} aria-label="参照画像を表示できません" />
@@ -10621,6 +10770,24 @@ export default function App() {
             }}
           >
             <VideoGeneratorToolIcon />
+          </button>
+          <button
+            type="button"
+            className="lovart-ai-button"
+            aria-label="音声ジェネレーター"
+            data-lovart-tooltip="音声ジェネレーター"
+            data-lovart-generator-kind="speech"
+            onPointerDown={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+            }}
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              createGeneratorFrame('speech')
+            }}
+          >
+            <SpeechGeneratorToolIcon />
           </button>
           <button
             type="button"
@@ -10725,10 +10892,12 @@ export default function App() {
       {frameOverlays.map((overlay) => {
         const isGenerating = generatingFrameIds.has(overlay.id) || overlay.remoteGenerating
         const isVideo = overlay.kind === 'video'
-        const isUtilityFrame = overlay.kind === 'subtitle' || overlay.kind === 'silenceCut'
+        const isUtilityFrame = overlay.kind === 'speech' || overlay.kind === 'subtitle' || overlay.kind === 'silenceCut'
         const overlayTitle = overlay.label || (
           overlay.kind === 'video'
             ? 'Video Generator'
+            : overlay.kind === 'speech'
+              ? 'Speech Generator'
             : overlay.kind === 'subtitle'
               ? 'SRT Generator'
               : overlay.kind === 'silenceCut'
@@ -10844,7 +11013,9 @@ export default function App() {
             <div className="lovart-frame-inner">
               {isGenerating ? <div className={`lovart-frame-generating-bg${isVideo ? ' video' : ''}`} /> : null}
               <div className="lovart-frame-center">
-                {overlay.kind === 'subtitle' ? (
+                {overlay.kind === 'speech' ? (
+                  <span style={{ width: overlayMetrics.iconSize, height: overlayMetrics.iconSize, display: 'inline-flex', color: '#b89de0' }}><SpeechGeneratorToolIcon /></span>
+                ) : overlay.kind === 'subtitle' ? (
                   <SrtCenterIcon size={overlayMetrics.iconSize} />
                 ) : overlay.kind === 'silenceCut' ? (
                   <SilenceCutCenterIcon size={overlayMetrics.iconSize} />
@@ -12118,6 +12289,103 @@ export default function App() {
                   <span>{typeof activePanelCreditEstimate === 'number' ? activePanelCreditEstimate.toLocaleString('ja-JP') : '—'}</span>
                 )}
               </button>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {showPromptPanel && activeFrameKind === 'speech' ? (
+        <section
+          className={`lovart-ai-panel lovart-utility-panel${openMenuBlocksPrompt ? ' has-open-menu' : ''}`}
+          style={panelStyle}
+          aria-label="Speech Generator"
+          onPointerDown={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="lovart-utility-tray-wrap is-open">
+            <textarea
+              className="lovart-ai-prompt"
+              placeholder="読み上げる日本語の台本を入力"
+              value={frameForm.speechText}
+              onChange={(event) => updateFrameForm('speechText', event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.nativeEvent.isComposing) {
+                  event.preventDefault()
+                  runUtilityGeneration()
+                }
+              }}
+            />
+            <div className="lovart-menu-section" style={{ padding: '12px 14px', display: 'grid', gap: 10 }}>
+              {!elevenLabsStatus?.configured ? (
+                <div style={{ display: 'grid', gap: 7 }}>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input
+                      type="password"
+                      value={elevenLabsApiKey}
+                      placeholder="ElevenLabs API key"
+                      autoComplete="off"
+                      onChange={(event) => setElevenLabsApiKey(event.target.value)}
+                      style={{ flex: 1, minWidth: 0, border: '1px solid #ddd', borderRadius: 8, padding: '8px 10px' }}
+                    />
+                    <button type="button" onClick={saveElevenLabsSettings} disabled={elevenLabsBusy || !elevenLabsApiKey.trim()}>
+                      {elevenLabsBusy ? '確認中…' : '保存'}
+                    </button>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', fontSize: 11, color: '#6b7280' }}>
+                    <span>キーは端末内だけに保存され、キャンバスには入りません。</span>
+                    <a href="https://elevenlabs.io/app/developers/api-keys" target="_blank" rel="noreferrer">APIキーを開く</a>
+                  </div>
+                </div>
+              ) : null}
+              <label className="lovart-setting-row" style={{ display: 'grid', gridTemplateColumns: '92px 1fr', alignItems: 'center' }}>
+                <span className="lovart-menu-header">モデル</span>
+                <select value={frameForm.speechModel} onChange={(event) => updateFrameForm('speechModel', event.target.value)}>
+                  <option value="eleven_v3">Eleven v3（表現力）</option>
+                  <option value="eleven_multilingual_v2">Multilingual v2（安定）</option>
+                  <option value="eleven_flash_v2_5">Flash v2.5（高速）</option>
+                </select>
+              </label>
+              <label className="lovart-setting-row" style={{ display: 'grid', gridTemplateColumns: '92px 1fr', alignItems: 'center' }}>
+                <span className="lovart-menu-header">声</span>
+                <select
+                  value={frameForm.speechVoiceId}
+                  disabled={!elevenLabsStatus?.configured || elevenLabsBusy}
+                  onChange={(event) => {
+                    const voice = elevenLabsVoices.find((candidate) => candidate.id === event.target.value)
+                    patchFrameForm({ speechVoiceId: event.target.value, speechVoiceName: voice?.name || '' })
+                  }}
+                >
+                  <option value="">声を選択</option>
+                  {elevenLabsVoices.map((voice) => <option key={voice.id} value={voice.id}>{voice.name}</option>)}
+                </select>
+              </label>
+              {elevenLabsVoices.find((voice) => voice.id === frameForm.speechVoiceId)?.previewUrl ? (
+                <audio controls preload="none" src={elevenLabsVoices.find((voice) => voice.id === frameForm.speechVoiceId).previewUrl} style={{ width: '100%', height: 34 }} />
+              ) : null}
+              {[
+                ['安定性', 'speechStability', 0, 1, 0.05],
+                ['声の類似度', 'speechSimilarityBoost', 0, 1, 0.05],
+                ['速度', 'speechSpeed', 0.7, 1.2, 0.05]
+              ].map(([label, field, min, max, step]) => (
+                <label key={field} className="lovart-setting-row" style={{ display: 'grid', gridTemplateColumns: '92px 1fr 42px', alignItems: 'center', gap: 8 }}>
+                  <span className="lovart-menu-header">{label}</span>
+                  <input type="range" min={min} max={max} step={step} value={frameForm[field]} onChange={(event) => updateFrameForm(field, Number(event.target.value))} />
+                  <output>{Number(frameForm[field]).toFixed(2)}</output>
+                </label>
+              ))}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                <span style={{ fontSize: 12, color: '#6b7280' }}>生成音声の文字時刻を吹き出し同期に使用</span>
+                <button
+                  type="button"
+                  className={`lovart-generate${isCurrentFrameGenerating ? ' is-generating' : ''}`}
+                  disabled={!elevenLabsStatus?.configured || !frameForm.speechText.trim() || !frameForm.speechVoiceId || isCurrentFrameGenerating}
+                  onClick={runUtilityGeneration}
+                >
+                  <LightningIcon />
+                  <span>{isCurrentFrameGenerating ? 'Generating...' : '生成'}</span>
+                </button>
+              </div>
             </div>
           </div>
         </section>

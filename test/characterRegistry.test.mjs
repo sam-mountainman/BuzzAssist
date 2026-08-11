@@ -59,9 +59,29 @@ test("resolveCharacterReferencePaths lists available ids on an unknown id", () =
   const registry = normalizeCharacterRegistry({ characters: [{ id: "sukketo" }] });
   assert.throws(
     () => resolveCharacterReferencePaths(registry, ["missing"], { canvasDir: os.tmpdir() }),
-    /Unknown character id\(s\): missing.*Available ids.*sukketo/s,
+    /Unknown or unapproved character id\(s\): missing.*Available ids.*sukketo/s,
   );
   assert.deepEqual(resolveCharacterReferencePaths(registry, [], { canvasDir: os.tmpdir() }), []);
+});
+
+test("draft and archived characters cannot be resolved as generation identities", () => {
+  const registry = normalizeCharacterRegistry({
+    characters: [
+      { id: "approved", status: "approved", referenceImagePaths: ["assets/approved.png"] },
+      { id: "draft", status: "draft", referenceImagePaths: ["assets/draft.png"] },
+      { id: "archived", status: "archived", referenceImagePaths: ["assets/archived.png"] },
+    ],
+  });
+
+  assert.equal(resolveCharacterBindings(registry, ["approved"], { canvasDir: os.tmpdir() }).length, 1);
+  assert.throws(
+    () => resolveCharacterBindings(registry, ["draft"], { canvasDir: os.tmpdir() }),
+    /Unknown or unapproved character id\(s\): draft.*Available ids.*approved/s,
+  );
+  assert.throws(
+    () => resolveCharacterBindings(registry, ["archived"], { canvasDir: os.tmpdir() }),
+    /Unknown or unapproved character id\(s\): archived.*Available ids.*approved/s,
+  );
 });
 
 test("character aliases resolve to an identity pack with explicit multi-character separation", () => {

@@ -122,12 +122,24 @@ export async function resolveCodexCommand() {
   );
 }
 
+function taggedCodexError(message, code, properties = {}) {
+  const error = new Error(message);
+  error.code = code;
+  Object.assign(error, properties);
+  return error;
+}
+
 function friendlyCodexError(error, command) {
   const message = error instanceof Error ? error.message : String(error);
-  if (/usage[_ -]?limit|hit your usage|rate[_ -]?limit|too many requests|quota|\b429\b/i.test(message)) {
-    return new Error(
+  if (/usage[_ -]?limit|hit your usage|quota|生成上限/i.test(message)) {
+    return taggedCodexError(
       "ChatGPTの生成上限に達しました。時間をおいて再試行するか、プランをアップグレードすると上限を増やせます。プラン一覧: https://chatgpt.com/ja-JP/pricing/?openaicom_referred=true",
+      "CODEX_USAGE_LIMIT",
+      { retryable: true, parked: true },
     );
+  }
+  if (/rate[_ -]?limit|too many requests|\b429\b/i.test(message)) {
+    return taggedCodexError(message, "CODEX_RATE_LIMIT", { retryable: true, parked: false });
   }
   if (/requires a newer version of Codex|update.*Codex|unsupported client/i.test(message)) {
     return new Error(
@@ -339,7 +351,7 @@ async function extractImageResult(item) {
   throw new Error("Codex image generation completed without an image payload.");
 }
 
-class CodexAppServerClient {
+export class CodexAppServerClient {
   constructor({ cwd, timeoutMs }) {
     this.cwd = cwd;
     this.timeoutMs = timeoutMs;
@@ -347,6 +359,8 @@ class CodexAppServerClient {
     this.pending = new Map();
     this.notifications = new Set();
     this.stderr = "";
+    this.closed = false;
+    this.intentionalClose = false;
   }
 
   async start() {
@@ -368,6 +382,7 @@ class CodexAppServerClient {
     });
 
     this.child.on("close", (code, signal) => {
+      this.closed = true;
       const error = new Error(`Codex app-server exited unexpectedly (code: ${code ?? "unknown"}, signal: ${signal ?? "none"}).`);
       for (const pending of this.pending.values()) pending.reject(error);
       this.pending.clear();
@@ -421,6 +436,9 @@ class CodexAppServerClient {
   }
 
   request(method, params) {
+    if (this.closed || !this.child?.stdin?.writable) {
+      return Promise.reject(new Error("Codex app-server is not running."));
+    }
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -453,22 +471,20 @@ class CodexAppServerClient {
   }
 
   dispose() {
+    this.intentionalClose = true;
+    this.closed = true;
     this.reader?.close();
     if (this.child && !this.child.killed) this.child.kill();
   }
 }
 
-async function generateWithCodex(payload) {
-  const timeoutMs = Number.parseInt(process.env.CODEX_IMAGE_BRIDGE_TIMEOUT_MS || "", 10) || DEFAULT_TIMEOUT_MS;
-  const cwd = await resolveBridgeWorkingDirectory(process.env.CODEX_IMAGE_BRIDGE_CWD);
-  const model = nonEmptyString(process.env.CODEX_IMAGE_BRIDGE_MODEL);
+// R62: one job = one THREAD on a (possibly shared) app-server client. The
+// caller owns the client lifecycle; this function only owns its thread.
+export async function generateOnClient(client, payload, { cwd, model, timeoutMs }) {
   const tempDir = await mkdtemp(join(os.tmpdir(), "excalidraw-codex-image-"));
-  const client = new CodexAppServerClient({ cwd, timeoutMs });
   let threadId = "";
-
   try {
     await mkdir(tempDir, { recursive: true });
-    await client.start();
     const created = await client.request("thread/start", {
       cwd,
       ...(model ? { model } : {}),
@@ -554,23 +570,182 @@ async function generateWithCodex(payload) {
     if (threadId) {
       await client.request("thread/archive", { threadId }).catch(() => undefined);
     }
-    client.dispose();
     await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
   }
+}
+
+async function generateWithCodex(payload) {
+  const timeoutMs = Number.parseInt(process.env.CODEX_IMAGE_BRIDGE_TIMEOUT_MS || "", 10) || DEFAULT_TIMEOUT_MS;
+  const cwd = await resolveBridgeWorkingDirectory(process.env.CODEX_IMAGE_BRIDGE_CWD);
+  const model = nonEmptyString(process.env.CODEX_IMAGE_BRIDGE_MODEL);
+  const client = new CodexAppServerClient({ cwd, timeoutMs });
+  try {
+    await client.start();
+    return await generateOnClient(client, payload, { cwd, model, timeoutMs });
+  } finally {
+    client.dispose();
+  }
+}
+
+function isAppServerDisconnect(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /app-server (?:exited|is not running)|broken pipe|EPIPE|ECONNRESET|socket hang up/iu.test(message);
+}
+
+/**
+ * One long-lived app-server, one short-lived thread per image job. Concurrent
+ * calls share the process; a process crash invalidates only that generation of
+ * the client and each unfinished job reconnects once on the replacement.
+ */
+export class SharedCodexImageBridge {
+  constructor(options = {}) {
+    this.cwd = options.cwd;
+    this.model = options.model || "";
+    this.timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS;
+    this.clientFactory = options.clientFactory || ((clientOptions) => new CodexAppServerClient(clientOptions));
+    this.client = null;
+    this.startPromise = null;
+    this.generation = 0;
+    this.stats = { starts: 0, restarts: 0, jobs: 0, completed: 0, failed: 0 };
+  }
+
+  async start() {
+    await this.#ensureClient();
+    return this;
+  }
+
+  async #ensureClient() {
+    if (this.client && !this.client.closed) return this.client;
+    if (!this.startPromise) {
+      this.startPromise = (async () => {
+        const client = await this.clientFactory({ cwd: this.cwd, timeoutMs: this.timeoutMs });
+        await client.start();
+        this.client = client;
+        this.generation += 1;
+        this.stats.starts += 1;
+        if (this.stats.starts > 1) this.stats.restarts += 1;
+        return client;
+      })().finally(() => {
+        this.startPromise = null;
+      });
+    }
+    return this.startPromise;
+  }
+
+  #invalidate(client) {
+    if (this.client !== client) return;
+    client.dispose();
+    this.client = null;
+  }
+
+  async generate(payload, options = {}) {
+    this.stats.jobs += 1;
+    const runner = options.generateOnClient || generateOnClient;
+    for (let reconnect = 0; reconnect <= 1; reconnect += 1) {
+      const client = await this.#ensureClient();
+      try {
+        const result = await runner(client, payload, {
+          cwd: this.cwd,
+          model: this.model,
+          timeoutMs: this.timeoutMs,
+        });
+        this.stats.completed += 1;
+        return result;
+      } catch (error) {
+        if (reconnect === 0 && isAppServerDisconnect(error)) {
+          this.#invalidate(client);
+          continue;
+        }
+        this.stats.failed += 1;
+        throw friendlyCodexError(error, client.command);
+      }
+    }
+    throw new Error("Codex image generation could not reconnect to app-server.");
+  }
+
+  dispose() {
+    this.client?.dispose();
+    this.client = null;
+  }
+}
+
+const sharedBridges = new Map();
+
+export async function generateCodexImage(payload, options = {}) {
+  const timeoutMs = Number(options.timeoutMs)
+    || Number.parseInt(process.env.CODEX_IMAGE_BRIDGE_TIMEOUT_MS || "", 10)
+    || DEFAULT_TIMEOUT_MS;
+  const cwd = await resolveBridgeWorkingDirectory(options.cwd || process.env.CODEX_IMAGE_BRIDGE_CWD);
+  const model = nonEmptyString(options.model ?? process.env.CODEX_IMAGE_BRIDGE_MODEL);
+  if (options.shared === false) return generateWithCodex(payload);
+  const key = `${cwd}\u0000${model}\u0000${timeoutMs}`;
+  let bridge = sharedBridges.get(key);
+  if (!bridge) {
+    bridge = new SharedCodexImageBridge({ cwd, model, timeoutMs });
+    sharedBridges.set(key, bridge);
+  }
+  return bridge.generate(payload);
+}
+
+export function sharedCodexImageBridgeStats() {
+  return [...sharedBridges.entries()].map(([key, bridge]) => ({ key, generation: bridge.generation, ...bridge.stats }));
+}
+
+export function disposeSharedCodexImageBridges() {
+  for (const bridge of sharedBridges.values()) bridge.dispose();
+  sharedBridges.clear();
 }
 
 async function main() {
   const raw = await readStdin();
   const payload = JSON.parse(raw || "{}");
-  const result = await generateWithCodex(payload);
+  const result = await generateCodexImage(payload);
   process.stdout.write(`${JSON.stringify({ success: true, ...result })}\n`);
+  disposeSharedCodexImageBridges();
+}
+
+async function sharedServerMain() {
+  const reader = createInterface({ input: process.stdin });
+  const pending = new Set();
+  reader.on("line", (line) => {
+    if (!line.trim()) return;
+    const task = (async () => {
+      let requestId = null;
+      try {
+        const payload = JSON.parse(line);
+        requestId = payload.requestId ?? null;
+        const result = await generateCodexImage(payload);
+        process.stdout.write(`${JSON.stringify({ requestId, success: true, ...result })}\n`);
+      } catch (error) {
+        process.stdout.write(`${JSON.stringify({
+          requestId,
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+          errorCode: error?.code || null,
+          retryable: error?.retryable === true,
+          parked: error?.parked === true,
+        })}\n`);
+      }
+    })();
+    pending.add(task);
+    task.finally(() => pending.delete(task));
+  });
+  await new Promise((resolve) => reader.once("close", resolve));
+  await Promise.allSettled(pending);
+  disposeSharedCodexImageBridges();
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch((error) => {
+  const entrypoint = process.argv.includes("--server-mode") && process.argv.includes("shared")
+    ? sharedServerMain
+    : main;
+  entrypoint().catch((error) => {
     process.stdout.write(`${JSON.stringify({
       success: false,
       error: error instanceof Error ? error.message : String(error),
+      errorCode: error?.code || null,
+      retryable: error?.retryable === true,
+      parked: error?.parked === true,
     })}\n`);
     process.exitCode = 1;
   });
