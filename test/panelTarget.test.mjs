@@ -216,7 +216,7 @@ test("all generation routes require BuzzAssist login through the shared dialog",
   assert.match(source, /'ログインして続行'/);
   assert.match(source, /Every generation route still needs a BuzzAssist account gate/);
   assert.match(source, /message: `\$\{generationRouteLabel\}で\$\{generationKindLabel\}を続けるにはBuzzAssistへのログインが必要です。`/);
-  assert.match(source, /const utilityLabel = kind === 'subtitle' \? 'SRT生成' : '無音カット'/);
+  assert.match(source, /const utilityLabel = kind === 'speech' \? '音声生成' : kind === 'subtitle' \? 'SRT生成' : '無音カット'/);
   assert.match(source, /message: `\$\{utilityLabel\}を続けるにはBuzzAssistへのログインが必要です。`/);
   assert.doesNotMatch(source, /requiresBuzzAssist/);
   assert.doesNotMatch(source, /needsCloud/);
