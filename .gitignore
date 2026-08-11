@@ -14,3 +14,5 @@ Youtube-AGI/
 # claude-mem drops auto-generated CLAUDE.md context files into subdirectories;
 # only the root CLAUDE.md (tracked, so unaffected by this rule) is intentional.
 **/CLAUDE.md
+.media/
+scripts/__pycache__/
