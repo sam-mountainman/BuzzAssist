@@ -85,7 +85,7 @@ const cases = [
   },
   {
     id: "shout",
-    label: "強い発話｜通常と同じ滑らかな楕円",
+    label: "強い発話｜参照実測の不規則な強調輪郭",
     bubbles: [{ preset: "shout", text: "同じ被害を受けて客足は遠のくわ", speakerPosition: "right" }],
   },
   {
@@ -131,15 +131,22 @@ function dataUri(fileName) {
 }
 
 function casePass(entry, result) {
-  const expectedShape = entry.bubbles.every((bubble) => bubble.preset === "narration") ? "rectangle" : "ellipse";
+  const expectedShape = entry.bubbles.every((bubble) => bubble.preset === "narration")
+    ? "rectangle"
+    : entry.bubbles.every((bubble) => bubble.preset === "shout")
+      ? "shout-irregular"
+      : entry.bubbles.every((bubble) => bubble.preset === "thought")
+        ? "thought-radial"
+        : "ellipse";
   const shapePass = result.svg.includes(`data-shape="${expectedShape}"`)
-    && !result.svg.includes('text-orientation="mixed"');
+    && result.svg.includes('data-layout="explicit-vertical-glyph"');
   const typographyPass = entry.id !== "punctuation-and-digits"
     || (result.svg.includes("２０２６") && result.svg.includes("︙") && !result.svg.includes("2026"));
   return shapePass && typographyPass && result.quality.every((quality) => (
     !quality.overflow
     && !quality.tooSmall
     && !quality.textLoss
+    && quality.shapeContainmentPass !== false
     && quality.columns <= 3
     && quality.fontSize >= frame.height * 0.043
     && quality.faceOverlapRatio <= 0.01
@@ -227,7 +234,8 @@ const report = {
     "Standard dialogue is a smooth white vertical ellipse with a thin black outline and no default tail.",
     "Dialogue typography is black Mincho, vertically set, and automatically reflowed to one to three columns.",
     "Narration is a white rectangle with a thin black outline.",
-    "Dialogue, internal voice, and strong speech use the same smooth oval in the locked reference videos.",
+    "Strong speech uses one of seven OpenCV-extracted, irregular concave outlines selected by text length and aspect ratio.",
+    "Every glyph block is tested against the selected concave polygon and repositioned or resized before export.",
     "ASCII digits become upright full-width digits and ellipses become a true vertical ellipsis.",
     "Balloons occupy outer negative-space zones and avoid faces, mouths, hands, and story-critical props.",
   ],

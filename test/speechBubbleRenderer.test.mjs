@@ -4,8 +4,10 @@ import { getImageDimensionsFromBuffer } from "../lib/canvasScene.mjs";
 import {
   buildBubbleAwareCompositionPrompt,
   planSpeechBubbleLayout,
+  REFERENCE_SEQUENCE_PLACEMENT_POLICY,
   renderSpeechBubbleSvg,
 } from "../lib/speechBubbleRenderer.mjs";
+import { buildCameraAwareBubblePlacement } from "../lib/mangaBubbleCameraPlacement.mjs";
 
 test("R5 locked-reference renderer uses upright Mincho type and one integrated curved tail path", () => {
   const result = renderSpeechBubbleSvg({
@@ -22,11 +24,11 @@ test("R5 locked-reference renderer uses upright Mincho type and one integrated c
     }],
   });
 
-  assert.match(result.svg, /writing-mode="vertical-rl"/);
-  assert.match(result.svg, /text-orientation="upright"/);
+  assert.match(result.svg, /data-layout="explicit-vertical-glyph"/);
+  assert.doesNotMatch(result.svg, /writing-mode=/);
   assert.match(result.svg, /Hiragino Mincho ProN/);
   assert.match(result.svg, /data-profile="reference-video-locked-v3"/);
-  assert.match(result.svg, /font-weight="500"/);
+  assert.match(result.svg, /font-weight="400"/);
   assert.match(result.svg, /data-tail="integrated"/);
   assert.match(result.svg, /<path d="M [^"]+ Q [^"]+" fill="#ffffff" stroke="#111111"/);
   assert.equal((result.svg.match(/<path /g) || []).length, 1);
@@ -108,6 +110,36 @@ test("automatic Japanese columns avoid splitting a negative auxiliary from its p
   ]);
 });
 
+test("automatic Japanese columns keep a demonstrative with its following noun", () => {
+  const result = renderSpeechBubbleSvg({
+    width: 1672,
+    height: 941,
+    bubbles: [{
+      text: "雨、強くなったな。閉店前に、この現像だけ終わらせよう",
+      speakerPosition: "left",
+    }],
+  });
+
+  assert.equal(result.quality[0].columns, 3);
+  assert.equal(result.quality[0].textLoss, false);
+  assert.ok(!result.quality[0].columnTexts.some((column) => column.endsWith("この")));
+  assert.ok(result.quality[0].columnTexts.some((column) => column.includes("この現像")));
+});
+
+test("vertical dialogue preserves authored punctuation without inventing a final Japanese period", () => {
+  const source = "澪なのか？　東京にいるはずじゃ……";
+  const result = renderSpeechBubbleSvg({
+    width: 1672,
+    height: 941,
+    bubbles: [{ text: source, speakerPosition: "left" }],
+  });
+
+  assert.equal(result.quality[0].textLoss, false);
+  assert.equal(result.quality[0].columnTexts.join(""), "澪なのか？東京にいるはずじゃ︙");
+  assert.ok(!result.quality[0].columnTexts.at(-1).endsWith("。"));
+  assert.match(result.svg, /data-text="澪なのか？東京にいるはずじゃ︙"/);
+});
+
 test("explicit human-approved Japanese columns remain available through the renderer", () => {
   const result = renderSpeechBubbleSvg({
     width: 1672,
@@ -125,6 +157,61 @@ test("explicit human-approved Japanese columns remain available through the rend
     "余計な確認はするな",
   ]);
   assert.equal(result.quality[0].textLoss, false);
+  assert.equal(result.quality[0].exactTextMatch, true);
+});
+
+test("approved narration columns retain phrase groups when only final punctuation was omitted", () => {
+  const text = "けれど、写した人の名前まで守ってくれるわけではない。";
+  const result = renderSpeechBubbleSvg({
+    width: 1672,
+    height: 941,
+    bubbles: [{
+      preset: "narration",
+      text,
+      columns: ["けれど、写した人の", "名前まで守ってくれる", "わけではない"],
+      bounds: { x: 0.42, y: 0.12, width: 0.18, height: 0.76 },
+    }],
+  });
+
+  assert.deepEqual(result.quality[0].columnTexts, [
+    "けれど、写した人の",
+    "名前まで守ってくれる",
+    "わけではない。",
+  ]);
+  assert.equal(result.quality[0].renderedText, text);
+  assert.equal(result.quality[0].exactTextMatch, true);
+  assert.equal(result.quality[0].textLoss, false);
+  assert.equal(result.quality[0].overflow, false);
+});
+
+test("stale explicit columns never replace or truncate the current dialogue text", () => {
+  const text = "田中さん、元の見積書とメールを開いてください。二つを並べれば改ざんが証明できます";
+  const result = renderSpeechBubbleSvg({
+    width: 1672,
+    height: 941,
+    bubbles: [{
+      text,
+      columns: ["二つを並べれば", "改ざんが証明できます"],
+      target: { x: 0.75, y: 0.25 },
+    }],
+  });
+
+  assert.equal(result.quality[0].inputCharacterCount, text.length);
+  assert.equal(result.quality[0].renderedCharacterCount, text.length);
+  assert.equal(result.quality[0].textLoss, false);
+  assert.equal(result.quality[0].columnTexts.join(""), text);
+});
+
+test("reference bubbles keep a full character-height safety margin from the body edge", () => {
+  const result = renderSpeechBubbleSvg({
+    width: 1672,
+    height: 941,
+    bubbles: [{ text: "また僕だけ残業か……。でも、明日の契約だけは失敗できない" }],
+  });
+
+  assert.equal(result.quality[0].overflow, false);
+  assert.ok(result.quality[0].edgeClearanceRatio >= 0.9);
+  assert.ok(result.quality[0].ellipseContainmentScore <= 0.96);
 });
 
 test("long reference-style dialogue never widens beyond three columns and reports overflow", () => {
@@ -186,10 +273,207 @@ test("default placement uses the negative space opposite the speaker", () => {
     });
     const bounds = result.bubbles[0].bounds;
     const centerX = bounds.x + bounds.width / 2;
-    if (speakerPosition === "left") assert.ok(centerX >= 1672 / 2 - 1, "use the center gap or right outer space");
-    else assert.ok(centerX <= 1672 / 2 + 1, "use the center gap or left outer space");
+    if (speakerPosition === "left") assert.ok(centerX >= 1672 * 0.75, "use the right outer negative-space lane");
+    else assert.ok(centerX <= 1672 * 0.25, "use the left outer negative-space lane");
     assert.ok(bounds.y + bounds.height / 2 < 941 * 0.72);
   }
+});
+
+test("reference sequence policy moves a new balloon out of the previous lane and band", () => {
+  const result = planSpeechBubbleLayout({
+    width: 1000,
+    height: 600,
+    bubbles: [{ id: "next", text: "連続して同じ場所には置かない", speakerPosition: "left" }],
+    placementHistory: [{
+      id: "previous",
+      preset: "dialogue",
+      bounds: { x: 0.798, y: 0.055, width: 0.157, height: 0.62 },
+    }],
+  });
+  const bubble = result.bubbles[0];
+  assert.equal(bubble.sequencePlacement.policyId, REFERENCE_SEQUENCE_PLACEMENT_POLICY.id);
+  assert.equal(bubble.sequencePlacement.historyDepth, 1);
+  assert.equal(bubble.sequencePlacement.nearRepeat, false);
+  assert.equal(bubble.sequencePlacement.immediate.laneChanged, true);
+  assert.equal(bubble.sequencePlacement.immediate.bandChanged, true);
+  assert.ok(
+    bubble.sequencePlacement.immediate.centerDistanceRatio
+      >= REFERENCE_SEQUENCE_PLACEMENT_POLICY.preferredMovementDistanceRatio,
+  );
+});
+
+test("sequence variation never wins by covering a protected face", () => {
+  const protectedFaces = [
+    { x: 0.36, y: 0.02, width: 0.30, height: 0.72, kind: "face" },
+    { x: 0.04, y: 0.02, width: 0.24, height: 0.72, kind: "face" },
+  ];
+  const result = planSpeechBubbleLayout({
+    width: 1000,
+    height: 600,
+    bubbles: [{ text: "顔を避ける方が優先", speakerPosition: "left" }],
+    placementHistory: [{ bounds: { x: 0.798, y: 0.055, width: 0.157, height: 0.62 } }],
+    avoidRegions: protectedFaces,
+  });
+  const selected = result.bubbles[0].bounds;
+  for (const face of protectedFaces) {
+    const absolute = { x: face.x * 1000, y: face.y * 600, width: face.width * 1000, height: face.height * 600 };
+    const overlapWidth = Math.max(0, Math.min(selected.x + selected.width, absolute.x + absolute.width) - Math.max(selected.x, absolute.x));
+    const overlapHeight = Math.max(0, Math.min(selected.y + selected.height, absolute.y + absolute.height) - Math.max(selected.y, absolute.y));
+    assert.equal(overlapWidth * overlapHeight, 0);
+  }
+  assert.equal(result.bubbles[0].sequencePlacement.immediate.bandChanged, true);
+  assert.equal(result.bubbles[0].placementScore < 5000, true);
+});
+
+test("camera-aware authored placement can lock a bubble to the requested outer lane", () => {
+  for (const placementSide of ["left", "right"]) {
+    const result = planSpeechBubbleLayout({
+      width: 1672,
+      height: 941,
+      bubbles: [{
+        text: "話者の顔を避ける位置",
+        placementSide,
+        lockPlacementSide: true,
+        target: placementSide === "left" ? { x: 0.82, y: 0.28 } : { x: 0.18, y: 0.28 },
+      }],
+    });
+    const bounds = result.bubbles[0].bounds;
+    const centerX = bounds.x + bounds.width / 2;
+    if (placementSide === "left") assert.ok(centerX < 1672 / 2);
+    else assert.ok(centerX > 1672 / 2);
+  }
+});
+
+test("multi-person dialogue uses the nearest face-safe center gap instead of a distant outer edge", () => {
+  const result = planSpeechBubbleLayout({
+    width: 1000,
+    height: 600,
+    bubbles: [{
+      text: "話している人の近くに置く",
+      placementSide: "left",
+      target: { x: 0.74, y: 0.30 },
+      speakerProximityTargets: [
+        { x: 0.71, y: 0.29 },
+        { x: 0.74, y: 0.30 },
+        { x: 0.77, y: 0.31 },
+      ],
+    }],
+    avoidRegions: [
+      { x: 0.66, y: 0.08, width: 0.18, height: 0.34, kind: "face" },
+      { x: 0.10, y: 0.10, width: 0.14, height: 0.30, kind: "body", weight: 80 },
+    ],
+  });
+  const bubble = result.bubbles[0];
+  const centerX = bubble.bounds.x + bubble.bounds.width / 2;
+  assert.ok(centerX > 1000 * 0.34 && centerX < 1000 * 0.66, "use the clean gap near the active speaker");
+  assert.equal(bubble.speakerProximityTargets.length, 3);
+});
+
+test("camera-swept active face gets a candidate directly beside its movement envelope", () => {
+  const result = planSpeechBubbleLayout({
+    width: 1000,
+    height: 600,
+    bubbles: [{
+      text: "移動中も話者の近く",
+      placementSide: "right",
+      target: { x: 0.25, y: 0.25 },
+      speakerProximityTargets: [
+        { x: 0.34, y: 0.25 },
+        { x: 0.25, y: 0.25 },
+        { x: 0.16, y: 0.25 },
+      ],
+    }],
+    avoidRegions: [{ x: 0.06, y: 0.02, width: 0.39, height: 0.38, kind: "face", weight: 1600 }],
+  });
+  const bounds = result.bubbles[0].bounds;
+  assert.ok(bounds.x >= 450, "place the balloon just beyond the swept face region");
+  assert.ok(bounds.x < 700, "do not send it to the far outer edge");
+});
+
+test("an authored bubble is rejected when it covers any protected speaker-head sample", () => {
+  assert.throws(() => renderSpeechBubbleSvg({
+    width: 1000,
+    height: 600,
+    bubbles: [{
+      text: "顔には絶対に重ねない",
+      bounds: { x: 0.42, y: 0.10, width: 0.20, height: 0.60 },
+    }],
+    avoidRegions: [{
+      x: 0.50,
+      y: 0.20,
+      width: 0.16,
+      height: 0.28,
+      kind: "active-speaker-head",
+    }],
+  }), /no collision-free placement/);
+});
+
+test("single-person dialogue tracks the speaker across the complete camera interval", () => {
+  const placement = buildCameraAwareBubblePlacement({
+    width: 1000,
+    height: 600,
+    shot: {
+      id: "moving-single-speaker",
+      startSeconds: 0,
+      endSeconds: 6,
+      durationSeconds: 6,
+      camera: {
+        zoomStart: 1.4,
+        zoomEnd: 1.4,
+        focusX: 0.60,
+        focusXEnd: 0.40,
+        focusY: 0.5,
+        focusYEnd: 0.5,
+      },
+    },
+    utterance: {
+      id: "single-u01",
+      preset: "dialogue",
+      timing: { bubbleStartInCutSeconds: 0.5, bubbleEndInCutSeconds: 5.5 },
+    },
+    overlaySpec: {
+      avoidRegions: [{ id: "speaker-face", kind: "face", x: 0.43, y: 0.12, width: 0.14, height: 0.25 }],
+      cameraAwarePlacement: {
+        sourceSpeakerFace: { id: "speaker-face", kind: "face", x: 0.43, y: 0.12, width: 0.14, height: 0.25 },
+      },
+    },
+  });
+  assert.ok(placement.sampledCameraPositions >= 33);
+  assert.equal(placement.speakerProximitySampleCount, 9);
+  assert.ok(placement.cameraAwareAvoidRegions.every((region) => region.kind === "active-speaker-head"));
+  assert.equal(placement.hardOverlapTolerancePixels, 0);
+});
+
+test("locked reference profile never synthesizes bold emphasis", () => {
+  const result = renderSpeechBubbleSvg({
+    width: 1672,
+    height: 941,
+    bubbles: [{ text: "太字にはしない", emphasis: "太字", target: { x: 0.8, y: 0.3 } }],
+  });
+  assert.doesNotMatch(result.svg, /font-weight="(?:[5-9]\d\d)"/);
+  assert.match(result.svg, /font-synthesis:none/);
+});
+
+test("camera-sampled important overlap reports the worst instant instead of summing time", () => {
+  const result = renderSpeechBubbleSvg({
+    width: 1000,
+    height: 600,
+    bubbles: [{
+      id: "sampled-overlap",
+      text: "証拠を隠さない",
+      bounds: { x: 100, y: 100, width: 200, height: 300 },
+    }],
+    avoidRegions: [0, 0.5, 1].map((cameraProgress, index) => ({
+      id: `evidence-camera-sample-${index + 1}`,
+      kind: "evidence",
+      x: 100,
+      y: 100,
+      width: 100,
+      height: 300,
+      cameraProgress,
+    })),
+  });
+  assert.ok(result.quality[0].importantOverlapRatio <= 0.51);
 });
 
 test("cut-table speaker hints provide the mouth anchor without face-detection ML", () => {
@@ -208,8 +492,8 @@ test("cut-table speaker hints provide the mouth anchor without face-detection ML
   assert.equal(Math.round(result.bubbles[0].target.y), 184);
 });
 
-test("August scope exposes exactly the four reference-video presets", () => {
-  for (const preset of ["dialogue", "shout", "thought", "narration"]) {
+test("editorial scope exposes all six reference-video presets", () => {
+  for (const preset of ["dialogue", "shout", "thought", "panic", "tremble", "narration"]) {
     const result = renderSpeechBubbleSvg({
       width: 1280,
       height: 720,

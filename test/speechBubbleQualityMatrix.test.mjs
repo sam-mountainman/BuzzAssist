@@ -92,21 +92,95 @@ test("reference profile is resolution-stable at HD, source size, and Full HD", (
   }
 });
 
-test("dialogue, thought, and shout all use the same smooth reference-video oval", () => {
-  const paths = [];
-  for (const preset of ["dialogue", "thought", "shout"]) {
+test("editorial presets keep distinct reference-video silhouettes at normal weight", () => {
+  const expectedShapes = new Map([
+    ["dialogue", "ellipse"],
+    ["thought", "thought-radial"],
+    ["shout", "shout-irregular"],
+    ["panic", "panic-wavy"],
+    ["tremble", "tremble-wavy"],
+  ]);
+  const renderedGroups = [];
+  for (const [preset, shape] of expectedShapes) {
     const result = renderSpeechBubbleSvg({
       width: 1280,
       height: 720,
       bubbles: [{ id: preset, preset, text: "同じ被害を受けて客足は遠のくわ", bounds: { x: 0.70, y: 0.08, width: 0.18, height: 0.62 } }],
     });
     const group = result.svg.match(new RegExp(`<g id="${preset}"[\\s\\S]*?<\\/g>`))?.[0] ?? "";
-    assert.match(group, /data-shape="ellipse"/);
-    assert.doesNotMatch(group, /<circle| L /);
-    assert.match(group, /font-weight="500"/);
-    paths.push(group.match(/<path d="([^"]+)"/)?.[1]);
+    assert.match(group, new RegExp(`data-shape="${shape}"`));
+    assert.match(group, /font-weight="400"/);
+    assert.doesNotMatch(group, /font-weight="[5-9]00"/);
+    renderedGroups.push(group);
   }
-  assert.equal(new Set(paths).size, 1);
+  assert.equal(new Set(renderedGroups).size, expectedShapes.size);
+});
+
+test("shout and tremble balloons use OpenCV-extracted reference contours", () => {
+  const shout = renderSpeechBubbleSvg({
+    width: 1672,
+    height: 941,
+    bubbles: [{
+      id: "measured-shout",
+      preset: "shout",
+      text: "ちょっと待ってください。そんな決め方では納得できません！",
+      bounds: { x: 0.405, y: 0.055, width: 0.18, height: 0.72 },
+    }],
+  });
+  const tremble = renderSpeechBubbleSvg({
+    width: 1672,
+    height: 941,
+    bubbles: [{
+      id: "measured-tremble",
+      preset: "tremble",
+      text: "ご、ごごごごめんなさぁぁぁい！",
+      bounds: { x: 0.45, y: 0.10, width: 0.15, height: 0.62 },
+    }],
+  });
+
+  assert.match(shout.svg, /data-shape-template="reference-frame-32"/);
+  assert.match(tremble.svg, /data-shape-template="reference-frame-37"/);
+  assert.ok((shout.svg.match(/ L /g) || []).length >= 45);
+  assert.ok((tremble.svg.match(/ L /g) || []).length >= 100);
+  assert.doesNotMatch(shout.svg, / Q /);
+});
+
+test("reference-contour typography stays inside concave shoulders", () => {
+  const result = renderSpeechBubbleSvg({
+    width: 1672,
+    height: 941,
+    bubbles: [{
+      id: "concave-safe",
+      preset: "shout",
+      text: "私は戻らない。あの写真は、祖母の最後の夏を撮った大切な記録なの",
+      bounds: { x: 0.405, y: 0.055, width: 0.18, height: 0.72 },
+    }],
+  });
+  const quality = result.quality[0];
+  assert.equal(quality.shapeTemplateId, "reference-frame-32");
+  assert.equal(quality.shapeContainmentPass, true);
+  assert.ok(quality.shapeTextClearance >= quality.fontSize * 0.13);
+  assert.equal(quality.overflow, false);
+  assert.equal(quality.textLoss, false);
+});
+
+test("thought balloon uses the measured dense equal-arc radial ink ring", () => {
+  const result = renderSpeechBubbleSvg({
+    width: 1672,
+    height: 941,
+    bubbles: [{
+      id: "measured-thought",
+      preset: "thought",
+      text: "……でも、もし静音が覚えていて、それを俺が破ってしまったら",
+      bounds: { x: 0.18, y: 0.08, width: 0.18, height: 0.72 },
+    }],
+  });
+  const group = result.svg.match(/<g id="measured-thought"[\s\S]*?<\/g>/)?.[0] ?? "";
+  const radialPath = group.match(/<path d="([^"]+)" data-decoration="reference-frame-27-radial-ink"/)?.[1] ?? "";
+  assert.match(group, /data-shape-template="reference-frame-27-radial-ink"/);
+  assert.match(group, /data-decoration="reference-frame-27-radial-ink"/);
+  assert.equal((radialPath.match(/M /g) || []).length, 160);
+  assert.equal((radialPath.match(/L /g) || []).length, 160);
 });
 
 test("vertical punctuation and digits use upright Japanese video typography", () => {
@@ -115,17 +189,20 @@ test("vertical punctuation and digits use upright Japanese video typography", ()
     height: 941,
     bubbles: [{ text: "2026年に『本当に？』と聞いたんです..." }],
   });
-  assert.match(result.svg, /text-orientation="upright"/);
+  assert.match(result.svg, /data-layout="explicit-vertical-glyph"/);
+  assert.doesNotMatch(result.svg, /writing-mode=/);
   assert.match(result.svg, /２０２６年/);
   assert.match(result.svg, /︙/);
   assert.doesNotMatch(result.svg, />2026|\.\.\./);
 });
 
-test("all four presets pass the no-loss readability gate", () => {
+test("all six presets pass the no-loss readability gate", () => {
   const cases = [
     { preset: "dialogue", text: "約束は守ってください" },
     { preset: "shout", text: "ふざけるな！" },
     { preset: "thought", text: "そういうことか…" },
+    { preset: "panic", text: "ご、ごめんなさい！" },
+    { preset: "tremble", text: "ご、ごごごめんなさぁぁぁい！" },
     { preset: "narration", text: "その日の夜、事態は動き始めた" },
   ];
   for (const entry of cases) {
