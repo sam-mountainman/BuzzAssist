@@ -75,6 +75,26 @@ test("script cast extraction ignores title and cut headers and trims punctuation
   assert.equal(cast.find((entry) => entry.name === "佐藤 誠司").role, "fixed");
 });
 
+test("script cast extraction ignores YAML frontmatter and keeps spaced Japanese speaker names", () => {
+  const script = `---
+title: 消えかけた写真に、帰る場所が写っていた
+kind: manga-video-script
+episode_id: manga-photo-homecoming-001
+visual_profile_id: koutani-reference-video-v1
+target_cuts: 10
+---
+
+高瀬 蓮：「この写真、まだ持っていたのか」
+水野 澪：「忘れるわけないでしょう」
+神谷 玲司：「二人とも、早く来いよ」
+`;
+
+  const cast = extractCastFromScript(script);
+
+  assert.deepEqual(cast.map((entry) => entry.name), ["高瀬 蓮", "水野 澪", "神谷 玲司"]);
+  assert.deepEqual(cast.map((entry) => entry.firstAppearanceLine), [9, 10, 11]);
+});
+
 test("workflow matches reusable fixed cast but keeps other-episode cast isolated", async () => {
   const projectDir = await mkdtemp(path.join(os.tmpdir(), "buzzassist-character-match-"));
   try {
@@ -96,6 +116,35 @@ test("workflow matches reusable fixed cast but keeps other-episode cast isolated
     assert.equal(helper.characterId, "channel-helper");
     assert.equal(hero.status, "needs-candidates");
     assert.notEqual(hero.id, "old-hero");
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("workflow reuses a draft same-episode id but requires new candidates", async () => {
+  const projectDir = await mkdtemp(path.join(os.tmpdir(), "buzzassist-character-reapproval-"));
+  try {
+    await writeCharacterRegistry({ projectDir }, {
+      characters: [
+        {
+          id: "episode-001-ren",
+          name: "高瀬 蓮",
+          role: "per-video",
+          status: "draft",
+          episodeId: "episode-001",
+          referenceImagePaths: [],
+        },
+      ],
+    });
+    const workflow = await prepareCharacterWorkflow({
+      projectDir,
+      scriptText: "高瀬 蓮：ただいま。",
+      episodeId: "episode-001",
+      candidateCount: 3,
+    });
+    assert.equal(workflow.cast[0].id, "episode-001-ren");
+    assert.equal(workflow.cast[0].status, "needs-candidates");
+    assert.equal(workflow.cast[0].characterId, "");
   } finally {
     await rm(projectDir, { recursive: true, force: true });
   }
@@ -161,7 +210,8 @@ test("approval builds turnaround and expression sheets, then registers the two a
     const selected = cast.candidates[1];
     const [turnaroundJob, expressionJob] = buildApprovedIdentityPackJobs(awaitingApproval, cast, selected);
     assert.deepEqual(turnaroundJob.referenceImagePaths, [selected.assetFile]);
-    assert.match(turnaroundJob.prompt, /front, left-profile, and back full-body/);
+    assert.match(turnaroundJob.prompt, /front, strict left-profile, strict right-profile, and back full-body/);
+    assert.match(turnaroundJob.prompt, /strict overhead\/top head views/);
     assert.deepEqual(expressionJob.referenceImagePaths, [selected.assetFile]);
     assert.match(expressionJob.prompt, /Every panel must depict the exact same person/);
     const turnaroundFile = path.join(canvasAssets, "turnaround.png");

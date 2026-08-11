@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  insertExcalidrawAudioResult,
   insertExcalidrawImage,
   insertExcalidrawMediaBatch,
   insertExcalidrawSilenceCutResult,
@@ -25,6 +26,34 @@ const ONE_BY_ONE_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
   "base64",
 );
+
+test("generated speech is inserted as an audio-linked canvas card without copying the audio", async () => {
+  const projectDir = await mkdtemp(join(tmpdir(), "excalidraw-speech-card-"));
+  try {
+    const audioDir = join(projectDir, "canvas", "assets", "audio");
+    await mkdir(audioDir, { recursive: true });
+    const audioPath = join(audioDir, "voice.mp3");
+    await writeFile(audioPath, Buffer.from("test-audio"));
+    const result = await insertExcalidrawAudioResult({
+      projectDir,
+      audioPath,
+      text: "確認用の音声です",
+      voiceId: "voice-default",
+      voiceName: "Default",
+      model: "eleven_v3",
+      durationSeconds: 1.25,
+    });
+    const saved = JSON.parse(await readFile(join(projectDir, "canvas", "excalidraw-canvas.json"), "utf8"));
+    const card = saved.elements.find((element) => element.id === result.elementId);
+    assert.equal(card.customData.codexMediaKind, "audio");
+    assert.equal(card.customData.speechModel, "eleven_v3");
+    assert.equal(card.customData.speechVoiceId, "voice-default");
+    assert.equal(card.customData.codexAssetPath, audioPath);
+    assert.match(card.link, /\/excalidraw-assets\/audio\/voice\.mp3$/);
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});
 
 test("resolveCanvasDir prefers explicit canvasDir", () => {
   assert.equal(

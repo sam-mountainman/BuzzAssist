@@ -18,13 +18,15 @@ import {
   runWithConcurrency
 } from './lib/mediaGeneration.mjs'
 import { getBuzzAssistAuthStatus, loginBuzzAssistViaBrowser, resolveAuthFilePath } from './lib/buzzassistApi.mjs'
-import { FOCUS_REQUEST_FILE_NAME, OFFICIAL_EXCALIDRAW_README, clearFrameGeneratingFlags, collectCanvasRecordedFileNames, createExcalidrawView, insertExcalidrawImage, insertExcalidrawSilenceCutResult, insertExcalidrawSubtitle, insertExcalidrawVideo, insertExcalidrawMediaBatch, loadScene, performCanvasMaintenance, stripAssetBackedFileDataURLs, syncDeletedCanvasAssets, syncMissingCanvasAssets } from './lib/canvasScene.mjs'
+import { FOCUS_REQUEST_FILE_NAME, OFFICIAL_EXCALIDRAW_README, clearFrameGeneratingFlags, collectCanvasRecordedFileNames, createExcalidrawView, insertExcalidrawAudioResult, insertExcalidrawImage, insertExcalidrawSilenceCutResult, insertExcalidrawSubtitle, insertExcalidrawVideo, insertExcalidrawMediaBatch, loadScene, performCanvasMaintenance, stripAssetBackedFileDataURLs, syncDeletedCanvasAssets, syncMissingCanvasAssets } from './lib/canvasScene.mjs'
 import { readCharacterRegistry, writeCharacterRegistry } from './lib/characterRegistry.mjs'
 import { prepareCharacterWorkflow, readCharacterWorkflowStore } from './lib/characterPipeline.mjs'
 import { streamZipStore } from './lib/zipStore.mjs'
 import { generateSubtitleSrt, refineSubtitleFromPlan, writeSubtitleWordsSidecar } from './lib/subtitleGeneration.mjs'
 import { silenceCutVideo } from './lib/tempoCut.mjs'
 import { renderSpeechBubbleSvg, speechBubbleProfile } from './lib/speechBubbleRenderer.mjs'
+import { getElevenLabsStatus, listElevenLabsVoices, saveElevenLabsConfig, speechAssetPublicResult, writeSpeechAsset } from './lib/speechGeneration.mjs'
+import { createEpisodeManifest, generateEpisodeSpeech, renderEpisodeVideo } from './lib/mangaVideoPipeline.mjs'
 import {
   getLovartAuthStatus,
   getLovartModelCosts,
@@ -3059,6 +3061,133 @@ function configureCanvasServer(server) {
           sendJson(res, 200, await saveLovartCredentials(body))
         } catch (error) {
           sendJson(res, 400, { error: error.message })
+        }
+      })
+
+      server.middlewares.use('/api/elevenlabs/settings', async (req, res) => {
+        try {
+          if (req.method === 'GET') {
+            sendJson(res, 200, await getElevenLabsStatus())
+            return
+          }
+          if (req.method === 'PUT') {
+            const body = JSON.parse((await readRequestBody(req)) || '{}')
+            sendJson(res, 200, await saveElevenLabsConfig(body))
+            return
+          }
+          res.statusCode = 405
+          res.setHeader('allow', 'GET, PUT')
+          res.end()
+        } catch (error) {
+          sendJson(res, 400, { error: error.message })
+        }
+      })
+
+      server.middlewares.use('/api/elevenlabs/voices', async (req, res) => {
+        try {
+          if (req.method !== 'GET') {
+            res.statusCode = 405
+            res.setHeader('allow', 'GET')
+            res.end()
+            return
+          }
+          const url = new URL(req.url || '/', 'http://127.0.0.1')
+          sendJson(res, 200, await listElevenLabsVoices({
+            search: url.searchParams.get('search') || '',
+            voiceType: url.searchParams.get('voiceType') || 'default'
+          }))
+        } catch (error) {
+          sendJson(res, 500, { error: error.message })
+        }
+      })
+
+      server.middlewares.use('/api/generate/speech', async (req, res) => {
+        try {
+          if (req.method !== 'POST') {
+            res.statusCode = 405
+            res.setHeader('allow', 'POST')
+            res.end()
+            return
+          }
+          const body = JSON.parse((await readRequestBody(req)) || '{}')
+          const generated = await writeSpeechAsset({ ...body, canvasDir })
+          const placement = await insertExcalidrawAudioResult({
+            canvasDir,
+            audioPath: generated.filePath,
+            assetUrl: generated.assetUrl,
+            fileName: generated.fileName,
+            mimeType: generated.mimeType,
+            provider: generated.provider,
+            model: generated.model,
+            voiceId: generated.voiceId,
+            voiceName: generated.voiceName,
+            text: generated.text,
+            durationSeconds: generated.durationSeconds,
+            alignmentPath: generated.alignmentPath,
+            anchorElementId: body.anchorElementId,
+            placement: body.placement,
+            replaceAnchor: body.replaceAnchor === true,
+            matchAnchor: body.matchAnchor === true,
+            customData: body.customData
+          })
+          sendJson(res, 200, {
+            ok: true,
+            kind: 'audio',
+            speech: speechAssetPublicResult(generated),
+            ...placement
+          })
+          broadcastCanvasChanged([canvasFile, generated.filePath, generated.alignmentPath])
+        } catch (error) {
+          sendJson(res, 500, { error: error.message })
+        }
+      })
+
+      server.middlewares.use('/api/manga-video/manifest', async (req, res) => {
+        try {
+          if (req.method !== 'POST') {
+            res.statusCode = 405
+            res.setHeader('allow', 'POST')
+            res.end()
+            return
+          }
+          const body = JSON.parse((await readRequestBody(req)) || '{}')
+          const result = await createEpisodeManifest({ ...body, canvasDir, projectDir })
+          sendJson(res, 200, { ok: true, ...result })
+        } catch (error) {
+          sendJson(res, 500, { error: error.message })
+        }
+      })
+
+      server.middlewares.use('/api/manga-video/speech', async (req, res) => {
+        try {
+          if (req.method !== 'POST') {
+            res.statusCode = 405
+            res.setHeader('allow', 'POST')
+            res.end()
+            return
+          }
+          const body = JSON.parse((await readRequestBody(req)) || '{}')
+          const result = await generateEpisodeSpeech({ ...body, canvasDir, projectDir })
+          sendJson(res, result.failedCount > 0 ? 207 : 200, { ok: result.failedCount === 0, ...result })
+        } catch (error) {
+          sendJson(res, 500, { error: error.message })
+        }
+      })
+
+      server.middlewares.use('/api/manga-video/render', async (req, res) => {
+        try {
+          if (req.method !== 'POST') {
+            res.statusCode = 405
+            res.setHeader('allow', 'POST')
+            res.end()
+            return
+          }
+          const body = JSON.parse((await readRequestBody(req)) || '{}')
+          const loaded = await renderEpisodeVideo({ ...body, canvasDir, projectDir })
+          sendJson(res, 200, { ok: true, ...loaded })
+          if (loaded.outputPath) broadcastCanvasChanged([canvasFile, loaded.outputPath])
+        } catch (error) {
+          sendJson(res, 500, { error: error.message })
         }
       })
 
