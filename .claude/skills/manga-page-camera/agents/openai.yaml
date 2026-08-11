@@ -1,0 +1,4 @@
+interface:
+  display_name: "Manga Page Camera"
+  short_description: "Audit viewpoint pull-outs and split-page cameras"
+  default_prompt: "Use $manga-page-camera to apply and audit left, right, top, and whole-page pull-out camera grammar."
