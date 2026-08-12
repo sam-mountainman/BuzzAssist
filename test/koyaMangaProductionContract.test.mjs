@@ -8,7 +8,20 @@ import {
   koyaContractDigest,
   resolveKoyaMangaProductionContract,
   validateKoyaMangaProductionContract,
+  validateKoyaMangaProductionSchema,
 } from "../lib/koyaMangaProductionContract.mjs";
+
+function leafPaths(value, prefix = []) {
+  if (Array.isArray(value)) return value.flatMap((entry, index) => leafPaths(entry, [...prefix, index]));
+  if (value && typeof value === "object") return Object.entries(value).flatMap(([key, entry]) => leafPaths(entry, [...prefix, key]));
+  return [prefix];
+}
+
+function setAtPath(value, path, replacement) {
+  let cursor = value;
+  for (const part of path.slice(0, -1)) cursor = cursor[part];
+  cursor[path.at(-1)] = replacement;
+}
 
 test("the Koya production contract is valid and deterministic", async () => {
   const first = await resolveKoyaMangaProductionContract({ projectDir: process.cwd() });
@@ -128,7 +141,7 @@ test("contract validation rejects safety regressions", async () => {
   broken.art.requireNaturalAnatomyAndPropScale = false;
   const report = validateKoyaMangaProductionContract(broken);
   assert.equal(report.pass, false);
-  assert.deepEqual(report.failures.map((entry) => entry.path), ["audio.model", "art.requireNaturalAnatomyAndPropScale", "camera.forbidPushIn"]);
+  assert.deepEqual(report.failures.map((entry) => entry.path), ["art.requireNaturalAnatomyAndPropScale", "audio.model", "camera.forbidPushIn"]);
 });
 
 test("contract validation rejects a missing final audit even when list length is unchanged", async () => {
@@ -138,4 +151,26 @@ test("contract validation rejects a missing final audit even when list length is
   const result = validateKoyaMangaProductionContract(contract);
   assert.equal(result.pass, false);
   assert.ok(result.failures.some((failure) => failure.message.includes("agent-contact-sheet-review")));
+});
+
+test("the JSON Schema closes every contract object and validates every leaf", async () => {
+  const resolved = await resolveKoyaMangaProductionContract({ projectDir: process.cwd() });
+  assert.equal(validateKoyaMangaProductionSchema(resolved.contract).pass, true);
+
+  const unknownTopLevel = structuredClone(resolved.contract);
+  unknownTopLevel.unreviewedEscapeHatch = true;
+  assert.equal(validateKoyaMangaProductionSchema(unknownTopLevel).pass, false);
+  const unknownNested = structuredClone(resolved.contract);
+  unknownNested.editorial.unreviewedEscapeHatch = true;
+  assert.equal(validateKoyaMangaProductionSchema(unknownNested).pass, false);
+
+  const mutations = [];
+  for (const path of leafPaths(resolved.contract)) {
+    const broken = structuredClone(resolved.contract);
+    setAtPath(broken, path, { invalidType: true });
+    const report = validateKoyaMangaProductionSchema(broken);
+    mutations.push({ path: path.join("."), pass: report.pass });
+  }
+  assert.equal(mutations.length > 100, true);
+  assert.deepEqual(mutations.filter((row) => row.pass), []);
 });

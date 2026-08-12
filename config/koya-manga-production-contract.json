@@ -1,10 +1,11 @@
 {
   "schemaVersion": 1,
-  "version": "koya-manga-production-v47",
+  "version": "koya-manga-production-v48",
   "channelId": "koya-manga",
   "description": "Fail-closed production contract for Koya-channel manga videos.",
   "sourceOfTruth": {
     "requirementsLedger": "docs/koya-channel-requirements-ledger.md",
+    "schema": "config/koya-manga-production-contract.schema.json",
     "skill": ".agents/skills/manga-video-production/SKILL.md",
     "cameraSkill": ".agents/skills/manga-page-camera/SKILL.md",
     "benchmarkEpisodeId": "manga-photo-homecoming-001"
@@ -104,10 +105,17 @@
     "preferMultiUtteranceImageHolds": true,
     "requireEditContinuityReview": true,
     "requireDialoguePacingReview": true,
-    "allowSplitPagesOnlyWhenSemanticallyJustified": true
+    "allowSplitPagesOnlyWhenSemanticallyJustified": true,
+    "minimumMultiUtteranceImageShare": 0.35,
+    "minimumMedianImageHoldSeconds": 6,
+    "maximumImageHoldSeconds": 69.6,
+    "forbidUnassignedCameraShots": true,
+    "forbidConditionalSplitPageLeadIns": true,
+    "requireEveryUtteranceAssignedToImage": true
   },
   "qualityReview": {
-    "version": "koya-agent-perceptual-signoff-v2",
+    "version": "koya-agent-perceptual-signoff-v3",
+    "reviewNotesVersion": "koya-perceptual-review-notes-v2",
     "userFeedbackOverridesMachinePass": true,
     "requireFullVideoReview": true,
     "requireContactSheetReview": true,
@@ -115,6 +123,13 @@
     "requireAudioSpotChecks": true,
     "requireNonEmptyNotesPerCheck": true,
     "requireEmptyKnownRemainingIssues": true,
+    "requireEvidenceFileHashes": true,
+    "requireContractDigestBinding": true,
+    "requireReviewNotesDigestBinding": true,
+    "minimumRepresentativeFrames": 3,
+    "minimumAudioSpotChecks": 3,
+    "minimumReviewNoteCharacters": 8,
+    "maximumFutureClockSkewSeconds": 300,
     "requiredChecks": [
       "characterContinuity",
       "composition",
@@ -146,6 +161,7 @@
   },
   "requiredAudits": [
     "contract-manifest",
+    "editorial-quality",
     "quality-harness-final",
     "rendered-camera",
     "bubble-midpoint-frames",

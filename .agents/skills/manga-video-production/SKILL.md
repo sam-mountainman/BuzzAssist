@@ -11,7 +11,7 @@ description: 対象チャンネル向け日本語漫画動画の台本設計、�
 
 変更や有料生成の前に次を最後まで読む。
 
-1. `../../../config/koya-manga-production-contract.json` — 実行可能な既定値と必須監査
+1. `../../../config/koya-manga-production-contract.json` — 実行可能な既定値と必須監査。全項目は隣接するJSON Schemaで閉じ、未知キーや型崩れを許さない
 2. `../../../docs/koya-channel-requirements-ledger.md` — ユーザー要求の時系列。矛盾時は、明示されたエピソード例外を除き、後の要求を優先する
 3. `../../../config/koya-manga-episode-overrides/<episode-id>.json` — 存在するときだけ読む凍結済み例外
 4. `references/quality-contract-ja.md` — セッション横断で一般化した台本・絵・音声・編集品質
@@ -67,7 +67,7 @@ node scripts/koya-manga-video.mjs full --script-path /absolute/script.txt --epis
 node scripts/koya-manga-video.mjs audit --episode-id <episode-id>
 ```
 
-監査で作った実MP4由来contact sheet、代表フレーム、音声区間、全編MP4を実際に確認し、`references/final-review-ja.md`の形式でレビュー記録JSONを作る。その後だけ署名する。
+監査で作った実MP4由来contact sheet、代表フレーム、音声区間、全編MP4を実際に確認し、`references/final-review-ja.md`の形式でレビュー記録JSONを作る。契約digest、実MP4/contact sheet/代表フレームのSHA-256、全編確認範囲、冒頭・中盤・終端の音声確認範囲を実値で記録した後だけ署名する。
 
 ```bash
 node scripts/koya-manga-video.mjs signoff --episode-id <episode-id> --reviewer claude --review-notes-path /absolute/review.json --pass

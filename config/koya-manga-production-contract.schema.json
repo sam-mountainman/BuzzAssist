@@ -1,0 +1,298 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://buzzassist.local/schema/koya-manga-production-contract-v1.json",
+  "title": "漫画動画動画 制作契約",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "version",
+    "channelId",
+    "description",
+    "sourceOfTruth",
+    "art",
+    "audio",
+    "bubbles",
+    "camera",
+    "video",
+    "editorial",
+    "qualityReview",
+    "provenance",
+    "lifecycle",
+    "requiredAudits",
+    "legacy"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "version": { "type": "string", "pattern": "^koya-manga-production-v[0-9]+$" },
+    "channelId": { "const": "koya-manga" },
+    "description": { "type": "string", "minLength": 1 },
+    "sourceOfTruth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requirementsLedger", "schema", "skill", "cameraSkill", "benchmarkEpisodeId"],
+      "properties": {
+        "requirementsLedger": { "const": "docs/koya-channel-requirements-ledger.md" },
+        "schema": { "const": "config/koya-manga-production-contract.schema.json" },
+        "skill": { "const": ".agents/skills/manga-video-production/SKILL.md" },
+        "cameraSkill": { "const": ".agents/skills/manga-page-camera/SKILL.md" },
+        "benchmarkEpisodeId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "art": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "visualProfileId", "imageModel", "usageLimitFallbackModel", "qaUsageLimitFallbackProvider",
+        "imageConcurrency", "qaConcurrency", "maximumQaRetries", "candidateCount",
+        "requireApprovedCharacterReferences", "requireCompositionVariation", "requireBubbleNegativeSpace",
+        "requireNaturalAnatomyAndPropScale", "forbidGeneratedPseudoText",
+        "refreshSourceAnnotationsAfterImageChange", "pauseForNewCharacterApproval"
+      ],
+      "properties": {
+        "visualProfileId": { "type": "string", "minLength": 1 },
+        "imageModel": { "const": "gpt-image-2-codex" },
+        "usageLimitFallbackModel": { "type": "string" },
+        "qaUsageLimitFallbackProvider": { "type": "string" },
+        "imageConcurrency": {
+          "anyOf": [
+            { "const": "auto" },
+            { "type": "integer", "minimum": 1, "maximum": 32 }
+          ]
+        },
+        "qaConcurrency": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "maximumQaRetries": { "type": "integer", "minimum": 0, "maximum": 5 },
+        "candidateCount": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "requireApprovedCharacterReferences": { "const": true },
+        "requireCompositionVariation": { "const": true },
+        "requireBubbleNegativeSpace": { "const": true },
+        "requireNaturalAnatomyAndPropScale": { "const": true },
+        "forbidGeneratedPseudoText": { "const": true },
+        "refreshSourceAnnotationsAfterImageChange": { "const": true },
+        "pauseForNewCharacterApproval": { "const": true }
+      }
+    },
+    "audio": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider", "model", "generationMode", "takeCount", "languageCode", "narrationVoicePolicy",
+        "narrationVoiceId", "preserveNarrationVisualStyle", "requireProtagonistVoiceMatch",
+        "requireNativeJapaneseVoice", "requireVoiceApproval", "targetLineLufs", "masterTargetLufs",
+        "masterTruePeakDb", "sameSpeakerGapSeconds", "speakerChangeGapSeconds", "emphasisGapSeconds",
+        "acousticHeadPaddingSeconds", "minimumReleasePaddingSeconds", "joinFadeInMilliseconds",
+        "joinFadeOutMilliseconds", "allowBgm", "allowSignalEffects", "freezeApprovedAudio"
+      ],
+      "properties": {
+        "provider": { "const": "elevenlabs" },
+        "model": { "const": "eleven_v3" },
+        "generationMode": { "const": "text-to-dialogue-with-timestamps" },
+        "takeCount": { "type": "integer", "minimum": 2, "maximum": 8 },
+        "languageCode": { "const": "ja" },
+        "narrationVoicePolicy": { "enum": ["protagonist-voice", "approved-original-narrator"] },
+        "narrationVoiceId": { "type": "string" },
+        "preserveNarrationVisualStyle": { "const": true },
+        "requireProtagonistVoiceMatch": { "const": true },
+        "requireNativeJapaneseVoice": { "const": true },
+        "requireVoiceApproval": { "const": true },
+        "targetLineLufs": { "type": "number", "minimum": -30, "maximum": -10 },
+        "masterTargetLufs": { "type": "number", "minimum": -24, "maximum": -10 },
+        "masterTruePeakDb": { "type": "number", "minimum": -6, "maximum": -1 },
+        "sameSpeakerGapSeconds": { "type": "number", "minimum": 0, "maximum": 2 },
+        "speakerChangeGapSeconds": { "type": "number", "minimum": 0, "maximum": 2 },
+        "emphasisGapSeconds": { "type": "number", "minimum": 0, "maximum": 3 },
+        "acousticHeadPaddingSeconds": { "type": "number", "minimum": 0.08, "maximum": 1 },
+        "minimumReleasePaddingSeconds": { "type": "number", "minimum": 0.045, "maximum": 1 },
+        "joinFadeInMilliseconds": { "type": "integer", "minimum": 6, "maximum": 50 },
+        "joinFadeOutMilliseconds": { "type": "integer", "minimum": 6, "maximum": 50 },
+        "allowBgm": { "const": false },
+        "allowSignalEffects": { "const": false },
+        "freezeApprovedAudio": { "const": true }
+      }
+    },
+    "bubbles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "writingMode", "fontFamilyPolicy", "fontWeight", "maximumColumns", "stripTerminalJapanesePeriod",
+        "cameraSweepSamples", "speakerProximitySamples", "activeSpeakerFaceMaximumOverlap",
+        "requireSequenceVariation", "requireIndependentRenderedFaceAudit", "requireClearEncodedTransitionFrame",
+        "fadeInMilliseconds", "fadeOutMilliseconds", "transitionCrossfadeSeconds"
+      ],
+      "properties": {
+        "writingMode": { "const": "vertical-rl" },
+        "fontFamilyPolicy": { "const": "mincho-serif" },
+        "fontWeight": { "type": "integer", "minimum": 300, "maximum": 500 },
+        "maximumColumns": { "type": "integer", "minimum": 1, "maximum": 3 },
+        "stripTerminalJapanesePeriod": { "const": true },
+        "cameraSweepSamples": { "type": "integer", "minimum": 33 },
+        "speakerProximitySamples": { "type": "integer", "minimum": 9 },
+        "activeSpeakerFaceMaximumOverlap": { "const": 0 },
+        "requireSequenceVariation": { "const": true },
+        "requireIndependentRenderedFaceAudit": { "const": true },
+        "requireClearEncodedTransitionFrame": { "const": true },
+        "fadeInMilliseconds": { "type": "integer", "minimum": 0, "maximum": 250 },
+        "fadeOutMilliseconds": { "type": "integer", "minimum": 0, "maximum": 250 },
+        "transitionCrossfadeSeconds": { "const": 0 }
+      }
+    },
+    "camera": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grammarVersion", "requiredFamilies", "minimumHorizontalTravel", "minimumTopTravel",
+        "minimumPulloutRevealRatio", "requireSemanticViews", "requireConstantSpeed",
+        "requireWholePageSplitCamera", "forbidPushIn", "forbidDownwardMotion", "forbidStops",
+        "forbidRepeatedCameraImages", "forbidPhaseReset", "cameraOversample"
+      ],
+      "properties": {
+        "grammarVersion": { "const": "manga-page-camera-v2" },
+        "requiredFamilies": { "const": ["directional", "pullout", "combined"] },
+        "minimumHorizontalTravel": { "type": "number", "minimum": 0.14, "maximum": 1 },
+        "minimumTopTravel": { "type": "number", "minimum": 0.12, "maximum": 1 },
+        "minimumPulloutRevealRatio": { "type": "number", "minimum": 0.24, "maximum": 1 },
+        "requireSemanticViews": { "const": true },
+        "requireConstantSpeed": { "const": true },
+        "requireWholePageSplitCamera": { "const": true },
+        "forbidPushIn": { "const": true },
+        "forbidDownwardMotion": { "const": true },
+        "forbidStops": { "const": true },
+        "forbidRepeatedCameraImages": { "const": true },
+        "forbidPhaseReset": { "const": true },
+        "cameraOversample": { "type": "integer", "minimum": 3, "maximum": 8 }
+      }
+    },
+    "video": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "width", "height", "fps", "audioSampleRate", "audioChannels",
+        "requireH264", "requireAac", "requireFullDecode"
+      ],
+      "properties": {
+        "width": { "const": 1920 },
+        "height": { "const": 1080 },
+        "fps": { "const": 30 },
+        "audioSampleRate": { "const": 48000 },
+        "audioChannels": { "const": 2 },
+        "requireH264": { "const": true },
+        "requireAac": { "const": true },
+        "requireFullDecode": { "const": true }
+      }
+    },
+    "editorial": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "preserveFullScript", "forbidContextlessLeadInImages", "preferMultiUtteranceImageHolds",
+        "requireEditContinuityReview", "requireDialoguePacingReview",
+        "allowSplitPagesOnlyWhenSemanticallyJustified", "minimumMultiUtteranceImageShare",
+        "minimumMedianImageHoldSeconds", "maximumImageHoldSeconds", "forbidUnassignedCameraShots",
+        "forbidConditionalSplitPageLeadIns", "requireEveryUtteranceAssignedToImage"
+      ],
+      "properties": {
+        "preserveFullScript": { "const": true },
+        "forbidContextlessLeadInImages": { "const": true },
+        "preferMultiUtteranceImageHolds": { "const": true },
+        "requireEditContinuityReview": { "const": true },
+        "requireDialoguePacingReview": { "const": true },
+        "allowSplitPagesOnlyWhenSemanticallyJustified": { "const": true },
+        "minimumMultiUtteranceImageShare": { "type": "number", "minimum": 0.35, "maximum": 1 },
+        "minimumMedianImageHoldSeconds": { "type": "number", "minimum": 6, "maximum": 60 },
+        "maximumImageHoldSeconds": { "type": "number", "minimum": 6, "maximum": 69.6 },
+        "forbidUnassignedCameraShots": { "const": true },
+        "forbidConditionalSplitPageLeadIns": { "const": true },
+        "requireEveryUtteranceAssignedToImage": { "const": true }
+      }
+    },
+    "qualityReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version", "reviewNotesVersion", "userFeedbackOverridesMachinePass", "requireFullVideoReview",
+        "requireContactSheetReview", "requireRepresentativeFrameReview", "requireAudioSpotChecks",
+        "requireNonEmptyNotesPerCheck", "requireEmptyKnownRemainingIssues", "requireEvidenceFileHashes",
+        "requireContractDigestBinding", "requireReviewNotesDigestBinding", "minimumRepresentativeFrames",
+        "minimumAudioSpotChecks", "minimumReviewNoteCharacters", "maximumFutureClockSkewSeconds",
+        "requiredChecks"
+      ],
+      "properties": {
+        "version": { "const": "koya-agent-perceptual-signoff-v3" },
+        "reviewNotesVersion": { "const": "koya-perceptual-review-notes-v2" },
+        "userFeedbackOverridesMachinePass": { "const": true },
+        "requireFullVideoReview": { "const": true },
+        "requireContactSheetReview": { "const": true },
+        "requireRepresentativeFrameReview": { "const": true },
+        "requireAudioSpotChecks": { "const": true },
+        "requireNonEmptyNotesPerCheck": { "const": true },
+        "requireEmptyKnownRemainingIssues": { "const": true },
+        "requireEvidenceFileHashes": { "const": true },
+        "requireContractDigestBinding": { "const": true },
+        "requireReviewNotesDigestBinding": { "const": true },
+        "minimumRepresentativeFrames": { "type": "integer", "minimum": 3, "maximum": 24 },
+        "minimumAudioSpotChecks": { "type": "integer", "minimum": 3, "maximum": 24 },
+        "minimumReviewNoteCharacters": { "type": "integer", "minimum": 8, "maximum": 1000 },
+        "maximumFutureClockSkewSeconds": { "type": "integer", "minimum": 0, "maximum": 300 },
+        "requiredChecks": {
+          "const": [
+            "characterContinuity", "composition", "camera", "bubblePlacement", "splitPages",
+            "textReadability", "anatomyAndPropScale", "editContinuity", "imagePacing",
+            "dialoguePacing", "audioNaturalness", "audioBoundaryArtifacts", "generatedTextArtifacts"
+          ]
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manifestSchemaVersion", "officialEntrypoint", "forbidLegacyStatusAfterRender",
+        "forbidAmbiguousProductionVersion"
+      ],
+      "properties": {
+        "manifestSchemaVersion": { "const": "koya-episode-manifest-v1" },
+        "officialEntrypoint": { "const": "scripts/koya-manga-video.mjs" },
+        "forbidLegacyStatusAfterRender": { "const": true },
+        "forbidAmbiguousProductionVersion": { "const": true }
+      }
+    },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checkpointOnUsageLimit", "reuseContentAddressedArtifacts", "regenerateFailuresOnly",
+        "requireEmptyKnownRemainingIssues", "completionStatus"
+      ],
+      "properties": {
+        "checkpointOnUsageLimit": { "const": true },
+        "reuseContentAddressedArtifacts": { "const": true },
+        "regenerateFailuresOnly": { "const": true },
+        "requireEmptyKnownRemainingIssues": { "const": true },
+        "completionStatus": { "const": "final-koya-audited" }
+      }
+    },
+    "requiredAudits": {
+      "const": [
+        "contract-manifest", "editorial-quality", "quality-harness-final", "rendered-camera",
+        "bubble-midpoint-frames", "bubble-transition-clear-frames", "bubble-camera-sweep",
+        "independent-rendered-face", "bubble-typography", "thought-spotlight", "split-page-integrity",
+        "stt-verification", "audio-onset", "audio-waveform-sync", "audio-click-hum-level",
+        "agent-contact-sheet-review", "full-decode"
+      ]
+    },
+    "legacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["blockedForNewEpisodes", "migrationInventory"],
+      "properties": {
+        "blockedForNewEpisodes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "migrationInventory": { "const": "config/koya-manga-legacy-migrations.json" }
+      }
+    }
+  }
+}
