@@ -77,6 +77,8 @@ test("MCP character pipeline runs candidates, approval packs, and a multi-charac
           workflowId,
           castId: cast.id,
           candidateId: selected.id,
+          approvalReason: `${cast.name}の役割と固定特徴が最も明瞭に出ているため`,
+          approvedBy: "integration-test-user",
           model: "gpt-image-2-codex",
           aspectRatio: "16:9",
           imageSize: "2K",
@@ -86,6 +88,8 @@ test("MCP character pipeline runs candidates, approval packs, and a multi-charac
       });
       assert.equal(approved.isError, undefined, JSON.stringify(approved));
       assert.equal(approved.structuredContent.character.referenceImagePaths.length, 2);
+      assert.equal(approved.structuredContent.character.approval.approvedBy, "integration-test-user");
+      assert.match(approved.structuredContent.character.approval.reason, /固定特徴/);
     }
 
     const storyboard = await client.callTool({

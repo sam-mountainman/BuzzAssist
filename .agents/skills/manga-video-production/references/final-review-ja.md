@@ -107,3 +107,5 @@
 最低3枚の代表フレームと、冒頭・中盤・終端を含む最低3区間の音声確認が必要である。全編確認区間は0秒から実尺終端までを覆う。`signoff`と再監査は、レビュー記録ファイル自体のSHA-256と正規化内容digestも検証する。
 
 問題が1件でもあれば署名せず、`knownRemainingIssues`へ時刻、対象、症状を書く。ユーザー指摘と機械結果が矛盾したらユーザー指摘を不合格根拠にする。
+
+再監査の最後に`audits/koya-final/quality-harness/final-decision.json`を読む。`status=passed`、自分自身を除く全必須監査が`passedAuditIds`へ含まれること、各適用監査の`evidenceSha256`、契約digest、実MP4 SHA-256が現在値と一致することを確認する。`needs-human-approval`は知覚署名待ち、`blocked`は機械監査または証拠拘束の失敗であり、どちらも完成ではない。

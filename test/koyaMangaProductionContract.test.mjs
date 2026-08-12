@@ -60,6 +60,9 @@ test("manifest application pins fail-closed Koya defaults", async () => {
   assert.equal(Object.hasOwn(manifest.production, "version"), false);
   assert.equal(manifest.production.pipeline.entrypoint, "scripts/koya-manga-video.mjs");
   assert.equal(manifest.production.qualityPolicy.userFeedbackOverridesMachinePass, true);
+  assert.equal(manifest.production.qualityPolicy.qualityLoopVersion, "koya-quality-loop-v2");
+  assert.equal(manifest.production.qualityPolicy.requireDistinctEvaluatorContext, true);
+  assert.equal(manifest.production.qualityPolicy.candidateDecision.requireSelectionReason, true);
   assert.equal(manifest.production.koyaContract.digest, resolved.digest);
   assert.equal(auditManifestAgainstKoyaContract(manifest, resolved).pass, true);
 });
@@ -139,9 +142,10 @@ test("contract validation rejects safety regressions", async () => {
   broken.camera.forbidPushIn = false;
   broken.audio.model = "eleven_multilingual_v2";
   broken.art.requireNaturalAnatomyAndPropScale = false;
+  broken.qualityLoop.requireEvidence = false;
   const report = validateKoyaMangaProductionContract(broken);
   assert.equal(report.pass, false);
-  assert.deepEqual(report.failures.map((entry) => entry.path), ["art.requireNaturalAnatomyAndPropScale", "audio.model", "camera.forbidPushIn"]);
+  assert.deepEqual(report.failures.map((entry) => entry.path), ["art.requireNaturalAnatomyAndPropScale", "audio.model", "camera.forbidPushIn", "qualityLoop.requireEvidence"]);
 });
 
 test("contract validation rejects a missing final audit even when list length is unchanged", async () => {

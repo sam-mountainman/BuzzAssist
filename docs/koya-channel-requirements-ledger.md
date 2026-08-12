@@ -229,6 +229,12 @@
 
 | R112 | 制作契約の一部だけを手書き検証する状態を廃止し、全フィールドをJSON Schemaで閉じ、未知キー・型崩れ・安全値の緩和を漏れなく拒否する | 実装済(v48契約) | `additionalProperties:false`の完全JSON Schemaを正本契約へ紐づけ、Ajv検証をbase/episode override解決後へ適用。契約の全leafを一つずつ不正型へ破壊するmutation test、未知のtop/nested key、安全値緩和テストを追加し、全454テストPASS。配布packageにも`config/`と要求台帳を含める |
 
+| R113 | `/Users/higataiyu/まさお`全件監査で得た「外部状態・評価分離・三重停止条件」を名目上の部品で終わらせない。最終`quality-harness-final`は空の`active`状態を作り直して事前ゲートだけで合格してはならず、当該実MP4に対する全必須監査、独立知覚署名、契約digest、証拠hashから終端状態を導出して保存する | 検証済(v49契約) | standalone final preflightを拒否し、公式最終監査の最後で自己監査を除く全必須監査の証拠SHA-256、契約digest、実MP4 SHA-256へ拘束した`final-decision.json`/`quality-loop-state.json`を作成。旧v48署名では`needs-human-approval`停止、v49再署名後は実MP4の17/17監査、16/16 hash-bound evidence、`knownRemainingIssues=[]`、`final-koya-audited`を実証 |
+
+| R114 | 曖昧な制作判断は、正解が機械判定できる場合・1案へ赤入れすべき場合・複数の異なる軸から選ぶ場合を明示分類する。Best-of-Nは2〜5案、軸の重複なし、匿名化、判定前の対応表非開示、採用理由の保存を必須とし、キャラクター・声・ブランド等の高コスト主観判断を自動採用しない | 実装済(v49契約) | `classifyMangaDecisionGate`でdeterministic/red-pen/human Best-of-N/fresh blind Best-of-Nを分類。匿名候補を2〜5件・variation axis一意・artifact必須・verdict先行へ強化。キャラクターCLIの`--approval-reason`と音声`selectionReason`/reviewerを永続化し、DAGにも人間判断と採用理由必須を明示 |
+
+| R115 | 品質ループは固定rubricの全項目、独立evaluator、具体的な証拠、失敗fingerprint、前roundからの修正差分を欠いた自己採点で合格してはならない。品質閾値・最大round・最大時間・最大費用・停滞上限を別々に判定し、同型事故はchecklist→恒久指示→機械hard gateへ昇格する | 実装済(v49契約) | quality loop v2を完全schemaへ追加。全rubric項目、evaluator context分離、具体メモ、hash-bound evidence、hard-gate契約digest、failure fingerprint、直前failure参照、再試行差分を必須化。観測時刻から経過時間を算出し、`needs-human-approval / budget-exhausted / blocked`を区別。同型事故の昇格ロジックを維持 |
+
 ## パイプライン不変条件（違反禁止）
 
 1. **画像変更（差し替え・クロップ・統合・構図変更）には、同一変更内で顔・領域アノテーションの再計測を必ず伴うこと。** 旧座標の流用が v31→v36、v38パネル、v38オーバーライドで3度同型の退行を起こした。

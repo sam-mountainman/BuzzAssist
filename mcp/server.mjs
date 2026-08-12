@@ -167,7 +167,7 @@ const MEDIA_GENERATION_AGENT_INSTRUCTIONS = [
   "To attach selected canvas images/videos/SRT/XML into the current chat, use prepare_canvas_attachments or read_canvas_attachment_bundle. Do not rely on OS GUI paste automation for media attachments.",
   "When the current chat includes an attached image and the user identifies it as a character, subject, product, or style reference, resolve its absolute local path and pass it in referenceImagePaths. For generate_excalidraw_images_batch, pass shared chat references once in the top-level referenceImagePaths field so every job inherits them; job-specific referenceImagePaths are merged with the shared list. Do not rely on the model merely seeing the chat attachment, and do not omit the path from the generation tool call. If the attachment role is ambiguous, ask whether it is a subject/style reference or another input before generating.",
   "The project may keep a character registry at canvas/characters.json (キャラ台帳) mapping character ids to reference images, style prompts, and voices. When the user names a registered character, pass characterIds on generate_excalidraw_image or generate_excalidraw_images_batch instead of re-attaching the same reference images; the server resolves them into referenceImagePaths. Register new recurring characters there (via /api/characters or by editing the file) rather than repeating loose reference paths across sessions.",
-  "For a new script, use analyze_character_script then generate_character_candidates. Generate three lightweight candidate cards per new character by default, wait for the user to choose, call approve_character_candidate to build the approved turnaround plus expression/angle sheet and register that two-image identity pack, then generate_character_storyboard. Never register an unapproved candidate in characters.json.",
+  "For a new script, use analyze_character_script then generate_character_candidates. Generate three lightweight candidate cards per new character by default, wait for the user to choose, record the user's concrete selection reason, then call approve_character_candidate to build the approved turnaround plus expression/angle sheet and register that two-image identity pack. Continue with generate_character_storyboard only after approval. Never register an unapproved candidate or a reasonless approval in characters.json.",
 ].join(" ");
 
 function collectFocusElementIds(value, output = new Set()) {
@@ -2450,7 +2450,7 @@ function toolDefinitions() {
     {
       name: TOOL_APPROVE_CHARACTER_CANDIDATE,
       title: "Approve Character Candidate",
-      description: "Select one generated candidate, generate its approved turnaround and expression/head-angle sheets, copy those two approved references into canvas/assets/characters, and register the final character in characters.json. Requires confirmed image settings.",
+      description: "Select one generated candidate with a concrete approval reason, generate its approved turnaround and expression/head-angle sheets, copy those two approved references into canvas/assets/characters, and register the final character plus approval evidence in characters.json. Requires confirmed image settings.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2458,6 +2458,8 @@ function toolDefinitions() {
           castId: { type: "string", description: "Workflow cast id or character name." },
           candidateId: { type: "string" },
           candidateIndex: { type: "number", minimum: 1, maximum: 10 },
+          approvalReason: { type: "string", minLength: 4, description: "Why this candidate won; preserve the user's taste judgment for later prompts and audits." },
+          approvedBy: { type: "string", description: "Human or agent identity that made the selection. Defaults to user." },
           model: { type: "string", enum: IMAGE_MODEL_IDS },
           aspectRatio: { type: "string" },
           imageSize: { type: "string" },
@@ -2468,7 +2470,7 @@ function toolDefinitions() {
           projectDir: { type: "string" },
           canvasDir: { type: "string" },
         },
-        required: ["workflowId", "castId"],
+        required: ["workflowId", "castId", "approvalReason"],
         additionalProperties: false,
       },
       annotations: {
@@ -2790,7 +2792,7 @@ function toolDefinitions() {
     {
       name: TOOL_MANAGE_ELEVENLABS_VOICE_LIBRARY,
       title: "Manage ElevenLabs Voice Library Casting",
-      description: "Search the complete public ElevenLabs Voice Library for native Japanese voices, rank them against each character's gender, voice age, personality, emotional range, and dialogue use case, and write a browser audition sheet. Discovery is read-only. The approve action requires previewConfirmed=true for every selection plus confirmedSettings=true, then adds only approved shared voices to My Voices and fixes the character-to-voice assignment.",
+      description: "Search the complete public ElevenLabs Voice Library for native Japanese voices, rank them against each character's gender, voice age, personality, emotional range, and dialogue use case, and write a browser audition sheet. Discovery is read-only. The approve action requires previewConfirmed=true and a concrete selectionReason for every selection plus confirmedSettings=true, then adds only approved shared voices to My Voices and records the human decision.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2810,12 +2812,14 @@ function toolDefinitions() {
                 voiceId: { type: "string" },
                 newName: { type: "string", description: "Optional My Voices display name." },
                 previewConfirmed: { type: "boolean", description: "Must be true after the candidate preview was listened to." },
+                selectionReason: { type: "string", minLength: 4, description: "Concrete human reason for selecting this voice over the other audition candidates." },
               },
-              required: ["characterId", "voiceId", "previewConfirmed"],
+              required: ["characterId", "voiceId", "previewConfirmed", "selectionReason"],
               additionalProperties: false,
             },
           },
           confirmedSettings: { type: "boolean", description: "Required for approve because it changes My Voices and the local character registry." },
+          approvedBy: { type: "string", description: "Human reviewer name or stable identifier. Defaults to human-user." },
           projectDir: { type: "string" },
           canvasDir: { type: "string" },
         },
@@ -3769,6 +3773,11 @@ async function handleToolCall(params, progress = () => {}) {
 
   if (params?.name === TOOL_APPROVE_CHARACTER_CANDIDATE) {
     const args = params.arguments ?? {};
+    const approvalReason = nonEmptyString(args.approvalReason);
+    if (approvalReason.length < 4) {
+      throw new Error("approvalReason must explain why this candidate won (at least 4 characters).");
+    }
+    const approvedBy = nonEmptyString(args.approvedBy) || "user";
     const store = await readCharacterWorkflowStore(args);
     let workflow = getCharacterWorkflow(store, args.workflowId);
     if (!workflow) throw new Error(`Unknown character workflow: ${args.workflowId}.`);
@@ -3842,6 +3851,8 @@ async function handleToolCall(params, progress = () => {}) {
     }
     const finalized = await finalizeApprovedCharacter({
       ...args,
+      approvalReason,
+      approvedBy,
       workflowId: workflow.id,
       castId: cast.id,
       candidateId: candidate.id,
@@ -3861,7 +3872,7 @@ async function handleToolCall(params, progress = () => {}) {
     return {
       content: [{
         type: "text",
-        text: `Approved ${cast.name} candidate ${candidate.index}; generated the turnaround and expression/angle sheets and registered ${finalized.character.id} with a two-image identity pack.`,
+        text: `Approved ${cast.name} candidate ${candidate.index}; recorded the selection reason, generated the turnaround and expression/angle sheets, and registered ${finalized.character.id} with a two-image identity pack.`,
       }],
       structuredContent: { ...finalized, turnaroundResult, expressionResult },
     };

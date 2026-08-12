@@ -17,6 +17,7 @@
     "video",
     "editorial",
     "qualityReview",
+    "qualityLoop",
     "provenance",
     "lifecycle",
     "requiredAudits",
@@ -239,6 +240,67 @@
             "textReadability", "anatomyAndPropScale", "editContinuity", "imagePacing",
             "dialoguePacing", "audioNaturalness", "audioBoundaryArtifacts", "generatedTextArtifacts"
           ]
+        }
+      }
+    },
+    "qualityLoop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version", "generatorEvaluatorSeparation", "requireDistinctEvaluatorContext",
+        "deterministicGatesBeforeJudgment", "immutableCriteriaDuringRun", "requireExternalState",
+        "requireCompleteRubric", "requireEvidence", "requireFailureFingerprint", "requireRevisionDelta",
+        "limits", "candidateDecision", "terminalStates"
+      ],
+      "properties": {
+        "version": { "const": "koya-quality-loop-v2" },
+        "generatorEvaluatorSeparation": { "const": true },
+        "requireDistinctEvaluatorContext": { "const": true },
+        "deterministicGatesBeforeJudgment": { "const": true },
+        "immutableCriteriaDuringRun": { "const": true },
+        "requireExternalState": { "const": true },
+        "requireCompleteRubric": { "const": true },
+        "requireEvidence": { "const": true },
+        "requireFailureFingerprint": { "const": true },
+        "requireRevisionDelta": { "const": true },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "targetScore", "maximumReviewRounds", "maximumElapsedMinutes", "maximumCostUnits",
+            "minimumImprovementPoints", "maximumStagnantRounds"
+          ],
+          "properties": {
+            "targetScore": { "type": "number", "minimum": 90, "maximum": 100 },
+            "maximumReviewRounds": { "type": "integer", "minimum": 1, "maximum": 8 },
+            "maximumElapsedMinutes": { "type": "integer", "minimum": 1, "maximum": 10080 },
+            "maximumCostUnits": { "type": "number", "exclusiveMinimum": 0 },
+            "minimumImprovementPoints": { "type": "number", "minimum": 0, "maximum": 100 },
+            "maximumStagnantRounds": { "type": "integer", "minimum": 1, "maximum": 5 }
+          }
+        },
+        "candidateDecision": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "minimumCandidates", "maximumCandidates", "requireDistinctVariationAxes",
+            "anonymousComparison", "revealMappingOnlyAfterVerdict", "requireSelectionReason",
+            "objectiveJudge", "rubricJudge", "subjectiveJudge"
+          ],
+          "properties": {
+            "minimumCandidates": { "type": "integer", "minimum": 2, "maximum": 5 },
+            "maximumCandidates": { "type": "integer", "minimum": 2, "maximum": 5 },
+            "requireDistinctVariationAxes": { "const": true },
+            "anonymousComparison": { "const": true },
+            "revealMappingOnlyAfterVerdict": { "const": true },
+            "requireSelectionReason": { "const": true },
+            "objectiveJudge": { "const": "deterministic-gate" },
+            "rubricJudge": { "const": "fresh-independent-evaluator" },
+            "subjectiveJudge": { "const": "human" }
+          }
+        },
+        "terminalStates": {
+          "const": ["active", "passed", "needs-human-approval", "budget-exhausted", "blocked"]
         }
       }
     },

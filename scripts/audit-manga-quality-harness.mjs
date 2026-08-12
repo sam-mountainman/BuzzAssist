@@ -26,8 +26,8 @@ if (!args.manifestPath) {
   throw new Error([
     "Usage: node scripts/audit-manga-quality-harness.mjs",
     "--manifest-path <episode-manifest.json>",
-    "[--stage planning|final] [--output-dir <dir>]",
-    "[--channel-directives <json>] [--overrides <json>] [--generator-id <id>]",
+    "[--stage planning] [--output-dir <dir>]",
+    "[--channel-directives <json>] [--overrides <json>] [--generator-id <id>] [--generator-context-id <id>]",
   ].join(" "));
 }
 
@@ -38,14 +38,19 @@ async function readJson(filePath, fallback = {}) {
 
 const manifestPath = resolve(args.manifestPath);
 const manifest = await readJson(manifestPath);
+const stage = args.stage || "planning";
+if (stage === "final") {
+  throw new Error("Final quality decisions must be derived by `node scripts/koya-manga-video.mjs audit`; preflight cannot self-certify final quality.");
+}
 const channelDirectives = await readJson(args.channelDirectives, manifest.production?.channelDirectives || {});
 const overrides = await readJson(args.overrides, manifest.production?.qualityHarness || {});
 const contract = createMangaQualityContract({ manifest, channelDirectives, overrides });
-const report = auditMangaPreflight({ manifest, contract, stage: args.stage || "planning" });
+const report = auditMangaPreflight({ manifest, contract, stage });
 const state = createMangaQualityLoopState({
   contract,
   episodeId: manifest.id,
   generatorId: args.generatorId || "production-generator",
+  generatorContextId: args.generatorContextId || args.generatorId || "production-generator-context",
 });
 const outputDir = resolve(args.outputDir || join(dirname(manifestPath), "quality-harness"));
 await mkdir(outputDir, { recursive: true });
