@@ -15,14 +15,13 @@ This gate works on the overlay PNGs actually composited into the video:
 Run AFTER overlays are rasterized (the pipeline PNGs must exist), so the
 audit sees exactly what the video composites.
 """
+import argparse
 import json
 import sys
 from pathlib import Path
 
 import cv2
 import numpy as np
-
-MANIFEST = Path("canvas/manga-videos/manga-photo-homecoming-001/episode-manifest.json")
 
 # Glyphs whose vertical forms ('vert'/'vrt2') are drawn off the em-box center
 # by design: punctuation hugs the top-right corner, small kana shift toward
@@ -38,12 +37,14 @@ import re
 
 def parse_svg_glyphs(svg_path):
     text = Path(svg_path).read_text()
+    root = re.search(r'<svg[^>]*\bwidth="([0-9.]+)"[^>]*\bheight="([0-9.]+)"', text)
+    source_size = (float(root.group(1)), float(root.group(2))) if root else (0.0, 0.0)
     glyphs = []
     for m in re.finditer(r'<text x="([0-9.]+)" y="([0-9.]+)"[^>]*font-size="([0-9.]+)"[^>]*>([^<])</text>', text):
         x, y, size, ch = float(m.group(1)), float(m.group(2)), float(m.group(3)), m.group(4)
         if ch.strip():
             glyphs.append((x, y, size, ch))
-    return glyphs
+    return glyphs, source_size
 
 
 def analyze_overlay(png_path, svg_path):
@@ -65,15 +66,24 @@ def analyze_overlay(png_path, svg_path):
     else:
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         text_mask = (gray < 110).astype(np.uint8)
-    glyphs = parse_svg_glyphs(svg_path)
+    glyphs, source_size = parse_svg_glyphs(svg_path)
     if not glyphs:
         return {"error": "no glyphs parsed from svg"}
     height, width = text_mask.shape
+    source_width, source_height = source_size
+    if source_width <= 0 or source_height <= 0:
+        return {"error": "svg width/height missing"}
+    scale_x = width / source_width
+    scale_y = height / source_height
+    scale_size = (scale_x + scale_y) / 2
     worst_dev_em = 0.0
     worst_body_dev_em = 0.0
     violations = 0
     missing = 0
     for (gx, gy, size, ch) in glyphs:
+        gx *= scale_x
+        gy *= scale_y
+        size *= scale_size
         half = size * 0.62
         x0, x1 = int(max(0, gx - half)), int(min(width, gx + half))
         y0, y1 = int(max(0, gy - half)), int(min(height, gy + half))
@@ -97,6 +107,9 @@ def analyze_overlay(png_path, svg_path):
             violations += 1
     return {
         "glyphCount": len(glyphs),
+        "svgSourceDimensions": [round(source_width), round(source_height)],
+        "pngDimensions": [width, height],
+        "rasterScale": [round(scale_x, 6), round(scale_y, 6)],
         "missingGlyphs": missing,
         "violations": violations,
         "worstCentroidDeviationEm": round(worst_dev_em, 3),
@@ -105,7 +118,13 @@ def analyze_overlay(png_path, svg_path):
 
 
 def main():
-    manifest = json.loads(MANIFEST.read_text())
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--manifest", type=Path, required=True)
+    parser.add_argument("--output", type=Path, default=None)
+    args = parser.parse_args()
+    manifest_path = args.manifest.resolve()
+    output_path = args.output.resolve() if args.output else manifest_path.parent / "bubble-typography-audit.json"
+    manifest = json.loads(manifest_path.read_text())
     rows = []
     for u in manifest["utterances"]:
         entries = []
@@ -121,7 +140,7 @@ def main():
         for entry_id, overlay_path, bounds in entries:
             # the renderer rasterizes overlays into .render-work/<id>.png —
             # audit exactly the PNG that was composited into the video
-            png = MANIFEST.parent / ".render-work" / f"{entry_id}.png"
+            png = manifest_path.parent / ".render-work" / f"{entry_id}.png"
             if not png.is_file():
                 rows.append({"id": entry_id, "error": "rasterized png missing (run render first)", "pass": False})
                 continue
@@ -135,7 +154,8 @@ def main():
         "rows": rows,
         "pass": bool(rows) and all(r["pass"] for r in rows),
     }
-    (MANIFEST.parent / "bubble-typography-audit.json").write_text(json.dumps(result, indent=1))
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(result, indent=1))
     print(json.dumps({"pass": result["pass"], "failures": [r for r in rows if not r["pass"]][:8], "checked": len(rows)}, ensure_ascii=False))
     if not result["pass"]:
         sys.exit(1)

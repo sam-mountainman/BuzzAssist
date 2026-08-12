@@ -9,6 +9,10 @@ canvas/
 .claude/*
 !.claude/skills/
 .codex/
+!.codex/
+.codex/*
+!.codex/skills/
+!.codex/skills/**
 Downloads/
 Youtube-AGI/
 # claude-mem drops auto-generated CLAUDE.md context files into subdirectories;

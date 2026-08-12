@@ -75,6 +75,16 @@ test("script cast extraction ignores title and cut headers and trims punctuation
   assert.equal(cast.find((entry) => entry.name === "佐藤 誠司").role, "fixed");
 });
 
+test("script cast extraction never promotes a quoted name inside narration to a speaker", () => {
+  const script = `
+ナレーション: 「会議」という言葉すら知らなかったらしい。
+ナレーション: T大の彼氏にも「ニートと付き合うなんて無理」と振られた。
+荒野: 価値観を押し付けるな。
+`;
+  const cast = extractCastFromScript(script);
+  assert.deepEqual(cast.map((entry) => entry.name), ["荒野"]);
+});
+
 test("script cast extraction ignores YAML frontmatter and keeps spaced Japanese speaker names", () => {
   const script = `---
 title: 消えかけた写真に、帰る場所が写っていた

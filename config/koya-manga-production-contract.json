@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 1,
+  "version": "koya-manga-production-v47",
+  "channelId": "koya-manga",
+  "description": "Fail-closed production contract for Koya-channel manga videos.",
+  "sourceOfTruth": {
+    "requirementsLedger": "docs/koya-channel-requirements-ledger.md",
+    "skill": ".agents/skills/manga-video-production/SKILL.md",
+    "cameraSkill": ".agents/skills/manga-page-camera/SKILL.md",
+    "benchmarkEpisodeId": "manga-photo-homecoming-001"
+  },
+  "art": {
+    "visualProfileId": "manga-channel-reference-video-v1+user-child-touch",
+    "imageModel": "gpt-image-2-codex",
+    "usageLimitFallbackModel": "",
+    "qaUsageLimitFallbackProvider": "",
+    "imageConcurrency": "auto",
+    "qaConcurrency": 1,
+    "maximumQaRetries": 1,
+    "candidateCount": 3,
+    "requireApprovedCharacterReferences": true,
+    "requireCompositionVariation": true,
+    "requireBubbleNegativeSpace": true,
+    "requireNaturalAnatomyAndPropScale": true,
+    "forbidGeneratedPseudoText": true,
+    "refreshSourceAnnotationsAfterImageChange": true,
+    "pauseForNewCharacterApproval": true
+  },
+  "audio": {
+    "provider": "elevenlabs",
+    "model": "eleven_v3",
+    "generationMode": "text-to-dialogue-with-timestamps",
+    "takeCount": 2,
+    "languageCode": "ja",
+    "narrationVoicePolicy": "protagonist-voice",
+    "narrationVoiceId": "",
+    "preserveNarrationVisualStyle": true,
+    "requireProtagonistVoiceMatch": true,
+    "requireNativeJapaneseVoice": true,
+    "requireVoiceApproval": true,
+    "targetLineLufs": -19,
+    "masterTargetLufs": -14.5,
+    "masterTruePeakDb": -1.5,
+    "sameSpeakerGapSeconds": 0.03,
+    "speakerChangeGapSeconds": 0.05,
+    "emphasisGapSeconds": 0.2,
+    "acousticHeadPaddingSeconds": 0.1,
+    "minimumReleasePaddingSeconds": 0.045,
+    "joinFadeInMilliseconds": 6,
+    "joinFadeOutMilliseconds": 8,
+    "allowBgm": false,
+    "allowSignalEffects": false,
+    "freezeApprovedAudio": true
+  },
+  "bubbles": {
+    "writingMode": "vertical-rl",
+    "fontFamilyPolicy": "mincho-serif",
+    "fontWeight": 400,
+    "maximumColumns": 3,
+    "stripTerminalJapanesePeriod": true,
+    "cameraSweepSamples": 33,
+    "speakerProximitySamples": 9,
+    "activeSpeakerFaceMaximumOverlap": 0,
+    "requireSequenceVariation": true,
+    "requireIndependentRenderedFaceAudit": true,
+    "requireClearEncodedTransitionFrame": true,
+    "fadeInMilliseconds": 50,
+    "fadeOutMilliseconds": 50,
+    "transitionCrossfadeSeconds": 0
+  },
+  "camera": {
+    "grammarVersion": "manga-page-camera-v2",
+    "requiredFamilies": [
+      "directional",
+      "pullout",
+      "combined"
+    ],
+    "minimumHorizontalTravel": 0.14,
+    "minimumTopTravel": 0.12,
+    "minimumPulloutRevealRatio": 0.24,
+    "requireSemanticViews": true,
+    "requireConstantSpeed": true,
+    "requireWholePageSplitCamera": true,
+    "forbidPushIn": true,
+    "forbidDownwardMotion": true,
+    "forbidStops": true,
+    "forbidRepeatedCameraImages": true,
+    "forbidPhaseReset": true,
+    "cameraOversample": 3
+  },
+  "video": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "audioSampleRate": 48000,
+    "audioChannels": 2,
+    "requireH264": true,
+    "requireAac": true,
+    "requireFullDecode": true
+  },
+  "editorial": {
+    "preserveFullScript": true,
+    "forbidContextlessLeadInImages": true,
+    "preferMultiUtteranceImageHolds": true,
+    "requireEditContinuityReview": true,
+    "requireDialoguePacingReview": true,
+    "allowSplitPagesOnlyWhenSemanticallyJustified": true
+  },
+  "qualityReview": {
+    "version": "koya-agent-perceptual-signoff-v2",
+    "userFeedbackOverridesMachinePass": true,
+    "requireFullVideoReview": true,
+    "requireContactSheetReview": true,
+    "requireRepresentativeFrameReview": true,
+    "requireAudioSpotChecks": true,
+    "requireNonEmptyNotesPerCheck": true,
+    "requireEmptyKnownRemainingIssues": true,
+    "requiredChecks": [
+      "characterContinuity",
+      "composition",
+      "camera",
+      "bubblePlacement",
+      "splitPages",
+      "textReadability",
+      "anatomyAndPropScale",
+      "editContinuity",
+      "imagePacing",
+      "dialoguePacing",
+      "audioNaturalness",
+      "audioBoundaryArtifacts",
+      "generatedTextArtifacts"
+    ]
+  },
+  "provenance": {
+    "manifestSchemaVersion": "koya-episode-manifest-v1",
+    "officialEntrypoint": "scripts/koya-manga-video.mjs",
+    "forbidLegacyStatusAfterRender": true,
+    "forbidAmbiguousProductionVersion": true
+  },
+  "lifecycle": {
+    "checkpointOnUsageLimit": true,
+    "reuseContentAddressedArtifacts": true,
+    "regenerateFailuresOnly": true,
+    "requireEmptyKnownRemainingIssues": true,
+    "completionStatus": "final-koya-audited"
+  },
+  "requiredAudits": [
+    "contract-manifest",
+    "quality-harness-final",
+    "rendered-camera",
+    "bubble-midpoint-frames",
+    "bubble-transition-clear-frames",
+    "bubble-camera-sweep",
+    "independent-rendered-face",
+    "bubble-typography",
+    "thought-spotlight",
+    "split-page-integrity",
+    "stt-verification",
+    "audio-onset",
+    "audio-waveform-sync",
+    "audio-click-hum-level",
+    "agent-contact-sheet-review",
+    "full-decode"
+  ],
+  "legacy": {
+    "blockedForNewEpisodes": [
+      "scripts/build-manga-video.mjs full",
+      "scripts/build-manga-video.mjs speech",
+      "scripts/generate-manga-v22-dialogue-audio.mjs without MANGA_DIALOGUE_VERSION=v25"
+    ],
+    "migrationInventory": "config/koya-manga-legacy-migrations.json"
+  }
+}

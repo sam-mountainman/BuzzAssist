@@ -1,0 +1,4 @@
+interface:
+  display_name: "漫画ページカメラ"
+  short_description: "意味に沿う漫画カメラを設計・実測監査"
+  default_prompt: "$manga-page-camera を使い、方向・引き・方向後の引きと分割ページ全体カメラを設計し、実MP4で監査してください。"

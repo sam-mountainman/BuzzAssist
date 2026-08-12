@@ -7,6 +7,8 @@ import test from "node:test";
 import {
   createMangaScriptImagePlan,
   executeMangaScriptImagePlan,
+  mangaImageQaReferenceCandidates,
+  mangaImageQaStructureContract,
   normalizeScriptImageConcurrency,
   renderEditorialPlatePng,
   runMangaScriptImagePipeline,
@@ -55,6 +57,146 @@ test("script planner covers strict plates, thought focus, split pages, and camer
   assert.equal(plan.compositionPlan.diagnostics.consecutiveTooSimilarCount, 0);
   assert.equal(plan.policy.splitPageCamera, "single-continuous");
   assert.equal(plan.policy.typographyGeneratedInImage, false);
+  const storyPanels = plan.jobs.filter((entry) => entry.kind === "split-panel" && entry.editorial?.split?.type === "story-3");
+  assert.ok(storyPanels.length >= 3);
+  assert.match(storyPanels[0].prompt, /narrow full-height LEFT panel/u);
+  assert.match(storyPanels[1].prompt, /UPPER-RIGHT panel/u);
+  assert.match(storyPanels[2].prompt, /LOWER-RIGHT panel/u);
+  const montagePage = plan.jobs.find((entry) => entry.kind === "split-page" && entry.montageTimeline === true);
+  assert.ok(montagePage);
+  assert.ok(montagePage.composition);
+  assert.ok(Array.isArray(montagePage.castNames));
+  assert.ok(Array.isArray(montagePage.fallbackReferenceImagePaths));
+});
+
+test("narration jobs carry the approved protagonist identity into first-person visual beats", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-narration-protagonist-"));
+  const registry = {
+    characters: [
+      { id: "hero-arano", name: "荒野", kind: "character", status: "approved", referenceImagePaths: [] },
+      { id: "sakura", name: "花園さくら", kind: "character", status: "approved", referenceImagePaths: [] },
+    ],
+  };
+  const plan = createMangaScriptImagePlan({
+    scriptText: "【カット1：大学】\n荒野: ここまで来た。\n花園さくら: 久しぶり。\nナレーション: 俺は大学の教室で英語の資料を開いた。",
+    episodeId: "narration-protagonist-test",
+    registry,
+    canvasDir: root,
+    assetDir: join(root, "assets"),
+    protagonistSpeakerName: "荒野",
+  });
+  const narrationJob = plan.jobs.find((entry) => entry.id === "image:cut-01-u03" || entry.id.startsWith("panel:cut-01-u03"));
+  assert.ok(narrationJob);
+  assert.ok(narrationJob.characterIds.includes("hero-arano"));
+  assert.match(narrationJob.prompt, /荒野 is the story protagonist/u);
+});
+
+test("third-person narration uses the explicitly named character instead of replacing them with the protagonist", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-third-person-narration-"));
+  const registry = {
+    characters: [
+      { id: "hero-arano", name: "荒野", aliases: ["荒野くん"], kind: "character", status: "approved", referenceImagePaths: [] },
+      { id: "sakura", name: "花園さくら", aliases: ["さくら", "花園さん"], kind: "character", status: "approved", referenceImagePaths: [] },
+    ],
+  };
+  const plan = createMangaScriptImagePlan({
+    scriptText: "【カット1：直前の場面】\n荒野: もう俺とは関係ない。\n【カット2：さくらの転落】\nナレーション: その後、さくらは仕事でミスを重ね、最終的に解雇された。\nナレーション: アルバイト生活に転落した。",
+    episodeId: "third-person-narration-test",
+    registry,
+    canvasDir: root,
+    assetDir: join(root, "assets"),
+    protagonistSpeakerName: "荒野",
+  });
+  const sceneJobs = plan.jobs.filter((entry) => ["scene-image", "split-panel"].includes(entry.kind) && entry.composition?.cutId === "cut-02");
+  assert.ok(sceneJobs.length > 0);
+  assert.ok(sceneJobs.every((entry) => entry.characterIds.includes("sakura")));
+  assert.ok(sceneJobs.every((entry) => !entry.characterIds.includes("hero-arano")));
+  assert.ok(sceneJobs.every((entry) => /Cast: 花園さくら/u.test(entry.prompt)));
+  assert.ok(sceneJobs.every((entry) => !/Narration identity anchor: 荒野/u.test(entry.prompt)));
+});
+
+test("multi-year plans make character identity stable while wardrobe follows the explicit age stage", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-age-stage-"));
+  const registry = {
+    characters: [
+      { id: "hero-arano", name: "荒野", kind: "character", status: "approved", referenceImagePaths: [] },
+      { id: "sakura", name: "花園さくら", kind: "character", status: "approved", referenceImagePaths: [] },
+    ],
+  };
+  const plan = createMangaScriptImagePlan({
+    scriptText: "【カット1：秋の放課後、音楽室での別れ】\n花園さくら: 別れよう\n荒野: 冗談だろ？",
+    episodeId: "age-stage-test",
+    registry,
+    canvasDir: root,
+    assetDir: join(root, "assets"),
+    characterBible: { cast: [{ name: "荒野", description: "高校では濃紺ブレザー。社会人では濃紺スーツ。", invariants: ["同じ顔"], negativePrompt: "別人化" }] },
+  });
+  const scene = plan.jobs.find((entry) => entry.kind === "scene-image" || entry.kind === "split-panel");
+  assert.match(scene.prompt, /High-school senior stage/u);
+  assert.match(scene.prompt, /lock face, hair, body identity/u);
+  assert.match(scene.prompt, /高校では濃紺ブレザー/u);
+  assert.doesNotMatch(scene.prompt, /preserve approved identity sheets, clothing/u);
+});
+
+test("environment atlases explicitly require black gutters and montage locations remain distinct", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-environment-gutters-"));
+  const plan = createMangaScriptImagePlan({
+    scriptText: "【カット1：社会人生活と夜の電話】\n荒野: 今日も頑張ろう。\nナレーション: 社会人になって数ヶ月。夜はほぼ毎日電話で報告した。",
+    episodeId: "environment-gutters-test",
+    registry: { characters: [] },
+    canvasDir: root,
+    assetDir: join(root, "assets"),
+  });
+  const environment = plan.jobs.find((entry) => entry.kind === "environment-sheet");
+  assert.equal(environment.location.multiScene, true);
+  assert.match(environment.prompt, /solid, clearly visible black gutters/u);
+  assert.match(environment.prompt, /do not blend the separate places into one impossible room/u);
+});
+
+test("education and career props are forced blank so generated pseudo-text cannot enter artwork", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-text-free-props-"));
+  const plan = createMangaScriptImagePlan({
+    scriptText: "【カット1：大学の講義室】\n荒野: 英語を学べる大学を選び、就活で内定をもらった。",
+    episodeId: "text-free-props-test",
+    registry: { characters: [] },
+    canvasDir: root,
+    assetDir: join(root, "assets"),
+  });
+  const scene = plan.jobs.find((entry) => entry.kind === "scene-image" || entry.kind === "split-panel");
+  assert.match(scene.prompt, /every book cover, brochure, worksheet, notebook, phone screen, sign, badge, and document must be completely blank/u);
+  assert.match(scene.prompt, /no letters, pseudo-text, numbers, notation, logos, or glyph-like lines/u);
+});
+
+test("breakup dialogue receives line-specific close staging instead of relying on generic correction", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-breakup-staging-"));
+  const plan = createMangaScriptImagePlan({
+    scriptText: "【カット1：音楽室】\n花園さくら: 別れよう\n花園さくら: 冗談なのはそっちでしょ。荒野くんにはがっかりしたわ。",
+    episodeId: "breakup-staging-test",
+    registry: { characters: [] },
+    canvasDir: root,
+    assetDir: join(root, "assets"),
+  });
+  const prompts = plan.jobs.filter((entry) => ["scene-image", "split-panel"].includes(entry.kind)).map((entry) => entry.prompt).join("\n");
+  assert.match(prompts, /tight chest-up reaction two-shot/u);
+  assert.match(prompts, /unmistakable palm-out stop gesture/u);
+  assert.match(prompts, /half-lidded cold eyes/u);
+  assert.match(prompts, /clean psychological gap/u);
+});
+
+test("blind QA distinguishes standalone split panels from the later flattened split page", () => {
+  assert.match(mangaImageQaStructureContract({ kind: "split-panel" }), /exactly one standalone panel/u);
+  assert.match(mangaImageQaStructureContract({ kind: "split-panel" }), /gutters are added only by the later split-page job/u);
+  assert.match(mangaImageQaStructureContract({ kind: "split-page" }), /solid black dividers/u);
+  assert.doesNotMatch(mangaImageQaStructureContract({ kind: "scene-image" }), /Require the authored number of panels/u);
+});
+
+test("blind QA comparison order keeps one representative sheet for every expected cast member", () => {
+  const candidates = mangaImageQaReferenceCandidates({
+    fallbackReferenceImagePaths: ["amane-turnaround.png", "sakura-turnaround.png", "arano-turnaround.png"],
+    referenceImagePaths: ["amane-turnaround.png", "amane-expressions.png", "sakura-expressions.png", "arano-expressions.png", "street.png"],
+  });
+  assert.deepEqual(candidates.slice(0, 3), ["amane-turnaround.png", "sakura-turnaround.png", "arano-turnaround.png"]);
+  assert.equal(new Set(candidates).size, candidates.length);
 });
 
 test("executor respects fixed concurrency, retries only QA failures, and reuses completed jobs", async () => {
@@ -117,6 +259,130 @@ test("executor respects fixed concurrency, retries only QA failures, and reuses 
   assert.equal(persisted.summary.complete, 13);
 });
 
+test("executor can explicitly retry only persistent failed jobs without regenerating completed work", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-script-retry-failed-"));
+  const buffer = renderEditorialPlatePng("pastel-sky", 320, 180);
+  const jobs = [1, 2].map((index) => ({
+    id: `image:${index}`,
+    kind: "scene-image",
+    dependencies: [],
+    outputPath: join(root, `image-${index}.png`),
+    prompt: `scene ${index}`,
+    referenceImagePaths: [],
+    model: "fake",
+    aspectRatio: "16:9",
+    imageSize: "2K",
+    quality: "high",
+    imageCount: 1,
+    inputHash: `hash-${index}`,
+  }));
+  const plan = { version: 2, episodeId: "retry-failed-test", scriptSha256: "retry-script", assetDir: root, jobs };
+  let failSecond = true;
+  const generationCounts = new Map();
+  const generationPrompts = new Map();
+  const generateImage = async ({ fileName, prompt }) => {
+    generationCounts.set(fileName, (generationCounts.get(fileName) || 0) + 1);
+    generationPrompts.set(fileName, [...(generationPrompts.get(fileName) || []), prompt]);
+    return { buffer, fileName, mimeType: "image/png" };
+  };
+  const visualQa = async ({ job }) => job.id === "image:2" && failSecond
+    ? { pass: false, issues: ["repair me"] }
+    : { pass: true, issues: [] };
+  const first = await executeMangaScriptImagePlan(plan, { maxRetries: 0, generateImage, visualQa });
+  assert.equal(first.ledger.status, "failed");
+  assert.equal(first.ledger.jobs["image:1"].status, "complete");
+  failSecond = false;
+  const second = await executeMangaScriptImagePlan(plan, { maxRetries: 0, retryFailed: true, generateImage, visualQa });
+  assert.equal(second.ledger.status, "complete");
+  assert.equal(generationCounts.get("image-1.png"), 1);
+  assert.equal(generationCounts.get("image-2.png"), 2);
+  assert.equal(generationPrompts.get("image-2.png")[0], "scene 2");
+  assert.match(generationPrompts.get("image-2.png")[1], /CORRECTION PASS: Fix these failures: repair me/);
+});
+
+test("semantic replanning does not apply QA feedback from an obsolete input hash", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-replan-feedback-scope-"));
+  const buffer = renderEditorialPlatePng("pastel-sky", 320, 180);
+  const outputPath = join(root, "image.png");
+  const originalPlan = {
+    version: 2,
+    episodeId: "replan-feedback-scope-test",
+    scriptSha256: "same-script",
+    assetDir: root,
+    jobs: [{ id: "image:1", kind: "scene-image", dependencies: [], outputPath, prompt: "old macro scene", referenceImagePaths: [], model: "fake", imageCount: 1, inputHash: "old-hash" }],
+  };
+  const prompts = [];
+  const generateImage = async ({ prompt }) => { prompts.push(prompt); return { buffer, mimeType: "image/png" }; };
+  const first = await executeMangaScriptImagePlan(originalPlan, {
+    maxRetries: 0,
+    generateImage,
+    visualQa: async () => ({ pass: false, issues: ["old macro crop is wrong"] }),
+  });
+  assert.equal(first.ledger.status, "failed");
+  const replacementPlan = {
+    ...originalPlan,
+    jobs: [{ ...originalPlan.jobs[0], prompt: "new departure scene", inputHash: "new-hash" }],
+  };
+  const second = await executeMangaScriptImagePlan(replacementPlan, {
+    maxRetries: 0,
+    generateImage,
+    visualQa: async () => ({ pass: true, issues: [] }),
+  });
+  assert.equal(second.ledger.status, "complete");
+  assert.deepEqual(prompts, ["old macro scene", "new departure scene"]);
+});
+
+test("transient semantic QA crashes retry the verdict without regenerating the image", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-qa-infra-retry-"));
+  const buffer = renderEditorialPlatePng("pastel-sky", 320, 180);
+  const plan = {
+    version: 2,
+    episodeId: "qa-infra-retry-test",
+    scriptSha256: "qa-infra-script",
+    assetDir: root,
+    jobs: [{ id: "image:1", kind: "scene-image", dependencies: [], outputPath: join(root, "image.png"), prompt: "scene", referenceImagePaths: [], model: "fake", imageCount: 1, inputHash: "qa-infra-hash" }],
+  };
+  let generated = 0;
+  let qaAttempts = 0;
+  const result = await executeMangaScriptImagePlan(plan, {
+    maxRetries: 0,
+    qaInfrastructureRetries: 2,
+    generateImage: async () => { generated += 1; return { buffer, mimeType: "image/png" }; },
+    visualQa: async () => {
+      qaAttempts += 1;
+      if (qaAttempts < 3) throw new Error("codex exited 1: transient stream disconnected");
+      return { pass: true, issues: [] };
+    },
+  });
+  assert.equal(result.ledger.status, "complete");
+  assert.equal(generated, 1);
+  assert.equal(qaAttempts, 3);
+  assert.equal(result.ledger.jobs["image:1"].qaInfrastructureAttempts, 3);
+});
+
+test("executor retires stale ledger jobs when semantic replanning changes the active DAG", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-script-retire-stale-"));
+  const buffer = renderEditorialPlatePng("pastel-sky", 320, 180);
+  const originalPlan = {
+    version: 2,
+    episodeId: "retire-stale-test",
+    scriptSha256: "same-script",
+    assetDir: root,
+    jobs: [{ id: "image:old", kind: "scene-image", dependencies: [], outputPath: join(root, "old.png"), prompt: "old", referenceImagePaths: [], model: "fake", imageCount: 1, inputHash: "old-hash" }],
+  };
+  const options = { generateImage: async () => ({ buffer, mimeType: "image/png" }), visualQa: async () => ({ pass: true, issues: [] }) };
+  await executeMangaScriptImagePlan(originalPlan, options);
+  const replacementPlan = {
+    ...originalPlan,
+    jobs: [{ id: "image:new", kind: "scene-image", dependencies: [], outputPath: join(root, "new.png"), prompt: "new", referenceImagePaths: [], model: "fake", imageCount: 1, inputHash: "new-hash" }],
+  };
+  const result = await executeMangaScriptImagePlan(replacementPlan, options);
+  assert.equal(result.ledger.status, "complete");
+  assert.equal(result.ledger.summary.complete, 1);
+  assert.equal(result.ledger.jobs["image:old"], undefined);
+  assert.equal(result.ledger.retiredJobs["image:old"].retiredReason, "not-present-in-current-plan");
+});
+
 test("usage limits persist a waiting checkpoint and resume the unfinished image without duplication", async () => {
   const root = await mkdtemp(join(tmpdir(), "buzzassist-script-park-"));
   const ledgerPath = join(root, "image-generation-ledger.json");
@@ -173,6 +439,307 @@ test("usage limits persist a waiting checkpoint and resume the unfinished image 
   assert.equal(result.ledger.status, "complete");
   assert.equal(result.ledger.jobs["image:1"].status, "complete");
   assert.equal(attempts, 2);
+});
+
+test("fixed image concurrency also parks the whole pool on a usage limit", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-script-fixed-park-"));
+  const outputPath = join(root, "image-1.png");
+  const plan = {
+    version: 1,
+    episodeId: "fixed-park-test",
+    scriptSha256: "fixed-park-script-hash",
+    assetDir: root,
+    jobs: [1, 2].map((index) => ({
+      id: `image:${index}`,
+      kind: "scene-image",
+      dependencies: [],
+      outputPath: join(root, `image-${index}.png`),
+      prompt: `scene ${index}`,
+      referenceImagePaths: [],
+      model: "fake",
+      aspectRatio: "16:9",
+      imageSize: "2K",
+      quality: "high",
+      imageCount: 1,
+      inputHash: `fixed-park-input-hash-${index}`,
+    })),
+  };
+  const buffer = renderEditorialPlatePng("pastel-sky", 320, 180);
+  let attempts = 0;
+  const attemptOrder = [];
+  let clockMs = 0;
+  let parked = 0;
+  const adaptiveController = new AdaptiveConcurrencyController({
+    mode: "fixed",
+    fixedLimit: 1,
+    usageLimitPauseMs: 100,
+    now: () => clockMs,
+  });
+  const result = await executeMangaScriptImagePlan(plan, {
+    concurrency: 1,
+    adaptiveController,
+    generateImage: async ({ fileName }) => {
+      attempts += 1;
+      attemptOrder.push(fileName);
+      if (attempts === 1) throw new Error("生成上限に達しました");
+      return { buffer, fileName, mimeType: "image/png" };
+    },
+    visualQa: async () => ({ pass: true, issues: [] }),
+    adaptiveRunOptions: {
+      sleep: async (ms) => { clockMs += ms; },
+      onPark: async () => { parked += 1; },
+    },
+  });
+  assert.equal(parked, 1);
+  assert.equal(attempts, 3);
+  assert.deepEqual(attemptOrder, ["image-1.png", "image-1.png", "image-2.png"]);
+  assert.equal(result.ledger.status, "complete");
+  assert.equal(result.ledger.summary.concurrency, "1");
+});
+
+test("an explicitly contracted fallback model handles a primary usage limit and records provenance", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-script-model-fallback-"));
+  const outputPath = join(root, "image-1.png");
+  const plan = {
+    version: 1,
+    episodeId: "model-fallback-test",
+    scriptSha256: "model-fallback-script-hash",
+    assetDir: root,
+    jobs: [{
+      id: "image:1",
+      kind: "scene-image",
+      dependencies: [],
+      outputPath,
+      prompt: "scene",
+      referenceImagePaths: ["one.png", "two.png", "three.png", "four.png"],
+      fallbackReferenceImagePaths: ["one.png", "three.png", "four.png"],
+      model: "primary-image-model",
+      aspectRatio: "16:9",
+      imageSize: "2K",
+      quality: "high",
+      imageCount: 1,
+      inputHash: "model-fallback-input-hash",
+    }],
+  };
+  const buffer = renderEditorialPlatePng("pastel-sky", 320, 180);
+  const calls = [];
+  const result = await executeMangaScriptImagePlan(plan, {
+    concurrency: 1,
+    fallbackImageModel: "fallback-image-model",
+    generateImage: async (input) => {
+      calls.push({ model: input.model, refs: input.referenceImagePaths });
+      if (input.model === "primary-image-model") throw new Error("生成上限に達しました");
+      return { buffer, fileName: "image-1.png", mimeType: "image/png" };
+    },
+    visualQa: async () => ({ pass: true, issues: [] }),
+  });
+  assert.equal(result.ledger.status, "complete");
+  assert.deepEqual(calls, [
+    { model: "primary-image-model", refs: ["one.png", "two.png", "three.png", "four.png"] },
+    { model: "fallback-image-model", refs: ["one.png", "three.png", "four.png"] },
+  ]);
+  assert.equal(result.ledger.jobs["image:1"].generationModel, "fallback-image-model");
+  assert.equal(result.ledger.jobs["image:1"].fallbackFromModel, "primary-image-model");
+  assert.equal(result.ledger.summary.fallbackGenerated, 1);
+});
+
+test("a contracted visual-QA fallback evaluates the same generated image after Codex usage exhaustion", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-script-qa-fallback-"));
+  const outputPath = join(root, "image-1.png");
+  const plan = {
+    version: 1,
+    episodeId: "qa-fallback-test",
+    scriptSha256: "qa-fallback-script-hash",
+    assetDir: root,
+    jobs: [{
+      id: "image:1",
+      kind: "scene-image",
+      dependencies: [],
+      outputPath,
+      prompt: "scene",
+      referenceImagePaths: [],
+      model: "fake",
+      aspectRatio: "16:9",
+      imageSize: "2K",
+      quality: "high",
+      imageCount: 1,
+      inputHash: "qa-fallback-input-hash",
+    }],
+  };
+  const buffer = renderEditorialPlatePng("pastel-sky", 320, 180);
+  let generated = 0;
+  let primaryQa = 0;
+  let fallbackQa = 0;
+  const result = await executeMangaScriptImagePlan(plan, {
+    concurrency: 1,
+    qaFallbackProvider: "grok",
+    generateImage: async () => { generated += 1; return { buffer, mimeType: "image/png" }; },
+    visualQa: async () => { primaryQa += 1; throw new Error("You've hit your usage limit"); },
+    fallbackVisualQa: async () => {
+      fallbackQa += 1;
+      return { pass: true, score: 94, hardFailures: [], issues: [], evaluator: "grok-headless-blind-vision" };
+    },
+  });
+  assert.equal(result.ledger.status, "complete");
+  assert.equal(generated, 1);
+  assert.equal(primaryQa, 1);
+  assert.equal(fallbackQa, 1);
+  assert.equal(result.ledger.jobs["image:1"].qa.semantic.evaluator, "grok-headless-blind-vision");
+  assert.equal(result.ledger.summary.qaFallbackApproved, 1);
+});
+
+test("usage-limit fallbacks stay open for the rest of one image pipeline run", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-script-fallback-circuit-"));
+  const plan = {
+    version: 1,
+    episodeId: "fallback-circuit-test",
+    scriptSha256: "fallback-circuit-script-hash",
+    assetDir: root,
+    jobs: [1, 2].map((index) => ({
+      id: `image:${index}`,
+      kind: "scene-image",
+      dependencies: [],
+      outputPath: join(root, `image-${index}.png`),
+      prompt: `scene ${index}`,
+      referenceImagePaths: [],
+      model: "primary-image-model",
+      aspectRatio: "16:9",
+      imageSize: "2K",
+      quality: "high",
+      imageCount: 1,
+      inputHash: `fallback-circuit-input-hash-${index}`,
+    })),
+  };
+  const buffer = renderEditorialPlatePng("pastel-sky", 320, 180);
+  let primaryImages = 0;
+  let fallbackImages = 0;
+  let primaryQa = 0;
+  let fallbackQa = 0;
+  const result = await executeMangaScriptImagePlan(plan, {
+    concurrency: 1,
+    fallbackImageModel: "fallback-image-model",
+    qaFallbackProvider: "grok",
+    generateImage: async (input) => {
+      if (input.model === "primary-image-model") {
+        primaryImages += 1;
+        throw new Error("You've hit your usage limit");
+      }
+      fallbackImages += 1;
+      return { buffer, mimeType: "image/png" };
+    },
+    visualQa: async () => {
+      primaryQa += 1;
+      throw new Error("You've hit your usage limit");
+    },
+    fallbackVisualQa: async () => {
+      fallbackQa += 1;
+      return { pass: true, score: 94, hardFailures: [], issues: [], evaluator: "grok-headless-blind-vision" };
+    },
+  });
+  assert.equal(result.ledger.status, "complete");
+  assert.equal(primaryImages, 1);
+  assert.equal(fallbackImages, 2);
+  assert.equal(primaryQa, 1);
+  assert.equal(fallbackQa, 2);
+  assert.equal(result.ledger.jobs["image:2"].primaryGenerationSkippedReason, "usage-limit-circuit-open");
+});
+
+test("usage-limit fallback circuits resume from the persistent ledger", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-script-fallback-resume-"));
+  const makeJob = (index) => ({
+    id: `image:${index}`,
+    kind: "scene-image",
+    dependencies: [],
+    outputPath: join(root, `image-${index}.png`),
+    prompt: `scene ${index}`,
+    referenceImagePaths: [],
+    model: "primary-image-model",
+    aspectRatio: "16:9",
+    imageSize: "2K",
+    quality: "high",
+    imageCount: 1,
+    inputHash: `fallback-resume-input-hash-${index}`,
+  });
+  const basePlan = {
+    version: 1,
+    episodeId: "fallback-resume-test",
+    scriptSha256: "fallback-resume-script-hash",
+    assetDir: root,
+  };
+  const buffer = renderEditorialPlatePng("pastel-sky", 320, 180);
+  let primaryImages = 0;
+  let fallbackImages = 0;
+  let primaryQa = 0;
+  let fallbackQa = 0;
+  const options = {
+    concurrency: 1,
+    fallbackImageModel: "fallback-image-model",
+    qaFallbackProvider: "grok",
+    generateImage: async (input) => {
+      if (input.model === "primary-image-model") {
+        primaryImages += 1;
+        throw new Error("You've hit your usage limit");
+      }
+      fallbackImages += 1;
+      return { buffer, mimeType: "image/png" };
+    },
+    visualQa: async () => {
+      primaryQa += 1;
+      throw new Error("You've hit your usage limit");
+    },
+    fallbackVisualQa: async () => {
+      fallbackQa += 1;
+      return {
+        pass: true,
+        score: 94,
+        hardFailures: [],
+        issues: [],
+        evaluator: "grok-headless-blind-vision",
+        fallbackFromEvaluator: "codex-ephemeral-blind-vision",
+      };
+    },
+  };
+  await executeMangaScriptImagePlan({ ...basePlan, jobs: [makeJob(1)] }, options);
+  const result = await executeMangaScriptImagePlan({ ...basePlan, jobs: [makeJob(1), makeJob(2)] }, options);
+  assert.equal(result.ledger.status, "complete");
+  assert.equal(primaryImages, 1);
+  assert.equal(fallbackImages, 2);
+  assert.equal(primaryQa, 1);
+  assert.equal(fallbackQa, 2);
+  assert.equal(result.ledger.jobs["image:2"].primaryGenerationSkippedReason, "usage-limit-circuit-open");
+});
+
+test("retry-failed rechecks an image after pure QA infrastructure failure without regenerating it", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-script-qa-only-retry-"));
+  const outputPath = join(root, "image-1.png");
+  const plan = {
+    version: 1,
+    episodeId: "qa-only-retry-test",
+    scriptSha256: "qa-only-retry-script-hash",
+    assetDir: root,
+    jobs: [{ id: "image:1", kind: "scene-image", dependencies: [], outputPath, prompt: "scene", referenceImagePaths: [], model: "fake", aspectRatio: "16:9", imageSize: "2K", quality: "high", imageCount: 1, inputHash: "qa-only-retry-hash" }],
+  };
+  const buffer = renderEditorialPlatePng("pastel-sky", 320, 180);
+  let generated = 0;
+  const first = await executeMangaScriptImagePlan(plan, {
+    concurrency: 1,
+    maxRetries: 0,
+    qaInfrastructureRetries: 0,
+    generateImage: async () => { generated += 1; return { buffer, mimeType: "image/png" }; },
+    visualQa: async () => { throw new Error("vision transport crashed"); },
+  });
+  assert.equal(first.ledger.status, "failed");
+  assert.equal(generated, 1);
+  const second = await executeMangaScriptImagePlan(plan, {
+    concurrency: 1,
+    maxRetries: 0,
+    retryFailed: true,
+    generateImage: async () => { generated += 1; return { buffer, mimeType: "image/png" }; },
+    visualQa: async () => ({ pass: true, score: 95, hardFailures: [], issues: [], evaluator: "recovered-vision" }),
+  });
+  assert.equal(second.ledger.status, "complete");
+  assert.equal(generated, 1);
+  assert.equal(second.ledger.jobs["image:1"].reusedGeneratedForQa, true);
 });
 
 test("pipeline concurrency parser supports auto, arbitrary fixed limits, and validation-only unlimited", () => {

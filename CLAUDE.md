@@ -1,3 +1,14 @@
+# Koya manga video — mandatory Claude route
+
+For any request that produces, changes, reviews, repairs, renders, or audits a Japanese manga video, Claude must first read these canonical skills completely:
+
+- `.agents/skills/manga-video-production/SKILL.md`
+- `.agents/skills/manga-page-camera/SKILL.md`
+
+The `.claude/skills` entries are host adapters to that shared source. Use `node scripts/koya-manga-video.mjs` as the only production entrypoint for new episodes. The historical `scripts/build-manga-video.mjs` and versioned `apply/finalize/generate-manga-v*` scripts are benchmark-only migrations. Do not claim completion until the official final audit passes, the MP4-derived contact-sheet signoff is valid, `knownRemainingIssues` is empty, and the real MP4 fully decodes.
+
+For new episodes, identify the protagonist before paid generation and pass `--protagonist-speaker-id`. Square narration boxes remain visually distinct, but every narration line must use the protagonist's exact approved voice; do not create a dedicated narrator.
+
 # BuzzAssist Agent Setup
 
 When the user gives this repository URL and asks to set it up, do the setup end to end.

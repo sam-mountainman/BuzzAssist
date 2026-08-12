@@ -1,4 +1,4 @@
 interface:
-  display_name: "Manga Page Camera"
-  short_description: "Audit viewpoint pull-outs and split-page cameras"
-  default_prompt: "Use $manga-page-camera to apply and audit left, right, top, and whole-page pull-out camera grammar."
+  display_name: "漫画ページカメラ（共通正本）"
+  short_description: "Claude Codeから共通カメラ契約を読む"
+  default_prompt: "$manga-page-camera を使い、方向・引き・複合・分割ページ全体カメラを実MP4で監査してください。"
