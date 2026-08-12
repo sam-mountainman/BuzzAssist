@@ -59,7 +59,7 @@ test("Koya production planning writes a contract snapshot and resumable state wi
   assert.equal(result.state.status, "planned");
   assert.ok(result.plan.jobs.length > 0);
   const snapshot = JSON.parse(await readFile(result.paths.contractSnapshotPath, "utf8"));
-  assert.equal(snapshot.contract.version, "koya-manga-production-v47");
+  assert.equal(snapshot.contract.version, "koya-manga-production-v48");
   const state = JSON.parse(await readFile(result.paths.statePath, "utf8"));
   assert.equal(state.currentStage, "images");
   assert.equal(state.protagonistSpeakerId, result.plan.production.protagonistSpeakerId);

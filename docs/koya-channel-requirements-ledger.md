@@ -215,13 +215,19 @@
 
 | R105 | 2026-08-12のリポジトリ・Claude Code/Codexセッション横断分析で抽出した依頼を、公式Anthropic `skill-creator`方式の日本語スキルへ統合し、新規台本でも同じ品質契約を再現する。Claude CodeとCodexは別実装を持たず、同じ正本を読む | 実装済(v47契約) | `.agents/skills`を日本語の正本とし、`.claude/skills`と`.codex/skills`は正本へ誘導する薄い日本語アダプターに限定。SKILL本文は実行手順、詳細品質要件は一段下の`references/`へ分離し、両ホスト経路・日本語記述・評価ケースをテストで固定 |
 
-| R106 | 機械監査合格だけで視聴品質を合格扱いしない。ユーザーの実聴・目視指摘を最優先し、人体/手/小道具比率、疑似文字、編集連続性、画像保持時間、台詞の間、音声の自然さ、頭切れ・末尾クリックまで明示的に知覚レビューする | 実装済(v47契約) | agent signoffをv2へ更新し、MP4全編、contact sheet、代表フレーム、音声スポットチェックの証拠と、全品質項目ごとの非空レビュー記録を必須化。単なる`--pass`だけでは署名できず、MP4 hash変更後の古い署名も拒否する |
+| R106 | 機械監査合格だけで視聴品質を合格扱いしない。ユーザーの実聴・目視指摘を最優先し、人体/手/小道具比率、疑似文字、編集連続性、画像保持時間、台詞の間、音声の自然さ、頭切れ・末尾クリックまで明示的に知覚レビューする | 実装済(v48契約) | agent signoff v3 / review notes v2で、MP4全編、contact sheet、代表フレーム、音声スポットチェックの実ファイルhash・確認区間と、全品質項目ごとの証拠参照付きレビュー記録を必須化。単なる`--pass`、MP4/contact sheet/frame変更、契約変更、review notes改変後の古い署名を拒否する |
 
 | R107 | 完成manifestへ過去工程の版名を現在状態のように残さず、正規のentrypoint・契約版・契約digestを一意に記録する | 実装済(v47契約) | `video.statusAfterRender`と曖昧な`production.version`を契約適用時に除去し、`production.pipeline`へ公式entrypoint、契約版、digestを保存。契約監査は旧ラベル残存とprovenance欠落をfail-closedで拒否 |
 
 | R108 | Claude Code/Codexの生セッションログへ資格情報を残さない。既存ログは値を表示せず高確度パターンだけを原子的にマスクし、今後もdry-run監査できること | 実装済(v47契約) | `scripts/sanitize-agent-session-secrets.mjs`を追加。既定は読取専用監査、`--apply`時のみ対象ファイル内のprovider tokenを`[REDACTED_*]`へ置換し、値自体は標準出力へ出さない。fixture回帰テストを追加 |
 
 | R109 | 新規制作経路から67本のversion固有migrationを隔離し、誤って旧full/speech/voice経路を呼ばない。現在の公式基盤を履歴へ固定し、再現可能な状態にする | 実装済(v47契約) | 旧migration inventoryをfail-closed監査し、packageの通常コマンドからlegacy aliasを撤去。新規制作は`node scripts/koya-manga-video.mjs`だけを入口とし、公式moduleからversion固有script参照が無いことをテスト。項目1の欠落MP4は対象外のため復元しない |
+
+| R110 | 一画像へ複数発話を自然に保持し、文脈のない挿入画・過剰な画像切替・短すぎる保持・長すぎる保持を、目視メモだけでなく新規台本共通の必須機械監査で拒否する | 検証済(v48契約) | 汎用`editorial-quality`監査を17個目の必須監査へ追加。連続同一画像を一つの編集区間へ正規化し、複数発話画像比率35%以上、保持中央値6秒以上、最大69.6秒以下、全発話割当、未割当ショット0、条件付き分割導入0をfail-closedで検証。実MP4 manifestは21区間、複数発話比率0.381、中央値6.082秒、最大14.133秒、29/29発話割当でPASSし、合格/各失敗の回帰テストも固定 |
+
+| R111 | Claude/Codexの知覚署名を自由記述の長さだけで合格させず、実MP4・contact sheet・代表フレーム・契約digest・レビュー時刻・確認区間へ暗号学的に拘束する | 検証済(v48契約) | review notes v2 / agent signoff v3でMP4・contact sheet・5代表フレーム・review notesファイル/正規化内容のSHA-256、契約digest、0〜149.087696秒全編、冒頭/中盤/終端を含む音声4区間、項目別evidence参照を固定。実証拠7ファイル再hashと署名ゲートがPASSし、ファイル変更、区間不足、古い契約、digest改変を拒否する回帰テストも固定 |
+
+| R112 | 制作契約の一部だけを手書き検証する状態を廃止し、全フィールドをJSON Schemaで閉じ、未知キー・型崩れ・安全値の緩和を漏れなく拒否する | 実装済(v48契約) | `additionalProperties:false`の完全JSON Schemaを正本契約へ紐づけ、Ajv検証をbase/episode override解決後へ適用。契約の全leafを一つずつ不正型へ破壊するmutation test、未知のtop/nested key、安全値緩和テストを追加し、全454テストPASS。配布packageにも`config/`と要求台帳を含める |
 
 ## パイプライン不変条件（違反禁止）
 

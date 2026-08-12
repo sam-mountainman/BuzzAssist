@@ -1,6 +1,6 @@
 # 実MP4知覚レビュー
 
-`signoff`は自動監査の代替ではなく、機械が判断できない品質を実際に見聞きした記録である。MP4が変わるとSHA-256が変わるため、旧署名は無効になる。
+`signoff`は自動監査の代替ではなく、機械が判断できない品質を実際に見聞きした記録である。レビュー記録は契約digest、実MP4、contact sheet、代表フレーム、確認時刻、確認区間へ結び付く。いずれかのbyteが変わるとSHA-256が変わるため、旧署名は無効になる。
 
 ## 必ず確認する証拠
 
@@ -27,34 +27,83 @@
 
 ## レビュー記録JSON
 
-各項目の値は空でない具体的な日本語メモにする。`true`だけの自己申告は不可。
+各項目の値は8文字以上の具体的な日本語メモにする。`true`だけの自己申告は不可。hash、尺、絶対パスはレビュー対象の実ファイルから計算し、例の値を転記しない。`reviewedAt`は実際に確認し終えた時刻にする。
 
 ```json
 {
-  "version": "koya-perceptual-review-notes-v1",
+  "version": "koya-perceptual-review-notes-v2",
+  "episodeId": "manga-example-001",
+  "contractDigest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "reviewedAt": "2026-08-12T12:00:00.000Z",
+  "video": {
+    "path": "/ABSOLUTE/PATH/final.mp4",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "durationSeconds": 100
+  },
+  "contactSheet": {
+    "path": "/ABSOLUTE/PATH/contact-sheet.jpg",
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
   "evidence": {
-    "fullVideoReviewed": "00:00から終端まで再生し、停止や欠落なし",
-    "contactSheetReviewed": "24枚を拡大確認",
-    "representativeFramesReviewed": "人物・吹き出し・小道具の代表時刻を確認",
-    "audioSpotChecksReviewed": "冒頭、全境界、終端をヘッドホン確認"
+    "fullVideoReviewed": {
+      "note": "00:00から終端まで連続再生し、停止や欠落なし",
+      "startSeconds": 0,
+      "endSeconds": 100
+    },
+    "contactSheetReviewed": {
+      "note": "全コマを原寸で拡大し、人物と編集連続性を確認した"
+    },
+    "representativeFramesReviewed": {
+      "note": "冒頭・感情頂点・終幕の実フレームを原寸確認した",
+      "frames": [
+        {
+          "path": "/ABSOLUTE/PATH/frame-01.jpg",
+          "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "timestampSeconds": 1.5,
+          "checkIds": ["characterContinuity", "composition", "bubblePlacement"]
+        },
+        {
+          "path": "/ABSOLUTE/PATH/frame-02.jpg",
+          "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "timestampSeconds": 50,
+          "checkIds": ["anatomyAndPropScale", "textReadability", "generatedTextArtifacts"]
+        },
+        {
+          "path": "/ABSOLUTE/PATH/frame-03.jpg",
+          "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "timestampSeconds": 98.5,
+          "checkIds": ["characterContinuity", "splitPages", "composition"]
+        }
+      ]
+    },
+    "audioSpotChecksReviewed": {
+      "note": "冒頭・中盤・終端をヘッドホンで実際に確認した",
+      "intervals": [
+        { "startSeconds": 0, "endSeconds": 2, "note": "冒頭の頭切れとノイズがないことを確認" },
+        { "startSeconds": 49, "endSeconds": 52, "note": "中盤の話者交代と間を実聴確認した" },
+        { "startSeconds": 98, "endSeconds": 100, "note": "終端の文末とクリックなしを確認した" }
+      ]
+    }
   },
   "checks": {
-    "characterContinuity": "全カットで人物の顔・服装段階が連続",
-    "composition": "場面と発話の意味が一致し、余白も自然",
-    "camera": "3系統を確認し、不自然な停止なし",
-    "bubblePlacement": "表示中の話者顔・重要物への重なりなし",
-    "splitPages": "該当なし、または必要性と一体移動を確認",
-    "textReadability": "縦組・文節・字形を確認",
-    "anatomyAndPropScale": "手指・身体・小道具比率に破綻なし",
-    "editContinuity": "場面・視線・因果が連続",
-    "imagePacing": "保持時間と切替頻度が自然",
-    "dialoguePacing": "問い返しと話者交代の間が自然",
-    "audioNaturalness": "読み・抑揚・速度・文末に問題なし",
-    "audioBoundaryArtifacts": "頭切れ・click・tail burst・humなし",
-    "generatedTextArtifacts": "疑似文字・不要ロゴなし"
+    "characterContinuity": { "note": "全カットで人物の顔・服装段階が連続している", "evidenceRefs": ["contactSheet", "representativeFrames"] },
+    "composition": { "note": "場面と発話の意味が一致し、余白も自然である", "evidenceRefs": ["contactSheet", "representativeFrames"] },
+    "camera": { "note": "全編で三系統を確認し、不自然な停止がない", "evidenceRefs": ["fullVideo"] },
+    "bubblePlacement": { "note": "表示中の話者顔と重要物への重なりがない", "evidenceRefs": ["representativeFrames"] },
+    "splitPages": { "note": "必要性とflatten後の一体移動を確認した", "evidenceRefs": ["representativeFrames"] },
+    "textReadability": { "note": "縦組・文節・字形を原寸で確認した", "evidenceRefs": ["representativeFrames"] },
+    "anatomyAndPropScale": { "note": "手指・身体・小道具比率に破綻がない", "evidenceRefs": ["representativeFrames"] },
+    "editContinuity": { "note": "場面・視線・行動・因果が全編で連続している", "evidenceRefs": ["fullVideo"] },
+    "imagePacing": { "note": "画像保持時間と切替頻度が全編で自然である", "evidenceRefs": ["fullVideo", "contactSheet"] },
+    "dialoguePacing": { "note": "問い返しと話者交代の間が全編で自然である", "evidenceRefs": ["fullVideo", "audioSpotChecks"] },
+    "audioNaturalness": { "note": "読み・抑揚・速度・感情・文末に問題がない", "evidenceRefs": ["audioSpotChecks"] },
+    "audioBoundaryArtifacts": { "note": "頭切れ・click・tail burst・humがない", "evidenceRefs": ["audioSpotChecks"] },
+    "generatedTextArtifacts": { "note": "背景と小道具に疑似文字・不要ロゴがない", "evidenceRefs": ["representativeFrames", "contactSheet"] }
   },
   "knownRemainingIssues": []
 }
 ```
+
+最低3枚の代表フレームと、冒頭・中盤・終端を含む最低3区間の音声確認が必要である。全編確認区間は0秒から実尺終端までを覆う。`signoff`と再監査は、レビュー記録ファイル自体のSHA-256と正規化内容digestも検証する。
 
 問題が1件でもあれば署名せず、`knownRemainingIssues`へ時刻、対象、症状を書く。ユーザー指摘と機械結果が矛盾したらユーザー指摘を不合格根拠にする。
