@@ -9,22 +9,57 @@ import {
   acquireMangaRenderLock,
   adoptEpisodeCutImages,
   auditCameraSequencePolicy,
+  buildEpisodeAudioMixFilter,
   cameraInterpolationExpression,
   cameraKeyframeExpression,
   cameraProgressExpression,
   compileEpisodeTiming,
+  exactCutMediaClock,
   generateEpisodeSpeech,
   normalizeSpeechPronunciations,
   normalizeEpisodeCamera,
   normalizeCameraShotSequence,
   normalizePanelLayout,
+  overlayTranslationFilter,
   parseMangaScript,
   projectFaceBoundsThroughCamera,
   refreshEpisodeBubbleOverlays,
+  renderCutInputHash,
   renderThoughtFocusSvg,
   resolveEpisodeImageForCut,
   resolveThoughtFocusForUtterance,
 } from "../lib/mangaVideoPipeline.mjs";
+
+test("manual bubble clearance offsets translate transparent overlays without wraparound", () => {
+  assert.equal(overlayTranslationFilter({}), "");
+  assert.equal(
+    overlayTranslationFilter({ x: 0, y: 120 }),
+    "pad=w=iw+0:h=ih+120:x=0:y=120:color=0x00000000,crop=w=iw-0:h=ih-120:x=0:y=0",
+  );
+  assert.equal(
+    overlayTranslationFilter({ x: -20, y: 0 }),
+    "pad=w=iw+20:h=ih+0:x=0:y=0:color=0x00000000,crop=w=iw-20:h=ih-0:x=20:y=0",
+  );
+});
+
+test("exact cut media clock represents 30 fps boundaries by counts instead of rounded seconds", () => {
+  assert.deepEqual(exactCutMediaClock(44.46666666666667, 30), {
+    frameCount: 1334,
+    durationSeconds: 1334 / 30,
+    sampleCount: 2_134_400,
+  });
+});
+
+test("episode audio mix uses absolute sample delays instead of concatenated AAC clocks", () => {
+  const mix = buildEpisodeAudioMixFilter([
+    { id: "u2", timing: { audioStartSeconds: 1.25 }, audio: { filePath: "/tmp/u2.wav" } },
+    { id: "u1", timing: { audioStartSeconds: 0.1 }, audio: { filePath: "/tmp/u1.wav" } },
+  ], { inputOffset: 1, sampleRate: 48_000, sampleCount: 96_000 });
+  assert.deepEqual(mix.inputPaths, ["/tmp/u1.wav", "/tmp/u2.wav"]);
+  assert.match(mix.filterGraph, /\[1:a\].*adelay=4800S:all=1\[episodea0\]/u);
+  assert.match(mix.filterGraph, /\[2:a\].*adelay=60000S:all=1\[episodea1\]/u);
+  assert.match(mix.filterGraph, /apad=whole_len=96000,atrim=end_sample=96000/u);
+});
 
 test("episode render lock is atomic, rejects a live owner, and reclaims a dead owner", async () => {
   const rootDir = await mkdtemp(join(tmpdir(), "manga-render-lock-"));
@@ -921,6 +956,29 @@ target_cuts: 1
   assert.equal(parsed.utterances[1].text, "おかえり");
 });
 
+test("narration preserves leading quoted terms while spoken dialogue unwraps outer quotation marks", () => {
+  const parsed = parseMangaScript(`【カット1：転落】
+ナレーション：「会議」という言葉すら知らなかったらしい。
+花園さくら：「そんなはずないわ」`, { registry: { characters: [], voices: [] } });
+  assert.equal(parsed.utterances[0].text, "「会議」という言葉すら知らなかったらしい。");
+  assert.equal(parsed.utterances[1].text, "そんなはずないわ");
+});
+
+test("unregistered Japanese speaker names receive distinct deterministic ids", () => {
+  const parsed = parseMangaScript(`【カット1：会話】
+悠斗：行こう
+美咲：うん`, { registry: { characters: [], voices: [] } });
+  const [first, second] = parsed.utterances.map((entry) => entry.speakerId);
+  assert.match(first, /^speaker-[a-f0-9]{10}$/u);
+  assert.match(second, /^speaker-[a-f0-9]{10}$/u);
+  assert.notEqual(first, second);
+  assert.deepEqual(
+    parseMangaScript(`悠斗：行こう
+美咲：うん`, { registry: { characters: [], voices: [] } }).utterances.map((entry) => entry.speakerId),
+    [first, second],
+  );
+});
+
 test("exact child character names do not inherit the adult character voices", () => {
   const script = `# 回想
 
@@ -991,6 +1049,96 @@ test("audio duration becomes cut timing and bubble visibility without manual tim
   assert.ok(newFirstFrame - oldLastFrame >= 2, "one encoded clear frame must exist between bubbles");
   assert.equal(compiled.cuts[1].timing.startSeconds, 3.65);
   assert.equal(compiled.metrics.videoDurationSeconds, 5.6);
+});
+
+test("visual speech bounds align bubbles to measured waveform without changing approved audio timing", () => {
+  const manifest = compileEpisodeTiming({
+    video: {
+      preRollSeconds: 0.1,
+      bubbleLeadSeconds: 0.08,
+      bubbleHoldSeconds: 0.18,
+      cutTailSeconds: 0.34,
+    },
+    cuts: [{ id: "cut-waveform", utteranceIds: ["u1"] }],
+    utterances: [{
+      id: "u1",
+      cutId: "cut-waveform",
+      speakerId: "speaker",
+      audio: {
+        filePath: "/tmp/approved.wav",
+        durationSeconds: 2,
+        speechStartSeconds: 0.07,
+        speechEndSeconds: 1.93,
+      },
+      bubbleTiming: {
+        speechStartSeconds: 0.18325,
+        speechEndSeconds: 1.8,
+      },
+    }],
+  });
+  const utterance = manifest.utterances[0];
+  assert.equal(utterance.timing.audioStartInCutSeconds, 0.1);
+  assert.equal(utterance.timing.audioEndInCutSeconds, 2.1);
+  assert.equal(utterance.timing.bubbleStartInCutSeconds, 0.20325);
+  assert.equal(utterance.timing.bubbleEndInCutSeconds, 2.08);
+});
+
+test("frame-aligned timing prevents cumulative concat drift between independently encoded cuts", () => {
+  const manifest = {
+    video: {
+      fps: 30,
+      frameAlignCutDurations: true,
+      preRollSeconds: 0.1,
+      cutTailSeconds: 0.1,
+      sameSpeakerGapSeconds: 0.2,
+    },
+    cuts: [
+      { id: "cut-01", utteranceIds: ["u1"] },
+      { id: "cut-02", utteranceIds: ["u2"] },
+    ],
+    utterances: [
+      { id: "u1", audio: { filePath: "/tmp/u1.wav", durationSeconds: 1.01 } },
+      { id: "u2", audio: { filePath: "/tmp/u2.wav", durationSeconds: 1.02 } },
+    ],
+    metrics: {},
+  };
+  const compiled = compileEpisodeTiming(manifest);
+  assert.equal(compiled.cuts[0].timing.durationSeconds * 30, 37);
+  assert.equal(compiled.cuts[1].timing.durationSeconds * 30, 37);
+  assert.equal(compiled.cuts[1].timing.startSeconds, 37 / 30);
+  assert.equal(compiled.metrics.videoDurationSeconds, 74 / 30);
+});
+
+test("transient raster cache paths do not invalidate a completed cut hash", async () => {
+  const root = await mkdtemp(join(tmpdir(), "manga-render-hash-"));
+  const imagePath = join(root, "image.png");
+  const overlayPath = join(root, "bubble.svg");
+  const audioPath = join(root, "speech.wav");
+  await Promise.all([
+    writeFile(imagePath, "image"),
+    writeFile(overlayPath, "overlay"),
+    writeFile(audioPath, "audio"),
+  ]);
+  const segment = {
+    id: "u1-bubble-s1",
+    text: "台詞",
+    overlayPath,
+    startOffsetSeconds: 0,
+    endOffsetSeconds: 1,
+  };
+  const utterance = {
+    id: "u1",
+    overlayPath,
+    bubbleSegments: [segment],
+    audio: { filePath: audioPath, durationSeconds: 1 },
+    timing: { audioStartInCutSeconds: 0.1, bubbleStartInCutSeconds: 0.1, bubbleEndInCutSeconds: 1.1 },
+  };
+  const manifest = { video: { width: 1920, height: 1080, fps: 30 } };
+  const cut = { id: "cut-01", imagePath, motion: "none", timing: { durationSeconds: 1.2 } };
+  const before = await renderCutInputHash(manifest, cut, [utterance]);
+  segment.rasterizedOverlayPath = join(root, "cache-a.png");
+  const after = await renderCutInputHash(manifest, cut, [utterance]);
+  assert.equal(after, before);
 });
 
 test("non-zero bubble fades still reserve two frame periods for a decoded clear frame", () => {

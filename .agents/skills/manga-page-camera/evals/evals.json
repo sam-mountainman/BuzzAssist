@@ -1,0 +1,32 @@
+{
+  "skill": "manga-page-camera",
+  "evals": [
+    {
+      "id": "pullout-monotony",
+      "prompt": "全カットがズームアウトで単調。幸谷漫画の基準に直して。",
+      "expectedBehavior": [
+        "方向のみと方向後の引きを追加する",
+        "元画像の視点意味と移動量を検証する",
+        "実MP4を測り、push-in・停止・clampを拒否する"
+      ]
+    },
+    {
+      "id": "split-page",
+      "prompt": "3分割画面の各パネルを別々に動かしたい。",
+      "expectedBehavior": [
+        "panel別の動きを拒否する",
+        "静止panelをflattenしてからページ全体を1台のカメラで動かす",
+        "黒ガターと実レンダー移動を監査する"
+      ]
+    },
+    {
+      "id": "source-viewpoint",
+      "prompt": "正面絵を横へパンすればleft-view扱いでいい？",
+      "expectedBehavior": [
+        "crop移動で元画像視点を偽装する案を拒否する",
+        "left/right/topを実際の生成視点として設計する",
+        "視点とページ変換を別の項目として監査する"
+      ]
+    }
+  ]
+}

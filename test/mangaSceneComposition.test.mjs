@@ -37,3 +37,92 @@ test("generated image prompt binds camera to visible story action and forbids co
   assert.match(prompt, /No speech bubble/);
   assert.match(prompt, /1920x1080/);
 });
+
+test("new scene openings and reunion establishing beats never default to an overhead insert", () => {
+  const plan = planMangaSceneCompositions({
+    manifest: {
+      id: "scene-establishing-test",
+      cuts: [{ id: "c1", description: "大学4年、高校の同窓会", utteranceIds: ["u1", "u2"] }],
+      utterances: [
+        { id: "u1", cutId: "c1", speakerId: "narration", preset: "narration", text: "時は流れ、俺は大学4年生になっていた。" },
+        { id: "u2", cutId: "c1", speakerId: "narration", preset: "narration", text: "華やかな同窓会の会場で周りを見渡すと目が合った。" },
+      ],
+    },
+  });
+  assert.ok(plan.beats.every((beat) => ["establishing-deep", "exterior-through-glass"].includes(beat.setup.id)));
+  assert.ok(plan.beats.every((beat) => beat.setup.elevation !== "overhead"));
+});
+
+test("a location word in the cut title establishes only the opening and does not flatten later dialogue coverage", () => {
+  const plan = planMangaSceneCompositions({
+    manifest: {
+      id: "scene-title-scope-test",
+      cuts: [{ id: "c1", description: "秋の放課後、音楽室での別れ", utteranceIds: ["u1", "u2", "u3"] }],
+      utterances: [
+        { id: "u1", cutId: "c1", speakerId: "sakura", speakerName: "花園さくら", preset: "dialogue", text: "話があるの" },
+        { id: "u2", cutId: "c1", speakerId: "arano", speakerName: "荒野", preset: "dialogue", text: "冗談だろ？" },
+        { id: "u3", cutId: "c1", speakerId: "sakura", speakerName: "花園さくら", preset: "dialogue", text: "がっかりしたわ" },
+      ],
+    },
+  });
+  assert.equal(plan.beats[0].intent, "scene-establishing");
+  assert.notEqual(plan.beats[1].intent, "scene-establishing");
+  assert.notEqual(plan.beats[2].intent, "scene-establishing");
+  assert.ok(plan.beats.slice(1).every((beat) => !["establishing-deep", "exterior-through-glass"].includes(beat.setup.id)));
+});
+
+test("season transitions and education choices avoid generic overhead workbench narration", () => {
+  const plan = planMangaSceneCompositions({
+    manifest: {
+      id: "semantic-narration-test",
+      cuts: [{ id: "c1", description: "音楽室", utteranceIds: ["u1", "u2", "u3"] }],
+      utterances: [
+        { id: "u1", cutId: "c1", speakerId: "sakura", preset: "dialogue", text: "話があるの" },
+        { id: "u2", cutId: "c1", speakerId: "narration", preset: "narration", text: "新学期が始まって間もない秋の放課後。" },
+        { id: "u3", cutId: "c1", speakerId: "narration", preset: "narration", text: "英語を専門的に学べる大学を選んだ。" },
+      ],
+    },
+  });
+  assert.equal(plan.beats[1].intent, "time-transition");
+  assert.equal(plan.beats[2].intent, "purpose-reflection");
+  assert.ok(plan.beats.slice(1).every((beat) => beat.setup.id !== "overhead-workbench"));
+});
+
+test("departure narration shows the exit and remaining reactions instead of a hands macro", () => {
+  const plan = planMangaSceneCompositions({
+    manifest: {
+      id: "departure-narration-test",
+      cuts: [{ id: "c1", description: "同窓会", utteranceIds: ["u1", "u2"] }],
+      utterances: [
+        { id: "u1", cutId: "c1", speakerId: "sakura", preset: "dialogue", text: "私は帰るわ" },
+        { id: "u2", cutId: "c1", speakerId: "narration", preset: "narration", text: "彼女は同級生たちを無視して去っていった。" },
+      ],
+    },
+  });
+  const departure = plan.beats[1];
+  assert.equal(departure.intent, "departure");
+  assert.ok(["ots-entry", "doorway-low-intrusion", "exterior-through-glass"].includes(departure.setup.id));
+  assert.notEqual(departure.setup.id, "macro-hands");
+  assert.notEqual(departure.setup.elevation, "overhead");
+  assert.match(departure.visibleAction, /departing character/u);
+  assert.match(buildMangaSceneImagePrompt(departure, { location: "同窓会", cast: ["荒野", "花園さくら"] }), /non-primary crowd/u);
+});
+
+test("arrival and confidence-collapse narration use readable character reactions instead of workbench inserts", () => {
+  const plan = planMangaSceneCompositions({
+    manifest: {
+      id: "arrival-reaction-test",
+      cuts: [{ id: "c1", description: "街中", utteranceIds: ["u1", "u2", "u3"] }],
+      utterances: [
+        { id: "u1", cutId: "c1", speakerId: "arano", preset: "dialogue", text: "もう関係ない" },
+        { id: "u2", cutId: "c1", speakerId: "narration", preset: "narration", text: "そこへ天音が到着した。" },
+        { id: "u3", cutId: "c1", speakerId: "narration", preset: "narration", text: "天音の言葉に、さくらの勢いは完全に削がれた。" },
+      ],
+    },
+  });
+  assert.equal(plan.beats[1].intent, "arrival");
+  assert.ok(["ots-entry", "doorway-low-intrusion", "exterior-through-glass", "ots-reaction"].includes(plan.beats[1].setup.id));
+  assert.equal(plan.beats[2].intent, "deflation-reaction");
+  assert.ok(["ots-reaction", "high-vulnerable-single", "negative-space-profile"].includes(plan.beats[2].setup.id));
+  assert.ok(plan.beats.slice(1).every((beat) => beat.setup.id !== "overhead-workbench" && beat.setup.id !== "macro-hands"));
+});

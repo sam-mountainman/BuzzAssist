@@ -83,7 +83,10 @@ def main() -> None:
                         help="Face mean luma must exceed surround mean luma by this many 8-bit steps.")
     args = parser.parse_args()
     manifest = read_json(args.manifest)
-    video_path = args.video or Path(manifest["outputs"]["finalVideo"]["filePath"])
+    video_path = args.video or Path(
+        manifest.get("outputs", {}).get("reviewVideo", {}).get("filePath")
+        or manifest["outputs"]["finalVideo"]["filePath"]
+    )
     episode_dir = args.manifest.parent
     output_path = args.output or episode_dir / "thought-spotlight-rendered-audit.json"
     frames_dir = episode_dir / "audits" / "thought-spotlight-frames"

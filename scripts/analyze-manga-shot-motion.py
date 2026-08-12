@@ -92,9 +92,43 @@ def measure(first: np.ndarray, second: np.ndarray, excluded: list[tuple[int, int
     mask = np.full(gray_a.shape, 255, dtype=np.uint8)
     for x, y, x2, y2 in excluded:
         cv2.rectangle(mask, (x, y), (x2, y2), 0, -1)
+
+    def phase_fallback(reason: str) -> dict:
+        """Measure low-texture directional pages when corner tracking starves.
+
+        Phase correlation uses the complete bubble-masked rendered frames and
+        is independent of the authored camera values. It cannot measure zoom,
+        so it is only a fallback proof of visible translation; pull-out gates
+        still require the feature-based affine result.
+        """
+        active = mask > 0
+        mean_abs_diff = float(np.abs(gray_a.astype(np.float32) - gray_b.astype(np.float32))[active].mean())
+        mask_f = mask.astype(np.float32) / 255.0
+        height, width = gray_a.shape
+        window = cv2.createHanningWindow((width, height), cv2.CV_32F)
+        first_f = (gray_a.astype(np.float32) - float(gray_a[active].mean())) * mask_f * window
+        second_f = (gray_b.astype(np.float32) - float(gray_b[active].mean())) * mask_f * window
+        shift, response = cv2.phaseCorrelate(first_f, second_f)
+        if not np.isfinite(response) or response < 0.01 or mean_abs_diff < 0.2:
+            return {"valid": False, "reason": reason, "phaseCorrelationResponse": round(float(response), 6)}
+        tx, ty = float(shift[0]), float(shift[1])
+        return {
+            "valid": True,
+            "method": "bubble-masked-phase-correlation-fallback",
+            "fallbackReason": reason,
+            "trackedPointCount": 0,
+            "inlierRatio": round(float(response), 4),
+            "zoomPercentPerSecond": 0.0,
+            "translationXPercentPerSecond": round(tx / width * 100.0 / delta, 4),
+            "translationYPercentPerSecond": round(ty / height * 100.0 / delta, 4),
+            "translationPercentPerSecond": round(math.hypot(tx / width, ty / height) * 100.0 / delta, 4),
+            "meanAbsolutePixelDifference": round(mean_abs_diff, 4),
+            "phaseCorrelationResponse": round(float(response), 6),
+        }
+
     points = cv2.goodFeaturesToTrack(gray_a, maxCorners=700, qualityLevel=0.012, minDistance=10, mask=mask)
     if points is None or len(points) < 24:
-        return {"valid": False, "reason": "insufficient-features"}
+        return phase_fallback("insufficient-features")
     # Camera moves in these shots displace content by hundreds of pixels
     # between the sampled frames; the default 3-level pyramid cannot follow
     # that, which starves RANSAC of genuine correspondences. Deep pyramid plus
@@ -192,7 +226,10 @@ def main() -> None:
     for row in plan_rows:
         cut_id = row["cutId"]
         duration = float(row["durationSeconds"])
-        local_start = elapsed_by_cut.get(cut_id, 0.0)
+        # Plans omit static editorial plates from rows, so accumulating only
+        # moving-row durations shifts later shots to the wrong video time.
+        # The official plan already carries the true in-cut offset.
+        local_start = float(row.get("startSecondsInCut", elapsed_by_cut.get(cut_id, 0.0)))
         absolute_start = float(cuts[cut_id]["timing"]["startSeconds"]) + local_start
         inset = min(max(0.45, duration * 0.18), max(0.45, duration / 3))
         first_time = absolute_start + inset

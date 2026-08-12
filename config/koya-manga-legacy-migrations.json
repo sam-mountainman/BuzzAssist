@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "status": "frozen-benchmark-migrations",
+  "purpose": "Historical one-off migrations and evidence finalizers for manga-photo-homecoming-001. They are never production entrypoints for new episodes.",
+  "officialEntrypoint": "scripts/koya-manga-video.mjs",
+  "legacyEntrypoint": "scripts/build-manga-video.mjs",
+  "matchedFileCount": 67,
+  "rules": [
+    {
+      "id": "apply-version-migrations",
+      "pattern": "^scripts/apply-manga-v[0-9].*\\.mjs$",
+      "scope": "manga-photo-homecoming-001 historical manifest migration"
+    },
+    {
+      "id": "finalize-version-evidence",
+      "pattern": "^scripts/finalize-manga-v[0-9].*\\.mjs$",
+      "scope": "manga-photo-homecoming-001 historical evidence finalization"
+    },
+    {
+      "id": "generate-version-assets",
+      "pattern": "^scripts/generate-manga-v[0-9].*\\.mjs$",
+      "scope": "manga-photo-homecoming-001 historical versioned generation"
+    }
+  ],
+  "policy": {
+    "allowedForNewEpisodes": false,
+    "allowedForBenchmarkRepair": true,
+    "requiresExplicitEpisodeId": "manga-photo-homecoming-001",
+    "newVersionedScriptsRequireInventoryUpdate": true,
+    "officialModulesMayImportLegacyScripts": false
+  }
+}

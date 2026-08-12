@@ -1,0 +1,4 @@
+interface:
+  display_name: "幸谷漫画動画制作（共通正本）"
+  short_description: "Codexから共通の日本語品質契約を読む"
+  default_prompt: "$manga-video-production を使い、共通正本に従って実MP4の最終監査まで完了してください。"

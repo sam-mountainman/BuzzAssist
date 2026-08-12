@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "episodeId": "manga-photo-homecoming-001",
+  "contractVersion": "koya-manga-production-v47",
+  "reason": "The user's 2026-08-11 instruction restored the approved original Koichi narration master for this benchmark episode only.",
+  "override": {
+    "audio": {
+      "narrationVoicePolicy": "approved-original-narrator",
+      "narrationVoiceId": "H8ZPDxbrPcks5hEsi2fq"
+    }
+  }
+}

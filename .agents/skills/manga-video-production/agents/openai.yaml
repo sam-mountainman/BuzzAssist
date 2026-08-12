@@ -1,0 +1,4 @@
+interface:
+  display_name: "幸谷漫画動画制作"
+  short_description: "幸谷漫画MP4を日本語品質契約で制作・監査"
+  default_prompt: "$manga-video-production と $manga-page-camera を使い、幸谷漫画動画を実MP4の最終監査完了まで制作してください。"

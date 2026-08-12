@@ -1,0 +1,4 @@
+interface:
+  display_name: "漫画ページカメラ（共通正本）"
+  short_description: "Codexから共通カメラ契約を読む"
+  default_prompt: "$manga-page-camera を使い、漫画ページカメラを設計し、実MP4で監査してください。"
