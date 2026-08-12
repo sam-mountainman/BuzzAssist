@@ -12,7 +12,7 @@ test("official Koya CLI exposes a validated read-only contract command", () => {
   });
   assert.equal(result.status, 0, result.stderr);
   const parsed = JSON.parse(result.stdout);
-  assert.equal(parsed.version, "koya-manga-production-v48");
+  assert.equal(parsed.version, "koya-manga-production-v49");
   assert.equal(parsed.validation.pass, true);
 });
 
@@ -36,4 +36,16 @@ test("official Koya CLI advertises the bounded onset-repair action", () => {
   assert.match(result.stdout, /qa-concurrency N/u);
   assert.match(result.stdout, /image-fallback-model MODEL/u);
   assert.match(result.stdout, /qa-fallback-provider grok/u);
+});
+
+test("standalone quality preflight cannot self-certify final quality", () => {
+  const result = spawnSync("node", [
+    "scripts/audit-manga-quality-harness.mjs",
+    "--manifest-path",
+    "config/koya-manga-production-contract.json",
+    "--stage",
+    "final",
+  ], { cwd: root, encoding: "utf8" });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /cannot self-certify final quality/u);
 });

@@ -23,11 +23,15 @@ test("production DAG exposes a ten-wide image pool and semantic camera assets in
   assert.ok(dag.pools.tts >= 4 && dag.pools.tts <= 8);
   assert.ok(dag.pools.render >= 2 && dag.pools.render <= 4);
   assert.equal(dag.nodes.filter((node) => node.kind === "character-candidate").length, 6);
+  assert.ok(dag.nodes.filter((node) => node.kind === "character-candidate").every((node) => node.metadata.variationAxis));
+  assert.equal(new Set(dag.nodes.filter((node) => node.id.startsWith("character-candidate:a:")).map((node) => node.metadata.variationAxis)).size, 3);
   assert.equal(dag.nodes.filter((node) => node.kind === "camera-asset").length, 2);
   assert.deepEqual(
     dag.nodes.find((node) => node.id === "voice-library-approval").dependencies,
     ["voice-library-discovery"],
   );
+  assert.equal(dag.nodes.find((node) => node.id === "character-approval:a").metadata.requireSelectionReason, true);
+  assert.equal(dag.nodes.find((node) => node.id === "voice-library-approval").metadata.requireSelectionReason, true);
   assert.ok(dag.nodes
     .filter((node) => node.kind === "voice-profile")
     .every((node) => node.dependencies.includes("voice-library-approval")));

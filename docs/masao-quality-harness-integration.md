@@ -4,11 +4,11 @@
 
 - 対象: `/Users/higataiyu/まさお`
 - 容量: 54 MB
-- `.git` 内部を除く物理ファイル: 314件
+- `.git` 内部を除く物理ファイル: 318件（2026-08-12再集計。55,004,124 bytes）
 - Markdown: 74件をすべて末尾まで読了。SHA-256で重複を照合すると本文は35種類、複製は39件。
-- YouTube調査素材: 動画情報65件（うち1件はプレイリスト情報）、実動画64本、VTT 130件。全VTT本文を読み、64本すべてに文字起こしがあることを確認。
+- YouTube調査素材: 動画情報65件（うち1件はプレイリスト情報）、実動画64本、VTT 130件（日本語64組128件＋英語2件）。64組の`.ja.vtt`と`.ja-orig.vtt`は全組で完全一致。
 - JSON: 78件を全件読み込み・構文検証し、78件すべて有効。
-- その他: HTML 4、JavaScript 2、Python 1、テキスト9、PNG 2、実行ファイル等7、`.gitignore` 2、`.DS_Store` 5。全ファイルをバイト単位で読み、複製セットはハッシュで確認。PNGの実画像も確認。
+- その他: HTML 4、JavaScript 2、Python 1、テキスト9、PNG 2、拡張子なし18。全ファイルをバイト単位で読み、SHA-256で198種類の実内容と89個の複製グループを確認。JSON 78件は全件構文有効。
 
 ## Markdownで得た共通原則
 
@@ -35,6 +35,19 @@
 - ナレーション用読み上げ文と、画面・絵コンテ・素材指示を分離する。
 - 自動評価だけで満点にせず、ネイティブサイズ確認、参照との横並び比較、全尺視聴を最終証拠にする。
 - 人間判断はブランド、味、リスク、曖昧な優先順位に限定し、機械判定可能な質問を増やさない。
+
+## ファイル時刻とGit履歴から見た時系列
+
+以下はファイルmtimeと同梱Git履歴に基づく来歴であり、本文中の出来事の発生日や著者を断定するものではない。
+
+- 2026-07-03 00:07〜00:23（UTC+8）: `1.md`〜`18.md`が順次保存された。
+- 2026-07-03 01:07以降: YouTubeプレイリスト情報、64動画分の情報JSON、日本語字幕64組と英語字幕2件が`.hiroya_obsidian_work/`へ収集された。
+- 2026-07-03〜07-04: `84.md`〜`87.md`と作業用バックアップが追加された。
+- 2026-07-06〜07-07: `.fable/last-plan.md`、Claude/Codex/Cursor/Antigravity向け`yt-quality-loop`配置試験、E2E痕跡、各階層の`CLAUDE.md`プレースホルダーが作られた。実装本体よりも、複数hostへ同じループを配る構造検討の証拠が中心である。
+- 2026-07-12 21:37:58: 同梱Git履歴で`akapen v0.1.0`（commit `a6a8277`）と`bestofn v0.4.0`（commit `59b6ba8`）がそれぞれ単一commitとして確定した。`*-main`と`*-repo`は内容重複なので一組ずつとして分析した。
+- 2026-07-23: `19.md`と`20.md`が追加された。
+- 2026-07-24: `X記事_ハーネスエンジニアリング.md`が追加され、外部状態、生成/評価分離、停止条件、人間判断の設計が長文で統合された。
+- 2026-08-10〜08-12: 実質的な本文追加は確認できず、更新は主にFinderの`.DS_Store`だった。
 
 ## 調査動画64本との照合
 
@@ -63,6 +76,19 @@ VTTはYouTubeのローリング字幕で重複行が多いため、出現回数�
 `bestofn` 側に明示ライセンスが見当たらなかったため、コードはコピーせず、匿名比較と安全境界を独自実装した。
 
 ## 現行パイプラインへ実装した内容
+
+### 2026-08-12再監査で判明した接続欠落
+
+初回統合は部品単位では正しかったが、完成判定への接続が不十分だった。
+
+- `audit-manga-quality-harness.mjs --stage final`は、実行のたびに`quality-loop-state.json`を`active / rounds=[]`へ上書きしていた。
+- 必須監査`quality-harness-final`は、その空状態を読まず、`preflight-final.json.pass`だけで合格していた。
+- rubricは一項目だけ採点しても100点を作れ、review noteと証拠が空でも通せた。
+- evaluator名だけ変えれば、generatorと同じ会話contextでも自己採点できた。
+- Best-of-Nは匿名ラベルを作る一方、異なるvariation axis、判定記録、採用理由を必須にしていなかった。
+- キャラクターと声の人間承認は候補IDを残すだけで、「なぜ採用したか」を次回へ継承できなかった。
+
+これらは資料群の中心原則と矛盾するため、今回の統合で修復対象にした。
 
 ### 品質契約
 
@@ -106,6 +132,27 @@ VTTはYouTubeのローリング字幕で重複行が多いため、出現回数�
 - ハードゲート合格かつ目標点以上のみpass。
 - 最大round、費用、時間、改善停止で自動停止し、人間へエスカレーション。
 - 評価証拠、費用、経過時間、次の行動を外部状態へ保存。
+
+v2ではさらに、全rubric項目、generatorと異なるevaluator context、具体的なメモ、SHA-256に結ばれた証拠を必須にした。不合格roundはfailure fingerprintを持ち、再試行は直前fingerprintと修正差分を参照する。時間は呼び出し側の自己申告加算ではなく`startedAt`からの観測時刻で判定する。
+
+### 判断ルーターと承認証跡
+
+- 外部テストで一意に決まる判断は機械ゲートへ送り、人へ質問しない。
+- 単一提案の曖昧点は赤ペン型の3±1問へ圧縮する。
+- 主観・ブランド・有料で複数候補がある判断はhuman Best-of-Nへ送る。
+- rubricで比較できる低リスク判断だけfresh evaluatorのblind Best-of-Nへ送る。
+- 匿名候補は2〜5件、`variationAxis`重複禁止、artifact必須。対応表は`setId`、採用ラベル、判定者、時刻、具体的理由を持つverdict確定後だけ開示する。
+- 漫画動画ハーネスのキャラクター承認CLIは`--approval-reason`を必須にし、声の採用も`selectionReason`と人間reviewerをレジストリへ保存する。
+
+### 最終品質決定
+
+`quality-harness-final`を事前ゲートの別名として扱う経路を廃止した。公式`koya-manga-video.mjs audit`の最後で、自分自身を除く全必須監査を集約し、各適用監査の証拠ファイルSHA-256、正本契約digest、実MP4 SHA-256へ拘束した`final-decision.json`と`quality-loop-state.json`を作る。
+
+- 全監査と知覚署名が揃う: `passed`
+- 機械監査は全合格で知覚署名だけ未完了: `needs-human-approval`
+- 監査欠損・不合格・証拠hash欠落: `blocked`
+
+空の`active`状態は完成証拠にならず、standalone preflight CLIの`--stage final`も拒否する。
 
 ### 事故知識の昇格
 
@@ -155,4 +202,17 @@ npm run manga-video:preflight -- \
 
 ## 実データ確認
 
-`manga-photo-homecoming-001` のplanning preflightを実行し、既存の画風・音声・カメラ・吹き出し・編集方針も自動継承した契約digest `0a087e2ef31fa633a9adf3deced2b05db3403f4a2b417593b09dcaff98c9c73c` で全ゲート合格を確認した。成果物は同エピソードの `quality-harness/` に保存した。
+`manga-photo-homecoming-001` の実MP4をv49へ同期し、公式最終監査を二段階で実証した。
+
+1. 旧v48知覚署名のまま監査すると、機械監査15項目と全尺デコードは合格したが、契約digest不一致を検出。`final-decision.json`は`needs-human-approval / perceptual-signoff-required`で停止し、`quality-harness-final`も不合格になった。
+2. 同一MP4 SHA-256、実MP4由来contact sheet、代表4フレーム、v49契約digestへ拘束したCodex知覚レビューを作成し、再監査した。最終17監査は17/17合格、`quality-harness/final-decision.json`は`passed`、16独立監査証拠は全件SHA-256付き、`knownRemainingIssues=[]`、manifestは`final-koya-audited`になった。
+
+実証値:
+
+- 契約: `koya-manga-production-v49`
+- エピソード固有契約digest: `31b44d5066eeaae342ca5b1d7965d974bad6fac76131d1d57ddb2dcd40317108`
+- 実MP4 SHA-256: `4c0ecf9f9216a8d7a7d8ff5eea98c9bf3f03117413fd6b769f4c8c5be8cc722b`
+- 実デコード尺: `149.087696`秒、1920×1080、30fps、H.264/AAC
+- 最終監査: 17/17、品質決定証拠: 16/16、未解決事項: 0
+
+検証は全458リポジトリテスト、公式`skill-creator` validatorによる制作・カメラ両スキル、Node構文検査、`git diff --check`でも合格した。

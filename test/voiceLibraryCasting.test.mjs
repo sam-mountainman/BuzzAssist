@@ -123,6 +123,8 @@ test("approval refuses unlistened candidates and adds only the explicitly confir
       characterId: "mio",
       voiceId: "shared-gentle-young-woman",
       previewConfirmed: true,
+      selectionReason: "人物の年齢感と静かな演技幅が最も一致した",
+      approvedBy: "test-human",
     }],
   });
 
@@ -132,5 +134,7 @@ test("approval refuses unlistened candidates and adds only the explicitly confir
   assert.equal(approved.registry.characters[0].voiceId, "auto-mio-ja");
   assert.equal(approved.registry.voices[0].providerVoiceId, "shared-gentle-young-woman");
   assert.equal(approved.registry.voices[0].casting.previewConfirmed, true);
+  assert.equal(approved.registry.voices[0].casting.selectionReason, "人物の年齢感と静かな演技幅が最も一致した");
+  assert.equal(approved.registry.voices[0].casting.approvedBy, "test-human");
   assert.equal(approved.plan.status, "approved");
 });

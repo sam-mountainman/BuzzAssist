@@ -41,7 +41,7 @@ function usage() {
     "actions: contract, plan, images, character-approve, prepare, speech, adjust-gap, standard-cut, repair-onset, repair-tail, sync-contract, render, audit, signoff, full, status",
     "common: --project-dir DIR --episode-id ID --script-path FILE --title TITLE --protagonist-speaker-id ID_OR_EXACT_NAME --character-bible-path JSON [--retry-failed] [--image-concurrency N|auto] [--qa-concurrency N] [--image-fallback-model MODEL] [--qa-fallback-provider grok]",
     "audit: --video-path MP4 [--quick] [--dry-run]",
-    "character-approve: --workflow-id ID --cast-id ID_OR_NAME --candidate-id ID_OR_INDEX",
+    "character-approve: --workflow-id ID --cast-id ID_OR_NAME --candidate-id ID_OR_INDEX --approval-reason WHY [--approved-by NAME]",
     "repair-onset: --utterance-id ID --source-path WAV --fade-start-seconds N --fade-milliseconds 6..8 --output-file-name NAME.wav",
     "repair-tail: --utterance-id ID --source-path WAV --speech-end-seconds N --fade-start-seconds N --fade-milliseconds 6..8 --output-file-name NAME.wav",
     "adjust-gap: --utterance-id ID --target-audible-gap-seconds N [--reason TEXT]",
@@ -147,6 +147,8 @@ switch (args.action) {
       castId: args.castId,
       candidateId: args.candidateId,
       candidateIndex: args.candidateIndex,
+      approvalReason: args.approvalReason,
+      approvedBy: args.approvedBy,
     });
     print({ episodeId: result.episodeId, workflowId: result.workflowId, castId: result.castId, candidateId: result.candidateId, character: result.finalized.character, state: result.state });
     break;

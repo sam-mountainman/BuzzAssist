@@ -216,6 +216,7 @@ test("approval builds turnaround and expression sheets, then registers the two a
     const cast = awaitingApproval.cast[0];
     assert.equal(cast.status, "awaiting-approval");
     assert.equal(cast.candidates.length, 3);
+    assert.equal(new Set(cast.candidates.map((candidate) => candidate.variationAxis)).size, 3);
 
     const selected = cast.candidates[1];
     const [turnaroundJob, expressionJob] = buildApprovedIdentityPackJobs(awaitingApproval, cast, selected);
@@ -229,11 +230,20 @@ test("approval builds turnaround and expression sheets, then registers the two a
     await writeFile(turnaroundFile, "fake-turnaround-png");
     await writeFile(expressionFile, "fake-expression-png");
 
+    await assert.rejects(() => finalizeApprovedCharacter({
+      projectDir,
+      workflowId: workflow.id,
+      castId: cast.id,
+      candidateId: selected.id,
+    }), /approvalReason/u);
+
     const finalized = await finalizeApprovedCharacter({
       projectDir,
       workflowId: workflow.id,
       castId: cast.id,
       candidateId: selected.id,
+      approvalReason: "顔立ちと服装が役柄に最も合い、他人物とも明確に区別できる",
+      approvedBy: "test-human",
       turnaroundResult: {
         elementId: "turnaround-element",
         assetFile: turnaroundFile,
@@ -247,6 +257,9 @@ test("approval builds turnaround and expression sheets, then registers the two a
     });
     assert.equal(finalized.workflow.status, "ready");
     assert.equal(finalized.character.status, "approved");
+    assert.equal(finalized.character.approval.route, "human-best-of-n");
+    assert.equal(finalized.character.approval.approvedBy, "test-human");
+    assert.equal(finalized.character.approval.reason, "顔立ちと服装が役柄に最も合い、他人物とも明確に区別できる");
     assert.equal(finalized.character.referenceImagePaths.length, 2);
     assert.ok(finalized.character.referenceImagePaths.every((item) => item.startsWith("assets/characters/")));
     assert.equal(finalized.workflow.cast[0].candidates.filter((candidate) => candidate.status === "selected").length, 1);

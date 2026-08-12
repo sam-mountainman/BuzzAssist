@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "koya-manga-production-v48",
+  "version": "koya-manga-production-v49",
   "channelId": "koya-manga",
   "description": "Fail-closed production contract for Koya-channel manga videos.",
   "sourceOfTruth": {
@@ -144,6 +144,44 @@
       "audioNaturalness",
       "audioBoundaryArtifacts",
       "generatedTextArtifacts"
+    ]
+  },
+  "qualityLoop": {
+    "version": "koya-quality-loop-v2",
+    "generatorEvaluatorSeparation": true,
+    "requireDistinctEvaluatorContext": true,
+    "deterministicGatesBeforeJudgment": true,
+    "immutableCriteriaDuringRun": true,
+    "requireExternalState": true,
+    "requireCompleteRubric": true,
+    "requireEvidence": true,
+    "requireFailureFingerprint": true,
+    "requireRevisionDelta": true,
+    "limits": {
+      "targetScore": 92,
+      "maximumReviewRounds": 2,
+      "maximumElapsedMinutes": 360,
+      "maximumCostUnits": 100,
+      "minimumImprovementPoints": 1,
+      "maximumStagnantRounds": 1
+    },
+    "candidateDecision": {
+      "minimumCandidates": 2,
+      "maximumCandidates": 5,
+      "requireDistinctVariationAxes": true,
+      "anonymousComparison": true,
+      "revealMappingOnlyAfterVerdict": true,
+      "requireSelectionReason": true,
+      "objectiveJudge": "deterministic-gate",
+      "rubricJudge": "fresh-independent-evaluator",
+      "subjectiveJudge": "human"
+    },
+    "terminalStates": [
+      "active",
+      "passed",
+      "needs-human-approval",
+      "budget-exhausted",
+      "blocked"
     ]
   },
   "provenance": {
