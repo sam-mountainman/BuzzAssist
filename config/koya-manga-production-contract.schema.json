@@ -351,7 +351,7 @@
         "contract-manifest", "editorial-quality", "quality-harness-final", "rendered-camera",
         "bubble-midpoint-frames", "bubble-transition-clear-frames", "bubble-camera-sweep",
         "independent-rendered-face", "bubble-typography", "thought-spotlight", "split-page-integrity",
-        "stt-verification", "audio-onset", "audio-waveform-sync", "audio-click-hum-level",
+        "stt-verification", "audio-onset", "audio-speaker-continuity", "audio-waveform-sync", "audio-click-hum-level",
         "agent-contact-sheet-review", "full-decode"
       ]
     },

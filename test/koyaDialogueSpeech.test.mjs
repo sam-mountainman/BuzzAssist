@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  alignmentSpeechSpan,
   applyKoyaSpeechPronunciations,
   buildKoyaDialogueRequest,
   koyaPerformanceTag,
   prepareKoyaDialogueCut,
+  quietestBoundarySeconds,
   scoreKoyaDialogueTake,
   selectKoyaDialogueTake,
 } from "../lib/koyaDialogueSpeech.mjs";
@@ -80,4 +82,45 @@ test("take scorer selects the complete natural-paced candidate", () => {
   assert.ok(scoreKoyaDialogueTake(good, plan).score < scoreKoyaDialogueTake(rushed, plan).score);
   assert.equal(selectKoyaDialogueTake([rushed, good], plan).takeIndex, 0);
   assert.equal(selectKoyaDialogueTake([rushed, good], plan, 1).takeIndex, 1);
+});
+
+test("R134 split boundaries follow the character alignment, not the reported segment bounds", () => {
+  // The provider reports segment 1 as starting at 10.0 while its first spoken
+  // character lands at 10.9: the 0.9 s in between is the previous speaker's
+  // still-sounding tail. Cutting at the reported midpoint would move that tail
+  // into the next character's line.
+  const metadata = {
+    alignment: {
+      characters: [..."あい", ..."うえ"],
+      character_start_times_seconds: [8.0, 8.5, 10.9, 11.4],
+      character_end_times_seconds: [8.5, 9.6, 11.4, 12.0],
+    },
+    voiceSegments: [
+      { dialogue_input_index: 0, character_start_index: 0, character_end_index: 2, start_time_seconds: 8.0, end_time_seconds: 10.0 },
+      { dialogue_input_index: 1, character_start_index: 2, character_end_index: 4, start_time_seconds: 10.0, end_time_seconds: 12.0 },
+    ],
+  };
+  const cutPlan = { inputs: [{ speechText: "あい" }, { speechText: "うえ" }] };
+
+  assert.deepEqual(alignmentSpeechSpan(metadata, cutPlan, 0), { startSeconds: 8.0, endSeconds: 9.6 });
+  assert.deepEqual(alignmentSpeechSpan(metadata, cutPlan, 1), { startSeconds: 10.9, endSeconds: 12.0 });
+
+  // Alignment is unavailable for astral-plane text, so the caller must fall
+  // back rather than mis-index.
+  assert.equal(alignmentSpeechSpan({ alignment: null, voiceSegments: [] }, cutPlan, 0), null);
+});
+
+test("R134 the physical cut lands in the quietest part of the inter-utterance window", () => {
+  const sampleRate = 48_000;
+  const samples = new Float32Array(sampleRate * 2);
+  for (let index = 0; index < samples.length; index += 1) {
+    const seconds = index / sampleRate;
+    // Speech either side of a 0.2 s silence centred on 1.0 s.
+    samples[index] = seconds > 0.9 && seconds < 1.1 ? 0 : Math.sin(seconds * 900);
+  }
+  const boundary = quietestBoundarySeconds(samples, 0.8, 1.2, sampleRate);
+  assert.ok(boundary > 0.9 && boundary < 1.1, `boundary ${boundary} should sit inside the silence`);
+
+  // A degenerate window falls back to the midpoint instead of throwing.
+  assert.equal(quietestBoundarySeconds(samples, 1.0, 1.0, sampleRate), 1.0);
 });

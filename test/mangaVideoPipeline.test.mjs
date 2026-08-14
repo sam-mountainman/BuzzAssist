@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
 import {
+  bubbleSegmentSpeechBoundaries,
   canReuseRenderedCut,
   applySpeechPronunciations,
   acquireMangaRenderLock,
@@ -32,6 +33,7 @@ import {
   renderThoughtFocusSvg,
   resolveEpisodeImageForCut,
   resolveThoughtFocusForUtterance,
+  stripFuriganaAnnotations,
 } from "../lib/mangaVideoPipeline.mjs";
 
 test("natural timed segmentation never emits a whitespace-only replacement", () => {
@@ -1454,4 +1456,50 @@ test("undefined adapter options never erase authored pause rules", () => {
   });
   assert.equal(compiled.utterances[1].timing.gapBeforeSeconds, 0.3);
   assert.equal(compiled.video.speakerChangeGapSeconds, 0.3);
+});
+
+test("R136 balloons print plain kanji names, not the script's reading gloss", () => {
+  assert.equal(
+    mangaBubbleDisplayText("高校3年生の俺、荒野（あらの）は呼び出された。"),
+    "高校3年生の俺、荒野は呼び出された。",
+  );
+  assert.equal(
+    mangaBubbleDisplayText("上沢天音（かんざわ あまね）です。ライン交換しよ"),
+    "上沢天音です。ライン交換しよ",
+  );
+  // Ordinary parenthetical dialogue is not a reading gloss and must survive.
+  assert.equal(stripFuriganaAnnotations("それは（たぶん）違うと思う"), "それは（たぶん）違うと思う");
+  assert.equal(stripFuriganaAnnotations("東京（明日出発）へ行く"), "東京（明日出発）へ行く");
+  // Stripping composes with the terminal-period rule rather than replacing it.
+  assert.equal(
+    mangaBubbleDisplayText("荒野（あらの）だ。", { stripTerminalJapanesePeriod: true }),
+    "荒野だ",
+  );
+});
+
+test("R137 balloon segments follow the measured voice, not a constant speaking rate", () => {
+  // Six spoken characters where the voice pauses after the third: a
+  // character-count split would put the boundary at the halfway point in time,
+  // which is 0.4 s before the speaker actually reaches the fourth character.
+  const utterance = {
+    audio: {
+      characterTimeline: [
+        { char: "あ", startSeconds: 0.10, endSeconds: 0.25 },
+        { char: "い", startSeconds: 0.25, endSeconds: 0.40 },
+        { char: "う", startSeconds: 0.40, endSeconds: 0.55 },
+        { char: "え", startSeconds: 1.30, endSeconds: 1.45 },
+        { char: "お", startSeconds: 1.45, endSeconds: 1.60 },
+        { char: "か", startSeconds: 1.60, endSeconds: 1.80 },
+      ],
+    },
+  };
+  const segments = [{ text: "あいう" }, { text: "えおか" }];
+  const measured = bubbleSegmentSpeechBoundaries(utterance, segments);
+  assert.deepEqual(measured, [
+    { startSeconds: 0.10, endSeconds: 0.55 },
+    { startSeconds: 1.30, endSeconds: 1.80 },
+  ]);
+
+  // Without a timeline the caller must be told so it can fall back.
+  assert.equal(bubbleSegmentSpeechBoundaries({ audio: {} }, segments), null);
 });

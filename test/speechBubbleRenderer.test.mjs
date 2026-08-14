@@ -595,3 +595,35 @@ test("canvas image insertion reads SVG width and height", () => {
   const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1672" height="941" viewBox="0 0 1672 941"></svg>');
   assert.deepEqual(getImageDimensionsFromBuffer(svg, "overlay.svg"), { width: 1672, height: 941 });
 });
+
+test("R135 vertical Latin stays upright: 'vrt2' is withheld from Latin and digits only", () => {
+  const result = renderSpeechBubbleSvg({
+    width: 1920,
+    height: 1080,
+    bubbles: [{
+      id: "brag",
+      text: "T大の彼氏ができたわ。3年ぶり",
+      target: { x: 0.5, y: 0.4 },
+      bounds: { x: 0.1, y: 0.1, width: 0.25, height: 0.7 },
+    }],
+  });
+
+  const glyphs = [...result.svg.matchAll(/<text[^>]*data-glyph-kind="([^"]+)"[^>]*style="([^"]+)"[^>]*>([^<]+)<\/text>/gu)]
+    .map(([, kind, style, char]) => ({ kind, style, char }));
+  // The pipeline normalises the ASCII digit to its full-width form; both the
+  // half-width letter and the full-width digit must stay upright.
+  const latin = glyphs.filter((glyph) => /^[A-Za-z0-9０-９Ａ-Ｚａ-ｚ]$/u.test(glyph.char));
+  assert.deepEqual(latin.map((glyph) => glyph.char).sort(), ["T", "３"]);
+  for (const glyph of latin) {
+    assert.equal(glyph.kind, "upright-latin");
+    assert.doesNotMatch(glyph.style, /vrt2/);
+    assert.doesNotMatch(glyph.style, /'vert'/);
+  }
+  // Japanese glyphs must keep the rotating vertical alternates.
+  const japanese = glyphs.filter((glyph) => glyph.char === "大" || glyph.char === "彼");
+  assert.ok(japanese.length >= 2);
+  for (const glyph of japanese) {
+    assert.match(glyph.style, /'vrt2' 1/);
+    assert.equal(glyph.kind, "character");
+  }
+});
