@@ -1,10 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 
 import {
   approveVoiceLibraryCasting,
   createVoiceLibraryAuditionPlan,
   rankVoiceLibraryCandidates,
+  writeVoiceLibraryAuditionPlan,
 } from "../lib/voiceLibraryCasting.mjs";
 import { characterVoicePersona } from "../lib/voiceCasting.mjs";
 
@@ -76,15 +80,38 @@ test("audition planning is read-only and records preview-before-approval policy"
     episodeId: "episode-voice",
     characters: [character],
     accountVoices: [],
-    sharedVoices: [sharedVoice()],
+    sharedVoices: [sharedVoice(), sharedVoice({ id: "shared-gentle-young-woman-2", name: "落ち着いた若い女性", publicOwnerId: "owner-2" })],
     includeNarration: false,
   });
 
   assert.equal(plan.status, "awaiting-preview");
   assert.equal(plan.policy.previewRequired, true);
   assert.equal(plan.policy.accountMutationDuringDiscovery, false);
-  assert.equal(plan.catalog.sharedLibraryCount, 1);
+  assert.equal(plan.catalog.sharedLibraryCount, 2);
   assert.equal(plan.entries[0].candidates[0].previewUrl, "https://example.test/gentle.mp3");
+});
+
+test("persisted voice audition exposes only anonymous hash-bound preview artifacts", async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), "voice-blind-"));
+  const plan = createVoiceLibraryAuditionPlan({
+    episodeId: "episode-voice",
+    characters: [character],
+    accountVoices: [],
+    sharedVoices: [sharedVoice(), sharedVoice({ id: "shared-2", name: "別の声", publicOwnerId: "owner-2" })],
+    includeNarration: false,
+  });
+  const bytes = Buffer.from("anonymous-preview-audio");
+  const written = await writeVoiceLibraryAuditionPlan({
+    plan,
+    rootDir,
+    fetchImpl: async () => ({ ok: true, arrayBuffer: async () => bytes }),
+  });
+  const publicPlan = JSON.parse(await readFile(written.jsonPath, "utf8"));
+  const candidate = publicPlan.entries[0].candidates[0];
+  assert.deepEqual(Object.keys(candidate).sort(), ["label", "previewSha256", "previewUrl"]);
+  assert.match(candidate.previewSha256, /^[a-f0-9]{64}$/u);
+  assert.equal(JSON.stringify(publicPlan).includes("shared-gentle-young-woman"), false);
+  assert.equal((await readFile(resolve(written.rootDir, candidate.previewUrl))).equals(bytes), true);
 });
 
 test("approval refuses unlistened candidates and adds only the explicitly confirmed shared voice", async () => {
@@ -92,7 +119,7 @@ test("approval refuses unlistened candidates and adds only the explicitly confir
     episodeId: "episode-voice",
     characters: [character],
     accountVoices: [],
-    sharedVoices: [sharedVoice()],
+    sharedVoices: [sharedVoice(), sharedVoice({ id: "shared-gentle-young-woman-2", name: "落ち着いた若い女性", publicOwnerId: "owner-2" })],
     includeNarration: false,
   });
   const registry = { characters: [character], voices: [] };
@@ -102,7 +129,7 @@ test("approval refuses unlistened candidates and adds only the explicitly confir
     registry,
     persist: false,
     confirmedVoiceAdds: true,
-    selections: [{ characterId: "mio", voiceId: "shared-gentle-young-woman" }],
+    selections: [{ characterId: "mio", winnerLabel: "A" }],
   }), /previewConfirmed=true/u);
 
   let addRequests = 0;
@@ -121,7 +148,7 @@ test("approval refuses unlistened candidates and adds only the explicitly confir
     },
     selections: [{
       characterId: "mio",
-      voiceId: "shared-gentle-young-woman",
+      winnerLabel: plan.entries[0].candidates.find((entry) => entry.voiceId === "shared-gentle-young-woman").blindLabel,
       previewConfirmed: true,
       selectionReason: "人物の年齢感と静かな演技幅が最も一致した",
       approvedBy: "test-human",

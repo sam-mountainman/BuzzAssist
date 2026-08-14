@@ -5272,12 +5272,19 @@ export default function App() {
   }, [sendCharacterPipelineRequest])
 
   const requestCharacterApproval = useCallback((workflow, cast, candidate) => {
+    const candidateLabel = candidate.label || ''
+    const approvalReason = window.prompt(`候補${candidateLabel}を採用する具体的な理由を入力してください（他候補との差、表情、構図など）`)
+    if (!approvalReason || approvalReason.trim().length < 4) {
+      setCharacterManagerStatus('採用には4文字以上の具体的な理由が必要です')
+      return Promise.resolve({ sent: false, cancelled: true })
+    }
     const message = [
-      `BuzzAssistのキャラ制作ワークフロー「${workflow.id}」で、キャラ「${cast.name}」（castId: ${cast.id}）の候補${candidate.index}（candidateId: ${candidate.id}）を採用します。`,
-      'approve_character_candidateを使い、この候補を参照して表情・顔角度シートを生成し、2枚の設定画をキャラ台帳へ登録してください。',
+      `BuzzAssistのキャラ制作ワークフロー「${workflow.id}」で、キャラ「${cast.name}」（castId: ${cast.id}）の匿名候補${candidateLabel}を採用します。`,
+      `採用理由: ${approvalReason.trim()}`,
+      `approve_character_candidateをcandidateLabel=${candidateLabel}、approvalReason=${approvalReason.trim()}で使い、この候補を参照して表情・顔角度シートを生成し、2枚の設定画をキャラ台帳へ登録してください。`,
       `生成設定はワークフローと同じモデル${workflow.model || 'gpt-image-2-codex'}、比率${workflow.aspectRatio || '16:9'}、解像度${workflow.imageSize || '2K'}、品質${workflow.quality || 'high'}を使ってください。`
     ].join('\n')
-    return sendCharacterPipelineRequest(message, `${cast.name}の候補${candidate.index}を採用中…`)
+    return sendCharacterPipelineRequest(message, `${cast.name}の候補${candidateLabel}を採用中…`)
   }, [sendCharacterPipelineRequest])
 
   const copyHermesGrokSetupPrompt = useCallback(async () => {
@@ -10660,12 +10667,12 @@ export default function App() {
                                 {cast.candidates?.length ? (
                                   <div className="character-candidate-grid">
                                     {cast.candidates.map((candidate) => (
-                                      <div className={`character-candidate-card is-${candidate.status}`} key={candidate.id}>
+                                      <div className={`character-candidate-card is-${candidate.status}`} key={candidate.label}>
                                         <div className="character-candidate-image">
-                                          {candidate.assetUrl ? <img src={candidate.assetUrl} alt={`${cast.name} 候補${candidate.index}`} /> : <span>{characterPipelineStatusLabel(candidate.status)}</span>}
+                                          {candidate.assetUrl ? <img src={candidate.assetUrl} alt={`${cast.name} 匿名候補${candidate.label}`} /> : <span>{characterPipelineStatusLabel(candidate.status)}</span>}
                                         </div>
                                         <div className="character-candidate-foot">
-                                          <span>候補{candidate.index}</span>
+                                          <span>候補{candidate.label}</span>
                                           {candidate.status === 'generated' ? (
                                             <button type="button" onClick={() => requestCharacterApproval(workflow, cast, candidate)}>これを採用</button>
                                           ) : candidate.status === 'selected' ? <strong>採用済み</strong> : null}

@@ -1,6 +1,6 @@
 {
   "episodeId": "manga-arano-amane-effort-001",
-  "contractVersion": "koya-manga-production-v49",
+  "contractVersion": "koya-manga-production-v50",
   "reason": "User explicitly requires every generated visual for this episode to use gpt-image-2-codex only; no image-generation or visual-QA fallback is allowed.",
   "override": {
     "art": {

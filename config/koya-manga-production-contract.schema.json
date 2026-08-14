@@ -160,7 +160,7 @@
         "forbidStops": { "const": true },
         "forbidRepeatedCameraImages": { "const": true },
         "forbidPhaseReset": { "const": true },
-        "cameraOversample": { "type": "integer", "minimum": 3, "maximum": 8 }
+        "cameraOversample": { "type": "integer", "minimum": 3, "maximum": 3 }
       }
     },
     "video": {
@@ -213,13 +213,14 @@
         "version", "reviewNotesVersion", "userFeedbackOverridesMachinePass", "requireFullVideoReview",
         "requireContactSheetReview", "requireRepresentativeFrameReview", "requireAudioSpotChecks",
         "requireNonEmptyNotesPerCheck", "requireEmptyKnownRemainingIssues", "requireEvidenceFileHashes",
-        "requireContractDigestBinding", "requireReviewNotesDigestBinding", "minimumRepresentativeFrames",
+        "requireContractDigestBinding", "requireReviewNotesDigestBinding", "requireEvaluatorProvenance",
+        "requireRubricScores", "requireEvidenceMerkleManifest", "minimumRepresentativeFrames",
         "minimumAudioSpotChecks", "minimumReviewNoteCharacters", "maximumFutureClockSkewSeconds",
         "requiredChecks"
       ],
       "properties": {
-        "version": { "const": "koya-agent-perceptual-signoff-v3" },
-        "reviewNotesVersion": { "const": "koya-perceptual-review-notes-v2" },
+        "version": { "const": "koya-agent-perceptual-signoff-v4" },
+        "reviewNotesVersion": { "const": "koya-perceptual-review-notes-v3" },
         "userFeedbackOverridesMachinePass": { "const": true },
         "requireFullVideoReview": { "const": true },
         "requireContactSheetReview": { "const": true },
@@ -230,6 +231,9 @@
         "requireEvidenceFileHashes": { "const": true },
         "requireContractDigestBinding": { "const": true },
         "requireReviewNotesDigestBinding": { "const": true },
+        "requireEvaluatorProvenance": { "const": true },
+        "requireRubricScores": { "const": true },
+        "requireEvidenceMerkleManifest": { "const": true },
         "minimumRepresentativeFrames": { "type": "integer", "minimum": 3, "maximum": 24 },
         "minimumAudioSpotChecks": { "type": "integer", "minimum": 3, "maximum": 24 },
         "minimumReviewNoteCharacters": { "type": "integer", "minimum": 8, "maximum": 1000 },
@@ -250,10 +254,11 @@
         "version", "generatorEvaluatorSeparation", "requireDistinctEvaluatorContext",
         "deterministicGatesBeforeJudgment", "immutableCriteriaDuringRun", "requireExternalState",
         "requireCompleteRubric", "requireEvidence", "requireFailureFingerprint", "requireRevisionDelta",
+        "requireVerifiedEvidenceFiles", "requireAtLeastOneCompletedRound", "requirePersistedIncidentLedger",
         "limits", "candidateDecision", "terminalStates"
       ],
       "properties": {
-        "version": { "const": "koya-quality-loop-v2" },
+        "version": { "const": "koya-quality-loop-v3" },
         "generatorEvaluatorSeparation": { "const": true },
         "requireDistinctEvaluatorContext": { "const": true },
         "deterministicGatesBeforeJudgment": { "const": true },
@@ -263,6 +268,9 @@
         "requireEvidence": { "const": true },
         "requireFailureFingerprint": { "const": true },
         "requireRevisionDelta": { "const": true },
+        "requireVerifiedEvidenceFiles": { "const": true },
+        "requireAtLeastOneCompletedRound": { "const": true },
+        "requirePersistedIncidentLedger": { "const": true },
         "limits": {
           "type": "object",
           "additionalProperties": false,
@@ -285,6 +293,7 @@
           "required": [
             "minimumCandidates", "maximumCandidates", "requireDistinctVariationAxes",
             "anonymousComparison", "revealMappingOnlyAfterVerdict", "requireSelectionReason",
+            "requireIsolatedPrivateMapping", "requireArtifactHashVerification",
             "objectiveJudge", "rubricJudge", "subjectiveJudge"
           ],
           "properties": {
@@ -294,6 +303,8 @@
             "anonymousComparison": { "const": true },
             "revealMappingOnlyAfterVerdict": { "const": true },
             "requireSelectionReason": { "const": true },
+            "requireIsolatedPrivateMapping": { "const": true },
+            "requireArtifactHashVerification": { "const": true },
             "objectiveJudge": { "const": "deterministic-gate" },
             "rubricJudge": { "const": "fresh-independent-evaluator" },
             "subjectiveJudge": { "const": "human" }
@@ -308,12 +319,14 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "manifestSchemaVersion", "officialEntrypoint", "forbidLegacyStatusAfterRender",
+        "manifestSchemaVersion", "officialEntrypoint", "requireGeneratorContextId", "requireReviewerContextId", "forbidLegacyStatusAfterRender",
         "forbidAmbiguousProductionVersion"
       ],
       "properties": {
         "manifestSchemaVersion": { "const": "koya-episode-manifest-v1" },
         "officialEntrypoint": { "const": "scripts/koya-manga-video.mjs" },
+        "requireGeneratorContextId": { "const": true },
+        "requireReviewerContextId": { "const": true },
         "forbidLegacyStatusAfterRender": { "const": true },
         "forbidAmbiguousProductionVersion": { "const": true }
       }

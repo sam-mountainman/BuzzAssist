@@ -46,3 +46,53 @@ test("editorial audit rejects conditional split-page lead-ins and image churn", 
   assert.ok(pacingReport.failures.some((failure) => failure.id === "multi-utterance-image-share"));
   assert.ok(pacingReport.failures.some((failure) => failure.id === "median-image-hold"));
 });
+
+test("editorial audit does not treat a text-only solid plate as a short illustration hold", () => {
+  const manifest = {
+    id: "editorial-plate-pacing",
+    utterances: [
+      { id: "u1", cutId: "c1" },
+      { id: "u2", cutId: "c1" },
+      { id: "u3", cutId: "c2" },
+    ],
+    cuts: [
+      {
+        id: "c1",
+        utteranceIds: ["u1", "u2"],
+        timing: { durationSeconds: 11 },
+        cameraSequence: [
+          {
+            id: "plate",
+            utteranceIds: ["u1"],
+            imagePath: "/plate.png",
+            durationSeconds: 5,
+            motion: "none",
+            editorialPlate: { characterPolicy: "strictly-none", environmentPolicy: "none" },
+          },
+          { id: "story", utteranceIds: ["u2"], imagePath: "/story.png", durationSeconds: 6, cameraMode: "right-only" },
+        ],
+      },
+      {
+        id: "c2",
+        utteranceIds: ["u3"],
+        timing: { durationSeconds: 7 },
+        cameraSequence: [
+          { id: "story-2", utteranceIds: ["u3"], imagePath: "/story-2.png", durationSeconds: 7, cameraMode: "left-only" },
+        ],
+      },
+    ],
+  };
+  const contract = {
+    editorial: {
+      minimumMultiUtteranceImageShare: 0,
+      minimumMedianImageHoldSeconds: 6,
+      maximumImageHoldSeconds: 60,
+      forbidUnassignedCameraShots: true,
+      requireEveryUtteranceAssignedToImage: true,
+    },
+  };
+  const report = auditKoyaEditorialQuality(manifest, contract);
+  assert.equal(report.pass, true);
+  assert.equal(report.metrics.medianImageHoldSeconds, 7);
+  assert.equal(report.segments.find((segment) => segment.imagePath === "/plate.png").source, "editorial-plate");
+});

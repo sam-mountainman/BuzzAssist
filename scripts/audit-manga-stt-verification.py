@@ -11,10 +11,13 @@ the first 40% of the expected text to be present with >=0.6 similarity.
 """
 import json
 import argparse
+import hashlib
 import re
 import subprocess
 import sys
+import tempfile
 import unicodedata
+import os
 from difflib import SequenceMatcher
 from pathlib import Path
 
@@ -72,6 +75,39 @@ def similarity(a, b):
     return SequenceMatcher(None, japanese_morae(a), japanese_morae(b)).ratio()
 
 
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def extract_pcm(video, output_path):
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", video,
+                    "-vn", "-ar", "16000", "-ac", "1", output_path], check=True)
+
+
+def reusable_cached_report(output_path, video, current_audio_sha256, expected_sha256, expected_ids):
+    if not output_path.exists():
+        return None
+    try:
+        cached = json.loads(output_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if cached.get("pass") is not True or [row.get("id") for row in cached.get("rows", [])] != expected_ids:
+        return None
+    if cached.get("expectedSpeechSha256") != expected_sha256:
+        return None
+    # A cached videoPath often names the same final file that has just been
+    # overwritten. Re-extracting that path would compare the new PCM with
+    # itself and incorrectly bless stale transcript rows. Only the PCM digest
+    # captured when those rows were produced can authorize reuse.
+    if cached.get("audioSha256") != current_audio_sha256:
+        return None
+    return cached
+
+
 def japanese_morae(text):
     """Group small kana with the preceding kana for Japanese STT matching."""
     units = []
@@ -101,13 +137,35 @@ def main():
         manifest.get("outputs", {}).get("reviewVideo", {}).get("filePath")
         or manifest["outputs"]["finalVideo"]["filePath"]
     )
-    from faster_whisper import WhisperModel
-    import tempfile, os
-    model = WhisperModel("small", device="cpu", compute_type="int8")
+    raw_expected = [u.get("speechText") or u["text"] for u in manifest["utterances"]]
+    expected_ids = [u["id"] for u in manifest["utterances"]]
+    expected_sha256 = hashlib.sha256(json.dumps({
+        "utterances": list(zip(expected_ids, raw_expected)),
+        "pronunciationVariants": pronunciation_variants,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    output_path = Path(args.output).resolve() if args.output else manifest_path.parent / "stt-verification-audit.json"
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
         tmp_path = tmp.name
-    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", video,
-                    "-vn", "-ar", "16000", "-ac", "1", tmp_path], check=True)
+    extract_pcm(video, tmp_path)
+    audio_sha256 = sha256_file(tmp_path)
+    cached = reusable_cached_report(output_path, video, audio_sha256, expected_sha256, expected_ids)
+    if cached:
+        cached.update({
+            "version": "stt-verification-v3-audio-hash-cache",
+            "videoPath": video,
+            "audioSha256": audio_sha256,
+            "expectedSpeechSha256": expected_sha256,
+            "cache": {
+                "hit": True,
+                "basis": "exact-decoded-pcm-and-ordered-utterance-ids",
+            },
+        })
+        output_path.write_text(json.dumps(cached, ensure_ascii=False, indent=1))
+        os.unlink(tmp_path)
+        print(json.dumps({"pass": True, "failures": [], "checked": len(cached["rows"]), "cacheHit": True}, ensure_ascii=False))
+        return
+    from faster_whisper import WhisperModel
+    model = WhisperModel("small", device="cpu", compute_type="int8")
     # One transcription pass over the whole episode; per-line verification is
     # then pure text alignment with an order cursor, so concat frame-rounding
     # drift cannot shift any window.
@@ -115,7 +173,6 @@ def main():
                                    condition_on_previous_text=False)
     raw_heard_full = "".join(seg.text for seg in segments)
     os.unlink(tmp_path)
-    raw_expected = [u.get("speechText") or u["text"] for u in manifest["utterances"]]
     prepared = [normalize(raw_heard_full, pronunciation_variants)] + [
         normalize(text, pronunciation_variants) for text in raw_expected
     ]
@@ -188,13 +245,15 @@ def main():
             "pass": bool(ok),
         })
     result = {
-        "version": "stt-verification-v2-fulltrack",
+        "version": "stt-verification-v3-audio-hash-cache",
         "videoPath": video,
+        "audioSha256": audio_sha256,
+        "expectedSpeechSha256": expected_sha256,
+        "cache": {"hit": False, "basis": "fresh-faster-whisper-transcription"},
         "model": "faster-whisper small int8 (single pass, order-aligned, kuromoji phonetic normalization)",
         "rows": rows,
         "pass": all(r["pass"] for r in rows),
     }
-    output_path = Path(args.output).resolve() if args.output else manifest_path.parent / "stt-verification-audit.json"
     output_path.write_text(json.dumps(result, ensure_ascii=False, indent=1))
     print(json.dumps({"pass": result["pass"], "failures": [r for r in rows if not r["pass"]], "checked": len(rows)}, ensure_ascii=False))
     if not result["pass"]:

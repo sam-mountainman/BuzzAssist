@@ -6,13 +6,13 @@ import {
   classifyMangaEditorialBeat,
 } from "../lib/mangaEditorialGrammar.mjs";
 
-test("reflective promise narration selects a characterless pastel plate and story-three montage", () => {
+test("a story-three montage takes precedence over an incompatible characterless plate", () => {
   const result = classifyMangaEditorialBeat({
     utterance: { id: "n1", preset: "narration", text: "翌週、約束の光だけが静かに残った。" },
     montageBeatCount: 3,
   });
-  assert.equal(result.backgroundOnly.recommended, true);
-  assert.equal(result.editorialPlate.type, "pastel-sky");
+  assert.equal(result.backgroundOnly.recommended, false);
+  assert.equal(result.editorialPlate.type, null);
   assert.equal(result.editorialPlate.environmentPolicy, "none");
   assert.equal(result.split.type, "story-3");
   assert.equal(result.split.composition, "post-composite-on-black-then-flatten");
@@ -89,8 +89,8 @@ test("audit reports the applied visual grammar without promoting every line", ()
     { utterance: { preset: "narration", text: "翌週、約束の光が静かに残った。" }, montageBeatCount: 3 },
   ]);
   assert.equal(audit.counts.thoughtFocus, 1);
-  assert.equal(audit.counts.backgroundOnly, 1);
-  assert.equal(audit.counts.pastelPlate, 1);
+  assert.equal(audit.counts.backgroundOnly, 0);
+  assert.equal(audit.counts.pastelPlate, 0);
   assert.equal(audit.counts.split3, 1);
   assert.equal(audit.counts.tremble, 0);
 });

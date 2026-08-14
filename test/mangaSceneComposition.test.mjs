@@ -38,6 +38,21 @@ test("generated image prompt binds camera to visible story action and forbids co
   assert.match(prompt, /1920x1080/);
 });
 
+test("spoken evidence dialogue never uses a face-hiding overhead setup", () => {
+  const manifest = {
+    id: "spoken-evidence-face",
+    cuts: [{ id: "cut-01", utteranceIds: ["cut-01-u01", "cut-01-u02"] }],
+    utterances: [
+      { id: "cut-01-u01", cutId: "cut-01", speakerId: "narration", preset: "narration", text: "古い記録を調べた。" },
+      { id: "cut-01-u02", cutId: "cut-01", speakerId: "hero", speakerName: "佐藤", preset: "dialogue", text: "小さな利用者を消したのは、路線ではなく記録のほうです" },
+    ],
+  };
+  const plan = planMangaSceneCompositions({ manifest });
+  const dialogue = plan.beats[1];
+  assert.notEqual(dialogue.setup.id, "overhead-workbench");
+  assert.match(buildMangaSceneImagePrompt(dialogue), /Spoken-dialogue face contract/u);
+});
+
 test("new scene openings and reunion establishing beats never default to an overhead insert", () => {
   const plan = planMangaSceneCompositions({
     manifest: {

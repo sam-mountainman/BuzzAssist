@@ -27,10 +27,46 @@ import cv2
 import numpy as np
 
 DEFAULT_CASCADE = Path("scripts/data/lbpcascade_animeface.xml")
+MINIMUM_CASCADE_WEIGHT = 1.0
 
 
 def read_json(path):
     return json.loads(Path(path).read_text())
+
+
+def rendered_overlay_geometry(path):
+    """Measure the actual raster submitted to ffmpeg, never placement JSON.
+
+    Placement plans can be regenerated or mutated independently of a cached
+    raster.  Auditing their stored rectangle against an MP4 would then compare
+    a face with a balloon that is not actually on screen.  Alpha-bound pixels
+    in the real render input are downstream evidence and keep placement and
+    audit coordinate sources separate.
+    """
+    if not path or not Path(path).is_file():
+        return None
+    image = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+    if image is None or image.ndim != 3 or image.shape[2] < 4:
+        return None
+    ys, xs = np.nonzero(image[:, :, 3] > 8)
+    if xs.size == 0 or ys.size == 0:
+        return None
+    height, width = image.shape[:2]
+    return {
+        "bounds": {
+            "x": int(xs.min()),
+            "y": int(ys.min()),
+            "width": int(xs.max() - xs.min() + 1),
+            "height": int(ys.max() - ys.min() + 1),
+        },
+        "imageSize": {"width": int(width), "height": int(height)},
+    }
+
+
+def rendered_overlay_bounds(path):
+    """Backward-compatible alpha-bounds accessor used by focused tests."""
+    geometry = rendered_overlay_geometry(path)
+    return geometry["bounds"] if geometry else None
 
 
 def clamp(v, lo, hi):
@@ -46,6 +82,68 @@ def rendered_detection_is_overlay_artifact(face, cover):
     partial intersections strict because a real face remains visibly testable.
     """
     return face.get("method") == "anime-cascade" and cover >= 0.98
+
+
+def box_matches(reference, candidate):
+    rx, ry, rw, rh = reference
+    cx, cy, cw, ch = candidate
+    ix0, iy0 = max(rx, cx), max(ry, cy)
+    ix1, iy1 = min(rx + rw, cx + cw), min(ry + rh, cy + ch)
+    intersection = max(0, ix1 - ix0) * max(0, iy1 - iy0)
+    union = max(1, rw * rh + cw * ch - intersection)
+    iou = intersection / union
+    center_distance = ((rx + rw / 2 - cx - cw / 2) ** 2 + (ry + rh / 2 - cy - ch / 2) ** 2) ** 0.5
+    return iou >= 0.15 or center_distance <= 0.45 * max(rw, rh, cw, ch)
+
+
+def cascade_face_exists_in_clear_frame(cascade, capture, face_box, clear_times):
+    """Confirm a heavily covered cascade hit in adjacent bubble-clear MP4 frames.
+
+    An opaque balloon cannot reveal the facial features behind it. If a
+    cascade box is >=80% inside the balloon but disappears one decoded frame
+    before/after the timed overlay, it was produced by the balloon border or
+    glyphs. A real face remains at the same optical position over this 33 ms
+    interval and is independently detectable in at least one clear frame.
+    """
+    for clear_time in clear_times:
+        capture.set(cv2.CAP_PROP_POS_MSEC, max(0.0, clear_time) * 1000)
+        ok, clear_frame = capture.read()
+        if not ok or clear_frame is None:
+            continue
+        if any(box_matches(face_box, candidate) for candidate in detect_faces(cascade, clear_frame)):
+            return True
+    return False
+
+
+def page_camera_box_at_clear_time(face_box, frame_size, camera, sample_progress, clear_progress):
+    """Move a rendered screen-space box between two whole-page camera states.
+
+    A split-page bubble can make a watch, glyph, or border look face-like.  The
+    independent confirmation frame must be bubble-clear, but the whole page
+    may have zoomed between the sample and that frame.  Invert the sampled
+    camera into flattened-page coordinates and project through the clear
+    camera so a real face is matched at its expected optical position.
+    """
+    frame_w, frame_h = frame_size
+    sample_zoom, sample_fx, sample_fy = page_camera_at(camera, sample_progress)
+    clear_zoom, clear_fx, clear_fy = page_camera_at(camera, clear_progress)
+    sample_crop = 1.0 / sample_zoom
+    clear_crop = 1.0 / clear_zoom
+    sample_ox = clamp(sample_fx - sample_crop / 2, 0, max(0, 1 - sample_crop))
+    sample_oy = clamp(sample_fy - sample_crop / 2, 0, max(0, 1 - sample_crop))
+    clear_ox = clamp(clear_fx - clear_crop / 2, 0, max(0, 1 - clear_crop))
+    clear_oy = clamp(clear_fy - clear_crop / 2, 0, max(0, 1 - clear_crop))
+    x, y, w, h = face_box
+    page_x = sample_ox + (x / frame_w) / sample_zoom
+    page_y = sample_oy + (y / frame_h) / sample_zoom
+    page_w = (w / frame_w) / sample_zoom
+    page_h = (h / frame_h) / sample_zoom
+    return [
+        int(round((page_x - clear_ox) * clear_zoom * frame_w)),
+        int(round((page_y - clear_oy) * clear_zoom * frame_h)),
+        max(1, int(round(page_w * clear_zoom * frame_w))),
+        max(1, int(round(page_h * clear_zoom * frame_h))),
+    ]
 
 
 def visible_detection_evidence(frame, face_box, bubble_rect):
@@ -93,10 +191,16 @@ def rendered_detection_is_flat_visible_background(face, cover, evidence):
 def detect_faces(cascade, frame):
     gray = cv2.equalizeHist(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
     height = frame.shape[0]
-    raw = cascade.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=3, minSize=(56, 56))
+    raw, _reject_levels, level_weights = cascade.detectMultiScale3(
+        gray,
+        scaleFactor=1.05,
+        minNeighbors=3,
+        minSize=(56, 56),
+        outputRejectLevels=True,
+    )
     return [
-        (int(x), int(y), int(w), int(h)) for (x, y, w, h) in raw
-        if h <= 0.45 * height
+        (int(x), int(y), int(w), int(h)) for (x, y, w, h), weight in zip(raw, level_weights)
+        if h <= 0.45 * height and float(weight) >= MINIMUM_CASCADE_WEIGHT
     ]
 
 
@@ -243,16 +347,45 @@ def main():
             for segment in segments:
                 s0 = audio_start + float(segment.get("startOffsetSeconds", 0))
                 s1 = audio_start + float(segment.get("endOffsetSeconds", 0))
-                entries.append((segment["id"], segment["bounds"], max(s0, float(timing["bubbleStartSeconds"])), min(s1, float(timing["bubbleEndSeconds"]))))
+                actual_geometry = rendered_overlay_geometry(segment.get("rasterizedOverlayPath"))
+                actual_bounds = actual_geometry["bounds"] if actual_geometry else None
+                coordinate_size = actual_geometry["imageSize"] if actual_geometry else {
+                    "width": overlay_w,
+                    "height": overlay_h,
+                }
+                entries.append((
+                    segment["id"],
+                    actual_bounds or segment["bounds"],
+                    "rendered-overlay-alpha" if actual_bounds else "placement-fallback",
+                    float(coordinate_size["width"]),
+                    float(coordinate_size["height"]),
+                    max(s0, float(timing["bubbleStartSeconds"])),
+                    min(s1, float(timing["bubbleEndSeconds"])),
+                ))
         else:
             bubble = (spec.get("plan", {}).get("bubbles") or [{}])[0]
             if isinstance(bubble.get("bounds"), dict):
-                entries.append((utterance["id"], bubble["bounds"], float(timing["bubbleStartSeconds"]), float(timing["bubbleEndSeconds"])))
-        for entry_id, bounds, start, end in entries:
+                actual_geometry = rendered_overlay_geometry(utterance.get("rasterizedOverlayPath"))
+                actual_bounds = actual_geometry["bounds"] if actual_geometry else None
+                coordinate_size = actual_geometry["imageSize"] if actual_geometry else {
+                    "width": overlay_w,
+                    "height": overlay_h,
+                }
+                entries.append((
+                    utterance["id"],
+                    actual_bounds or bubble["bounds"],
+                    "rendered-overlay-alpha" if actual_bounds else "placement-fallback",
+                    float(coordinate_size["width"]),
+                    float(coordinate_size["height"]),
+                    float(timing["bubbleStartSeconds"]),
+                    float(timing["bubbleEndSeconds"]),
+                ))
+        for entry_id, bounds, bounds_source, coordinate_w, coordinate_h, start, end in entries:
             worst_active = {"cover": 0.0}
             worst_generic = {"cover": 0.0}
             detected_face_count = 0
             ignored_overlay_artifact_count = 0
+            ignored_clear_frame_artifact_count = 0
             ignored_flat_background_count = 0
             active_speaker_id = utterance.get("speakerId") if utterance.get("preset") != "narration" else None
             active_templates = [row for row in templates if row[0] == active_speaker_id]
@@ -264,10 +397,10 @@ def main():
                     continue
                 fh, fw = frame.shape[:2]
                 # bubble rect on SCREEN at time t
-                bx0 = float(bounds["x"]) / overlay_w
-                by0 = float(bounds["y"]) / overlay_h
-                bx1 = (float(bounds["x"]) + float(bounds["width"])) / overlay_w
-                by1 = (float(bounds["y"]) + float(bounds["height"])) / overlay_h
+                bx0 = float(bounds["x"]) / coordinate_w
+                by0 = float(bounds["y"]) / coordinate_h
+                bx1 = (float(bounds["x"]) + float(bounds["width"])) / coordinate_w
+                by1 = (float(bounds["y"]) + float(bounds["height"])) / coordinate_h
                 if is_panel:
                     camera = cut["panelLayout"].get("pageCamera") or {}
                     duration = float(cut["timing"]["durationSeconds"])
@@ -298,6 +431,28 @@ def main():
                     if rendered_detection_is_overlay_artifact(face, cover):
                         ignored_overlay_artifact_count += 1
                         continue
+                    if face.get("method") == "anime-cascade" and cover > args.generic_max_cover:
+                        clear_times = [start - 1 / 30, end + 1 / 30]
+                        clear_boxes = [face["box"], face["box"]]
+                        if is_panel:
+                            page_camera = cut["panelLayout"].get("pageCamera") or {}
+                            cut_start = float(cut["timing"]["startSeconds"])
+                            cut_duration = max(1e-6, float(cut["timing"]["durationSeconds"]))
+                            sample_progress = clamp((t - cut_start) / cut_duration, 0, 1)
+                            clear_boxes = [
+                                page_camera_box_at_clear_time(
+                                    face["box"], (fw, fh), page_camera, sample_progress,
+                                    clamp((clear_time - cut_start) / cut_duration, 0, 1),
+                                )
+                                for clear_time in clear_times
+                            ]
+                        confirmed = any(
+                            cascade_face_exists_in_clear_frame(cascade, capture, clear_box, [clear_time])
+                            for clear_box, clear_time in zip(clear_boxes, clear_times)
+                        )
+                        if not confirmed:
+                            ignored_clear_frame_artifact_count += 1
+                            continue
                     visible_evidence = visible_detection_evidence(frame, face["box"], rect)
                     if rendered_detection_is_flat_visible_background(face, cover, visible_evidence):
                         ignored_flat_background_count += 1
@@ -322,12 +477,15 @@ def main():
             rows.append({
                 "bubbleId": entry_id,
                 "utteranceId": utterance["id"],
+                "bubbleBoundsSource": bounds_source,
+                "bubbleCoordinateSize": {"width": coordinate_w, "height": coordinate_h},
                 "activeSpeakerId": active_speaker_id,
                 "activeTemplateCount": len(active_templates),
                 "worstActiveSpeakerFaceCover": round(worst_active["cover"], 3),
                 "worstGenericFaceCover": round(worst_generic["cover"], 3),
                 "detectedFaceCount": detected_face_count,
                 "ignoredFullyContainedOverlayArtifactCount": ignored_overlay_artifact_count,
+                "ignoredAdjacentClearFrameArtifactCount": ignored_clear_frame_artifact_count,
                 "ignoredFlatVisibleBackgroundCount": ignored_flat_background_count,
                 **({"worstActiveSpeakerFace": worst_active} if worst_active["cover"] > 0 else {}),
                 **({"worstGenericFace": worst_generic} if worst_generic["cover"] > 0 else {}),
@@ -335,12 +493,12 @@ def main():
             })
     capture.release()
     result = {
-        "version": "bubble-faces-independent-v3-visible-face-evidence",
+        "version": "bubble-faces-independent-v6-rendered-overlay-native-dimensions",
         "videoPath": str(video_path),
         "maxCover": args.max_cover,
         "genericMaxCover": args.generic_max_cover,
         "activeTemplateThreshold": args.template_threshold,
-        "method": "rendered-frame anime cascade for any face + active-speaker-only approved registry templates; no shot annotations used; fully opaque-bubble-contained glyph hits and partial cascade hits with a large flat/edgeless/dark-free visible remainder excluded",
+        "method": "actual ffmpeg overlay-alpha bounds normalized by each raster PNG's native dimensions and projected through the page camera + rendered-frame anime cascade (level weight >=1.0) for any face + active-speaker-only approved registry templates; no placement-plan or shot-face coordinates used; fully opaque-bubble-contained glyph hits, failing-overlap cascade hits absent from adjacent decoded bubble-clear frames after whole-page camera reprojection, and partial hits with a large flat/edgeless/dark-free visible remainder excluded",
         "turnaroundPaths": [str(path) for _, path in turnaround_paths],
         "templateCount": len(templates),
         "rows": rows,

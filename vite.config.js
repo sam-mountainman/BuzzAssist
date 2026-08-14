@@ -20,7 +20,7 @@ import {
 import { getBuzzAssistAuthStatus, loginBuzzAssistViaBrowser, resolveAuthFilePath } from './lib/buzzassistApi.mjs'
 import { FOCUS_REQUEST_FILE_NAME, OFFICIAL_EXCALIDRAW_README, clearFrameGeneratingFlags, collectCanvasRecordedFileNames, createExcalidrawView, insertExcalidrawAudioResult, insertExcalidrawImage, insertExcalidrawSilenceCutResult, insertExcalidrawSubtitle, insertExcalidrawVideo, insertExcalidrawMediaBatch, loadScene, performCanvasMaintenance, stripAssetBackedFileDataURLs, syncDeletedCanvasAssets, syncMissingCanvasAssets } from './lib/canvasScene.mjs'
 import { readCharacterRegistry, writeCharacterRegistry } from './lib/characterRegistry.mjs'
-import { prepareCharacterWorkflow, readCharacterWorkflowStore } from './lib/characterPipeline.mjs'
+import { prepareCharacterWorkflow, publicCharacterWorkflow, readCharacterWorkflowStore } from './lib/characterPipeline.mjs'
 import { streamZipStore } from './lib/zipStore.mjs'
 import { generateSubtitleSrt, refineSubtitleFromPlan, writeSubtitleWordsSidecar } from './lib/subtitleGeneration.mjs'
 import { silenceCutVideo } from './lib/tempoCut.mjs'
@@ -2052,7 +2052,7 @@ function configureCanvasServer(server) {
           }
           const body = JSON.parse(await readRequestBody(req))
           const workflow = await prepareCharacterWorkflow({ canvasDir, ...body })
-          sendJson(res, 200, { ok: true, workflow })
+          sendJson(res, 200, { ok: true, workflow: publicCharacterWorkflow(workflow) })
           broadcastCanvasChanged([join(canvasDir, 'character-workflows.json')])
         } catch (error) {
           sendJson(res, 500, { error: error.message })
@@ -2068,7 +2068,7 @@ function configureCanvasServer(server) {
             return
           }
           const store = await readCharacterWorkflowStore({ canvasDir })
-          sendJson(res, 200, { ok: true, ...store })
+          sendJson(res, 200, { ok: true, ...store, workflows: (store.workflows || []).map(publicCharacterWorkflow) })
         } catch (error) {
           sendJson(res, 500, { error: error.message })
         }

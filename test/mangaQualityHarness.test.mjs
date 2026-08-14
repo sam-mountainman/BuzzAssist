@@ -9,6 +9,7 @@ import {
   createMangaQualityContract,
   createMangaQualityLoopState,
   recordMangaQualityIncident,
+  mergeMangaQualityIncidentLedgers,
   recordMangaQualityRound,
   revealBlindSelection,
 } from "../lib/mangaQualityHarness.mjs";
@@ -204,6 +205,14 @@ test("final quality decision cannot pass without every independent audit and has
     contractDigest: "c".repeat(64),
     videoSha256: "d".repeat(64),
     requiredAuditIds,
+    evidenceManifestPath: "/tmp/evidence-manifest.json",
+    evidenceManifestSha256: "1".repeat(64),
+    evidenceMerkleRoot: "2".repeat(64),
+    qualityLoopState: {
+      status: "active",
+      generatorContextId: "generator-context",
+      rounds: [],
+    },
   };
   const awaiting = createMangaFinalQualityDecision({
     ...common,
@@ -217,6 +226,11 @@ test("final quality decision cannot pass without every independent audit and has
   assert.equal(awaiting.pass, false);
   const passed = createMangaFinalQualityDecision({
     ...common,
+    qualityLoopState: {
+      status: "passed",
+      generatorContextId: "generator-context",
+      rounds: [{ evidenceMerkleRoot: "2".repeat(64), reviews: [{ evaluatorContextId: "reviewer-context" }] }],
+    },
     auditSteps: [
       { id: "contract-manifest", pass: true, evidencePath: "/tmp/contract.json", evidenceSha256: "e".repeat(64) },
       { id: "agent-contact-sheet-review", pass: true, evidencePath: "/tmp/signoff.json", evidenceSha256: "f".repeat(64) },
@@ -227,6 +241,11 @@ test("final quality decision cannot pass without every independent audit and has
   assert.equal(passed.pass, true);
   const unbound = createMangaFinalQualityDecision({
     ...common,
+    qualityLoopState: {
+      status: "passed",
+      generatorContextId: "generator-context",
+      rounds: [{ evidenceMerkleRoot: "2".repeat(64), reviews: [{ evaluatorContextId: "reviewer-context" }] }],
+    },
     auditSteps: [
       { id: "contract-manifest", pass: true, evidencePath: "/tmp/contract.json", evidenceSha256: "" },
       { id: "agent-contact-sheet-review", pass: true, evidencePath: "/tmp/signoff.json", evidenceSha256: "f".repeat(64) },
@@ -247,4 +266,17 @@ test("repeated deterministic high-impact incidents are promoted into hard gates"
   });
   assert.equal(second.incidents[0].occurrences, 2);
   assert.equal(second.incidents[0].promotion, "hard-gate");
+});
+
+test("tracked incident seed and runtime observations merge without losing the strongest promotion", () => {
+  const merged = mergeMangaQualityIncidentLedgers(
+    { incidents: [{ signature: "same", occurrences: 2, promotion: "hard-gate", evidence: ["seed"] }] },
+    { incidents: [
+      { signature: "same", occurrences: 1, promotion: "checklist", evidence: ["runtime"] },
+      { signature: "new", occurrences: 1, promotion: "checklist", evidence: ["new"] },
+    ] },
+  );
+  assert.equal(merged.incidents.length, 2);
+  assert.equal(merged.incidents.find((entry) => entry.signature === "same").promotion, "hard-gate");
+  assert.deepEqual(merged.incidents.find((entry) => entry.signature === "same").evidence, ["seed", "runtime"]);
 });

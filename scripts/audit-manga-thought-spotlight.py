@@ -36,7 +36,47 @@ def clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 
 
-def camera_at(camera: dict, progress: float) -> tuple[float, float, float]:
+def safe_focus(value: float, zoom: float, padding: float = 0.006) -> float:
+    edge = min(0.5, 1.0 / (2.0 * max(1.000001, zoom)) + max(0.0, padding))
+    return clamp(float(value), edge, 1.0 - edge)
+
+
+def normalized_pullout_camera(camera: dict) -> dict:
+    """Mirror the renderer's pullout normalization before pixel projection.
+
+    Authored focus coordinates can sit outside the crop-safe range. The Node
+    renderer clamps those against the ending (widest) zoom and rebuilds its
+    keyframes; auditing the raw manifest coordinates projects the face onto a
+    different screen location and creates a false spotlight failure.
+    """
+    zoom_end = clamp(float(camera.get("zoomEnd", camera.get("zoom_end", 1.08))), 1.02, 1.3)
+    requested_start = clamp(
+        float(camera.get("zoomStart", camera.get("zoom_start", zoom_end / 0.7))),
+        1.08,
+        2.2,
+    )
+    zoom_start = max(requested_start, zoom_end / 0.76)
+    focus_x = safe_focus(float(camera.get("focusX", camera.get("focus_x", 0.5))), zoom_end)
+    focus_y = safe_focus(float(camera.get("focusY", camera.get("focus_y", 0.5))), zoom_end)
+    return {
+        **camera,
+        "zoomStart": zoom_start,
+        "zoomEnd": zoom_end,
+        "focusX": focus_x,
+        "focusY": focus_y,
+        "focusXEnd": focus_x,
+        "focusYEnd": focus_y,
+        "keyframes": [
+            {"at": 0.0, "zoom": zoom_start, "focusX": focus_x, "focusY": focus_y},
+            {"at": 1.0, "zoom": zoom_end, "focusX": focus_x, "focusY": focus_y},
+        ],
+    }
+
+
+def camera_at(camera: dict, progress: float, motion: str = "pull-out") -> tuple[float, float, float]:
+    normalized_motion = str(motion or "").strip().lower().replace("_", "-")
+    if normalized_motion in {"pull-out", "pullout", "pullout-only", "zoom-out", "wide"}:
+        camera = normalized_pullout_camera(camera)
     keyframes = camera.get("keyframes") or []
     if len(keyframes) < 2:
         keyframes = [
@@ -164,7 +204,7 @@ def main() -> None:
                 progress = clamp((t - shot_start) / shot_duration, 0.0, 1.0)
             else:
                 progress = clamp((t - start) / max(1e-6, end - start), 0.0, 1.0)
-            zoom, focus_x, focus_y = camera_at(shot.get("camera") or {}, progress)
+            zoom, focus_x, focus_y = camera_at(shot.get("camera") or {}, progress, shot.get("motion") or "pull-out")
             projected = project_rect(
                 {"x": float(face["x"]), "y": float(face["y"]), "width": float(face["width"]), "height": float(face["height"])},
                 zoom, focus_x, focus_y,

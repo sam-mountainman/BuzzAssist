@@ -49,7 +49,7 @@ test("manifest application pins fail-closed Koya defaults", async () => {
     id: "demo",
     model: "eleven_multilingual_v2",
     video: { bgmPath: "music.mp3", bgmVolume: 0.5, width: 640, height: 360, fps: 24, statusAfterRender: "final-v12" },
-    production: { version: "v12" },
+    production: { version: "v12", provenance: { generator: { id: "codex:fixture", contextId: "fixture-context" } } },
     utterances: [{ id: "cut-01-u01", model: "eleven_multilingual_v2" }],
   }, resolved);
   assert.equal(manifest.model, "eleven_v3");
@@ -60,9 +60,12 @@ test("manifest application pins fail-closed Koya defaults", async () => {
   assert.equal(Object.hasOwn(manifest.production, "version"), false);
   assert.equal(manifest.production.pipeline.entrypoint, "scripts/koya-manga-video.mjs");
   assert.equal(manifest.production.qualityPolicy.userFeedbackOverridesMachinePass, true);
-  assert.equal(manifest.production.qualityPolicy.qualityLoopVersion, "koya-quality-loop-v2");
+  assert.equal(manifest.production.qualityPolicy.qualityLoopVersion, "koya-quality-loop-v3");
   assert.equal(manifest.production.qualityPolicy.requireDistinctEvaluatorContext, true);
   assert.equal(manifest.production.qualityPolicy.candidateDecision.requireSelectionReason, true);
+  assert.equal(manifest.production.bubbleDisplayPolicy.preserveAuthoredSpeechText, true);
+  assert.equal(manifest.production.bubbleDisplayPolicy.stripTerminalJapanesePeriod, true);
+  assert.match(manifest.production.dialogueEditorialPolicy.punctuation, /omit a terminal Japanese full stop/u);
   assert.equal(manifest.production.koyaContract.digest, resolved.digest);
   assert.equal(auditManifestAgainstKoyaContract(manifest, resolved).pass, true);
 });
@@ -73,6 +76,7 @@ test("square narration rows keep narration styling but inherit the protagonist v
     id: "narration-protagonist-test",
     model: "eleven_v3",
     video: {},
+    production: { provenance: { generator: { id: "codex:fixture", contextId: "fixture-context" } } },
     utterances: [
       {
         id: "cut-01-u01",
@@ -167,6 +171,9 @@ test("the JSON Schema closes every contract object and validates every leaf", as
   const unknownNested = structuredClone(resolved.contract);
   unknownNested.editorial.unreviewedEscapeHatch = true;
   assert.equal(validateKoyaMangaProductionSchema(unknownNested).pass, false);
+  const unsupportedOversample = structuredClone(resolved.contract);
+  unsupportedOversample.camera.cameraOversample = 4;
+  assert.equal(validateKoyaMangaProductionSchema(unsupportedOversample).pass, false);
 
   const mutations = [];
   for (const path of leafPaths(resolved.contract)) {

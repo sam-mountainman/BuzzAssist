@@ -5,9 +5,11 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
 import {
+  canReuseRenderedCut,
   applySpeechPronunciations,
   acquireMangaRenderLock,
   adoptEpisodeCutImages,
+  auditBubbleSegmentNaturalness,
   auditCameraSequencePolicy,
   buildEpisodeAudioMixFilter,
   cameraInterpolationExpression,
@@ -16,6 +18,8 @@ import {
   compileEpisodeTiming,
   exactCutMediaClock,
   generateEpisodeSpeech,
+  mangaBubbleDisplayText,
+  naturalBubbleSegmentsForLimit,
   normalizeSpeechPronunciations,
   normalizeEpisodeCamera,
   normalizeCameraShotSequence,
@@ -29,6 +33,49 @@ import {
   resolveEpisodeImageForCut,
   resolveThoughtFocusForUtterance,
 } from "../lib/mangaVideoPipeline.mjs";
+
+test("natural timed segmentation never emits a whitespace-only replacement", () => {
+  const source = "今日は晴れ？ 明日も晴れる。";
+  const segments = naturalBubbleSegmentsForLimit(source, 7);
+  assert.ok(segments.length > 1);
+  assert.equal(segments.join(""), source);
+  assert.ok(segments.every((segment) => segment.trim().length > 0));
+});
+
+test("Koya bubble display text removes only terminal Japanese periods", () => {
+  assert.equal(mangaBubbleDisplayText("内側。句点。", { stripTerminalJapanesePeriod: true }), "内側。句点");
+  assert.equal(mangaBubbleDisplayText("疑問？", { stripTerminalJapanesePeriod: true }), "疑問？");
+  assert.equal(mangaBubbleDisplayText("保持。", { stripTerminalJapanesePeriod: false }), "保持。");
+  const timedText = "最初の文です。次の文も続きます";
+  assert.equal(auditBubbleSegmentNaturalness(timedText, ["最初の文です。", "次の文も続きます"]).exactText, true);
+  assert.equal(mangaBubbleDisplayText(timedText, { stripTerminalJapanesePeriod: true }), timedText);
+});
+
+test("Japanese bubble replacement boundaries reject names, compounds, and inflections split mid-word", () => {
+  const text = "閉鎖予定の山間バス停で、佐藤誠司は最後の点検に立ち会っていた";
+  const bad = auditBubbleSegmentNaturalness(text, ["閉鎖予定の山間バス停で、佐藤誠", "司は最後の点検に立ち会っていた"]);
+  assert.equal(bad.pass, false);
+  assert.ok(bad.unnaturalBoundaries.length > 0);
+  const good = auditBubbleSegmentNaturalness(text, ["閉鎖予定の山間バス停で、", "佐藤誠司は", "最後の点検に立ち会っていた"]);
+  assert.equal(good.pass, true);
+
+  assert.equal(auditBubbleSegmentNaturalness(
+    "廃止申請には、その便を三か月利用した人はいないと記されていた",
+    ["廃止申請には、その便を三か月利", "用した人はいないと記されていた"],
+  ).pass, false);
+  assert.equal(auditBubbleSegmentNaturalness(
+    "翌月、朝の一本は通院する住民のために残された",
+    ["翌月、朝の一本は通院す", "る住民のために残された"],
+  ).pass, false);
+  assert.equal(auditBubbleSegmentNaturalness(
+    "この時刻表、午前七時十分の便だけ剥がされていますね",
+    ["この時刻表、午前七時十分の", "便だけ剥がされていますね"],
+  ).pass, false);
+  assert.equal(auditBubbleSegmentNaturalness(
+    "けれど、券売機の記録には毎週金曜日、同じ区間の回数券が使われています",
+    ["けれど、券売機の記録に", "は毎週金曜日、", "同じ区間の回数券が使われています"],
+  ).pass, false);
+});
 
 test("manual bubble clearance offsets translate transparent overlays without wraparound", () => {
   assert.equal(overlayTranslationFilter({}), "");
@@ -251,6 +298,69 @@ test("episode bubble overrides are rendered and invalidate stale review output",
   assert.equal(result.manifest.utterances[0].rasterizedOverlayPath, undefined);
   assert.deepEqual(result.refreshed[0].bounds, bounds);
   assert.match(await readFile(overlayPath, "utf8"), /短い台詞/);
+});
+
+test("split-page refresh resegments long dialogue for the guaranteed camera-visible window", async () => {
+  const projectDir = await mkdtemp(join(tmpdir(), "manga-split-bubble-refresh-"));
+  const rootDir = join(projectDir, "canvas", "manga-videos", "episode-split-bubble");
+  const overlaySpecsDir = join(rootDir, "overlay-specs");
+  const overlaysDir = join(rootDir, "overlays");
+  await mkdir(overlaySpecsDir, { recursive: true });
+  await mkdir(overlaysDir, { recursive: true });
+  const manifestPath = join(rootDir, "episode-manifest.json");
+  const overlaySpecPath = join(overlaySpecsDir, "cut-01-u01.json");
+  const overlayPath = join(overlaysDir, "cut-01-u01.svg");
+  const text = "残すべきものは、声の大きさではなく、確かめた事実で決めましょう";
+  await writeFile(overlayPath, "<svg/>");
+  for (const index of [1, 2]) await writeFile(join(overlaysDir, `cut-01-u01-s${index}.svg`), "<svg/>");
+  await writeFile(overlaySpecPath, JSON.stringify({
+    utteranceId: "cut-01-u01",
+    imageSize: { width: 1672, height: 941 },
+    bubble: { id: "bubble-cut-01-u01", text, preset: "dialogue", tail: false },
+    plan: { avoidRegions: [] },
+    profile: { id: "reference-video-locked-v3" },
+  }));
+  await writeFile(manifestPath, JSON.stringify({
+    id: "episode-split-bubble",
+    title: "分割ページ文字組みテスト",
+    status: "visuals-ready",
+    video: { width: 1920, height: 1080 },
+    cuts: [{
+      id: "cut-01",
+      imagePath: "/tmp/page.png",
+      timing: { durationSeconds: 8 },
+      panelLayout: {
+        enabled: true,
+        type: "story-3",
+        panels: [{}, {}, {}],
+        pageCameraMode: "top-only",
+        pageViewpoint: "top",
+        pageCamera: { zoomStart: 1.58, zoomEnd: 1.58, focusX: 0.5, focusY: 0.5, focusXEnd: 0.5, focusYEnd: 0.5 },
+      },
+    }],
+    utterances: [{
+      id: "cut-01-u01",
+      cutId: "cut-01",
+      speakerId: "speaker-a",
+      order: 1,
+      text,
+      preset: "dialogue",
+      overlaySpecPath,
+      overlayPath,
+      bubbleSegments: [
+        { id: "cut-01-u01-bubble-s1", text: text.slice(0, 16), overlayPath: join(overlaysDir, "cut-01-u01-s1.svg") },
+        { id: "cut-01-u01-bubble-s2", text: text.slice(16), overlayPath: join(overlaysDir, "cut-01-u01-s2.svg") },
+      ],
+    }],
+    outputs: {},
+  }));
+  const result = await refreshEpisodeBubbleOverlays({ projectDir, manifestPath, refreshAll: true, reflowPlacement: true });
+  const segments = result.manifest.utterances[0].bubbleSegments;
+  assert.equal(segments.length, 3);
+  assert.equal(segments.map((segment) => segment.text).join(""), text);
+  assert.ok(segments.every((segment) => Array.from(segment.text).length <= 13));
+  assert.equal(auditBubbleSegmentNaturalness(text, segments).pass, true);
+  assert.match(await readFile(segments[2].overlayPath, "utf8"), /決めましょう/u);
 });
 
 test("episode-wide bubble refresh carries two placements forward and avoids sequential repetition", async () => {
@@ -1139,6 +1249,56 @@ test("transient raster cache paths do not invalidate a completed cut hash", asyn
   segment.rasterizedOverlayPath = join(root, "cache-a.png");
   const after = await renderCutInputHash(manifest, cut, [utterance]);
   assert.equal(after, before);
+});
+
+test("interrupted, undecodable, or stale unselected cut files are never reused", () => {
+  const complete = { status: "complete", inputHash: "same" };
+  assert.equal(canReuseRenderedCut({
+    existingCut: true,
+    decodableCut: true,
+    previousJob: { status: "running", inputHash: "same" },
+    inputHash: "same",
+  }), false);
+  assert.equal(canReuseRenderedCut({
+    existingCut: true,
+    decodableCut: false,
+    previousJob: complete,
+    inputHash: "same",
+  }), false);
+  assert.equal(canReuseRenderedCut({
+    existingCut: true,
+    decodableCut: true,
+    previousJob: complete,
+    inputHash: "same",
+  }), true);
+  assert.equal(canReuseRenderedCut({
+    existingCut: true,
+    decodableCut: true,
+    previousJob: complete,
+    inputHash: "changed",
+    excludedBySelection: true,
+  }), false);
+  assert.equal(canReuseRenderedCut({
+    existingCut: true,
+    decodableCut: true,
+    previousJob: { status: "queued", inputHash: "changed" },
+    inputHash: "changed-again",
+    excludedBySelection: true,
+  }), false);
+  assert.equal(canReuseRenderedCut({
+    existingCut: true,
+    decodableCut: true,
+    previousJob: complete,
+    inputHash: "same",
+    excludedBySelection: true,
+  }), true);
+  assert.equal(canReuseRenderedCut({
+    existingCut: true,
+    decodableCut: true,
+    previousJob: complete,
+    inputHash: "same",
+    explicitlySelected: true,
+  }), false);
 });
 
 test("non-zero bubble fades still reserve two frame periods for a decoded clear frame", () => {
