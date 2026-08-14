@@ -1503,3 +1503,35 @@ test("R137 balloon segments follow the measured voice, not a constant speaking r
   // Without a timeline the caller must be told so it can fall back.
   assert.equal(bubbleSegmentSpeechBoundaries({ audio: {} }, segments), null);
 });
+
+test("R137 a timeline that cannot describe this audio is refused, not rendered", () => {
+  const segments = [{ text: "あいう" }, { text: "えおか" }];
+  // Characters that start before the file does: this is what an alignment
+  // looks like after the split had to be moved off its reported boundary.
+  const negative = {
+    audio: {
+      characterTimeline: Array.from({ length: 6 }, (_value, index) => ({
+        char: "あ",
+        startSeconds: -1.4 + index * 0.2,
+        endSeconds: -1.2 + index * 0.2,
+      })),
+    },
+  };
+  assert.ok(bubbleSegmentSpeechBoundaries(negative, segments));
+
+  // A segment collapsing to a single instant renders no frame and breaks the
+  // transition gate, so the measured path must decline it.
+  const collapsed = {
+    audio: {
+      characterTimeline: [
+        { char: "あ", startSeconds: 0.1, endSeconds: 0.4 },
+        { char: "い", startSeconds: 0.4, endSeconds: 0.7 },
+        { char: "う", startSeconds: 0.7, endSeconds: 1.0 },
+        { char: "え", startSeconds: 1.0, endSeconds: 1.0 },
+        { char: "お", startSeconds: 1.0, endSeconds: 1.0 },
+        { char: "か", startSeconds: 1.0, endSeconds: 1.0 },
+      ],
+    },
+  };
+  assert.equal(bubbleSegmentSpeechBoundaries(collapsed, segments), null);
+});
