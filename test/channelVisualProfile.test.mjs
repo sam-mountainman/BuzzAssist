@@ -82,7 +82,7 @@ test("character candidates and storyboard scenes inherit the locked channel prof
   assert.equal(workflow.visualProfile.id, "channel-lock");
 
   const candidates = await buildCharacterCandidateJobs(workflow, { candidateCount: 1 });
-  assert.equal(candidates.length, 1);
+  assert.equal(candidates.length, 2);
   assert.equal(candidates[0].referenceImagePaths.length, 2);
   assert.match(candidates[0].prompt, /CHANNEL VISUAL STYLE LOCK \[channel-lock\]/);
   assert.equal(candidates[0].customData.buzzassistChannelVisualProfileId, "channel-lock");

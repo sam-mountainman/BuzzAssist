@@ -62,12 +62,14 @@ import {
   getCharacterWorkflow,
   markCharacterCandidatesGenerating,
   prepareCharacterWorkflow,
+  publicCharacterWorkflow,
   readCharacterWorkflowStore,
   recordCharacterCandidateResults,
   updateCharacterWorkflow,
   validateStoryboardCharacterBindings,
   validateStoryboardVisualProfile,
 } from "../lib/characterPipeline.mjs";
+import { recordBlindCandidateVerdict } from "../lib/mangaBlindCandidateStore.mjs";
 import { resolveChannelVisualProfileSnapshot } from "../lib/channelVisualProfile.mjs";
 import { refineSilenceCutFromPlan, silenceCutVideo } from "../lib/tempoCut.mjs";
 import { estimateCreditsForJob } from "../lib/mediaCredits.mjs";
@@ -78,6 +80,7 @@ import { getElevenLabsStatus, listAllElevenLabsVoices, saveElevenLabsConfig, spe
 import { approveVoiceLibraryCasting, discoverVoiceLibraryCasting } from "../lib/voiceLibraryCasting.mjs";
 import { createEpisodeManifest, generateEpisodeSpeech, readEpisodeManifest, renderEpisodeVideo } from "../lib/mangaVideoPipeline.mjs";
 import { createMangaProductionDag, executeMangaProductionDag } from "../lib/mangaProductionDag.mjs";
+import { createKoyaMangaDagRuntime } from "../lib/koyaMangaDagRuntime.mjs";
 import { startChatBridgeWorker } from "../lib/chatBridge.mjs";
 import {
   isCompatibleCanvasServerStatus,
@@ -2365,7 +2368,6 @@ function toolDefinitions() {
                 invariants: { type: "array", items: { type: "string" } },
                 negativePrompt: { type: "string" },
                 stylePrompt: { type: "string" },
-                voiceId: { type: "string" },
               },
               required: ["name"],
               additionalProperties: false,
@@ -2456,8 +2458,7 @@ function toolDefinitions() {
         properties: {
           workflowId: { type: "string" },
           castId: { type: "string", description: "Workflow cast id or character name." },
-          candidateId: { type: "string" },
-          candidateIndex: { type: "number", minimum: 1, maximum: 10 },
+          candidateLabel: { type: "string", pattern: "^[A-Ea-e]$", description: "Anonymous winner label from the public judge packet." },
           approvalReason: { type: "string", minLength: 4, description: "Why this candidate won; preserve the user's taste judgment for later prompts and audits." },
           approvedBy: { type: "string", description: "Human or agent identity that made the selection. Defaults to user." },
           model: { type: "string", enum: IMAGE_MODEL_IDS },
@@ -2470,7 +2471,7 @@ function toolDefinitions() {
           projectDir: { type: "string" },
           canvasDir: { type: "string" },
         },
-        required: ["workflowId", "castId", "approvalReason"],
+        required: ["workflowId", "castId", "candidateLabel", "approvalReason"],
         additionalProperties: false,
       },
       annotations: {
@@ -2809,12 +2810,12 @@ function toolDefinitions() {
               type: "object",
               properties: {
                 characterId: { type: "string" },
-                voiceId: { type: "string" },
+                winnerLabel: { type: "string", pattern: "^[A-Ea-e]$", description: "Anonymous winner label from the audition sheet." },
                 newName: { type: "string", description: "Optional My Voices display name." },
                 previewConfirmed: { type: "boolean", description: "Must be true after the candidate preview was listened to." },
                 selectionReason: { type: "string", minLength: 4, description: "Concrete human reason for selecting this voice over the other audition candidates." },
               },
-              required: ["characterId", "voiceId", "previewConfirmed", "selectionReason"],
+              required: ["characterId", "winnerLabel", "previewConfirmed", "selectionReason"],
               additionalProperties: false,
             },
           },
@@ -3674,7 +3675,7 @@ async function handleToolCall(params, progress = () => {}) {
         type: "text",
         text: `Character workflow ${workflow.id}: ${workflow.cast.length} visual character(s), ${existing.length} matched to the registry, ${newCast.length} need ${workflow.candidateCount} candidate(s) each.`,
       }],
-      structuredContent: { workflow, existingCharacters: existing, newCharacters: newCast },
+      structuredContent: { workflow: publicCharacterWorkflow(workflow), existingCharacters: existing, newCharacters: newCast },
     };
   }
 
@@ -3697,7 +3698,11 @@ async function handleToolCall(params, progress = () => {}) {
           ? `Character workflow ${workflow.id}: ${workflow.status}; ${workflow.cast.length} cast member(s).`
           : `${store.workflows.length} character workflow(s); ${registry.characters.length} approved registry character(s).`,
       }],
-      structuredContent: workflow ? { workflow, registry } : { ...store, registry },
+      structuredContent: workflow ? { workflow: publicCharacterWorkflow(workflow), registry } : {
+        ...store,
+        workflows: (store.workflows || []).map(publicCharacterWorkflow),
+        registry,
+      },
     };
   }
 
@@ -3723,7 +3728,7 @@ async function handleToolCall(params, progress = () => {}) {
     if (jobs.length === 0) {
       return {
         content: [{ type: "text", text: `Workflow ${workflow.id} has no new characters that need candidates.` }],
-        structuredContent: { workflow, total: 0, succeeded: 0, failed: 0, results: [] },
+        structuredContent: { workflow: publicCharacterWorkflow(workflow), total: 0, succeeded: 0, failed: 0, results: [] },
       };
     }
     progress(0, jobs.length, `Preparing ${jobs.length} character candidates`);
@@ -3767,7 +3772,14 @@ async function handleToolCall(params, progress = () => {}) {
           ? `Payload preview for ${jobs.length} character candidate(s): ~${batch.estimatedCredits ?? "?"} credits.`
           : `Generated ${batch.succeeded}/${batch.total} character candidate(s). Workflow ${workflow.id} is ${updatedWorkflow.status}; wait for the user to choose one candidate per new character.`,
       }],
-      structuredContent: { ...batch, workflow: updatedWorkflow },
+      structuredContent: {
+        total: batch.total,
+        succeeded: batch.succeeded,
+        failed: batch.failed,
+        payloadPreview: batch.payloadPreview === true,
+        estimatedCredits: batch.estimatedCredits,
+        workflow: publicCharacterWorkflow(updatedWorkflow),
+      },
     };
   }
 
@@ -3794,9 +3806,21 @@ async function handleToolCall(params, progress = () => {}) {
     }
     const cast = findWorkflowCast(workflow, args.castId);
     if (!cast) throw new Error(`Unknown workflow character: ${args.castId}.`);
-    const selector = args.candidateId ?? args.candidateIndex;
-    const candidate = findWorkflowCandidate(cast, selector);
-    if (!candidate) throw new Error(`Unknown candidate for ${cast.name}: ${selector ?? "not specified"}.`);
+    const candidateLabel = nonEmptyString(args.candidateLabel).toUpperCase();
+    let candidate = findWorkflowCandidate(cast, candidateLabel);
+    if (!candidate) throw new Error(`Unknown anonymous candidate for ${cast.name}: ${candidateLabel || "not specified"}.`);
+    let verdictResult = null;
+    if (!args.payloadPreview) {
+      verdictResult = await recordBlindCandidateVerdict({
+        publicPath: candidate.blindPublicPacketPath,
+        privatePath: candidate.blindPrivateMappingPath,
+        winnerLabel: candidateLabel,
+        decidedBy: approvedBy,
+        reason: approvalReason,
+      });
+      candidate = findWorkflowCandidate(cast, verdictResult.selected.id);
+      if (!candidate) throw new Error(`Private mapping did not resolve anonymous candidate ${candidateLabel}.`);
+    }
     const identityPackJobs = buildApprovedIdentityPackJobs(workflow, cast, candidate, args);
     if (!args.payloadPreview) {
       await updateCharacterWorkflow(args, workflow.id, (current) => {
@@ -3834,7 +3858,13 @@ async function handleToolCall(params, progress = () => {}) {
     if (args.payloadPreview) {
       return {
         content: [{ type: "text", text: `Payload preview for ${cast.name}'s turnaround and expression/angle sheets: ~${batch.estimatedCredits ?? "?"} credits.` }],
-        structuredContent: { ...batch, workflow, cast, candidate },
+        structuredContent: {
+          payloadPreview: true,
+          estimatedCredits: batch.estimatedCredits,
+          workflow: publicCharacterWorkflow(workflow),
+          castId: cast.id,
+          candidateLabel,
+        },
       };
     }
     const turnaroundResult = batch.results[0] && !batch.results[0].error ? batch.results[0] : null;
@@ -3856,6 +3886,9 @@ async function handleToolCall(params, progress = () => {}) {
       workflowId: workflow.id,
       castId: cast.id,
       candidateId: candidate.id,
+      candidateLabel,
+      candidateSetId: verdictResult?.verdict?.setId || candidate.candidateSetId,
+      verdictDigest: verdictResult?.verdict?.digest || "",
       turnaroundResult,
       expressionResult,
     });
@@ -3872,7 +3905,7 @@ async function handleToolCall(params, progress = () => {}) {
     return {
       content: [{
         type: "text",
-        text: `Approved ${cast.name} candidate ${candidate.index}; recorded the selection reason, generated the turnaround and expression/angle sheets, and registered ${finalized.character.id} with a two-image identity pack.`,
+        text: `Approved ${cast.name} candidate ${candidateLabel}; recorded the blind verdict and selection reason, generated the turnaround and expression/angle sheets, and registered ${finalized.character.id} with a two-image identity pack.`,
       }],
       structuredContent: { ...finalized, turnaroundResult, expressionResult },
     };
@@ -4077,7 +4110,7 @@ async function handleToolCall(params, progress = () => {}) {
       const dag = JSON.parse(await readFile(dagPath, "utf8"));
       let state;
       try { state = JSON.parse(await readFile(statePath, "utf8")); } catch {}
-      let handlers = {};
+      let handlers = createKoyaMangaDagRuntime({ manifestPath });
       if (args.handlerModulePath) {
         const adapter = await import(`${pathToFileURL(resolve(args.handlerModulePath)).href}?v=${Date.now()}`);
         handlers = adapter.handlers || adapter.default || {};

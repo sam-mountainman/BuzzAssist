@@ -235,6 +235,42 @@
 
 | R115 | 品質ループは固定rubricの全項目、独立evaluator、具体的な証拠、失敗fingerprint、前roundからの修正差分を欠いた自己採点で合格してはならない。品質閾値・最大round・最大時間・最大費用・停滞上限を別々に判定し、同型事故はchecklist→恒久指示→機械hard gateへ昇格する | 実装済(v49契約) | quality loop v2を完全schemaへ追加。全rubric項目、evaluator context分離、具体メモ、hash-bound evidence、hard-gate契約digest、failure fingerprint、直前failure参照、再試行差分を必須化。観測時刻から経過時間を算出し、`needs-human-approval / budget-exhausted / blocked`を区別。同型事故の昇格ロジックを維持 |
 
+| R116 | ユーザー直接指示（2026-08-13）: 残っている改善をすべて実施する。品質ループ・独立評価provenance・証拠Merkle・匿名Best-of-N・事故昇格・公式DAG runtimeを本番経路へ接続し、旧契約で完成した実作品を現行契約で再監査し、さらに未見台本canaryで新規制作の再現性を実証してリモートへ反映する | 実装済(v50契約) | `full/audit/signoff`の終端条件を実round stateへ接続し、generator/reviewerのhost・ID・contextを別々に拘束。公開judge packetと秘密対応表、実ファイル再hash＋Merkle root、`final-decision.json`と`quality-loop-state.json`、既定DAG runtimeを本番接続した。写真店作品、旧v46荒野作品、完全未見canaryの3本で実MP4・独立context・全尺decode・空の未解決事項まで実証 |
+
+| R117 | 表示上の末尾句点を除く契約は、台本本文や音声本文を書き換えず、旧SVG・新規台本・分割セグメントのすべてへ同じhard gateとして適用する | 実装済(v50) | `bubbleDisplayPolicy.preserveAuthoredSpeechText`と全SVG再生成を契約化。実MP4由来typography監査で末尾`。`と原文一致を独立検査し、同型事故2件をincident ledgerのhard-gateへ昇格 |
+
+| R118 | 未見台本canaryと旧作品再準備で得た失敗を新規台本の既定品質へ一般化する。flatten済み分割ページ全顔、自然な日本語分節、顔検出誤検知、ナレーション主体長編の画面保持、旧承認音声・生成provenanceの保全を場当たり修正にしない | 実装済(v50) | 合成後1920×1080分割ページへ複数一意顔注釈と0件停止を導入。Intl.Segmenter由来の語境界監査で固有名詞・複合語・活用・助詞直前分割を拒否。吹き出し内cascade候補は直前直後のclear frameへ同位置顔が無い場合だけ誤検知除外。ナレーションと隣接台詞を最大2発話で共有し、代表画は台詞人物を優先。legacy stateの実生成者provenanceとdialogue alignmentに完全一致する既存PCMだけを復元し、有料再生成を防止 |
+
+| R119 | v50長尺再レンダーで判明した実運用退行を新規制作へ残さない。timed segmentの文中句読点、計画矩形と実overlayの座標差、3倍oversampleのメモリ飽和、中断partial MP4、同一パス上書き後の旧STT cache誤再利用をfail-closedで防ぐ | 実装済(v50) | 表示全文にだけ末尾句点処理を行いsegment本文を保持。独立顔監査v5は実overlay PNGのalpha bboxを使用。3倍oversampleは約6GiB/jobで物理メモリ・CPU連動（16GiB既定2）。cut再利用は`status=complete`かつffprobeでvideo stream/正尺を確認。STT cacheは認識時PCM SHA-256と順序付き発話digestの完全一致だけを許す。一般化事故10件をtracked seed `config/koya-manga-quality-incidents.json`へ格納し、実行時台帳と強い昇格状態を保ってマージする |
+
+| R120 | 荒野旧作品の実MP4監査で見つかった小顔・非話者顔・flatten済みページ顔を、新規台本でも話者判定に依存せず0px保護する。自動検出漏れは画像hash拘束付き原寸レビューで補い、分割座標は実overlay寸法へ展開する | 実装済(v50) | 全検出顔を`face + hardProtection=true`へ統一。`sourceAvoidRegionsInOverlaySpace`は契約1920x1080ではなく各specの実`imageSize`を使用。独立実MP4監査由来の補足顔レビューをSHA-256・reviewer・時刻へ拘束し、元画像変更時は拒否する回帰テストを追加 |
+
+| R121 | 顔保護を強めた結果の狭い配置でも、文字縮小・顔保護緩和・空白だけの時限吹き出し・全件への先回り複数列化で解決しない | 実装済(v50) | 日本語語境界で12字以下への再分割を試し、成立しない場合は承認済み自然分割を維持。通常レイアウトが衝突または組版hard gateに失敗したsegmentだけ2〜3列へ退避し、空白だけのsegmentを生成前に拒否する回帰テストを追加 |
+
+| R122 | 独立顔cascadeは光点・図形の低信頼誤検知を除外しつつ、遠景やスマホ内の小さい実顔を落とさない | 実装済(v50) | `detectMultiScale3`のlevelWeightを証拠化し、荒野編の実顔陽性（約1.8以上）と発光点陰性（-0.088）から保守的に1.0へ校正。高信頼候補には従来の0px重なり判定を維持し、陽性・陰性双方を回帰テストへ固定 |
+
+| R123 | 実overlay PNGのalpha bboxは、元SVG/spec寸法ではなく、実際にdecodeしたPNG固有のpixel寸法で正規化する。制作時のraster resizeがあっても監査矩形を膨張・移動させない | 実装済(v50) | 独立顔監査v6は各raster PNGからalpha bboxと実`imageSize`を同時取得し、その座標系で正規化してから必要なpage-camera投影を行う。1920x1080 PNGと1672x941 specが異なる回帰ケースを固定 |
+
+| R124 | 自動顔検出が顕著な顔を見落とし、opaque吹き出しで完全に隠した後はrendered cascadeでも復元できない。独立知覚レビューの実MP4指摘を元画像SHA拘束注釈へ戻し、重要証拠物も同じカメラ全区間0px契約で保護する | 実装済(v50) | `koya-source-region-review-v2`を導入し、face/hand/prop/evidence/textを画像hash・発話ID・根拠へ拘束。`hardProtection=true`の重要領域を`protected-*`へ投影し、候補配置で1pxでも重なれば拒否。荒野編385秒の顔、100/253/280秒のスマホ・地球儀・世界地図を回帰対象化 |
+
+| R125 | 連続ナレーションをhold最適化だけで同一画像へ統合し、後続文専用の視覚証拠を消してはならない | 実装済(v50) | ナレーション同士は目的別画像を保持し、narration↔dialogueの意味的bridgeだけ従来どおり最大2発話共有。荒野編の「結婚」から「子供二人」へ専用家族画像が切り替わる回帰テストを追加 |
+
+| R126 | 自動cascadeが別人物の大きな顔を発話者primaryへ誤対応しても、正しい手動話者顔を無視しない。ナレーション中を含むカメラ移動全区間で、同一画面の全人物頭部を0px保護する | 実装済(v50) | hash拘束付き手動発話者顔を自動primaryより常に優先し、自動hitは非話者hard obstacleとして保持。`purpose-reflection`ナレーションは直前対話へ統合せず承認済み専用画像を保持。荒野編45.802〜58.092秒のさくら頭髪と282秒付近の荒野右目を独立全編レビューが検出し、cut-01/cut-07の全人物頭部注釈と回帰テストへ固定 |
+
+| R127 | 群衆画面の心の声で自動cascadeが背景人物を主人公primaryへ誤同定しても、明部を背景へ向けない。分割ページの独立顔監査は、腕時計や文字を顔と誤検知しても実顔保護を弱めず判別する | 実装済(v50) | `cut-03-u01`主人公頭部を元画像SHA-256拘束注釈へ戻し、thought明部・カメラ焦点・吹き出し回避を同じ正しいprimaryへ再構築。独立顔監査は合格閾値超過候補をbubble-clear frameへwhole-page camera再投影し、そこに同一顔がないoverlay由来候補だけを除外する回帰テストを追加 |
+
+| R128 | `render --cut-ids`は再構築する最小集合であり、選択外cutの現在入力が前回完成bindingと同一なら再利用する。decode可能でもimage/audio/overlay/camera入力hashが変わった旧cutは再利用しない | 修正済(v50) | 当初の「選択外はdecodeできれば保持」が、prepare後の新SVGと旧overlay PNG/MP4を混在させ、荒野編cut-08のtypography監査を落とした。選択外にも`complete + inputHash一致 + ffprobe decode`を必須化し、入力変更cutは指定外でも再構築する回帰へ修正 |
+
+| R129 | 思考スポットライト監査はmanifestの正規化前focusを実cropとして扱わず、レンダーが終端zoomの安全範囲へclampした後のcamera/keyframesで顔を投影する | 実装済(v50) | 荒野編cut-03の生focus `0.68/0.195` がレンダー時 `0.531037/0.468963` へ正規化される差を固定。監査も同じpull-out正規化を行い、実MP4の5点すべてで主人公顔明度比1.01以上・周囲暗部ありを検証する回帰テストを追加 |
+
+| R130 | 別カットで一度手動顔注釈を追加しても、同一人物の別画像へ注釈を推測流用しない。独立全尺レビューで次の検出漏れが見つかったら、当該元画像を原寸再計測してhash拘束する | 実装済(v50) | 荒野編第3独立レビューが、既知8回帰点の修復確認後、指定外の305.25〜307.25秒で`cut-07-u04`の発話者・荒野の顔全体を吹き出しが覆うことを新規検出。元画像SHA-256 `52993cc5…b938c30`へ頭部注釈を拘束し、実設定ファイルを読む回帰テストを追加 |
+
+| R131 | 反射・鏡像・写真内の顔も、本人の手前顔とは別の可視顔として同一元画像内に全件在庫化する | 実装済(v50) | 荒野編第3独立レビューが324〜328秒で窓反射の荒野顔への重なりを検出。`cut-07-u05`の手前頭部と窓反射頭部を同じ画像SHA-256 `e97fcc83…b04668e`上の別ID・別矩形でhard face化し、両方の実設定を回帰テストへ固定 |
+
+| R132 | source-face detectorが無効注釈・hash不一致・実行エラーで失敗したとき、前回の合格`source-face-placement.json`を今回の証拠として再利用しない | 実装済(v50) | detector起動前に対象の派生reportを正確に削除し、今回呼び出しが新規reportを生成できなければprepareを例外停止。stale `pass:true`を事前配置した回帰テストで受理しないことを固定 |
+
+| R133 | 部分レンダーで選択外cutを再利用するとき、旧MP4へ現在の入力hashを上書きして「一致したこと」にしてはならない | 実装済(v50) | 荒野編のcut-07修復時にcut-08の旧PNG/MP4を保持したまま、新SVGのhashをjobへ保存していたため、実ラスター監査だけが不一致を検出した。再利用判定をjob更新より先に厳格化し、staleな選択外cutは再レンダーする |
+
 ## パイプライン不変条件（違反禁止）
 
 1. **画像変更（差し替え・クロップ・統合・構図変更）には、同一変更内で顔・領域アノテーションの再計測を必ず伴うこと。** 旧座標の流用が v31→v36、v38パネル、v38オーバーライドで3度同型の退行を起こした。

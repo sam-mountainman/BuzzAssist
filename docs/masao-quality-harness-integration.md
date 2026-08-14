@@ -133,7 +133,7 @@ VTTはYouTubeのローリング字幕で重複行が多いため、出現回数�
 - 最大round、費用、時間、改善停止で自動停止し、人間へエスカレーション。
 - 評価証拠、費用、経過時間、次の行動を外部状態へ保存。
 
-v2ではさらに、全rubric項目、generatorと異なるevaluator context、具体的なメモ、SHA-256に結ばれた証拠を必須にした。不合格roundはfailure fingerprintを持ち、再試行は直前fingerprintと修正差分を参照する。時間は呼び出し側の自己申告加算ではなく`startedAt`からの観測時刻で判定する。
+v3ではさらに、全rubric項目、generatorと異なる実Codex task/Claude session context、具体的なメモ、実ファイル再hash済み証拠、証拠Merkle rootを必須にした。不合格roundはfailure fingerprintを持ち、再試行は直前fingerprintと修正差分を参照する。時間は呼び出し側の自己申告加算ではなく`startedAt`からの観測時刻で判定する。
 
 ### 判断ルーターと承認証跡
 
@@ -141,12 +141,12 @@ v2ではさらに、全rubric項目、generatorと異なるevaluator context、�
 - 単一提案の曖昧点は赤ペン型の3±1問へ圧縮する。
 - 主観・ブランド・有料で複数候補がある判断はhuman Best-of-Nへ送る。
 - rubricで比較できる低リスク判断だけfresh evaluatorのblind Best-of-Nへ送る。
-- 匿名候補は2〜5件、`variationAxis`重複禁止、artifact必須。対応表は`setId`、採用ラベル、判定者、時刻、具体的理由を持つverdict確定後だけ開示する。
+- 匿名候補は2〜5件、`variationAxis`重複禁止、artifact必須。公開packetはA〜E・匿名artifact・SHA-256だけ、provider・元ファイル・内部ID・生成順・variation axis対応表は別のprivate mappingへ物理分離する。対応表は`setId`、採用ラベル、判定者、時刻、具体的理由を持つverdict確定後だけ開示する。キャラクター画像と音声試聴MP3の双方で実ファイルhashを採用前に再検証する。
 - 幸谷のキャラクター承認CLIは`--approval-reason`を必須にし、声の採用も`selectionReason`と人間reviewerをレジストリへ保存する。
 
 ### 最終品質決定
 
-`quality-harness-final`を事前ゲートの別名として扱う経路を廃止した。公式`koya-manga-video.mjs audit`の最後で、自分自身を除く全必須監査を集約し、各適用監査の証拠ファイルSHA-256、正本契約digest、実MP4 SHA-256へ拘束した`final-decision.json`と`quality-loop-state.json`を作る。
+`quality-harness-final`を事前ゲートの別名として扱う経路を廃止した。公式`koya-manga-video.mjs audit`の最後で、自分自身を除く全必須監査を集約し、各適用監査の証拠ファイルSHA-256、正本契約digest、実MP4 SHA-256、証拠Merkle manifestへ拘束した`final-decision.json`と`quality-loop-state.json`を作る。generatorとreviewerのhost・ID・context IDが同じなら、表示名を変えても拒否する。
 
 - 全監査と知覚署名が揃う: `passed`
 - 機械監査は全合格で知覚署名だけ未完了: `needs-human-approval`
@@ -162,11 +162,11 @@ v2ではさらに、全rubric項目、generatorと異なるevaluator context、�
 - 2回目: instruction
 - 高影響かつ機械判定可能な事故が2回: hard-gate
 
-例として、文字はみ出しは再発時に吹き出し自動ゲートへ昇格する。
+一般化済み事故はtracked seed `config/koya-manga-quality-incidents.json`へ同梱し、無視対象の実行時台帳とマージする。強い昇格状態を弱いローカル記録で上書きしない。例として表示末尾句点は2回の再発でhard gateへ昇格済みである。
 
 ### 制作DAG
 
-`lib/mangaProductionDag.mjs` をv3へ更新した。
+`lib/mangaProductionDag.mjs` をv4へ更新し、`lib/koyaMangaDagRuntime.mjs`の組み込みhandlerをCLI/MCPの既定へ接続した。handlerのないproduction nodeを成功扱いせず、画像、音声、cut MP4、最終MP4、最終監査の実ファイルを再検証する。
 
 ```text
 script-analysis
@@ -202,17 +202,48 @@ npm run manga-video:preflight -- \
 
 ## 実データ確認
 
-`manga-photo-homecoming-001` の実MP4をv49へ同期し、公式最終監査を二段階で実証した。
+`manga-photo-homecoming-001` の実MP4を現行v50へ同期し、公式最終監査を二段階で実証した。
 
-1. 旧v48知覚署名のまま監査すると、機械監査15項目と全尺デコードは合格したが、契約digest不一致を検出。`final-decision.json`は`needs-human-approval / perceptual-signoff-required`で停止し、`quality-harness-final`も不合格になった。
-2. 同一MP4 SHA-256、実MP4由来contact sheet、代表4フレーム、v49契約digestへ拘束したCodex知覚レビューを作成し、再監査した。最終17監査は17/17合格、`quality-harness/final-decision.json`は`passed`、16独立監査証拠は全件SHA-256付き、`knownRemainingIssues=[]`、manifestは`final-koya-audited`になった。
+1. 旧知覚署名のまま監査すると、機械監査15項目と全尺デコードは合格したが、契約digest不一致を検出。`final-decision.json`は`needs-human-approval / perceptual-signoff-required`で停止し、`quality-harness-final`も不合格になった。
+2. 同一MP4 SHA-256、実MP4由来contact sheet、代表フレーム、v50契約digestへ拘束したCodex知覚レビューを作成し、再監査した。最終17監査は17/17合格、`quality-harness/final-decision.json`は`passed`、16独立監査証拠は全件SHA-256付き、`knownRemainingIssues=[]`、manifestは`final-koya-audited`になった。
 
 実証値:
 
-- 契約: `koya-manga-production-v49`
-- エピソード固有契約digest: `31b44d5066eeaae342ca5b1d7965d974bad6fac76131d1d57ddb2dcd40317108`
-- 実MP4 SHA-256: `4c0ecf9f9216a8d7a7d8ff5eea98c9bf3f03117413fd6b769f4c8c5be8cc722b`
+- 契約: `koya-manga-production-v50`
+- エピソード固有契約digest: `76f143ce214ed0f6448b41e3835a7b65a156a11cdb3f0e9b5f550c598cff5431`
+- 実MP4 SHA-256: `5a1df1c01a2dd0d49f31a03a39747542496e5a897ebce09b41855564f063709a`
 - 実デコード尺: `149.087696`秒、1920×1080、30fps、H.264/AAC
 - 最終監査: 17/17、品質決定証拠: 16/16、未解決事項: 0
 
-検証は全458リポジトリテスト、公式`skill-creator` validatorによる制作・カメラ両スキル、Node構文検査、`git diff --check`でも合格した。
+この時点の検証は全491リポジトリテスト、公式`skill-creator` validatorによる制作・カメラ両スキル、Node構文検査、`git diff --check`でも合格した。以後の荒野編修復で追加した回帰テストは最終検証値へ更新する。
+
+## 未見canaryから追加した恒久ゲート
+
+v50の完全未見台本では、機械監査だけでは拾えない実MP4上の退行を、生成担当とは別のCodex contextが検出した。修正前レビュー自体を失敗証拠として保存し、次をハーネスの既定動作へ戻した。
+
+- 分割ページはpanel単体の顔座標を信用せず、黒ガター合成後の1920×1080完成ページから全顔在庫を作る。同じ発話に複数顔があっても固有annotation IDで保持し、0件なら停止する。
+- 縦書きセグメントは文字数だけで切らない。日本語の語境界を使い、固有名詞、複合語、活用語、助詞・助動詞の直前を切った`佐藤誠／司`、`利／用`、`回数／券`、`数／字`、`通院す／る`のような分割をhard gateで拒否する。
+- cascadeが吹き出し輪郭を顔と誤認した場合、表示直前・直後のclear frameに同じ光学座標の顔が存在するかを独立照合する。両方に無い80%以上被覆候補だけをoverlay由来artifactとして除外し、実顔は除外しない。
+- ナレーション比率が高い長編を発話ごとに75枚切り替えない。隣接ナレーションと台詞を最大2発話で共有し、ナレーション先行でも台詞人物が写る承認済みページを代表画にする。編集監査の複数発話共有率と保持中央値を実MP4から再計測する。
+- 旧作品を現行契約へ移行するときは生成者を現在のtaskへ付け替えない。stateに残る実legacy provenanceを計画へ永続化し、承認済みWAVは発話ID・表示文・読み適用後speech text・voice ID・model・実ファイル・alignment pathが完全一致したものだけ復元する。
+
+これにより、失敗レビューは「当該動画だけの修正指示」ではなく、source face、組版、レンダー顔監査、編集テンポ、移行保全の回帰テストと日本語スキル指示へ変換される。
+
+未見canaryの完成MP4はSHA-256 `171154a74079bd7fd66c9ace18a8724272f6be214512562b316de254ac8d6b1d`、44.687696秒で、公式17/17監査、別Codex context `019ff803-e496-7b71-917b-0aa390689734`の全尺レビュー、`knownRemainingIssues=[]`まで到達した。
+
+## 荒野長尺編の二段階独立レビュー
+
+75発話・約9分の`manga-arano-amane-effort-001`では、短編とcanaryの合格だけでは発見できなかった長尺固有の失敗を、別Codex contextの全尺レビューで二段階に検出した。
+
+1. context `019ff988-7158-70c0-85c1-ae8e771fa009`は、主人公顔への四角ナレーション枠、スマホ・地球儀・世界地図への吹き出し、子供二人の台詞と夫婦だけの画面という5件を検出した。修正前fail JSONは削除せず証跡として保存した。
+2. 5件修復後のcontext `019ffa57-ac18-70b3-bc4b-cc55f453d23b`は、旧5件の修復を確認した一方、45.802〜58.092秒の頭髪重なりと約282秒の目・顔重なりを新たに検出し、13チェック中2件fail、`knownRemainingIssues` 2件として再び停止した。
+
+二度目の停止から次を新規台本の既定へ一般化した。
+
+- 自動cascadeの最大顔には人物同定能力がない。画像SHA-256拘束の手動発話者顔がある場合は、auto hitが存在してもprimaryを必ず上書きする。auto hit自体は非話者hard obstacleとして残す。
+- 二人画面は発話者だけでなく全人物の頭部を在庫化し、カメラ33点の全区間へ投影する。
+- `purpose-reflection`ナレーションは直前の混雑した対話画像へ統合せず、既に承認された専用画像を保持する。専用画の追加で後続カメラ多様化列をずらさない。
+- 画面端の対話話者は、反対側から横断するカメラを使わず、話者を全区間可視に保つanchored pull-outへ固定する。
+- flatten済み分割ページは方向移動で可視窓を狭めず、中央pull-outへ固定しつつ、後続の多様化順序は維持する。
+
+最終MP4のSHA・独立review context・公式監査値・DAG結果は、修復後の最終レビュー完了時点でこの節へ固定する。

@@ -49,6 +49,190 @@
         "文書やスマホを無地または非言語色面にし、疑似文字を禁止する",
         "場面・視線・行動・因果の編集連続性をレビューする"
       ]
+    },
+    {
+      "id": "anonymous-character-and-voice-selection",
+      "prompt": "新キャラと声を複数案から選びたい。おすすめ順や提供元に引っ張られない形で出して。",
+      "expectedBehavior": [
+        "画像も音声も最低2候補をA〜Eの匿名artifactとして提示する",
+        "provider、内部ID、生成順、variationAxis対応表をpublic packetへ出さない",
+        "採用ラベルと具体的理由をdigest付きで保存してからprivate mappingを開く",
+        "採用前に実artifactのSHA-256を再検証する"
+      ]
+    },
+    {
+      "id": "independent-v50-final-review",
+      "prompt": "自分で作った動画だから、そのまま自分で合格にして納品して。",
+      "expectedBehavior": [
+        "generatorの実Codex task IDまたはClaude session IDを保持する",
+        "同じcontextによる自己署名を別名でも拒否する",
+        "別contextの評価者に9項目すべてを採点させ、最低1品質roundを記録する",
+        "実在証拠hashとMerkle rootが一致しない限りfinal-decisionをpassedにしない"
+      ]
+    },
+    {
+      "id": "repeated-incident-and-dag-resume",
+      "prompt": "前回と同じ失敗を防いで、DAGの途中から再開して。未実装ノードも成功扱いにしないで。",
+      "expectedBehavior": [
+        "永続incident ledgerから昇格済み指示とhard gateを新規品質契約へ取り込む",
+        "公式DAG runtimeで実artifactを検証し、handlerのないproduction nodeを完了扱いにしない",
+        "input hashが一致する実在成果だけ再利用し、欠落artifactのstageを明示して停止する"
+      ]
+    },
+    {
+      "id": "legacy-bubble-punctuation-repair",
+      "prompt": "旧作品の四角ナレーション枠に末尾の句点が残っている。音声と台本本文は変えず、今後の新規台本でも再発しないよう全部直して。",
+      "expectedBehavior": [
+        "公式refresh-bubblesで全SVGの表示文字列だけを再生成する",
+        "元の発話テキストと承認済み音声を変更しない",
+        "force再レンダー後に全SVG data-textの末尾句点を機械監査する",
+        "回帰テスト、恒久指示、既存episode、新規canaryへ同じhard gateを反映する"
+      ]
+    },
+    {
+      "id": "source-face-detector-fallback",
+      "prompt": "新規漫画の画像QAは通ったけど、顔自動検出が3枚だけ失敗して制作が止まった。安全に続けて。",
+      "expectedBehavior": [
+        "対象の実画像を原寸で目視し、発話者の顔領域を正規化座標で測る",
+        "発話ID、話者ID、画像SHA-256、具体的根拠をkoya-source-face-review-v1へ保存する",
+        "公式CLIの--source-face-review-pathで再開し、画像hashや話者が違えば拒否する",
+        "最終MP4では別系統の顔監査を実行し、手動領域だけで合格にしない"
+      ]
+    },
+    {
+      "id": "flattened-split-page-face-inventory",
+      "prompt": "分割ページの最後の吹き出しが左パネルの話者顔を隠した。通常発話画像の顔座標はあるのに監査も通っていた。今後も含めて直して。",
+      "expectedBehavior": [
+        "個別発話画像の座標を流用せず、黒ガター合成後のflatten済みページを原寸確認する",
+        "同じページの全パネル人物へ一意ID付き複数顔注釈を作り、最終ページSHA-256へ拘束する",
+        "全注釈を全分割ページ発話のハード回避領域へ反映して吹き出しを再配置する",
+        "対象カットを再レンダーし、別contextの実MP4レビューで顔0px重なりを再確認する"
+      ]
+    },
+    {
+      "id": "japanese-lexical-bubble-segmentation",
+      "prompt": "縦書き吹き出しが『佐藤誠／司』『回数／券』『通院す／る』のように途中で切れて読みにくい。新規台本でも直して。",
+      "expectedBehavior": [
+        "文字数だけで再分割せず日本語の語境界を使う",
+        "固有名詞、複合語、活用語、助詞・助動詞の直前をsegment境界にしない",
+        "台本本文と音声本文を変更せず表示segmentだけを再構築する",
+        "実MP4由来フレームとbubble-typographyのnaturalSegmentation hard gateを両方確認する"
+      ]
+    },
+    {
+      "id": "timed-segment-punctuation-preservation",
+      "prompt": "表示末尾の句点だけ消したい。長文を複数の吹き出しへ切り替えても、文中の句読点まで消さないで。",
+      "expectedBehavior": [
+        "表示全文へ末尾句点除去を一度だけ適用する",
+        "timed segmentごとには句読点除去を再適用しない",
+        "読点、疑問符、感嘆符、文中の句点をsegment本文へ保持する",
+        "台本・音声原文不変と実SVGのdata-textを回帰テストする"
+      ]
+    },
+    {
+      "id": "actual-raster-face-audit-and-memory-cap",
+      "prompt": "長尺を3倍解像度でレンダーして顔重なり監査して。配置計画と実映像がずれても誤判定せず、16GB端末も固めないで。",
+      "expectedBehavior": [
+        "顔重なり監査の吹き出し領域を実overlay PNGのalpha bboxから測る",
+        "alpha bboxは元SVGやspecの寸法ではなくdecodeした実PNGのpixel幅・高さで正規化する",
+        "実ラスターがある場合に配置計画矩形を監査座標として使わない",
+        "3倍oversampleでは物理メモリとCPUから既定並列数を決める",
+        "16GiB級端末の既定を2並列以下にし、明示overrideだけを尊重する"
+      ]
+    },
+    {
+      "id": "same-path-stt-cache-invalidation",
+      "prompt": "同じ出力パスへMP4を再レンダーした。音声が同じならSTTを再利用し、変わっていたら必ず再認識して。",
+      "expectedBehavior": [
+        "STT行作成時に保存したdecoded PCM SHA-256を現在PCMと比較する",
+        "順序付き発話IDと音声本文digestも完全一致させる",
+        "cache内のvideoPathを再抽出して旧結果を正当化しない",
+        "PCMまたは期待本文が変わればcache missとしてfresh STTを実行する"
+      ]
+    },
+    {
+      "id": "non-speaker-and-split-raster-face-protection",
+      "prompt": "分割ページとスマホ画面の小さい非話者顔に吹き出しが重なる。正規化座標はあるのに実素材では少しずれている。新作でも防いで。",
+      "expectedBehavior": [
+        "発話者か否かを問わず検出した全人物顔をfaceかつhardProtection=trueの0px回避領域にする",
+        "分割ページの正規化顔矩形を固定1920x1080ではなくoverlay specの実imageSizeで展開する",
+        "独立実MP4監査で判明した検出漏れは原寸目視し、実画像SHA-256へ拘束した補足注釈として保存する",
+        "対象を再配置・再レンダーし、配置系と別系統の顔監査で0px重なりを確認する"
+      ]
+    },
+    {
+      "id": "safe-adaptive-bubble-layout",
+      "prompt": "顔保護を強めたら長文吹き出しが置けない。文字を小さくしたり顔保護を弱めたりせず直して。空白だけの切替も出さないで。",
+      "expectedBehavior": [
+        "日本語語境界でtimed segmentを再構築し、空白だけのsegmentを拒否する",
+        "通常の1列配置を先に試し、衝突または組版hard gate失敗時だけ自然な2〜3列へ退避する",
+        "顔のhardProtection、最低font size、完全な表示本文を維持する",
+        "全segmentの実SVG組版と実MP4顔重なりを再監査する"
+      ]
+    },
+    {
+      "id": "rendered-face-confidence-calibration",
+      "prompt": "実MP4顔監査が地図の発光点を顔と誤検知した。でも小さい本物の顔は落としたくない。",
+      "expectedBehavior": [
+        "cascadeのlevelWeightなど検出confidenceを証拠へ保存する",
+        "既知の実顔サンプルで校正した閾値未満の低信頼候補だけを除外する",
+        "高信頼候補はoverlay被覆やclear frame照合だけで消さない",
+        "誤検知フレームと小顔の陽性フレームを回帰テストへ固定する"
+      ]
+    },
+    {
+      "id": "opaque-bubble-hidden-face-and-story-evidence",
+      "prompt": "四角いナレーション枠が自動検出漏れの主人公の顔を完全に隠し、別の吹き出しもスマホや世界地図を覆った。新規台本でも防いで。",
+      "expectedBehavior": [
+        "独立実MP4レビューで顔が完全遮蔽された場合も、元画像を原寸確認して画像SHA-256拘束のface注釈へ戻す",
+        "台詞理解に不可欠なスマホ・地図・賞状等をevidenceまたはprop領域として同じ画像hashへ拘束する",
+        "hardProtection=trueの顔と重要領域をカメラ全区間の0px hard obstacleへ投影する",
+        "配置座標を共有しない独立実MP4レビューで顔と重要物を再確認する"
+      ]
+    },
+    {
+      "id": "successive-narration-semantic-image-retention",
+      "prompt": "『結婚した。子供も二人授かった。』という連続ナレーションなのに、子供の台詞中も夫婦しか映っていない。",
+      "expectedBehavior": [
+        "同じナレーターという理由だけで意味の異なる専用画像を統合しない",
+        "結婚から子供二人へ可視事実が変わる位置で該当画像へ切り替える",
+        "長いholdの数値目標より台詞と画面の意味一致を優先する",
+        "実MP4全尺レビューで当該台詞区間の視覚証拠を確認する"
+      ]
+    },
+    {
+      "id": "wrong-person-cascade-primary-during-camera-sweep",
+      "prompt": "顔自動検出は成功扱いなのに、二人画面で別人を発話者として扱い、カメラ移動中だけナレーション枠が髪、台詞吹き出しが目へ重なった。新作でも防いで。",
+      "expectedBehavior": [
+        "自動cascadeの最大顔を人物IDの根拠にせず、実画像を原寸で見て同一画面の全人物頭部を在庫化する",
+        "画像SHA-256拘束の手動発話者顔がある場合は自動primaryを必ず上書きし、自動hitは非話者hard obstacleとして残す",
+        "内面の選択を示すpurpose-reflectionナレーションを直前の対話画像へ潰さず、承認済み専用画像を保持する",
+        "頭髪を含む全顔領域をカメラ全区間へ投影し、1pxでも重なる候補を拒否する",
+        "開始・中間・終了だけでなく独立全編レビューで移動途中も確認し、失敗レビューを削除せず修復前証跡として残す"
+      ]
+    },
+    {
+      "id": "crowded-thought-primary-and-panel-clear-frame-reprojection",
+      "prompt": "群衆画面の心の声で背景人物だけが明るく、主人公が暗い。分割ページ監査は腕時計を顔として不合格にした。実顔保護を緩めず新作でも防いで。",
+      "expectedBehavior": [
+        "群衆画面のthoughtは自動最大顔を人物同定に使わず、主人公頭部を原寸確認して画像SHA-256とspeakerIdへ拘束する",
+        "hash拘束付き主人公顔をspotlight中心・カメラ焦点・吹き出し回避のprimaryとして全区間へ適用する",
+        "実MP4監査もrendererと同じcamera mode正規化と終端zoom基準safe focus clamp後のkeyframesで顔を投影する",
+        "合格閾値超過のcascade候補は直前直後のbubble-clear frameへwhole-page camera変換を反映して再探索する",
+        "clear frameに同一候補がなければ腕時計・文字等のoverlay由来として除外し、再投影後に存在する実顔は除外しない",
+        "実MP4のthought開始・中間・終了と分割ページ対象時刻を独立監査してから合格にする"
+      ]
+    },
+    {
+      "id": "targeted-render-reuses-only-current-bound-unselected-cuts",
+      "prompt": "cut-03だけを直したので部分再レンダーして。prepareが全吹き出しSVGを更新した可能性もある。変更のないcutは作り直さず、入力が変わったcutを古いMP4のまま残さないで。",
+      "expectedBehavior": [
+        "公式CLIのrenderへ--cut-ids cut-03を渡し、指定を再構築する最小集合として扱う",
+        "選択外cutも前回complete checkpoint、現在と一致するimage/audio/overlay/camera入力hash、ffprobe実decodeの3条件で再利用可否を決める",
+        "decode可能でもprepareやrefresh-bubblesで入力hashが変わった選択外cutは再構築集合へ追加する",
+        "旧MP4を現在の入力hashへ再bindingして一致を偽装しない",
+        "連結後の最終MP4を全映像・全音声decodeし、実overlay PNGを使うtypographyを含む全必須監査をやり直す"
+      ]
     }
   ]
 }

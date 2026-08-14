@@ -1,0 +1,341 @@
+{
+  "version": 3,
+  "incidents": [
+    {
+      "signature": "bubble-terminal-japanese-period",
+      "scope": "bubble-typography",
+      "rule": "bubbles.stripTerminalJapanesePeriod",
+      "failure": "Rendered SVG data-text retained a terminal Japanese full stop even though the display contract required omission.",
+      "severity": "high",
+      "deterministic": true,
+      "occurrences": 2,
+      "promotion": "hard-gate",
+      "evidence": [
+        "manga-photo-homecoming-001 independent MP4 review",
+        "manga-arano-amane-effort-001 pre-refresh SVG scan"
+      ],
+      "lastSeenAt": "2026-08-12T18:55:00.000Z"
+    },
+    {
+      "signature": "cascade-bubble-border-face-artifact",
+      "scope": "independent-rendered-face",
+      "rule": "adjacent-clear-frame-disambiguation",
+      "failure": "Anime face cascade identified a bubble border as a face only while the overlay was visible.",
+      "severity": "medium",
+      "deterministic": true,
+      "occurrences": 1,
+      "promotion": "checklist",
+      "evidence": [
+        "manga-v50-unseen-canary-001 independent rendered-face audit"
+      ],
+      "lastSeenAt": "2026-08-12T22:02:20.575Z"
+    },
+    {
+      "signature": "flattened-split-page-incomplete-face-inventory",
+      "scope": "source-face-placement",
+      "rule": "flattened-split-page-all-face-inventory",
+      "failure": "A one-panel face annotation allowed bubbles to obscure other faces on the flattened 1920x1080 split page.",
+      "severity": "high",
+      "deterministic": true,
+      "occurrences": 1,
+      "promotion": "checklist",
+      "evidence": [
+        "manga-v50-unseen-canary-001 failed independent review"
+      ],
+      "lastSeenAt": "2026-08-12T21:55:00.000Z"
+    },
+    {
+      "signature": "legacy-reprepare-approved-audio-reference-loss",
+      "scope": "legacy-contract-migration",
+      "rule": "exact-alignment-bound-audio-recovery",
+      "failure": "Legacy reprepare replaced a manifest before approved utterance audio could be rebound.",
+      "severity": "high",
+      "deterministic": true,
+      "occurrences": 1,
+      "promotion": "checklist",
+      "evidence": [
+        "manga-arano-amane-effort-001 exact alignment recovery"
+      ],
+      "lastSeenAt": "2026-08-12T22:15:00.000Z"
+    },
+    {
+      "signature": "unnatural-japanese-bubble-segmentation",
+      "scope": "bubble-typography",
+      "rule": "natural-japanese-lexical-boundaries",
+      "failure": "Character-count segmentation split proper names, compounds, and inflections inside lexical units.",
+      "severity": "high",
+      "deterministic": true,
+      "occurrences": 1,
+      "promotion": "checklist",
+      "evidence": [
+        "佐藤誠／司, 利／用, 回数／券, 数／字, 通院す／る"
+      ],
+      "lastSeenAt": "2026-08-12T21:55:00.000Z"
+    },
+    {
+      "signature": "timed-segment-internal-punctuation-loss",
+      "scope": "bubble-typography",
+      "rule": "strip-only-whole-display-terminal-period",
+      "failure": "Terminal-period normalization was applied to each timed segment and erased authored punctuation inside the utterance.",
+      "severity": "high",
+      "deterministic": true,
+      "occurrences": 1,
+      "promotion": "checklist",
+      "evidence": [
+        "test/mangaVideoPipeline.test.mjs"
+      ],
+      "lastSeenAt": "2026-08-13T01:00:00.000Z"
+    },
+    {
+      "signature": "rendered-face-audit-placement-raster-drift",
+      "scope": "independent-rendered-face",
+      "rule": "actual-raster-alpha-bounds",
+      "failure": "A stale placement rectangle differed from the ffmpeg overlay raster and caused a false face-cover failure.",
+      "severity": "high",
+      "deterministic": true,
+      "occurrences": 1,
+      "promotion": "checklist",
+      "evidence": [
+        "scripts/audit-manga-bubble-faces-independent.py v5"
+      ],
+      "lastSeenAt": "2026-08-13T01:00:00.000Z"
+    },
+    {
+      "signature": "oversampled-render-memory-oversubscription",
+      "scope": "render-runtime",
+      "rule": "memory-aware-render-concurrency",
+      "failure": "Four concurrent 5760x3240 ffmpeg jobs on a 16GiB host caused memory pressure and reduced throughput.",
+      "severity": "high",
+      "deterministic": true,
+      "occurrences": 1,
+      "promotion": "checklist",
+      "evidence": [
+        "test/koyaMangaProduction.test.mjs"
+      ],
+      "lastSeenAt": "2026-08-13T01:00:00.000Z"
+    },
+    {
+      "signature": "interrupted-partial-mp4-cache-reuse",
+      "scope": "render-runtime",
+      "rule": "complete-checkpoint-and-decodable-cut-required",
+      "failure": "An interrupted ffmpeg output with a matching input hash was considered reusable even though it had no MP4 moov atom.",
+      "severity": "high",
+      "deterministic": true,
+      "occurrences": 1,
+      "promotion": "checklist",
+      "evidence": [
+        "test/mangaVideoPipeline.test.mjs"
+      ],
+      "lastSeenAt": "2026-08-13T01:15:00.000Z"
+    },
+    {
+      "signature": "same-path-stale-stt-cache-reuse",
+      "scope": "stt-verification",
+      "rule": "exact-captured-pcm-digest-required",
+      "failure": "Re-extracting an overwritten MP4 at the cached path could compare the new PCM with itself and authorize stale transcript rows.",
+      "severity": "high",
+      "deterministic": true,
+      "occurrences": 1,
+      "promotion": "checklist",
+      "evidence": [
+        "test/koyaSttCache.test.mjs"
+      ],
+      "lastSeenAt": "2026-08-13T01:30:00.000Z"
+    },
+    {
+      "signature": "non-speaker-source-face-soft-protection",
+      "scope": "source-face-placement",
+      "rule": "all-detected-faces-hard-zero-pixel",
+      "failure": "Detected non-speaker faces were downgraded to soft secondary heads, allowing bubbles to cover phone and background faces.",
+      "severity": "high",
+      "deterministic": true,
+      "occurrences": 1,
+      "promotion": "checklist",
+      "evidence": ["manga-arano-amane-effort-001 rendered face audit"],
+      "lastSeenAt": "2026-08-13T02:05:31.000Z"
+    },
+    {
+      "signature": "split-raster-face-coordinate-size-mismatch",
+      "scope": "source-face-placement",
+      "rule": "overlay-image-size-coordinate-expansion",
+      "failure": "Normalized split-page face bounds were expanded with 1920x1080 although the actual overlay raster was 1672x941.",
+      "severity": "high",
+      "deterministic": true,
+      "occurrences": 1,
+      "promotion": "checklist",
+      "evidence": ["test/koyaSourceFaceReview.test.mjs"],
+      "lastSeenAt": "2026-08-13T02:05:31.000Z"
+    },
+    {
+      "signature": "whitespace-only-timed-bubble-segment",
+      "scope": "bubble-typography",
+      "rule": "non-empty-natural-timed-segments",
+      "failure": "A natural-boundary search isolated authoring whitespace as an independently timed empty bubble.",
+      "severity": "high",
+      "deterministic": true,
+      "occurrences": 1,
+      "promotion": "checklist",
+      "evidence": ["test/mangaVideoPipeline.test.mjs"],
+      "lastSeenAt": "2026-08-13T02:30:00.000Z"
+    },
+    {
+      "signature": "proactive-compact-columns-typography-regression",
+      "scope": "bubble-typography",
+      "rule": "compact-columns-only-after-layout-failure",
+      "failure": "Compact columns were applied proactively to otherwise valid bubbles and introduced unrelated typography overflow.",
+      "severity": "high",
+      "deterministic": true,
+      "occurrences": 1,
+      "promotion": "checklist",
+      "evidence": ["manga-arano-amane-effort-001 cut-05-u01"],
+      "lastSeenAt": "2026-08-13T02:45:00.000Z"
+    },
+    {
+      "signature": "low-confidence-cascade-prop-graphic-face",
+      "scope": "independent-rendered-face",
+      "rule": "calibrated-cascade-level-weight",
+      "failure": "A low-confidence cascade candidate on a glowing map point was treated as a face while real face candidates had materially higher weights.",
+      "severity": "medium",
+      "deterministic": true,
+      "occurrences": 1,
+      "promotion": "checklist",
+      "evidence": ["test/koyaRenderedFaceAudit.test.mjs"],
+      "lastSeenAt": "2026-08-13T02:05:31.000Z"
+    },
+    {
+      "signature": "rendered-overlay-alpha-normalized-by-spec-size",
+      "scope": "independent-rendered-face",
+      "rule": "native-raster-dimensions-for-alpha-normalization",
+      "failure": "The auditor measured alpha pixels in a 1920x1080 ffmpeg overlay raster but divided them by the 1672x941 SVG/spec size, inflating and shifting the bubble rectangle and creating false face-cover failures.",
+      "severity": "high",
+      "deterministic": true,
+      "occurrences": 1,
+      "promotion": "checklist",
+      "evidence": ["test/koyaRenderedFaceAudit.test.mjs"],
+      "lastSeenAt": "2026-08-13T04:05:00.000Z"
+    },
+    {
+      "signature": "source-face-cascade-missed-prominent-face-under-opaque-overlay",
+      "scope": "source-region-placement",
+      "rule": "hash-bound-manual-region-and-independent-perceptual-review",
+      "failure": "The source cascade missed the prominent protagonist face and hallucinated a lower-body face; an opaque narration card then fully covered the real face, which a rendered-frame cascade could no longer see.",
+      "severity": "critical",
+      "deterministic": true,
+      "occurrences": 1,
+      "promotion": "hard-gate",
+      "evidence": ["manga-arano-amane-effort-001 @ 385.000s", "test/koyaSourceFaceReview.test.mjs"],
+      "lastSeenAt": "2026-08-13T05:44:34.000Z"
+    },
+    {
+      "signature": "story-critical-prop-soft-avoidance-and-semantic-narration-image-collapse",
+      "scope": "source-region-placement-and-pacing",
+      "rule": "hard-evidence-regions-and-semantic-narration-image-retention",
+      "failure": "Soft prop scoring allowed speech cards to cover phone, globe, and map evidence, while adjacent narration grouping hid the purpose-built two-children image behind a marriage-only image.",
+      "severity": "high",
+      "deterministic": true,
+      "occurrences": 1,
+      "promotion": "hard-gate",
+      "evidence": ["manga-arano-amane-effort-001 @ 100/253/280/526s", "test/koyaMangaProduction.test.mjs", "test/speechBubbleRenderer.test.mjs"],
+      "lastSeenAt": "2026-08-13T05:44:34.000Z"
+    },
+    {
+      "signature": "cascade-wrong-person-primary-overrides-reviewed-speaker",
+      "scope": "source-region-placement",
+      "rule": "hash-bound-reviewed-speaker-always-primary-and-all-head-inventory",
+      "failure": "The identity-blind cascade assigned another visible person as the active-speaker primary and a later human annotation could not replace it; a purpose-reflection narration was also bridged onto the crowded prior dialogue image, so camera-time overlays crossed visible hair and an eye.",
+      "severity": "critical",
+      "deterministic": true,
+      "occurrences": 1,
+      "promotion": "hard-gate",
+      "evidence": ["manga-arano-amane-effort-001 @ 45.802-58.092s and 282.000s", "test/koyaSourceFaceReview.test.mjs"],
+      "lastSeenAt": "2026-08-13T09:45:00.000Z"
+    },
+    {
+      "signature": "thought-primary-wrong-person-and-panel-camera-clear-frame-mismatch",
+      "scope": "thought-spotlight-and-independent-rendered-face",
+      "rule": "hash-bound-thought-primary-and-camera-reprojected-clear-frame-confirmation",
+      "failure": "In a crowded thought shot, the identity-blind cascade selected a background person as the protagonist and moved the spotlight away from the real face. In a flattened split page, a watch was detected as a face and same-screen clear-frame comparison ignored whole-page camera zoom.",
+      "severity": "critical",
+      "deterministic": true,
+      "occurrences": 1,
+      "promotion": "hard-gate",
+      "evidence": ["manga-arano-amane-effort-001 @ 116-119s and 213.18s", "test/koyaRenderedFaceAudit.test.mjs", "test/koyaSourceFaceReview.test.mjs"],
+      "lastSeenAt": "2026-08-13T12:25:00.000Z"
+    },
+    {
+      "signature": "targeted-render-rebuilt-unselected-queued-cuts",
+      "scope": "render-resume-and-targeted-repair",
+      "rule": "explicit-cut-selection-preserves-every-decodable-unselected-cut",
+      "failure": "After prepare reset render jobs to queued, a --cut-ids cut-03 repair rebuilt unselected cuts because reuse required a complete checkpoint even though their existing MP4s decoded correctly.",
+      "severity": "high",
+      "deterministic": true,
+      "occurrences": 1,
+      "promotion": "hard-gate",
+      "evidence": ["manga-arano-amane-effort-001 targeted cut-03 render", "test/mangaVideoPipeline.test.mjs"],
+      "lastSeenAt": "2026-08-13T12:48:00.000Z"
+    },
+    {
+      "signature": "thought-audit-used-pre-normalization-camera-focus",
+      "scope": "thought-spotlight-rendered-audit",
+      "rule": "audit-projects-through-renderer-normalized-camera-keyframes",
+      "failure": "The renderer clamped authored pullout focus against the ending zoom safe range, but the audit projected the face with raw manifest focus coordinates and falsely marked three correctly lit frames as missed.",
+      "severity": "critical",
+      "deterministic": true,
+      "occurrences": 1,
+      "promotion": "hard-gate",
+      "evidence": ["manga-arano-amane-effort-001 @ 116.181-118.893s", "test/koyaRenderedFaceAudit.test.mjs"],
+      "lastSeenAt": "2026-08-13T13:10:00.000Z"
+    },
+    {
+      "signature": "same-character-face-review-not-inventoried-per-source-image",
+      "scope": "source-region-placement",
+      "rule": "hash-bound-face-inventory-is-per-image-not-per-character",
+      "failure": "Earlier reviewed faces for the same protagonist did not protect a different source image; the identity-blind cascade mapped the speaker to the wrong region and a speech bubble covered both eyes, nose, and mouth.",
+      "severity": "critical",
+      "deterministic": true,
+      "occurrences": 1,
+      "promotion": "hard-gate",
+      "evidence": ["manga-arano-amane-effort-001 @ 305.25-307.25s", "test/koyaSourceFaceReview.test.mjs"],
+      "lastSeenAt": "2026-08-13T14:21:49.657Z"
+    },
+    {
+      "signature": "reflection-face-omitted-from-same-image-inventory",
+      "scope": "source-region-placement",
+      "rule": "reflections-mirrors-and-photo-faces-are-independent-hard-faces",
+      "failure": "The source image contained both the foreground protagonist and a clear window reflection, but the reflected eyes, nose, and mouth were omitted from the hard face inventory and covered by timed bubbles.",
+      "severity": "critical",
+      "deterministic": true,
+      "occurrences": 1,
+      "promotion": "hard-gate",
+      "evidence": ["manga-arano-amane-effort-001 @ 324-328s", "test/koyaSourceFaceReview.test.mjs"],
+      "lastSeenAt": "2026-08-13T15:46:26.939Z"
+    },
+    {
+      "signature": "failed-source-face-run-reused-stale-pass-report",
+      "scope": "source-region-placement",
+      "rule": "current-detector-invocation-must-produce-current-report",
+      "failure": "An invalid source annotation made the detector exit before writing evidence, but prepare found the previous passing report at the stable output path and continued with stale face inventory.",
+      "severity": "critical",
+      "deterministic": true,
+      "occurrences": 1,
+      "promotion": "hard-gate",
+      "evidence": ["test/koyaMangaProduction.test.mjs"],
+      "lastSeenAt": "2026-08-13T16:26:09.757Z"
+    },
+    {
+      "signature": "targeted-render-rebound-stale-unselected-cut-to-current-input",
+      "scope": "partial-render-reuse",
+      "rule": "unselected-cut-reuse-requires-complete-current-input-binding-and-decode",
+      "failure": "After prepare rewrote episode overlays, a targeted cut-07 render preserved a decodable old cut-08 MP4 and then overwrote its render job with the new input hash. The SVG and composited PNG/MP4 diverged, which the rendered typography gate detected.",
+      "severity": "critical",
+      "deterministic": true,
+      "occurrences": 1,
+      "promotion": "hard-gate",
+      "evidence": [
+        "manga-arano-amane-effort-001 cut-08 typography audit",
+        "test/mangaVideoPipeline.test.mjs"
+      ],
+      "lastSeenAt": "2026-08-13T18:43:00.000Z"
+    }
+  ]
+}

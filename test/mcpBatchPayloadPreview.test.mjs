@@ -93,7 +93,8 @@ test("MCP batch payload previews validate and do not start or mutate a canvas", 
     assert.equal(candidatePreview.isError, undefined, JSON.stringify(candidatePreview));
     assert.equal(candidatePreview.structuredContent.payloadPreview, true);
     assert.equal(candidatePreview.structuredContent.total, 6);
-    assert.ok(candidatePreview.structuredContent.results.every((result) => result.local === true));
+    assert.equal(candidatePreview.structuredContent.results, undefined);
+    assert.equal(JSON.stringify(candidatePreview.structuredContent).includes("candidateId"), false);
 
     const imagePreview = await client.callTool({
       name: "generate_excalidraw_images_batch",

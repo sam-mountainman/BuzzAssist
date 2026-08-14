@@ -76,7 +76,7 @@ test("MCP character pipeline runs candidates, approval packs, and a multi-charac
           canvasDir,
           workflowId,
           castId: cast.id,
-          candidateId: selected.id,
+          candidateLabel: selected.label,
           approvalReason: `${cast.name}の役割と固定特徴が最も明瞭に出ているため`,
           approvedBy: "integration-test-user",
           model: "gpt-image-2-codex",

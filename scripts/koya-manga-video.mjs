@@ -15,10 +15,12 @@ import {
   repairKoyaMangaAudioOnset,
   repairKoyaMangaAudioTail,
   renderKoyaMangaVideo,
+  refreshKoyaMangaBubbles,
   standardizeKoyaMangaCut,
   syncKoyaMangaContract,
 } from "../lib/koyaMangaProduction.mjs";
 import { resolveKoyaMangaProductionContract } from "../lib/koyaMangaProductionContract.mjs";
+import { disposeMediaGenerationResources } from "../lib/mediaGeneration.mjs";
 
 function parseArgs(argv) {
   const values = { action: argv[2] || "help" };
@@ -38,16 +40,19 @@ function usage() {
     "Koya manga video production (fail-closed)",
     "",
     "node scripts/koya-manga-video.mjs <action> [options]",
-    "actions: contract, plan, images, character-approve, prepare, speech, adjust-gap, standard-cut, repair-onset, repair-tail, sync-contract, render, audit, signoff, full, status",
-    "common: --project-dir DIR --episode-id ID --script-path FILE --title TITLE --protagonist-speaker-id ID_OR_EXACT_NAME --character-bible-path JSON [--retry-failed] [--image-concurrency N|auto] [--qa-concurrency N] [--image-fallback-model MODEL] [--qa-fallback-provider grok]",
+    "actions: contract, plan, images, character-approve, prepare, speech, adjust-gap, standard-cut, repair-onset, repair-tail, sync-contract, refresh-bubbles, render, audit, signoff, full, status",
+    "common: --project-dir DIR --episode-id ID --script-path FILE --title TITLE --protagonist-speaker-id ID_OR_EXACT_NAME --character-bible-path JSON [--source-face-review-path JSON] [--generator-host codex|claude|legacy-migration] [--generator-id ID] [--generator-context-id TASK_OR_SESSION_ID] [--retry-failed] [--image-concurrency N|auto] [--qa-concurrency N] [--image-fallback-model MODEL] [--qa-fallback-provider grok]",
+    "source region fallback: inspect the exact source image and pass a koya-source-region-review-v2 JSON whose annotations bind normalized face/hand/prop/evidence/text bounds to the source SHA-256 (legacy koya-source-face-review-v1 remains accepted)",
     "audit: --video-path MP4 [--quick] [--dry-run]",
-    "character-approve: --workflow-id ID --cast-id ID_OR_NAME --candidate-id ID_OR_INDEX --approval-reason WHY [--approved-by NAME]",
+    "character-approve: --workflow-id ID --cast-id ID_OR_NAME --candidate-label A..E --approval-reason WHY [--approved-by NAME]",
     "repair-onset: --utterance-id ID --source-path WAV --fade-start-seconds N --fade-milliseconds 6..8 --output-file-name NAME.wav",
     "repair-tail: --utterance-id ID --source-path WAV --speech-end-seconds N --fade-start-seconds N --fade-milliseconds 6..8 --output-file-name NAME.wav",
     "adjust-gap: --utterance-id ID --target-audible-gap-seconds N [--reason TEXT]",
     "standard-cut: --cut-id ID --plan-path JSON [--reason TEXT] (remove split layout and apply validated ordinary single-image shots)",
     "sync-contract: update manifest contract metadata without changing media, then require a fresh audit",
-    "signoff: --reviewer claude|codex --review-notes-path /absolute/review.json --pass (only after reviewing the full MP4, contact sheet, representative frames, and audio)",
+    "refresh-bubbles: rebuild every SVG under the resolved punctuation/placement contract, then require a fresh render and audit",
+    "render: [--cut-ids cut-01,cut-02] rerenders at least the named cuts; unselected cuts are reused only when their completed input hash still matches and the MP4 decodes",
+    "signoff: --reviewer claude|codex [--reviewer-id ID] [--reviewer-context-id TASK_OR_SESSION_ID] --review-notes-path /absolute/review.json --pass (the evaluator task/session must differ from the generator)",
   ].join("\n");
 }
 
@@ -62,11 +67,16 @@ const common = {
   overridePath: args.overridePath ? resolve(args.overridePath) : "",
   protagonistSpeakerId: args.protagonistSpeakerId || "",
   characterBiblePath: args.characterBiblePath ? resolve(args.characterBiblePath) : "",
+  sourceFaceReviewPath: args.sourceFaceReviewPath ? resolve(args.sourceFaceReviewPath) : "",
+  cutIds: args.cutIds || "",
   retryFailed: args.retryFailed === true,
   imageConcurrency: args.imageConcurrency,
   qaConcurrency: args.qaConcurrency,
   imageFallbackModel: args.imageFallbackModel,
   qaFallbackProvider: args.qaFallbackProvider,
+  generatorHost: args.generatorHost,
+  generatorId: args.generatorId,
+  generatorContextId: args.generatorContextId,
 };
 
 function requireEpisodeId() {
@@ -102,6 +112,7 @@ async function auditOptions() {
 }
 
 let exitCode = 0;
+try {
 switch (args.action) {
   case "help":
   case "--help":
@@ -145,12 +156,11 @@ switch (args.action) {
       ...common,
       workflowId: args.workflowId,
       castId: args.castId,
-      candidateId: args.candidateId,
-      candidateIndex: args.candidateIndex,
+      candidateLabel: args.candidateLabel,
       approvalReason: args.approvalReason,
       approvedBy: args.approvedBy,
     });
-    print({ episodeId: result.episodeId, workflowId: result.workflowId, castId: result.castId, candidateId: result.candidateId, character: result.finalized.character, state: result.state });
+    print({ episodeId: result.episodeId, workflowId: result.workflowId, castId: result.castId, candidateLabel: result.candidateLabel, candidateSetId: result.candidateSetId, verdictPath: result.verdictPath, character: result.finalized.character, state: result.state });
     break;
   }
   case "prepare": {
@@ -273,6 +283,20 @@ switch (args.action) {
     });
     break;
   }
+  case "refresh-bubbles": {
+    requireEpisodeId();
+    const result = await refreshKoyaMangaBubbles(common);
+    print({
+      episodeId: result.episodeId,
+      status: result.state.status,
+      refreshedBubbleCount: result.refreshed.length,
+      contractVersion: result.resolved.contract.version,
+      contractDigest: result.resolved.digest,
+      contractAuditPass: result.contractAudit.pass,
+      next: `Run render: node scripts/koya-manga-video.mjs render --episode-id ${result.episodeId} --force`,
+    });
+    break;
+  }
   case "render": {
     requireEpisodeId();
     const result = await renderKoyaMangaVideo({
@@ -299,6 +323,8 @@ switch (args.action) {
       manifestPath: paths.manifestPath,
       videoPath: args.videoPath ? resolve(args.videoPath) : "",
       reviewerHost: args.reviewer,
+      reviewerId: args.reviewerId,
+      reviewerContextId: args.reviewerContextId,
       reviewNotesPath: args.reviewNotesPath ? resolve(args.reviewNotesPath) : "",
       pass: true,
     });
@@ -350,5 +376,8 @@ switch (args.action) {
   }
   default:
     throw new Error(`Unknown action: ${args.action}\n${usage()}`);
+}
+} finally {
+  await disposeMediaGenerationResources();
 }
 process.exitCode = exitCode;

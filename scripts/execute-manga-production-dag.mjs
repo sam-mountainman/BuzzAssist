@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 
 import { writeJsonAtomic } from "../lib/canvasScene.mjs";
 import { executeMangaProductionDag } from "../lib/mangaProductionDag.mjs";
+import { createKoyaMangaDagRuntime } from "../lib/koyaMangaDagRuntime.mjs";
 
 const args = {};
 for (let index = 2; index < process.argv.length; index += 1) {
@@ -30,7 +31,7 @@ const statePath = resolve(args.statePath || resolve(dirname(dagPath), "productio
 const dag = JSON.parse(await readFile(dagPath, "utf8"));
 let previousState;
 try { previousState = JSON.parse(await readFile(statePath, "utf8")); } catch {}
-let handlers = {};
+let handlers = createKoyaMangaDagRuntime({ manifestPath: args.manifestPath || resolve(dirname(dagPath), "episode-manifest.json") });
 if (args.handlerModule) {
   const adapter = await import(`${pathToFileURL(resolve(args.handlerModule)).href}?v=${Date.now()}`);
   handlers = adapter.handlers || adapter.default || {};

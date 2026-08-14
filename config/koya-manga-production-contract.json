@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "koya-manga-production-v49",
+  "version": "koya-manga-production-v50",
   "channelId": "koya-manga",
   "description": "Fail-closed production contract for Koya-channel manga videos.",
   "sourceOfTruth": {
@@ -114,8 +114,8 @@
     "requireEveryUtteranceAssignedToImage": true
   },
   "qualityReview": {
-    "version": "koya-agent-perceptual-signoff-v3",
-    "reviewNotesVersion": "koya-perceptual-review-notes-v2",
+    "version": "koya-agent-perceptual-signoff-v4",
+    "reviewNotesVersion": "koya-perceptual-review-notes-v3",
     "userFeedbackOverridesMachinePass": true,
     "requireFullVideoReview": true,
     "requireContactSheetReview": true,
@@ -126,6 +126,9 @@
     "requireEvidenceFileHashes": true,
     "requireContractDigestBinding": true,
     "requireReviewNotesDigestBinding": true,
+    "requireEvaluatorProvenance": true,
+    "requireRubricScores": true,
+    "requireEvidenceMerkleManifest": true,
     "minimumRepresentativeFrames": 3,
     "minimumAudioSpotChecks": 3,
     "minimumReviewNoteCharacters": 8,
@@ -147,7 +150,7 @@
     ]
   },
   "qualityLoop": {
-    "version": "koya-quality-loop-v2",
+    "version": "koya-quality-loop-v3",
     "generatorEvaluatorSeparation": true,
     "requireDistinctEvaluatorContext": true,
     "deterministicGatesBeforeJudgment": true,
@@ -157,6 +160,9 @@
     "requireEvidence": true,
     "requireFailureFingerprint": true,
     "requireRevisionDelta": true,
+    "requireVerifiedEvidenceFiles": true,
+    "requireAtLeastOneCompletedRound": true,
+    "requirePersistedIncidentLedger": true,
     "limits": {
       "targetScore": 92,
       "maximumReviewRounds": 2,
@@ -172,6 +178,8 @@
       "anonymousComparison": true,
       "revealMappingOnlyAfterVerdict": true,
       "requireSelectionReason": true,
+      "requireIsolatedPrivateMapping": true,
+      "requireArtifactHashVerification": true,
       "objectiveJudge": "deterministic-gate",
       "rubricJudge": "fresh-independent-evaluator",
       "subjectiveJudge": "human"
@@ -187,6 +195,8 @@
   "provenance": {
     "manifestSchemaVersion": "koya-episode-manifest-v1",
     "officialEntrypoint": "scripts/koya-manga-video.mjs",
+    "requireGeneratorContextId": true,
+    "requireReviewerContextId": true,
     "forbidLegacyStatusAfterRender": true,
     "forbidAmbiguousProductionVersion": true
   },

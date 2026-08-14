@@ -31,10 +31,27 @@
 
 ```json
 {
-  "version": "koya-perceptual-review-notes-v2",
+  "version": "koya-perceptual-review-notes-v3",
   "episodeId": "manga-example-001",
   "contractDigest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
   "reviewedAt": "2026-08-12T12:00:00.000Z",
+  "reviewer": {
+    "host": "codex",
+    "id": "codex:実タスクID",
+    "contextId": "実タスクID"
+  },
+  "summary": "全尺、全監査証拠、代表フレーム、音声区間を確認し完成品質に達している",
+  "rubricScores": {
+    "semantic-scene-fit": 95,
+    "character-continuity": 95,
+    "camera-composition": 95,
+    "editorial-grammar": 95,
+    "bubble-typography": 95,
+    "voice-performance": 95,
+    "audio-technical": 95,
+    "timing-continuity": 95,
+    "final-playback": 95
+  },
   "video": {
     "path": "/ABSOLUTE/PATH/final.mp4",
     "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -108,4 +125,6 @@
 
 問題が1件でもあれば署名せず、`knownRemainingIssues`へ時刻、対象、症状を書く。ユーザー指摘と機械結果が矛盾したらユーザー指摘を不合格根拠にする。
 
-再監査の最後に`audits/koya-final/quality-harness/final-decision.json`を読む。`status=passed`、自分自身を除く全必須監査が`passedAuditIds`へ含まれること、各適用監査の`evidenceSha256`、契約digest、実MP4 SHA-256が現在値と一致することを確認する。`needs-human-approval`は知覚署名待ち、`blocked`は機械監査または証拠拘束の失敗であり、どちらも完成ではない。
+吹き出し末尾句点を除く契約では、原寸フレームの目視だけでなく`bubble-typography.json`の`terminalPunctuation`を確認する。全SVGの`data-text`を機械検査し、`pass=true`かつ`terminalPeriodFound=false`でなければ署名しない。旧episodeの修復は公式`refresh-bubbles`→`render --force`→`audit`の順で行い、音声・台本本文は変更しない。
+
+再監査の最後に`audits/koya-final/quality-harness/final-decision.json`を読む。`status=passed`、独立contextの品質roundが1件以上、自分自身を除く全必須監査が`passedAuditIds`へ含まれること、各適用監査の`evidenceSha256`、契約digest、実MP4 SHA-256、`evidence-manifest.json`のSHA-256とMerkle rootが現在値と一致することを確認する。`needs-human-approval`は知覚署名待ち、`blocked`は機械監査・品質loop・証拠拘束の失敗であり、どちらも完成ではない。

@@ -1,0 +1,199 @@
+{
+  "version": "koya-source-region-review-v2",
+  "episodeId": "manga-arano-amane-effort-001",
+  "reviewedBy": "codex:019ff618-698e-7750-b374-faf6bac3cd48",
+  "reviewedAt": "2026-08-13T09:45:00.000Z",
+  "annotations": [
+    {
+      "id": "cut-03-u01-arano-full-head",
+      "utteranceId": "cut-03-u01",
+      "kind": "face",
+      "speakerId": "manga-arano-amane-effort-001-character-2",
+      "imageSha256": "69e7c4a18a8c1acc25a58417fbbeb155c8a492bbd84ec1cb2fa9694c6a7adbeb",
+      "bounds": {
+        "x": 0.585,
+        "y": 0.015,
+        "width": 0.19,
+        "height": 0.36
+      },
+      "note": "原寸1672×941画像で、右手前の発話者・荒野の頭髪全体、両目、鼻、口、顎を保守的に囲った。自動cascadeが左奥の小人物を荒野として誤同定し、心の声スポットライトが背景へ向いたため追加"
+    },
+    {
+      "id": "cut-01-u06-sakura-full-head",
+      "utteranceId": "cut-01-u06",
+      "kind": "face",
+      "speakerId": "manga-arano-amane-effort-001-character-1",
+      "imageSha256": "977e3f25b6f40eea395de9e59104f29a20ce0ea090739030f6def24c64840d3c",
+      "bounds": {
+        "x": 0.255,
+        "y": 0.12,
+        "width": 0.19,
+        "height": 0.37
+      },
+      "note": "原寸1672×941画像で、左手前のさくらの頭頂から顔周囲の頭髪、両目、鼻、口、顎までを保守的に囲った。肩より下へ垂れる髪は頭部矩形へ混ぜず自動hair marginへ委ねる。独立実MP4レビューで45.802〜58.092秒のナレーション枠が頭髪へ重なったため追加"
+    },
+    {
+      "id": "cut-01-u06-arano-full-head",
+      "utteranceId": "cut-01-u06",
+      "kind": "face",
+      "speakerId": "manga-arano-amane-effort-001-character-2",
+      "imageSha256": "977e3f25b6f40eea395de9e59104f29a20ce0ea090739030f6def24c64840d3c",
+      "bounds": {
+        "x": 0.69,
+        "y": 0.105,
+        "width": 0.185,
+        "height": 0.37
+      },
+      "note": "原寸1672×941画像で、右側の荒野の頭髪全体、両目、鼻、口、顎を保守的に囲い、同一画面の全人物頭部を在庫化した"
+    },
+    {
+      "id": "cut-04-u01-arano-prominent-face",
+      "utteranceId": "cut-04-u01",
+      "speakerId": "manga-arano-amane-effort-001-character-2",
+      "imageSha256": "577becf2acd263e69d1edb10f3cba0c42b633154ebdbf97c4dce54f4e2aad741",
+      "bounds": {
+        "x": 0.535,
+        "y": 0.235,
+        "width": 0.145,
+        "height": 0.255
+      },
+      "note": "原寸1672×941画像で、手前に座る荒野の頭髪、両目、鼻、口、顎を含む顔全体を保守的に囲った"
+    },
+    {
+      "id": "cut-04-u01-amane-prominent-face",
+      "utteranceId": "cut-04-u01",
+      "speakerId": "manga-arano-amane-effort-001-character-3",
+      "imageSha256": "577becf2acd263e69d1edb10f3cba0c42b633154ebdbf97c4dce54f4e2aad741",
+      "bounds": {
+        "x": 0.69,
+        "y": 0.09,
+        "width": 0.16,
+        "height": 0.285
+      },
+      "note": "原寸1672×941画像で、右奥に立つ天音の頭髪、両目、鼻、口、顎を含む顔全体を保守的に囲った"
+    },
+    {
+      "id": "cut-02-u05-phone-employment-evidence",
+      "utteranceId": "cut-02-u05",
+      "kind": "evidence",
+      "imageSha256": "5db4e63fa4e9640e64ed9e23155ec9f564886584b459b4a23783124cb78c2a53",
+      "bounds": {
+        "x": 0.37,
+        "y": 0.23,
+        "width": 0.225,
+        "height": 0.255
+      },
+      "note": "原寸1672×941画像で、内定を示すビル・鞄・チェック印と人物写真を含むスマートフォン画面全体を囲った"
+    },
+    {
+      "id": "cut-06-u05-fashion-globe-evidence",
+      "utteranceId": "cut-06-u05",
+      "kind": "evidence",
+      "imageSha256": "83605bfb1c179a222f0f9b55db02398dd37e0b4c2ffc86fbb6d6ee73c0b329ef",
+      "bounds": {
+        "x": 0.58,
+        "y": 0.37,
+        "width": 0.15,
+        "height": 0.34
+      },
+      "note": "原寸1672×941画像で、海外ファッションという発話意味を担う地球儀の輪郭と航路線全体を囲った"
+    },
+    {
+      "id": "cut-07-u02-world-map-route-evidence",
+      "utteranceId": "cut-07-u02",
+      "kind": "evidence",
+      "imageSha256": "bd71306b1d9cdcbadf110581d33d84356cdb7f8200310635c11c95d6f43d0e9a",
+      "bounds": {
+        "x": 0.22,
+        "y": 0.4,
+        "width": 0.42,
+        "height": 0.36
+      },
+      "note": "原寸1672×941画像で、日本と海外を繋ぐ仕事の意味を担う世界地図中央部と主要な発光航路を囲った"
+    },
+    {
+      "id": "cut-07-u02-amane-full-head",
+      "utteranceId": "cut-07-u02",
+      "kind": "face",
+      "speakerId": "manga-arano-amane-effort-001-character-3",
+      "imageSha256": "bd71306b1d9cdcbadf110581d33d84356cdb7f8200310635c11c95d6f43d0e9a",
+      "bounds": {
+        "x": 0.31,
+        "y": 0.03,
+        "width": 0.125,
+        "height": 0.22
+      },
+      "note": "原寸1672×941画像で、左奥の天音の頭髪全体、両目、鼻、口、顎を保守的に囲った"
+    },
+    {
+      "id": "cut-07-u02-arano-full-head",
+      "utteranceId": "cut-07-u02",
+      "kind": "face",
+      "speakerId": "manga-arano-amane-effort-001-character-2",
+      "imageSha256": "bd71306b1d9cdcbadf110581d33d84356cdb7f8200310635c11c95d6f43d0e9a",
+      "bounds": {
+        "x": 0.605,
+        "y": 0.035,
+        "width": 0.155,
+        "height": 0.285
+      },
+      "note": "原寸1672×941画像で、右側の発話者・荒野の頭髪全体、両目、鼻、口、顎を保守的に囲った。独立実MP4レビューで282秒付近の吹き出しが右目と顔へ重なったため追加"
+    },
+    {
+      "id": "cut-07-u04-arano-full-head",
+      "utteranceId": "cut-07-u04",
+      "kind": "face",
+      "speakerId": "manga-arano-amane-effort-001-character-2",
+      "imageSha256": "52993cc51af219543452f7aa0c3cce522d6d6000fb0e7262f53a64e54b938c30",
+      "bounds": {
+        "x": 0.42,
+        "y": 0.055,
+        "width": 0.175,
+        "height": 0.34
+      },
+      "note": "原寸1672×941画像で、画面中央の発話者・荒野の頭頂から頭髪、両目、鼻、口、顎までを保守的に囲った。自動cascadeが発話者顔を右側の別領域へ誤対応し、独立実MP4レビューで305.25〜307.25秒の吹き出しが荒野の両目・鼻・口を覆ったため追加"
+    },
+    {
+      "id": "cut-07-u05-arano-foreground-full-head",
+      "utteranceId": "cut-07-u05",
+      "kind": "face",
+      "speakerId": "manga-arano-amane-effort-001-character-2",
+      "imageSha256": "e97fcc838987faf267e2a78c9657df1ea4d715544a0010bd950cf917bb04668e",
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0.405,
+        "height": 0.58
+      },
+      "note": "原寸1672×941画像で、左手前の荒野の頭髪全体、耳、両目、鼻、口、顎を囲った。同一元画像の窓反射顔と別のhard faceとして在庫化"
+    },
+    {
+      "id": "cut-07-u05-arano-reflection-full-head",
+      "utteranceId": "cut-07-u05",
+      "kind": "face",
+      "speakerId": "manga-arano-amane-effort-001-character-2",
+      "imageSha256": "e97fcc838987faf267e2a78c9657df1ea4d715544a0010bd950cf917bb04668e",
+      "bounds": {
+        "x": 0.335,
+        "y": 0.025,
+        "width": 0.245,
+        "height": 0.57
+      },
+      "note": "原寸1672×941画像で、窓に映る荒野の反射頭髪、両目、鼻、口、顎を囲った。第3独立実MP4レビューで324〜328秒の吹き出しが反射顔の目・鼻・口へ重なったため追加"
+    },
+    {
+      "id": "cut-10-u01-arano-prominent-face",
+      "utteranceId": "cut-10-u01",
+      "kind": "face",
+      "speakerId": "manga-arano-amane-effort-001-character-2",
+      "imageSha256": "75306adb3fa7d78e6c514b5b945a52852071d9696699e8a38ccb1f3bcfd64c84",
+      "bounds": {
+        "x": 0.714,
+        "y": 0.16,
+        "width": 0.143,
+        "height": 0.295
+      },
+      "note": "原寸1672×941画像で、右側の荒野の頭髪、両目、鼻、口、顎を含む顔全体を保守的に囲った"
+    }
+  ]
+}

@@ -408,6 +408,24 @@ test("an authored bubble is rejected when it covers any protected speaker-head s
   }), /no collision-free placement/);
 });
 
+test("a natural narration box may shrink marginally to fit a camera-visible pocket", () => {
+  const result = planSpeechBubbleLayout({
+    width: 1672,
+    height: 941,
+    bubbles: [{ id: "narration-margin", preset: "narration", text: "佐藤は駅舎の防犯映像と回数" }],
+    avoidRegions: [
+      { x: 0, y: 0, width: 317, height: 941, kind: "page-offscreen" },
+      { x: 1355, y: 0, width: 317, height: 941, kind: "page-offscreen" },
+      { x: 317, y: 0, width: 1038, height: 268, kind: "page-offscreen" },
+      { x: 317, y: 673, width: 1038, height: 268, kind: "page-offscreen" },
+    ],
+  });
+  assert.ok(result.bubbles[0].placementScale < 1);
+  assert.ok(result.bubbles[0].placementScale >= 0.86);
+  assert.equal(result.bubbles[0].bounds.y >= 268, true);
+  assert.equal(result.bubbles[0].bounds.y + result.bubbles[0].bounds.height <= 673, true);
+});
+
 test("single-person dialogue tracks the speaker across the complete camera interval", () => {
   const placement = buildCameraAwareBubblePlacement({
     width: 1000,
@@ -452,6 +470,69 @@ test("locked reference profile never synthesizes bold emphasis", () => {
   });
   assert.doesNotMatch(result.svg, /font-weight="(?:[5-9]\d\d)"/);
   assert.match(result.svg, /font-synthesis:none/);
+});
+
+test("supplemental source faces remain hard across every camera sample", () => {
+  const placement = buildCameraAwareBubblePlacement({
+    width: 1000,
+    height: 600,
+    shot: {
+      id: "two-face-shot",
+      startSeconds: 0,
+      endSeconds: 4,
+      durationSeconds: 4,
+      camera: { zoomStart: 1, zoomEnd: 1, focusX: 0.5, focusY: 0.5 },
+    },
+    utterance: {
+      id: "u1",
+      speakerId: "speaker",
+      preset: "dialogue",
+      timing: { bubbleStartInCutSeconds: 0, bubbleEndInCutSeconds: 4 },
+    },
+    overlaySpec: {
+      sourceAvoidRegions: [
+        { id: "speaker", kind: "face", x: 0.1, y: 0.1, width: 0.15, height: 0.25 },
+        { id: "listener", kind: "face", hardProtection: true, x: 0.7, y: 0.1, width: 0.15, height: 0.25 },
+      ],
+      cameraAwarePlacement: {
+        sourceSpeakerFace: { id: "speaker", kind: "face", x: 0.1, y: 0.1, width: 0.15, height: 0.25 },
+      },
+    },
+  });
+  assert.ok(placement.cameraAwareAvoidRegions.some((region) => region.id.startsWith("listener-") && region.kind === "head"));
+});
+
+test("hash-bound story evidence remains hard across every camera sample", () => {
+  const placement = buildCameraAwareBubblePlacement({
+    width: 1000,
+    height: 600,
+    shot: {
+      id: "evidence-shot",
+      startSeconds: 0,
+      endSeconds: 4,
+      durationSeconds: 4,
+      camera: { zoomStart: 1.2, zoomEnd: 1, focusX: 0.5, focusY: 0.5 },
+    },
+    utterance: {
+      id: "u1",
+      speakerId: "narration",
+      preset: "narration",
+      timing: { bubbleStartInCutSeconds: 0, bubbleEndInCutSeconds: 4 },
+    },
+    overlaySpec: {
+      sourceAvoidRegions: [
+        { id: "phone-proof", kind: "evidence", hardProtection: true, x: 0.4, y: 0.3, width: 0.2, height: 0.2 },
+      ],
+    },
+  });
+  assert.ok(placement.cameraAwareAvoidRegions.length >= 33);
+  assert.ok(placement.cameraAwareAvoidRegions.every((region) => region.kind === "protected-evidence"));
+  assert.throws(() => renderSpeechBubbleSvg({
+    width: 1000,
+    height: 600,
+    bubbles: [{ id: "blocked", text: "証拠を隠さない", bounds: { x: 350, y: 150, width: 300, height: 300 } }],
+    avoidRegions: placement.cameraAwareAvoidRegions,
+  }), /no collision-free placement/u);
 });
 
 test("camera-sampled important overlap reports the worst instant instead of summing time", () => {

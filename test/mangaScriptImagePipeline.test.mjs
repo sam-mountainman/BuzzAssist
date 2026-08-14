@@ -9,6 +9,7 @@ import {
   executeMangaScriptImagePlan,
   mangaImageQaReferenceCandidates,
   mangaImageQaStructureContract,
+  mangaImageQaVisualPrompt,
   normalizeScriptImageConcurrency,
   renderEditorialPlatePng,
   runMangaScriptImagePipeline,
@@ -49,6 +50,9 @@ test("script planner covers strict plates, thought focus, split pages, and camer
   assert.ok(plan.editorialDecisions.some((entry) => entry.thoughtFocus.recommended));
   assert.ok(plan.pages.some((entry) => entry.editorial.split.type === "vertical-2"));
   assert.ok(plan.pages.some((entry) => entry.editorial.split.type === "story-3"));
+  assert.ok(plan.pages.every((entry) => !(
+    entry.editorial.split.recommended && entry.editorial.editorialPlate.recommended
+  )));
   assert.ok(plan.pages.filter((entry) => entry.editorial.split.recommended).every((entry) => (
     entry.flattenBeforeCamera === true && entry.panelCamera === "static" && entry.wholePageCamera === true
   )));
@@ -62,6 +66,8 @@ test("script planner covers strict plates, thought focus, split pages, and camer
   assert.match(storyPanels[0].prompt, /narrow full-height LEFT panel/u);
   assert.match(storyPanels[1].prompt, /UPPER-RIGHT panel/u);
   assert.match(storyPanels[2].prompt, /LOWER-RIGHT panel/u);
+  assert.match(storyPanels[2].prompt, /face center between 58% and 70%/u);
+  assert.ok(storyPanels.every((entry) => /same wardrobe across all three panels/u.test(entry.prompt)));
   const montagePage = plan.jobs.find((entry) => entry.kind === "split-page" && entry.montageTimeline === true);
   assert.ok(montagePage);
   assert.ok(montagePage.composition);
@@ -163,8 +169,26 @@ test("education and career props are forced blank so generated pseudo-text canno
     assetDir: join(root, "assets"),
   });
   const scene = plan.jobs.find((entry) => entry.kind === "scene-image" || entry.kind === "split-panel");
-  assert.match(scene.prompt, /every book cover, brochure, worksheet, notebook, phone screen, sign, badge, and document must be completely blank/u);
+  assert.match(scene.prompt, /every book cover, brochure, worksheet, notebook, phone screen, sign, badge, ticket, timetable, log, and document must be blank/u);
   assert.match(scene.prompt, /no letters, pseudo-text, numbers, notation, logos, or glyph-like lines/u);
+  assert.equal(scene.textFreeEvidencePolicy, true);
+});
+
+test("unseen transit evidence scripts infer their real locations and keep records text-free", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-transit-evidence-"));
+  const plan = createMangaScriptImagePlan({
+    scriptText: "【カット1：閉鎖予定の山間バス停、早朝】\n佐藤 誠司: この時刻表、午前七時十分の便だけ剥がされていますね\n【カット2：古い駅舎で利用記録を照合する】\n佐藤 誠司: 券売機の記録には毎週金曜日、同じ区間の回数券が使われています",
+    episodeId: "transit-evidence-test",
+    registry: { characters: [] },
+    canvasDir: root,
+    assetDir: join(root, "assets"),
+  });
+  const environments = plan.jobs.filter((entry) => entry.kind === "environment-sheet");
+  assert.deepEqual(environments.map((entry) => entry.location.id), ["mountain-bus-stop", "old-station-building"]);
+  const evidenceScenes = plan.jobs.filter((entry) => ["scene-image", "split-panel"].includes(entry.kind));
+  assert.ok(evidenceScenes.every((entry) => entry.textFreeEvidencePolicy === true));
+  assert.ok(evidenceScenes.every((entry) => /Never attempt to write the quoted dates, times, weekdays, route names, or record fields/u.test(entry.prompt)));
+  assert.ok(evidenceScenes.every((entry) => !/Location: 主要舞台/u.test(entry.prompt)));
 });
 
 test("breakup dialogue receives line-specific close staging instead of relying on generic correction", async () => {
@@ -188,6 +212,11 @@ test("blind QA distinguishes standalone split panels from the later flattened sp
   assert.match(mangaImageQaStructureContract({ kind: "split-panel" }), /gutters are added only by the later split-page job/u);
   assert.match(mangaImageQaStructureContract({ kind: "split-page" }), /solid black dividers/u);
   assert.doesNotMatch(mangaImageQaStructureContract({ kind: "scene-image" }), /Require the authored number of panels/u);
+  const panelPrompt = mangaImageQaVisualPrompt({ job: { kind: "split-panel", editorial: { split: { type: "story-3" } } } });
+  const pagePrompt = mangaImageQaVisualPrompt({ job: { kind: "split-page", splitType: "story-3" } });
+  assert.match(panelPrompt, /only one static source panel/u);
+  assert.doesNotMatch(panelPrompt, /result must already be one flattened page/u);
+  assert.match(pagePrompt, /final flattened page/u);
 });
 
 test("blind QA comparison order keeps one representative sheet for every expected cast member", () => {
@@ -802,7 +831,9 @@ test("one-call pipeline pauses after generating candidates for a genuinely new c
   });
   assert.equal(result.status, "awaiting-character-approval");
   assert.equal(result.cast.length, 1);
-  assert.equal(result.cast[0].candidates.filter((entry) => entry.status === "generated").length, 3);
+  assert.equal(result.cast[0].candidates.length, 3);
+  assert.deepEqual(result.cast[0].candidates.map((entry) => entry.label).sort(), ["A", "B", "C"]);
+  assert.equal(result.cast[0].candidates.some((entry) => entry.id || entry.variationAxis), false);
   assert.equal(generated, 3);
 });
 
