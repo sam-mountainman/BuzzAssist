@@ -3,11 +3,13 @@ import { test } from "node:test";
 
 import {
   alignmentSpeechSpan,
+  envelopeDistance,
   applyKoyaSpeechPronunciations,
   buildKoyaDialogueRequest,
   koyaPerformanceTag,
   prepareKoyaDialogueCut,
   quietestBoundarySeconds,
+  spectralEnvelope,
   scoreKoyaDialogueTake,
   selectKoyaDialogueTake,
 } from "../lib/koyaDialogueSpeech.mjs";
@@ -123,4 +125,39 @@ test("R134 the physical cut lands in the quietest part of the inter-utterance wi
 
   // A degenerate window falls back to the midpoint instead of throwing.
   assert.equal(quietestBoundarySeconds(samples, 1.0, 1.0, sampleRate), 1.0);
+});
+
+test("R138 speaker identity comes from spectral timbre, not pitch", () => {
+  const sampleRate = 48_000;
+  // Source-filter model: a harmonic source shaped by fixed formant resonances.
+  // Formants stay put when the speaker changes pitch, which is precisely why
+  // timbre survives the octave errors that make autocorrelation pitch useless
+  // at a line's onset.
+  const build = (fundamental, formants) => {
+    const gain = (hz) => formants.reduce(
+      (sum, [centre, width]) => sum + Math.exp(-(((hz - centre) / width) ** 2)),
+      0.02,
+    );
+    const harmonics = [];
+    for (let hz = fundamental; hz < 6000; hz += fundamental) harmonics.push([hz, gain(hz)]);
+    return Float32Array.from({ length: sampleRate }, (_value, index) => harmonics.reduce(
+      (sum, [hz, amplitude]) => sum + amplitude * Math.sin(2 * Math.PI * hz * index / sampleRate),
+      0,
+    ) * 0.05);
+  };
+  const speakerA = [[700, 160], [1220, 220], [2600, 300]];
+  const speakerB = [[400, 160], [2000, 220], [3400, 300]];
+
+  const lowPitch = spectralEnvelope(build(110, speakerA), 0.1, 0.9);
+  const highPitch = spectralEnvelope(build(220, speakerA), 0.1, 0.9);
+  const otherSpeaker = spectralEnvelope(build(110, speakerB), 0.1, 0.9);
+  assert.ok(lowPitch && highPitch && otherSpeaker);
+  assert.ok(
+    envelopeDistance(lowPitch, otherSpeaker) > envelopeDistance(lowPitch, highPitch),
+    `different vocal tract ${envelopeDistance(lowPitch, otherSpeaker)} must exceed same tract at another pitch ${envelopeDistance(lowPitch, highPitch)}`,
+  );
+  assert.ok(envelopeDistance(lowPitch, lowPitch) < 1e-9);
+
+  // Silence carries no identity and must be reported as such, never guessed.
+  assert.equal(spectralEnvelope(new Float32Array(sampleRate), 0.1, 0.9), null);
 });
