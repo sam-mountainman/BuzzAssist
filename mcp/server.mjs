@@ -76,8 +76,7 @@ import { estimateCreditsForJob } from "../lib/mediaCredits.mjs";
 import { isFalImageModel, isFalVideoModel, previewFalImageRequest, previewFalVideoRequest } from "../lib/falMediaGeneration.mjs";
 import { generateSubtitleSrt, normalizeSubtitleHoldSeconds, refineSubtitleFromPlan, renderSrt, writeSubtitleWordsSidecar } from "../lib/subtitleGeneration.mjs";
 import { buildBubbleAwareCompositionPrompt, renderSpeechBubbleSvg, speechBubbleProfile } from "../lib/speechBubbleRenderer.mjs";
-import { getElevenLabsStatus, listAllElevenLabsVoices, saveElevenLabsConfig, speechAssetPublicResult, writeSpeechAsset } from "../lib/speechGeneration.mjs";
-import { approveVoiceLibraryCasting, discoverVoiceLibraryCasting } from "../lib/voiceLibraryCasting.mjs";
+import { getElevenLabsStatus, listAllElevenLabsVoices, listVoices, resolveSpeechProvider, saveElevenLabsConfig, speechAssetPublicResult, writeSpeechAsset } from "../lib/speechGeneration.mjs";
 import { createEpisodeManifest, generateEpisodeSpeech, readEpisodeManifest, renderEpisodeVideo } from "../lib/mangaVideoPipeline.mjs";
 import { createMangaProductionDag, executeMangaProductionDag } from "../lib/mangaProductionDag.mjs";
 import { createKoyaMangaDagRuntime } from "../lib/koyaMangaDagRuntime.mjs";
@@ -123,8 +122,7 @@ const TOOL_BUZZASSIST_LOGIN = "buzzassist_login";
 const TOOL_BUZZASSIST_AUTH_STATUS = "buzzassist_auth_status";
 const TOOL_SETUP_HERMES = "setup_hermes_grok";
 const TOOL_GENERATE_SUBTITLES = "generate_excalidraw_subtitles";
-const TOOL_GET_ELEVENLABS_VOICES = "get_elevenlabs_voices";
-const TOOL_MANAGE_ELEVENLABS_VOICE_LIBRARY = "manage_elevenlabs_voice_library";
+const TOOL_GET_VOICES = "get_voices";
 const TOOL_GENERATE_SPEECH = "generate_excalidraw_speech";
 const TOOL_BUILD_MANGA_VIDEO = "build_excalidraw_manga_video";
 const TOOL_RUN_MANGA_PRODUCTION_DAG = "run_excalidraw_manga_production_dag";
@@ -2775,9 +2773,9 @@ function toolDefinitions() {
       },
     },
     {
-      name: TOOL_GET_ELEVENLABS_VOICES,
-      title: "Get ElevenLabs Voices",
-      description: "Return ElevenLabs connection status and every voice usable by the current account/workspace, following all pagination. Japanese-only filtering keeps native or verified Japanese candidates. Does not expose the API key.",
+      name: TOOL_GET_VOICES,
+      title: "Get Voices",
+      description: "Return every Japanese voice usable by the current BuzzAssist account: the shared library plus any voices trained for this account. Each voice includes name, gender, age group, style tags and a sample URL. Requires BuzzAssist login (buzzassist_login).",
       inputSchema: {
         type: "object",
         properties: {
@@ -2791,54 +2789,15 @@ function toolDefinitions() {
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     {
-      name: TOOL_MANAGE_ELEVENLABS_VOICE_LIBRARY,
-      title: "Manage ElevenLabs Voice Library Casting",
-      description: "Search the complete public ElevenLabs Voice Library for native Japanese voices, rank them against each character's gender, voice age, personality, emotional range, and dialogue use case, and write a browser audition sheet. Discovery is read-only. The approve action requires previewConfirmed=true and a concrete selectionReason for every selection plus confirmedSettings=true, then adds only approved shared voices to My Voices and records the human decision.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          action: { type: "string", enum: ["audition", "approve"] },
-          episodeId: { type: "string", description: "Limit candidates to characters registered for this episode. Defaults to global." },
-          characterIds: { type: "array", items: { type: "string" }, description: "Optional exact character IDs to audition." },
-          candidateLimit: { type: "number", minimum: 2, maximum: 12, description: "Candidates shown per character. Defaults to 5." },
-          includeNarration: { type: "boolean", description: "Also audition a Japanese narrator. Defaults to true." },
-          planPath: { type: "string", description: "Audition JSON to approve. Optional when episodeId identifies the default plan path." },
-          selections: {
-            type: "array",
-            description: "Approved candidates after listening to their preview audio.",
-            items: {
-              type: "object",
-              properties: {
-                characterId: { type: "string" },
-                winnerLabel: { type: "string", pattern: "^[A-Ea-e]$", description: "Anonymous winner label from the audition sheet." },
-                newName: { type: "string", description: "Optional My Voices display name." },
-                previewConfirmed: { type: "boolean", description: "Must be true after the candidate preview was listened to." },
-                selectionReason: { type: "string", minLength: 4, description: "Concrete human reason for selecting this voice over the other audition candidates." },
-              },
-              required: ["characterId", "winnerLabel", "previewConfirmed", "selectionReason"],
-              additionalProperties: false,
-            },
-          },
-          confirmedSettings: { type: "boolean", description: "Required for approve because it changes My Voices and the local character registry." },
-          approvedBy: { type: "string", description: "Human reviewer name or stable identifier. Defaults to human-user." },
-          projectDir: { type: "string" },
-          canvasDir: { type: "string" },
-        },
-        required: ["action"],
-        additionalProperties: false,
-      },
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    },
-    {
       name: TOOL_GENERATE_SPEECH,
       title: "Generate Excalidraw Speech",
-      description: "Generate Japanese speech with ElevenLabs (Eleven v3 by default), save mp3 plus character timing, and replace the generator frame with an audio card. Requires confirmedSettings=true.",
+      description: "Generate Japanese speech with the BuzzAssist voice engine, save mp3 plus character timing, and replace the generator frame with an audio card. Minutes are billed to the BuzzAssist account; regenerating the same line is free up to 3 times. Requires confirmedSettings=true.",
       inputSchema: {
         type: "object",
         properties: {
           text: { type: "string", description: "Japanese narration or dialogue to synthesize." },
           model: { type: "string", enum: ["eleven_v3", "eleven_multilingual_v2", "eleven_flash_v2_5"], description: "Defaults to eleven_v3." },
-          voiceId: { type: "string", description: "ElevenLabs default or library voice id." },
+          voiceId: { type: "string", description: "BuzzAssist voice id (get_voices で取得)." },
           voiceName: { type: "string" },
           stability: { type: "number", minimum: 0, maximum: 1 },
           similarityBoost: { type: "number", minimum: 0, maximum: 1 },
@@ -3973,62 +3932,32 @@ async function handleToolCall(params, progress = () => {}) {
       structuredContent: { ...batch, validation, workflow: updatedWorkflow },
     };
   }
-  if (params?.name === TOOL_GET_ELEVENLABS_VOICES) {
+  if (params?.name === TOOL_GET_VOICES) {
     const args = params.arguments ?? {};
-    const status = await getElevenLabsStatus();
-    const voices = status.configured
-      ? await listAllElevenLabsVoices({ ...args, japaneseOnly: args.japaneseOnly !== false })
-      : { voices: [], totalCount: 0, hasMore: false };
+    // 既定は BuzzAssist の音声基盤。移行期間のみ SPEECH_PROVIDER=elevenlabs で従来動作。
+    if (resolveSpeechProvider(args) === "elevenlabs") {
+      const status = await getElevenLabsStatus();
+      const voices = status.configured
+        ? await listAllElevenLabsVoices({ ...args, japaneseOnly: args.japaneseOnly !== false })
+        : { voices: [], totalCount: 0, pageCount: 0 };
+      return {
+        content: [{ type: "text", text: status.configured
+          ? `ElevenLabs is ready; found ${voices.totalCount} Japanese-capable voice(s).`
+          : "ElevenLabs API key is not configured." }],
+        structuredContent: { ok: true, provider: "elevenlabs", ...status, ...voices },
+      };
+    }
+    const voices = await listVoices(args);
+    const owned = voices.filter((voice) => voice.ownerType === "account").length;
     return {
-      content: [{ type: "text", text: status.configured
-        ? `ElevenLabs is ready; found ${voices.totalCount} Japanese-capable voice(s) across ${voices.pageCount || 0} account page(s).`
-        : "ElevenLabs API key is not configured. Save it in the canvas Speech Generator first." }],
-      structuredContent: { status, ...voices },
+      content: [{ type: "text", text: `BuzzAssist has ${voices.length} Japanese voice(s) available${owned > 0 ? ` (${owned} trained for this account)` : ""}.` }],
+      structuredContent: { ok: true, provider: "buzzassist", totalCount: voices.length, voices },
     };
   }
 
-  if (params?.name === TOOL_MANAGE_ELEVENLABS_VOICE_LIBRARY) {
+if (params?.name === TOOL_GENERATE_SPEECH) {
     const args = params.arguments ?? {};
-    if (args.action === "audition") {
-      progress(0, 2, "Searching and scoring Japanese Voice Library candidates");
-      const result = await discoverVoiceLibraryCasting({
-        ...args,
-        episodeId: args.episodeId || "global",
-        includeNarration: args.includeNarration !== false,
-      });
-      progress(2, 2, "Voice Library audition sheet ready");
-      return {
-        content: [{
-          type: "text",
-          text: `Scored ${result.plan.catalog.sharedLibraryCount} public Japanese voice(s) plus ${result.plan.catalog.accountCount} account voice(s) for ${result.plan.entries.length} role(s). No voice was added. Listen in ${result.htmlPath} before approval.`,
-        }],
-        structuredContent: result,
-      };
-    }
-    if (args.action === "approve") {
-      if (args.confirmedSettings !== true) {
-        throw new Error("Voice Library approval requires confirmedSettings=true after every selected preview was heard.");
-      }
-      progress(0, 2, "Adding approved Voice Library selections");
-      const result = await approveVoiceLibraryCasting({
-        ...args,
-        confirmedVoiceAdds: true,
-      });
-      progress(2, 2, "Voice casting approved");
-      return {
-        content: [{
-          type: "text",
-          text: `Approved ${result.approvals.length} character voice assignment(s); only selected shared voices were added to My Voices.`,
-        }],
-        structuredContent: result,
-      };
-    }
-    throw new Error(`Unsupported Voice Library action: ${args.action || "(missing)"}`);
-  }
-
-  if (params?.name === TOOL_GENERATE_SPEECH) {
-    const args = params.arguments ?? {};
-    progress(0, 2, "Generating ElevenLabs speech");
+    progress(0, 2, "Generating speech");
     const generated = await writeSpeechAsset(args);
     progress(1, 2, "Placing audio on canvas");
     const placement = await insertExcalidrawAudioResult({
