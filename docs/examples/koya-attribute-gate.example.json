@@ -1,0 +1,15 @@
+{"checks": [
+ {"id":"ivory2-drift","type":"hairColorDelta","image":"canvas/assets/appare-revisions/horo-v7-akacha-ivoryjersey2.png","reference":"canvas/assets/appare-revisions/horo-v7-akacha-fangbig.png"},
+ {"id":"ivory3-overdark","type":"hairColorDelta","image":"canvas/assets/appare-revisions/horo-v7-akacha-ivoryjersey3.png","reference":"canvas/assets/appare-revisions/horo-v7-akacha-fangbig.png"},
+ {"id":"ivory5-final","type":"hairColorDelta","image":"canvas/assets/appare-revisions/horo-v7-akacha-ivoryjersey5.png","reference":"canvas/assets/appare-revisions/horo-v7-akacha-fangbig.png"},
+ {"id":"navy2-ok","type":"hairColorDelta","image":"canvas/assets/appare-revisions/horo-v7-akacha-navyjersey2.png","reference":"canvas/assets/appare-revisions/horo-v7-akacha-fangbig.png"},
+ {"id":"grey3-ok","type":"hairColorDelta","image":"canvas/assets/appare-revisions/horo-v7-akacha-greyjersey3.png","reference":"canvas/assets/appare-revisions/horo-v7-akacha-fangbig.png"},
+ {"id":"messy-family","type":"duplicateTakes","images":["canvas/assets/appare-revisions/reiji-var-messy.png","canvas/assets/appare-revisions/reiji-messy-b.png","canvas/assets/appare-revisions/reiji-messy-c.png"]},
+ {"id":"distinct-set","type":"duplicateTakes","images":["canvas/assets/appare-revisions/reiji-var-messy.png","canvas/assets/appare-revisions/reiji-tex-take1.png","canvas/assets/appare-revisions/reiji-v2-wild.png","canvas/assets/appare-revisions/reiji-v2-mash.png","canvas/assets/appare-revisions/reiji-v2-curtain.png"]},
+ {"id":"neck-black-old","type":"neckOrnament","image":"canvas/assets/appare-revisions/horo-v7-akacha-blackjersey-fang.png","reference":"canvas/assets/appare-revisions/horo-v7-akacha-blackjersey2.png"},
+ {"id":"neck-ivory-old","type":"neckOrnament","image":"canvas/assets/appare-revisions/horo-v7-akacha-ivoryjersey.png","reference":"canvas/assets/appare-revisions/horo-v7-akacha-ivoryjersey5.png"},
+ {"id":"neck-grey2-old","type":"neckOrnament","image":"canvas/assets/appare-revisions/horo-v7-akacha-greyjersey2.png","reference":"canvas/assets/appare-revisions/horo-v7-akacha-greyjersey3.png"},
+ {"id":"neck-black-new-clean","type":"neckOrnament","image":"canvas/assets/appare-revisions/horo-v7-akacha-blackjersey2.png","reference":"canvas/assets/appare-revisions/horo-v7-akacha-navyjersey2.png"},
+ {"id":"crest-removal-ok","type":"unintendedChange","image":"canvas/assets/appare-revisions/horo-v7-rose-fang-plain.png","base":"canvas/assets/appare-revisions/horo-v7-rose-fang.png","allowedRegions":[[0.0,0.15,0.25,0.45]]},
+ {"id":"haircolor-sideeffect","type":"unintendedChange","image":"canvas/assets/appare-revisions/horo-v7-akacha-ivoryjersey3.png","base":"canvas/assets/appare-revisions/horo-v7-akacha-ivoryjersey5.png","allowedRegions":[[0.56,0.40,0.24,0.30]]}
+]}

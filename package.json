@@ -36,6 +36,7 @@
     "mcp/server.mjs",
     "scripts/*.mjs",
     "scripts/*.sh",
+    "scripts/*.py",
     "skills/",
     "./AGENTS.md",
     "./CLAUDE.md",
