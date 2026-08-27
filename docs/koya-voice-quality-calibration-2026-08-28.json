@@ -1,0 +1,270 @@
+{
+ "version": "koya-voice-quality-calibration-v1",
+ "calibratedAt": "2026-08-28",
+ "groundTruth": {
+  "adoptedTakes": {
+   "cut-01": "take2",
+   "cut-02": "take2",
+   "cut-03": "take1"
+  },
+  "utmosAgreement": "2/3 (cut-02 disagrees: human chose lower-UTMOS take for emotional read)",
+  "wilson95": "0.21-0.94 — insufficient evidence for auto-adoption of serifu; narration auto-pick pending 50-100 human pairwise comparisons (Bradley-Terry plan)"
+ },
+ "thresholds": {
+  "maxCer": 0.13,
+  "cerFloorApproved": "0.02-0.10",
+  "minUtmos": 2.7,
+  "minUtmosDuration": 2.0,
+  "minF0SemitoneStd": 1.2,
+  "moraPerSecRange": [
+   4.0,
+   10.0
+  ],
+  "maxInternalPauseSec": 1.2
+ },
+ "environment": {
+  "scriptSha256": "f987674ff9590fd21eead1900feb1a69c0b96d961b690d12793d6abc3518b89e",
+  "utmosSource": "/Users/higataiyu/.cache/torch/hub/tarepan_SpeechMOS_v1.2.0",
+  "whisperModel": "kotoba-tech/kotoba-whisper-v2.0-faster",
+  "speakerBackend": "resemblyzer"
+ },
+ "checks": [
+  {
+   "id": "canary-cut-01-take1",
+   "status": "pass",
+   "metrics": {
+    "durationSec": 9.04,
+    "peak": 0.8969,
+    "utmos": 3.709,
+    "vad": "silero",
+    "internalPausesSec": [
+     0.45
+    ],
+    "edgeSilenceSec": [
+     0.0,
+     0.0
+    ],
+    "lufs": -15.2,
+    "cer": 0.0694,
+    "transcript": "閉鎖予定の三冠バス停で佐藤政治は最後の点検に立ち会っていたこの時刻表午前7時10分の便だけ剥がされていますね",
+    "moraPerSec": 7.75,
+    "f0SemitoneStd": 4.11,
+    "voicedRatio": 0.865
+   },
+   "inputSha256": {
+    "/Users/higataiyu/Documents/Excalidraw/canvas/manga-videos/manga-v50-unseen-canary-001/.koya-dialogue-source/cut-01-take-1-d861d8a35ffe-eleven-v3-dialogue.wav": "c6b7514683b660ba23458507af3ff89a55a6d9f8e39ebf6bd1f3761b5840e093"
+   },
+   "checkDigest": "b89ce5f8aaeb17a630ef271f2b8aeb509d856157ba22dcde7cdd6b212ca5c374"
+  },
+  {
+   "id": "canary-cut-01-take2",
+   "status": "pass",
+   "metrics": {
+    "durationSec": 9.68,
+    "peak": 0.9388,
+    "utmos": 3.731,
+    "vad": "silero",
+    "internalPausesSec": [
+     0.77
+    ],
+    "edgeSilenceSec": [
+     0.03,
+     0.0
+    ],
+    "lufs": -15.78,
+    "cer": 0.0833,
+    "transcript": "閉鎖予定の三冠バス停で佐藤政治はサイモの点検に立ち会っていたこの時刻表午前7時10分の便だけ剥がされていますね",
+    "moraPerSec": 7.26,
+    "f0SemitoneStd": 4.13,
+    "voicedRatio": 0.801
+   },
+   "inputSha256": {
+    "/Users/higataiyu/Documents/Excalidraw/canvas/manga-videos/manga-v50-unseen-canary-001/.koya-dialogue-source/cut-01-take-2-7fc5a2dda9e4-eleven-v3-dialogue.wav": "614e4fbb323cc9409486e810a62f1894022eb44c44a0b6e5c110504ee77efb27"
+   },
+   "checkDigest": "0cafcdbb43432ecbaa63f26d13530f0b1fb1b2a4e6c46510f3b8451face08c3a"
+  },
+  {
+   "id": "canary-cut-02-take1",
+   "status": "pass",
+   "metrics": {
+    "durationSec": 13.6,
+    "peak": 0.9599,
+    "utmos": 3.988,
+    "vad": "silero",
+    "internalPausesSec": [
+     0.16,
+     0.2
+    ],
+    "edgeSilenceSec": [
+     0.07,
+     0.0
+    ],
+    "lufs": -15.34,
+    "cer": 0.0185,
+    "transcript": "廃止申請にはその便を3か月利用した人はいないと記されていたけれど券売機の記録には毎週金曜日同じ区間の回数券が使われています刑事を剥がせば乗る人がいないように見せられる",
+    "moraPerSec": 7.91,
+    "f0SemitoneStd": 4.44,
+    "voicedRatio": 0.823
+   },
+   "inputSha256": {
+    "/Users/higataiyu/Documents/Excalidraw/canvas/manga-videos/manga-v50-unseen-canary-001/.koya-dialogue-source/cut-02-take-1-30e414a94af9-eleven-v3-dialogue.wav": "8e61f35347ffd744d68fdc9c47f97305835e5a5d171a49f795e96edbbf451528"
+   },
+   "checkDigest": "d06d1a287e1e325b01f936c339840ce61477dcaf4c2550f17ffb8b9deabc8166"
+  },
+  {
+   "id": "canary-cut-02-take2",
+   "status": "pass",
+   "metrics": {
+    "durationSec": 13.92,
+    "peak": 0.9653,
+    "utmos": 3.797,
+    "vad": "silero",
+    "internalPausesSec": [
+     0.23
+    ],
+    "edgeSilenceSec": [
+     0.03,
+     0.0
+    ],
+    "lufs": -15.85,
+    "cer": 0.0278,
+    "transcript": "廃止申請にはその弁を3か月利用した人はいないと記されていたけれど券売機の記録には毎週金曜日同じ区間の回数券が使われています刑事を剥がせば乗る人がいないように見せられる",
+    "moraPerSec": 7.71,
+    "f0SemitoneStd": 4.37,
+    "voicedRatio": 0.836
+   },
+   "inputSha256": {
+    "/Users/higataiyu/Documents/Excalidraw/canvas/manga-videos/manga-v50-unseen-canary-001/.koya-dialogue-source/cut-02-take-2-7c1c101b0c25-eleven-v3-dialogue.wav": "60fc9b8ed755a7e729189b1078f9fa8536793fda9f251c1b64102cfa49902cf1"
+   },
+   "checkDigest": "c8ebefbad3328bbcdc6248f7f16d18c2b958c5ec56e27e8ded51936d523e9c31"
+  },
+  {
+   "id": "canary-cut-03-take1",
+   "status": "pass",
+   "metrics": {
+    "durationSec": 20.48,
+    "peak": 0.9615,
+    "utmos": 3.597,
+    "vad": "silero",
+    "internalPausesSec": [
+     0.26,
+     0.52,
+     0.39
+    ],
+    "edgeSilenceSec": [
+     0.0,
+     0.0
+    ],
+    "lufs": -15.34,
+    "cer": 0.1026,
+    "transcript": "昨日は駅舎の防犯映像と回数券記録を並べ廃止申請の数字が作られた証拠を提出したのは路線ではなく記録の方です翌月、朝の一本は数員する住民のために残された残すべきものは声の大きさではなく確かめた事実で決めましょう",
+    "moraPerSec": 7.32,
+    "f0SemitoneStd": 4.41,
+    "voicedRatio": 0.794
+   },
+   "inputSha256": {
+    "/Users/higataiyu/Documents/Excalidraw/canvas/manga-videos/manga-v50-unseen-canary-001/.koya-dialogue-source/cut-03-take-1-75ca44205f93-eleven-v3-dialogue.wav": "e96880e8f1619cb807b645f376784f51cdcaf884451fa943b6e8d5d6395e6eda"
+   },
+   "checkDigest": "7b634f643f62a21e04f22f82a286bcd0d107e5f035b01a86435d17140fa62a5f"
+  },
+  {
+   "id": "canary-cut-03-take2",
+   "status": "pass",
+   "metrics": {
+    "durationSec": 20.0,
+    "peak": 0.9621,
+    "utmos": 3.425,
+    "vad": "silero",
+    "internalPausesSec": [
+     0.1,
+     0.74,
+     0.16
+    ],
+    "edgeSilenceSec": [
+     0.03,
+     0.0
+    ],
+    "lufs": -15.67,
+    "cer": 0.0833,
+    "transcript": "佐藤は駅舎の防犯映像と回数件記録を並べ廃止申請の数字が作られた証拠を提出したのは路線ではなく記録の方です翌月、朝の一本は通院する住民のために残された残すべきものは声の大きさではなく確かめた事実で決めましょう",
+    "moraPerSec": 7.51,
+    "f0SemitoneStd": 4.54,
+    "voicedRatio": 0.828
+   },
+   "inputSha256": {
+    "/Users/higataiyu/Documents/Excalidraw/canvas/manga-videos/manga-v50-unseen-canary-001/.koya-dialogue-source/cut-03-take-2-d490b114249d-eleven-v3-dialogue.wav": "affd7934bec33e70af95027bb7c580ef96ed4ecc2f0cd87e7471f4dfd6d54718"
+   },
+   "checkDigest": "d6b99b243ea98eb6ed53ee2f137f95a83c862271e631f009bb01de3a277bdf02"
+  },
+  {
+   "id": "arano-u01",
+   "status": "pass",
+   "metrics": {
+    "durationSec": 2.775,
+    "peak": 0.5555,
+    "utmos": 3.139,
+    "vad": "silero",
+    "internalPausesSec": [
+     0.58
+    ],
+    "edgeSilenceSec": [
+     0.1,
+     0.0
+    ],
+    "lufs": -19.16,
+    "f0SemitoneStd": 4.4,
+    "voicedRatio": 0.795
+   },
+   "inputSha256": {
+    "canvas/assets/audio/manga-arano-amane-effort-001-cut-01-u01-koya-v44.wav": "1b0aad702d054e8c3b2075d98f4fdc2213dc9a9f395a9593f1614fdad89a1d4a"
+   },
+   "checkDigest": "738d32001865cf229bdca45fa76167e912de5e46b859dc929e93297d06c35ceb"
+  },
+  {
+   "id": "arano-u02",
+   "status": "warn",
+   "metrics": {
+    "durationSec": 1.025,
+    "peak": 0.3934,
+    "utmos": 2.18,
+    "vad": "silero",
+    "internalPausesSec": [],
+    "edgeSilenceSec": [
+     0.07,
+     0.0
+    ],
+    "lufs": -19.02,
+    "f0SemitoneStd": 1.85,
+    "voicedRatio": 0.864
+   },
+   "inputSha256": {
+    "canvas/assets/audio/manga-arano-amane-effort-001-cut-01-u02-koya-v44.wav": "83d06a913122cfc0093c5c034ba4644f30eee6f7a0532665593e497924c098c2"
+   },
+   "checkDigest": "481c917825017d3725b4e75ce3167ca14aff551bd6e091937f2a5c45251e656a"
+  },
+  {
+   "id": "arano-u03",
+   "status": "pass",
+   "metrics": {
+    "durationSec": 2.435,
+    "peak": 0.5082,
+    "utmos": 2.859,
+    "vad": "silero",
+    "internalPausesSec": [
+     0.13
+    ],
+    "edgeSilenceSec": [
+     0.19,
+     0.0
+    ],
+    "lufs": -19.02,
+    "f0SemitoneStd": 2.71,
+    "voicedRatio": 0.898
+   },
+   "inputSha256": {
+    "canvas/assets/audio/manga-arano-amane-effort-001-cut-01-u03-koya-v44.wav": "f472cc192654b682749a3c321ea1260c4034c85ec01bec5f3f8fda358d42aedf"
+   },
+   "checkDigest": "38a2411e59f31421072caa1316765f183fe72f5778cbd18bdc37ddda54e2e9ae"
+  }
+ ]
+}

@@ -26,6 +26,16 @@ const dictionaryPath = resolve(pathIndex >= 0 ? args[pathIndex + 1] : "config/ko
 const dictionary = await readReadingDictionary(dictionaryPath);
 const rules = buildElevenLabsRules(dictionary);
 if (rules.length === 0) {
+  // Fail-closed: with no active rules a previously synced dictionary id must
+  // not keep applying old readings — clear the binding so production stops
+  // attaching the stale locator (removal on the API side stays a human step).
+  if (dictionary.elevenlabs?.dictionaryId && !dryRun) {
+    const stale = dictionary.elevenlabs;
+    delete dictionary.elevenlabs;
+    await writeReadingDictionary(dictionaryPath, dictionary);
+    console.log(JSON.stringify({ status: "cleared-stale-binding", previousDictionaryId: stale.dictionaryId }));
+    process.exit(0);
+  }
   console.log(JSON.stringify({ status: "noop", reason: "no active entries" }));
   process.exit(0);
 }

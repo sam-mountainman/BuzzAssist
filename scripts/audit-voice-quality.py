@@ -1,46 +1,50 @@
 #!/usr/bin/env python3
-"""Voice quality gates for generated Japanese speech (both harnesses).
+"""Voice quality gates for generated Japanese speech (ledger R194, rev 2).
 
-Measures, per utterance WAV:
-  - utmos:     UTMOS22 predicted naturalness MOS (torch.hub tarepan/SpeechMOS)
-  - cer:       character error rate vs expected text (faster-whisper, kana-insensitive)
-  - prosody:   F0 spread in semitones (monotone detector), voiced ratio,
-               speech rate in mora/sec (needs expectedText), edge silences
-  - loudness:  integrated LUFS (pyloudnorm), sample peak / clipping
-  - speaker:   cosine similarity to an approved anchor voice (resemblyzer)
+Per-check measurements:
+  - utmos:    UTMOS22 naturalness MOS, loaded OFFLINE from the local torch hub
+              cache only (no runtime code fetch; pre-fetch once by trusted hand)
+  - cer:      STT round-trip CER per SEGMENT (utterance) when segments are
+              given, else whole-clip; expected side uses `expectedReading`
+              (confirmed kana) when provided so the metric is not circular
+              through the same morphological dictionary as the transcript
+  - prosody:  F0 semitone spread per segment (monotone), speech rate in
+              mora/sec (sokuon and chouon COUNT as moras), edge silences and
+              internal pauses via Silero VAD when available (envelope fallback)
+  - levels:   sample peak measured on the ORIGINAL file samples (pre-resample),
+              integrated LUFS (pyloudnorm)
+  - speaker:  cosine vs anchor voice (resemblyzer; SpeechBrain ECAPA when
+              VOICE_QA_SPEAKER_BACKEND=ecapa)
 
 Config JSON:
-{
-  "checks": [
-    {"id": "...", "type": "voiceQuality",
-     "audio": "utt.wav",
-     "expectedText": "こんにちは",              // optional: enables cer + mora rate
-     "anchorAudio": "approved-voice.wav",        // optional: enables speaker similarity
-     "minUtmos": 2.7, "warnUtmos": 3.1,
-     "maxCer": 0.15,
-     "minF0SemitoneStd": 1.2,                    // below = monotone read
-     "moraPerSecRange": [4.0, 10.0],
-     "maxEdgeSilenceSec": 1.5,
-     "loudness": {"target": -14.0, "tolerance": 4.0},
-     "minSpeakerCosine": 0.72}
-  ]
-}
+{"checks": [{
+  "id": "...", "type": "voiceQuality", "audio": "take.wav",
+  "expectedText": "...",              // optional whole-clip fallback
+  "expectedReading": "コンニチハ...",  // optional confirmed kana (preferred)
+  "segments": [{"id": "u01", "start": 0.0, "end": 2.4,
+                 "expectedText": "...", "expectedReading": "..."}],
+  "anchorAudio": "...", "minUtmos": 2.7, "maxCer": 0.13, ...}]}
 
-Metrics whose optional dependency or input is missing are reported with
-status "unavailable" instead of silently passing; the check fails only on
-measured violations. Exit 0 = no failures, 3 = at least one check failed.
+Every check result carries `inputSha256` (audio bytes) and `checkDigest`
+(canonical config: expected text/reading, thresholds, segments) plus a
+report-level `environment` block, so a stored PASS is bound to exactly what
+was judged. Metrics with missing dependencies are listed in `unavailable`,
+never silently passed. Exit 0 = no failures, 3 = at least one check failed.
 All inference is local; audio never leaves the machine.
 """
 import hashlib
 import json
-import math
+import os
 import sys
 import unicodedata
 from pathlib import Path
 
 import numpy as np
 
-SMALL_KANA = set("ゃゅょぁぃぅぇぉャュョァィゥェォっッー")
+# Small kana combine with the previous mora; sokuon (っ/ッ) and chouon (ー)
+# are their own moras (がっこう=4, スーパー=4 — 2026-08-28 Codex review fix).
+COMBINING_KANA = set("ゃゅょぁぃぅぇぉャュョァィゥェォ")
+UTMOS_CACHE_DIR = Path.home() / ".cache/torch/hub/tarepan_SpeechMOS_v1.2.0"
 
 
 def fail(message):
@@ -51,63 +55,80 @@ def fail(message):
 def load_audio(path, target_sr=16000):
     import soundfile as sf
     data, sr = sf.read(str(path), dtype="float64", always_2d=True)
+    original_peak = float(np.abs(data).max()) if data.size else 0.0
     mono = data.mean(axis=1)
     if sr != target_sr:
         import librosa
         mono = librosa.resample(mono, orig_sr=sr, target_sr=target_sr)
         sr = target_sr
-    return mono, sr
+    return mono, sr, original_peak
 
 
-def normalize_kana(text):
-    """Reading-normalize: convert to katakana via morphological analysis so
-    kanji spellings and kana transcripts compare as pronunciation, then strip
-    punctuation/whitespace."""
+_TAGGER = None
+
+
+def tagger():
+    global _TAGGER
+    if _TAGGER is None:
+        from fugashi import Tagger
+        _TAGGER = Tagger()
+    return _TAGGER
+
+
+def to_katakana_reading(text):
+    """Morphological reading (katakana). Used for the TRANSCRIPT side and as
+    a fallback for expected text when no confirmed reading is supplied."""
     text = unicodedata.normalize("NFKC", text)
     try:
-        from fugashi import Tagger
-        global _TAGGER
-        if "_TAGGER" not in globals() or _TAGGER is None:
-            _TAGGER = Tagger()
         text = "".join(
             (word.feature.kana if getattr(word.feature, "kana", None) else word.surface)
-            for word in _TAGGER(text)
+            for word in tagger()(text)
         )
     except ImportError:
         pass
+    return fold_kana(text)
+
+
+def fold_kana(text):
+    text = unicodedata.normalize("NFKC", text)
     text = "".join(chr(ord(ch) + 0x60) if "ぁ" <= ch <= "ゔ" else ch for ch in text)
     return "".join(ch for ch in text if not unicodedata.category(ch).startswith("P") and not ch.isspace())
 
 
-def mora_count(text):
-    try:
-        from fugashi import Tagger
-    except ImportError:
-        return None
-    tagger = Tagger()
-    yomi = "".join(
-        (word.feature.kana or word.surface) if hasattr(word.feature, "kana") else word.surface
-        for word in tagger(text)
+def mora_count_from_reading(reading):
+    return sum(
+        1 for ch in reading
+        if ("ァ" <= ch <= "ヺ" or ch == "ー") and ch not in COMBINING_KANA
     )
-    yomi = unicodedata.normalize("NFKC", yomi)
-    return sum(1 for ch in yomi if ("ァ" <= ch <= "ヺ" or "ぁ" <= ch <= "ゔ") and ch not in SMALL_KANA) or None
 
 
 _UTMOS = None
+_UTMOS_ERROR = None
 
 
 def utmos_score(audio, sr):
-    global _UTMOS
-    import torch
+    global _UTMOS, _UTMOS_ERROR
+    if _UTMOS_ERROR:
+        raise RuntimeError(_UTMOS_ERROR)
     if _UTMOS is None:
-        _UTMOS = torch.hub.load("tarepan/SpeechMOS:v1.2.0", "utmos22_strong", trust_repo=True)
+        import torch
+        if not UTMOS_CACHE_DIR.exists():
+            _UTMOS_ERROR = (
+                f"UTMOS cache missing at {UTMOS_CACHE_DIR}; pre-fetch once with "
+                "torch.hub.load('tarepan/SpeechMOS:v1.2.0', 'utmos22_strong') on a trusted run"
+            )
+            raise RuntimeError(_UTMOS_ERROR)
+        # source="local" executes only the already-audited cached snapshot —
+        # no network fetch, no fresh third-party code (Codex review, R194).
+        _UTMOS = torch.hub.load(str(UTMOS_CACHE_DIR), "utmos22_strong", source="local")
+    import torch
     with torch.no_grad():
         return float(_UTMOS(torch.from_numpy(audio).float().unsqueeze(0), sr).item())
 
 
 def f0_semitone_std(audio, sr):
     import pyworld
-    f0, _ = pyworld.harvest(audio, sr, f0_floor=60.0, f0_ceil=500.0, frame_period=10.0)
+    f0, _ = pyworld.harvest(np.ascontiguousarray(audio), sr, f0_floor=60.0, f0_ceil=500.0, frame_period=10.0)
     voiced = f0[f0 > 0]
     if voiced.size < 10:
         return None, 0.0
@@ -115,7 +136,29 @@ def f0_semitone_std(audio, sr):
     return float(np.std(semitones)), float(voiced.size / f0.size)
 
 
-def edge_silence_seconds(audio, sr, threshold_db=-45.0):
+_VAD = None
+_VAD_ERROR = None
+
+
+def speech_spans(audio, sr):
+    """Speech spans in seconds via Silero VAD; None when unavailable."""
+    global _VAD, _VAD_ERROR
+    if _VAD_ERROR:
+        return None
+    try:
+        if _VAD is None:
+            from silero_vad import get_speech_timestamps, load_silero_vad
+            _VAD = (load_silero_vad(), get_speech_timestamps)
+        model, get_ts = _VAD
+        import torch
+        stamps = get_ts(torch.from_numpy(audio).float(), model, sampling_rate=sr)
+        return [(t["start"] / sr, t["end"] / sr) for t in stamps]
+    except Exception as error:  # noqa: BLE001
+        _VAD_ERROR = str(error)[:120]
+        return None
+
+
+def envelope_edges(audio, sr, threshold_db=-45.0):
     amplitude = np.abs(audio)
     if amplitude.max() <= 0:
         return len(audio) / sr, len(audio) / sr
@@ -131,27 +174,29 @@ def integrated_lufs(audio, sr):
         import pyloudnorm
     except ImportError:
         return None
-    meter = pyloudnorm.Meter(sr)
-    return float(meter.integrated_loudness(audio))
+    return float(pyloudnorm.Meter(sr).integrated_loudness(audio))
 
 
 _WHISPER = None
 
 
-def transcribe(path, check_model=None):
+def transcribe(audio_or_path, model_name=None):
     global _WHISPER
     try:
         from faster_whisper import WhisperModel
     except ImportError:
         return None
     if _WHISPER is None:
-        _WHISPER = WhisperModel(check_model or "kotoba-tech/kotoba-whisper-v2.0-faster", device="cpu", compute_type="int8")
-    segments, _ = _WHISPER.transcribe(str(path), language="ja", beam_size=5)
+        _WHISPER = WhisperModel(model_name or "kotoba-tech/kotoba-whisper-v2.0-faster",
+                                device="cpu", compute_type="int8")
+    source = audio_or_path if isinstance(audio_or_path, str) else audio_or_path.astype(np.float32)
+    segments, _ = _WHISPER.transcribe(source, language="ja", beam_size=5)
     return "".join(segment.text for segment in segments)
 
 
-def char_error_rate(expected, actual):
-    expected, actual = normalize_kana(expected), normalize_kana(actual)
+def reading_error_rate(expected_text, expected_reading, transcript):
+    expected = fold_kana(expected_reading) if expected_reading else to_katakana_reading(expected_text)
+    actual = to_katakana_reading(transcript)
     if not expected:
         return None
     rows = list(range(len(actual) + 1))
@@ -162,90 +207,87 @@ def char_error_rate(expected, actual):
     return rows[-1] / len(expected)
 
 
-_SPEAKER_ENCODER = None
+_SPEAKER = None
 
 
 def speaker_cosine(audio_path, anchor_path):
-    global _SPEAKER_ENCODER
+    global _SPEAKER
+    backend = os.environ.get("VOICE_QA_SPEAKER_BACKEND", "resemblyzer")
     try:
+        if backend == "ecapa":
+            if _SPEAKER is None:
+                from speechbrain.inference.speaker import SpeakerRecognition
+                _SPEAKER = SpeakerRecognition.from_hparams(
+                    source="speechbrain/spkrec-ecapa-voxceleb",
+                    savedir=str(Path.home() / ".cache/speechbrain-ecapa"),
+                )
+            score, _ = _SPEAKER.verify_files(str(audio_path), str(anchor_path))
+            return float(score.item())
         from resemblyzer import VoiceEncoder, preprocess_wav
+        if _SPEAKER is None:
+            _SPEAKER = VoiceEncoder()
+        a = _SPEAKER.embed_utterance(preprocess_wav(Path(audio_path)))
+        b = _SPEAKER.embed_utterance(preprocess_wav(Path(anchor_path)))
+        return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
     except ImportError:
         return None
-    if _SPEAKER_ENCODER is None:
-        _SPEAKER_ENCODER = VoiceEncoder()
-    a = _SPEAKER_ENCODER.embed_utterance(preprocess_wav(Path(audio_path)))
-    b = _SPEAKER_ENCODER.embed_utterance(preprocess_wav(Path(anchor_path)))
-    return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+
+
+def canonical_check_digest(check):
+    material = {k: check[k] for k in sorted(check) if k not in ("id",)}
+    return hashlib.sha256(json.dumps(material, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
+
+def slice_audio(audio, sr, start, end):
+    lo = max(0, int(start * sr))
+    hi = min(len(audio), int(end * sr))
+    return audio[lo:hi]
 
 
 def check_voice_quality(check):
     audio_path = Path(check["audio"])
     if not audio_path.exists():
         fail(f"audio not found: {audio_path}")
-    audio, sr = load_audio(audio_path)
+    audio, sr, original_peak = load_audio(audio_path)
     duration = len(audio) / sr
-    metrics = {"durationSec": round(duration, 3)}
+    metrics = {"durationSec": round(duration, 3), "peak": round(original_peak, 4)}
     problems, warnings, unavailable = [], [], []
+
+    if original_peak >= 0.999:
+        problems.append("clipping at full scale (original samples)")
 
     try:
         score = utmos_score(audio, sr)
         metrics["utmos"] = round(score, 3)
-        # UTMOS under-scores very short clips (approved 1.0s utterance measured
-        # 2.18 on 2026-08-28 calibration), so below minUtmosDuration a low MOS
-        # is a warning for human ears, not an automatic rejection.
         short_clip = duration < float(check.get("minUtmosDuration", 2.0))
         if score < float(check.get("minUtmos", 2.7)):
             (warnings if short_clip else problems).append(
                 f"utmos {score:.2f} < {check.get('minUtmos', 2.7)}" + (" (short clip)" if short_clip else ""))
         elif score < float(check.get("warnUtmos", 0.0)):
             warnings.append(f"utmos {score:.2f} below warn threshold")
-    except Exception as error:  # noqa: BLE001 - report which metric is missing
-        unavailable.append(f"utmos: {str(error)[:80]}")
-
-    std, voiced_ratio = None, None
-    try:
-        std, voiced_ratio = f0_semitone_std(audio, sr)
-        if std is not None:
-            metrics["f0SemitoneStd"] = round(std, 2)
-            metrics["voicedRatio"] = round(voiced_ratio, 3)
-            if std < float(check.get("minF0SemitoneStd", 1.2)):
-                problems.append(f"monotone pitch: f0 std {std:.2f} semitones")
     except Exception as error:  # noqa: BLE001
-        unavailable.append(f"f0: {str(error)[:80]}")
+        unavailable.append(f"utmos: {str(error)[:120]}")
 
-    lead, tail = edge_silence_seconds(audio, sr)
+    spans = speech_spans(audio, sr)
+    if spans:
+        metrics["vad"] = "silero"
+        lead, tail = spans[0][0], duration - spans[-1][1]
+        internal = [round(spans[i + 1][0] - spans[i][1], 2)
+                    for i in range(len(spans) - 1)
+                    if spans[i + 1][0] - spans[i][1] > 0.05]
+        metrics["internalPausesSec"] = internal[:12]
+        max_pause = float(check.get("maxInternalPauseSec", 1.2))
+        if any(p > max_pause for p in internal):
+            problems.append(f"internal pause {max(internal):.2f}s > {max_pause}s")
+    else:
+        metrics["vad"] = "envelope-fallback"
+        if _VAD_ERROR:
+            unavailable.append(f"vad: {_VAD_ERROR}")
+        lead, tail = envelope_edges(audio, sr)
     metrics["edgeSilenceSec"] = [round(lead, 2), round(tail, 2)]
     max_edge = float(check.get("maxEdgeSilenceSec", 1.5))
     if max(lead, tail) > max_edge:
         problems.append(f"edge silence {max(lead, tail):.2f}s > {max_edge}s")
-
-    # Internal silences from the amplitude envelope (provider-agnostic):
-    # warn-level because long pauses can be intentional drama.
-    frame = max(1, sr // 100)
-    envelope = np.abs(audio[: (len(audio) // frame) * frame]).reshape(-1, frame).max(axis=1)
-    if envelope.max() > 0:
-        quiet = envelope < envelope.max() * (10 ** (-45.0 / 20.0))
-        runs, run = [], 0
-        for flag in quiet:
-            run = run + 1 if flag else (runs.append(run) or 0 if run else 0)
-        interior = quiet.copy()
-        first_loud = int(np.argmax(~quiet))
-        last_loud = len(quiet) - 1 - int(np.argmax(~quiet[::-1]))
-        interior[: first_loud] = False
-        interior[last_loud:] = False
-        best, run = 0, 0
-        for flag in interior:
-            run = run + 1 if flag else 0
-            best = max(best, run)
-        internal_pause = best / 100.0
-        metrics["maxInternalPauseSec"] = round(internal_pause, 2)
-        if internal_pause > float(check.get("maxInternalPauseSec", 0.9)):
-            warnings.append(f"internal pause {internal_pause:.2f}s (check intent)")
-
-    peak = float(np.abs(audio).max())
-    metrics["peak"] = round(peak, 4)
-    if peak >= 0.999:
-        problems.append("clipping at full scale")
 
     lufs = integrated_lufs(audio, sr)
     if lufs is None:
@@ -258,32 +300,86 @@ def check_voice_quality(check):
             if abs(lufs - target) > tolerance:
                 problems.append(f"loudness {lufs:.1f} LUFS outside {target}±{tolerance}")
 
-    expected = check.get("expectedText", "")
-    if expected:
-        moras = mora_count(expected)
-        if moras and duration > max(lead + tail, 0.01):
-            rate = moras / max(duration - lead - tail, 0.2)
-            metrics["moraPerSec"] = round(rate, 2)
-            lo, hi = check.get("moraPerSecRange", [4.0, 10.0])
-            if not (float(lo) <= rate <= float(hi)):
-                problems.append(f"speech rate {rate:.1f} mora/s outside {lo}-{hi}")
-        elif moras is None:
-            unavailable.append("moraRate: fugashi missing")
-        actual = transcribe(audio_path)
-        if actual is None:
-            unavailable.append("cer: faster-whisper missing")
-        else:
-            cer = char_error_rate(expected, actual)
-            metrics["cer"] = round(cer, 4)
-            metrics["transcript"] = actual[:120]
-            if cer > float(check.get("maxCer", 0.13)):
-                problems.append(f"cer {cer:.3f} > {check.get('maxCer', 0.13)}")
+    segments = check.get("segments") or []
+    if segments:
+        segment_rows = []
+        for segment in segments:
+            seg_id = segment.get("id", "")
+            clip = slice_audio(audio, sr, float(segment.get("start", 0)), float(segment.get("end", duration)))
+            seg_duration = len(clip) / sr
+            row = {"id": seg_id, "durationSec": round(seg_duration, 3)}
+            if seg_duration < 0.15:
+                row["skipped"] = "too short"
+                segment_rows.append(row)
+                continue
+            expected_text = segment.get("expectedText", "")
+            if expected_text:
+                transcript = transcribe(clip)
+                if transcript is None:
+                    unavailable.append(f"cer[{seg_id}]: faster-whisper missing")
+                else:
+                    cer = reading_error_rate(expected_text, segment.get("expectedReading", ""), transcript)
+                    row["cer"] = round(cer, 4)
+                    row["transcript"] = transcript[:80]
+                    if cer > float(check.get("maxCer", 0.13)):
+                        problems.append(f"cer[{seg_id}] {cer:.3f} > {check.get('maxCer', 0.13)}")
+                reading = segment.get("expectedReading", "") or to_katakana_reading(expected_text)
+                moras = mora_count_from_reading(fold_kana(reading))
+                if moras and seg_duration > 0.2:
+                    rate = moras / seg_duration
+                    row["moraPerSec"] = round(rate, 2)
+                    lo, hi = check.get("moraPerSecRange", [4.0, 10.0])
+                    if not (float(lo) <= rate <= float(hi)):
+                        problems.append(f"speech rate[{seg_id}] {rate:.1f} mora/s outside {lo}-{hi}")
+            if seg_duration >= 0.5:
+                try:
+                    std, _voiced = f0_semitone_std(clip, sr)
+                    if std is not None:
+                        row["f0SemitoneStd"] = round(std, 2)
+                        if std < float(check.get("minF0SemitoneStd", 1.2)):
+                            problems.append(f"monotone pitch[{seg_id}]: f0 std {std:.2f}")
+                except Exception as error:  # noqa: BLE001
+                    unavailable.append(f"f0[{seg_id}]: {str(error)[:80]}")
+            segment_rows.append(row)
+        metrics["segments"] = segment_rows
+    else:
+        expected = check.get("expectedText", "")
+        if expected:
+            transcript = transcribe(str(audio_path))
+            if transcript is None:
+                unavailable.append("cer: faster-whisper missing")
+            else:
+                cer = reading_error_rate(expected, check.get("expectedReading", ""), transcript)
+                metrics["cer"] = round(cer, 4)
+                metrics["transcript"] = transcript[:120]
+                if cer > float(check.get("maxCer", 0.13)):
+                    problems.append(f"cer {cer:.3f} > {check.get('maxCer', 0.13)}")
+            reading = check.get("expectedReading", "") or to_katakana_reading(expected)
+            moras = mora_count_from_reading(fold_kana(reading))
+            voiced_window = max(duration - lead - tail, 0.2)
+            if moras:
+                rate = moras / voiced_window
+                metrics["moraPerSec"] = round(rate, 2)
+                lo, hi = check.get("moraPerSecRange", [4.0, 10.0])
+                if not (float(lo) <= rate <= float(hi)):
+                    problems.append(f"speech rate {rate:.1f} mora/s outside {lo}-{hi}")
+        try:
+            std, voiced_ratio = f0_semitone_std(audio, sr)
+            if std is None:
+                unavailable.append("f0: not enough voiced frames")
+            else:
+                metrics["f0SemitoneStd"] = round(std, 2)
+                metrics["voicedRatio"] = round(voiced_ratio, 3)
+                if std < float(check.get("minF0SemitoneStd", 1.2)):
+                    problems.append(f"monotone pitch: f0 std {std:.2f} semitones")
+        except Exception as error:  # noqa: BLE001
+            unavailable.append(f"f0: {str(error)[:80]}")
 
     anchor = check.get("anchorAudio")
     if anchor:
         cosine = speaker_cosine(audio_path, anchor)
         if cosine is None:
-            unavailable.append("speaker: resemblyzer missing")
+            unavailable.append("speaker: backend missing")
         else:
             metrics["speakerCosine"] = round(cosine, 4)
             if cosine < float(check.get("minSpeakerCosine", 0.72)):
@@ -319,10 +415,18 @@ def main():
             fail(f"unknown check type: {check.get('type')}")
         outcome = handler(check)
         results.append({"id": check.get("id", ""), "type": check["type"],
-                        "inputSha256": input_digests(check), **outcome})
+                        "inputSha256": input_digests(check),
+                        "checkDigest": canonical_check_digest(check),
+                        **outcome})
     overall = "fail" if any(r["status"] == "fail" for r in results) else (
         "warn" if any(r["status"] == "warn" for r in results) else "pass")
-    print(json.dumps({"overall": overall, "checks": results}, ensure_ascii=False))
+    environment = {
+        "scriptSha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        "utmosSource": str(UTMOS_CACHE_DIR),
+        "whisperModel": "kotoba-tech/kotoba-whisper-v2.0-faster",
+        "speakerBackend": os.environ.get("VOICE_QA_SPEAKER_BACKEND", "resemblyzer"),
+    }
+    print(json.dumps({"overall": overall, "environment": environment, "checks": results}, ensure_ascii=False))
     sys.exit(0 if overall != "fail" else 3)
 
 

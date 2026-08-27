@@ -19,7 +19,8 @@ import sys
 import unicodedata
 from pathlib import Path
 
-SMALL_KANA = set("ゃゅょぁぃぅぇぉャュョァィゥェォっッー")
+# sokuon (っ/ッ) and chouon (ー) COUNT as moras; only combining small kana do not.
+COMBINING_KANA = set("ゃゅょぁぃぅぇぉャュョァィゥェォ")
 
 # Surfaces with more than one common reading where TTS engines regularly
 # guess wrong. The right fix is a per-channel dictionary entry, so these are
@@ -57,7 +58,8 @@ def apply_dictionary(text, entries):
 
 
 def mora_count(reading):
-    return sum(1 for ch in reading if ("ァ" <= ch <= "ヺ" or "ぁ" <= ch <= "ゔ") and ch not in SMALL_KANA)
+    return sum(1 for ch in reading
+               if ("ァ" <= ch <= "ヺ" or "ぁ" <= ch <= "ゔ" or ch == "ー") and ch not in COMBINING_KANA)
 
 
 def analyze(text, tagger):
@@ -110,6 +112,11 @@ def main():
             "appliedText": applied_text,
             "dictionaryApplied": applied,
             "flags": flags,
+            # A flag-free line's analyzer reading is trustworthy enough to act
+            # as the confirmed expectedReading for the CER gate; flagged lines
+            # need a human or dictionary confirmation first (anti-circularity).
+            "expectedReading": reading if not flags else "",
+            "readingConfirmed": not flags,
             "moraCount": moras,
             "estimatedSeconds": round(moras / 6.5, 2),
         })

@@ -4,6 +4,7 @@ import test from "node:test";
 import { selectKoyaDialogueTake } from "../lib/koyaDialogueSpeech.mjs";
 import {
   activeReadingEntries,
+  buildElevenLabsRules,
   exportElevenLabsLexicon,
   mergeIntoPronunciations,
   recordMisreading,
@@ -77,4 +78,46 @@ test("voice quality penalties reorder take selection and hard failures sink", ()
   );
   const sunk = withGate.candidateSelection.candidates.find((entry) => entry.takeIndex === 0);
   assert.ok(sunk.combinedScore > 100);
+});
+
+test("same incident eventId never double-counts and homographs never auto-activate", () => {
+  const dictionary = { entries: [] };
+  recordMisreading(dictionary, { surface: "誠一", reading: "せいいち", eventId: "ev-1" });
+  const again = recordMisreading(dictionary, { surface: "誠一", reading: "せいいち", eventId: "ev-1" });
+  assert.equal(again.occurrences, 1);
+  assert.equal(again.status, "candidate");
+  const promoted = recordMisreading(dictionary, { surface: "誠一", reading: "せいいち", eventId: "ev-2" });
+  assert.equal(promoted.status, "active");
+
+  recordMisreading(dictionary, { surface: "方", reading: "かた", eventId: "h-1" });
+  const blocked = recordMisreading(dictionary, { surface: "方", reading: "かた", eventId: "h-2" });
+  assert.equal(blocked.status, "needs-human-review");
+  assert.ok(!activeReadingEntries(dictionary).some((entry) => entry.from === "方"));
+});
+
+test("native rules order longest surface first", () => {
+  const dictionary = {
+    entries: [
+      { from: "誠", to: "まこと", status: "active" },
+      { from: "佐藤誠司", to: "さとうせいじ", status: "active" },
+    ],
+  };
+  const rules = buildElevenLabsRules(dictionary);
+  assert.equal(rules[0].string_to_replace, "佐藤誠司");
+  assert.equal(rules[1].string_to_replace, "誠");
+});
+
+test("all-hard-fail selection refuses instead of picking the least bad", () => {
+  const cutPlan = { cutId: "cut-09", inputs: [] };
+  const candidates = [
+    { takeIndex: 0, sourcePath: "a.wav", quality: { score: 0.2, rows: [] } },
+    { takeIndex: 1, sourcePath: "b.wav", quality: { score: 0.3, rows: [] } },
+  ];
+  const failed = { hardFail: true, penalty: 100.5, problems: ["cer"], warnings: [], unavailable: [], metrics: {} };
+  assert.throws(
+    () => selectKoyaDialogueTake(candidates, cutPlan, null, { 0: failed, 1: failed }),
+    /refusing automatic selection/,
+  );
+  const forced = selectKoyaDialogueTake(candidates, cutPlan, 1, { 0: failed, 1: failed });
+  assert.equal(forced.takeIndex, 1);
 });
