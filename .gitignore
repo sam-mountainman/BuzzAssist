@@ -21,3 +21,5 @@ Youtube-AGI/
 .media/
 scripts/__pycache__/
 tmp/
+models/wd14/*.onnx
+models/wd14/*.csv

@@ -203,3 +203,29 @@ test("revision runner refuses escaping or duplicate outputs without generating",
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("wd14 gate separates fang and necklace on real assets", async (t) => {
+  const model = "models/wd14/model.onnx";
+  const fang = "canvas/assets/appare-revisions/horo-v7-akacha-fangbig.png";
+  const necklace = "canvas/assets/appare-revisions/horo-v7-akacha-greyjersey2.png";
+  const { access } = await import("node:fs/promises");
+  try {
+    await Promise.all([model, fang, necklace].map((path) => access(path)));
+  } catch {
+    t.skip("wd14 model or calibration assets are not present");
+    return;
+  }
+  if (!(await pythonAvailable())) {
+    t.skip("python3 with cv2/numpy is unavailable");
+    return;
+  }
+  const report = await auditCandidateAttributes({
+    checks: [
+      { id: "fang", type: "wd14Tags", image: fang, region: [0.55, 0.05, 0.42, 0.6], requireTags: { fang: 0.2 } },
+      { id: "necklace", type: "wd14Tags", image: necklace, forbidTags: { necklace: 0.3 } },
+    ],
+  });
+  const byId = Object.fromEntries(report.checks.map((check) => [check.id, check]));
+  assert.equal(byId.fang.status, "pass");
+  assert.equal(byId.necklace.status, "warn");
+});

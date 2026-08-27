@@ -27,7 +27,13 @@ Config JSON:
     {"id": "...", "type": "neckOrnament",      // advisory: warns, never fails
      "image": "a.png", "reference": "clean.png",
      "region": [0.56, 0.42, 0.22, 0.26],
-     "ratioLimit": 1.5, "absoluteMargin": 150, "standaloneLimit": 500}
+     "ratioLimit": 1.5, "absoluteMargin": 150, "standaloneLimit": 500},
+
+    {"id": "...", "type": "wd14Tags",          // ML screening (models/wd14/README.md)
+     "image": "a.png", "region": [0.55, 0.05, 0.42, 0.60],
+     "requireTags": {"fang": 0.2},             // fail when absent
+     "forbidTags": {"necklace": 0.3},          // warn when present
+     "reportTags": ["hair_over_one_eye"]}      // tag names use underscores
   ]
 }
 
@@ -205,11 +211,72 @@ def check_neck_ornament(check):
     return {"goldPixels": count, "limit": limit, "status": "warn" if count > limit else "pass"}
 
 
+_WD14_SESSIONS = {}
+
+
+def wd14_session(model_path):
+    if model_path not in _WD14_SESSIONS:
+        try:
+            import onnxruntime
+        except ImportError:
+            fail("wd14Tags requires onnxruntime (pip install onnxruntime)")
+        _WD14_SESSIONS[model_path] = onnxruntime.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
+    return _WD14_SESSIONS[model_path]
+
+
+def wd14_scores(image_bgr, model_path, tags_path):
+    session = wd14_session(model_path)
+    size = session.get_inputs()[0].shape[1]
+    height, width = image_bgr.shape[:2]
+    side = max(height, width)
+    canvas = np.full((side, side, 3), 255, dtype=np.uint8)
+    top, left = (side - height) // 2, (side - width) // 2
+    canvas[top:top + height, left:left + width] = image_bgr
+    resized = cv2.resize(canvas, (size, size), interpolation=cv2.INTER_AREA).astype(np.float32)
+    logits = session.run(None, {session.get_inputs()[0].name: resized[None, :, :, :]})[0][0]
+    names = []
+    with open(tags_path, encoding="utf-8") as handle:
+        next(handle)
+        for line in handle:
+            names.append(line.split(",")[1])
+    return dict(zip(names, [float(v) for v in logits]))
+
+
+def check_wd14_tags(check):
+    # ML screening for attributes the deterministic gates cannot see
+    # (fang presence, jewelry on bright jackets, hair-over-one-eye). WD14
+    # cannot tell WHICH eye is covered; the side check stays geometric/human.
+    model_path = Path(check.get("model", "models/wd14/model.onnx"))
+    tags_path = Path(check.get("tags", "models/wd14/selected_tags.csv"))
+    if not model_path.exists() or not tags_path.exists():
+        fail(f"wd14Tags model files missing: {model_path}, {tags_path}")
+    image = load_bgr(check["image"])
+    if check.get("region"):
+        image = crop_region(image, check["region"])
+    scores = wd14_scores(image, model_path, tags_path)
+    observed = {}
+    status = "pass"
+    for tag, threshold in (check.get("requireTags") or {}).items():
+        score = scores.get(tag, 0.0)
+        observed[tag] = round(score, 4)
+        if score < float(threshold):
+            status = "fail"
+    for tag, threshold in (check.get("forbidTags") or {}).items():
+        score = scores.get(tag, 0.0)
+        observed[tag] = round(score, 4)
+        if score >= float(threshold) and status != "fail":
+            status = "warn"
+    for tag in check.get("reportTags") or []:
+        observed[tag] = round(scores.get(tag, 0.0), 4)
+    return {"tags": observed, "status": status}
+
+
 HANDLERS = {
     "hairColorDelta": check_hair_color_delta,
     "unintendedChange": check_unintended_change,
     "duplicateTakes": check_duplicate_takes,
     "neckOrnament": check_neck_ornament,
+    "wd14Tags": check_wd14_tags,
 }
 
 

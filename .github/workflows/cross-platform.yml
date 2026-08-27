@@ -26,6 +26,8 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Install python QA dependencies for attribute gates
+        run: python3 -m pip install --user opencv-python-headless numpy
       - name: Run tests including isolated Codex and Claude Code setup
         run: npm test
       - name: Build canvas
