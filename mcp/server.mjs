@@ -55,6 +55,7 @@ import {
 import {
   buildApprovedIdentityPackJobs,
   buildCharacterCandidateJobs,
+  buildCharacterCandidateRegenerationJobs,
   buildCharacterStoryboardJobs,
   finalizeApprovedCharacter,
   findWorkflowCandidate,
@@ -65,7 +66,9 @@ import {
   publicCharacterWorkflow,
   readCharacterWorkflowStore,
   recordCharacterCandidateResults,
+  stageApprovedCharacterIdentityPack,
   updateCharacterWorkflow,
+  validateCandidateDiversityReview,
   validateStoryboardCharacterBindings,
   validateStoryboardVisualProfile,
 } from "../lib/characterPipeline.mjs";
@@ -81,6 +84,14 @@ import { approveVoiceLibraryCasting, discoverVoiceLibraryCasting } from "../lib/
 import { createEpisodeManifest, generateEpisodeSpeech, readEpisodeManifest, renderEpisodeVideo } from "../lib/mangaVideoPipeline.mjs";
 import { createMangaProductionDag, executeMangaProductionDag } from "../lib/mangaProductionDag.mjs";
 import { createKoyaMangaDagRuntime } from "../lib/koyaMangaDagRuntime.mjs";
+import {
+  KOYA_MCP_ACTIONS,
+  doctorKoyaMcp,
+  listKoyaMcpJobs,
+  readKoyaMcpJob,
+  runKoyaMcpAction,
+  startKoyaMcpJob,
+} from "../lib/koyaMcpAdapter.mjs";
 import { startChatBridgeWorker } from "../lib/chatBridge.mjs";
 import {
   isCompatibleCanvasServerStatus,
@@ -118,6 +129,7 @@ const TOOL_ANALYZE_CHARACTER_SCRIPT = "analyze_character_script";
 const TOOL_GET_CHARACTER_PIPELINE = "get_character_pipeline";
 const TOOL_GENERATE_CHARACTER_CANDIDATES = "generate_character_candidates";
 const TOOL_APPROVE_CHARACTER_CANDIDATE = "approve_character_candidate";
+const TOOL_REGISTER_CHARACTER_IDENTITY = "register_character_identity";
 const TOOL_GENERATE_CHARACTER_STORYBOARD = "generate_character_storyboard";
 const TOOL_BUZZASSIST_LOGIN = "buzzassist_login";
 const TOOL_BUZZASSIST_AUTH_STATUS = "buzzassist_auth_status";
@@ -128,6 +140,9 @@ const TOOL_MANAGE_ELEVENLABS_VOICE_LIBRARY = "manage_elevenlabs_voice_library";
 const TOOL_GENERATE_SPEECH = "generate_excalidraw_speech";
 const TOOL_BUILD_MANGA_VIDEO = "build_excalidraw_manga_video";
 const TOOL_RUN_MANGA_PRODUCTION_DAG = "run_excalidraw_manga_production_dag";
+const TOOL_KOYA_MANGA_DOCTOR = "koya_manga_doctor";
+const TOOL_RUN_KOYA_MANGA_PIPELINE = "run_koya_manga_pipeline";
+const TOOL_GET_KOYA_MANGA_JOB = "get_koya_manga_job";
 const TOOL_GENERATE_SUBTITLES_BATCH = "generate_excalidraw_subtitles_batch";
 const TOOL_REFINE_SUBTITLES = "refine_excalidraw_subtitles";
 const TOOL_SILENCE_CUT_VIDEO = "silence_cut_excalidraw_video";
@@ -170,7 +185,7 @@ const MEDIA_GENERATION_AGENT_INSTRUCTIONS = [
   "To attach selected canvas images/videos/SRT/XML into the current chat, use prepare_canvas_attachments or read_canvas_attachment_bundle. Do not rely on OS GUI paste automation for media attachments.",
   "When the current chat includes an attached image and the user identifies it as a character, subject, product, or style reference, resolve its absolute local path and pass it in referenceImagePaths. For generate_excalidraw_images_batch, pass shared chat references once in the top-level referenceImagePaths field so every job inherits them; job-specific referenceImagePaths are merged with the shared list. Do not rely on the model merely seeing the chat attachment, and do not omit the path from the generation tool call. If the attachment role is ambiguous, ask whether it is a subject/style reference or another input before generating.",
   "The project may keep a character registry at canvas/characters.json (キャラ台帳) mapping character ids to reference images, style prompts, and voices. When the user names a registered character, pass characterIds on generate_excalidraw_image or generate_excalidraw_images_batch instead of re-attaching the same reference images; the server resolves them into referenceImagePaths. Register new recurring characters there (via /api/characters or by editing the file) rather than repeating loose reference paths across sessions.",
-  "For a new script, use analyze_character_script then generate_character_candidates. Generate three lightweight candidate cards per new character by default, wait for the user to choose, record the user's concrete selection reason, then call approve_character_candidate to build the approved turnaround plus expression/angle sheet and register that two-image identity pack. Continue with generate_character_storyboard only after approval. Never register an unapproved candidate or a reasonless approval in characters.json.",
+  "For a new script, use analyze_character_script then generate_character_candidates. The pipeline writes an anonymous A/B/C contact sheet and candidate-diversity review draft. A different task/session must inspect the original-size images, judge face shape/eyes/brows/hair silhouette/body build, and pass every pair. If the chosen design still needs hair/color/outfit/build refinement, use the canonical Koya character-style-generate/compose/select actions before approval: each option is a separate one-identity sheet, only independently reviewed passing options enter the deterministic comparison, and the comparison sheet is never an identity reference. approve_character_candidate then generates a pending identity pack and never registers immediately. Review all eight turnaround views and all twelve expression cells in the generated identity review draft, then call register_character_identity. Scene generation routes only selected face + the task-specific expression/turnaround/outfit sheet, or one selected-face reference per person in multi-character scenes.",
 ].join(" ");
 
 function collectFocusElementIds(value, output = new Set()) {
@@ -1524,6 +1539,10 @@ async function generateExcalidrawImagesBatch(args = {}) {
     ...jobs.map((job) => job?.characterIds ?? job?.character_ids),
   ].some((list) => Array.isArray(list) && list.length > 0);
   const characterRegistry = characterIdsRequested ? await readCharacterRegistry(args) : null;
+  const providerReferenceLimitForJob = (job = {}) => {
+    const jobModel = nonEmptyString(job.model ?? args.model);
+    return jobModel === "grok-imagine-image-hermes" || jobModel === "grok-imagine-image-api" ? 3 : 30;
+  };
   const characterBindingsForJob = (job = {}) => {
     const bindings = characterRegistry
       ? resolveCharacterBindings(
@@ -1537,40 +1556,78 @@ async function generateExcalidrawImagesBatch(args = {}) {
           { projectDir: args.projectDir, canvasDir: args.canvasDir },
         )
       : [];
-    const jobModel = nonEmptyString(job.model ?? args.model);
-    const grokReferenceLimit = jobModel === "grok-imagine-image-hermes" || jobModel === "grok-imagine-image-api";
     return optimizeCharacterBindingsForGeneration(bindings, {
-      // Grok accepts three references total. Two-character scenes therefore
-      // use one approved identity image per person; single-character scenes
-      // can keep the identity and camera/angle sheets together.
-      multiCharacterThreshold: grokReferenceLimit ? 2 : 3,
-      maxReferencesPerCharacter: 1,
+      // Every multi-character scene uses exactly one approved face reference
+      // per person. Single-character scenes route at most one task-specific
+      // sheet beside the face lock, avoiding face/outfit blending.
+      referenceIntent: nonEmptyString(job.referenceIntent ?? job.reference_intent ?? job.customData?.buzzassistCharacterReferenceIntent),
+      storyStage: nonEmptyString(job.storyStage ?? job.story_stage ?? job.customData?.buzzassistCharacterStoryStage),
+      providerReferenceLimit: providerReferenceLimitForJob(job),
     });
   };
   const sharedExplicitReferenceImagePaths = mergeReferenceImagePaths(
     args.referenceImagePaths,
     args.reference_image_paths,
   );
-  const styleReferenceImagePathsForJob = (job = {}) => mergeReferenceImagePaths(
+  const declaredStyleReferenceImagePathsForJob = (job = {}) => mergeReferenceImagePaths(
     job.customData?.buzzassistStyleReferencePaths,
   );
+  const styleReferenceImagePathsForJob = (job = {}) => (
+    characterBindingsForJob(job).length > 0 ? [] : declaredStyleReferenceImagePathsForJob(job)
+  );
   const explicitReferenceImagePathsForJob = (job = {}) => {
-    const stylePaths = new Set(styleReferenceImagePathsForJob(job));
-    return mergeReferenceImagePaths(
+    const stylePaths = new Set(declaredStyleReferenceImagePathsForJob(job));
+    const rolelessPaths = mergeReferenceImagePaths(
       sharedExplicitReferenceImagePaths,
       job.referenceImagePaths,
       job.reference_image_paths,
     ).filter((path) => !stylePaths.has(path));
+    const bindings = characterBindingsForJob(job);
+    const declaredAssets = [
+      ...(Array.isArray(args.referenceAssets) ? args.referenceAssets : []),
+      ...(Array.isArray(args.reference_assets) ? args.reference_assets : []),
+      ...(Array.isArray(job.referenceAssets) ? job.referenceAssets : []),
+      ...(Array.isArray(job.reference_assets) ? job.reference_assets : []),
+    ];
+    const identitySafePaths = declaredAssets.map((asset, index) => {
+      const path = nonEmptyString(asset?.path ?? asset?.referenceImagePath ?? asset?.reference_image_path);
+      if (!path) throw new Error(`referenceAssets[${index}].path is required.`);
+      const role = nonEmptyString(asset?.role);
+      if (bindings.length > 0) {
+        if (!["environment", "prop", "composition"].includes(role) || asset?.identitySafe !== true || asset?.containsPeople !== false) {
+          throw new Error(
+            `Explicit reference ${path} is unsafe for a character-bound job. ` +
+            "Use role environment/prop/composition with identitySafe=true and containsPeople=false, or remove it.",
+          );
+        }
+      }
+      return path;
+    });
+    if (bindings.length > 0 && rolelessPaths.length > 0) {
+      throw new Error(
+        "Roleless referenceImagePaths are not allowed when characterIds are present. " +
+        "Use referenceAssets with role, identitySafe=true, and containsPeople=false; registered character identity sheets are routed automatically.",
+      );
+    }
+    return mergeReferenceImagePaths(rolelessPaths, identitySafePaths);
   };
   const identityReferenceImagePathsForJob = (job = {}) => mergeReferenceImagePaths(
     ...characterBindingsForJob(job).map((binding) => binding.referenceImagePaths),
   );
   const referenceImagePathsForJob = (job = {}) => {
-    return mergeReferenceImagePaths(
+    const paths = mergeReferenceImagePaths(
       explicitReferenceImagePathsForJob(job),
       identityReferenceImagePathsForJob(job),
       styleReferenceImagePathsForJob(job),
     );
+    const providerLimit = providerReferenceLimitForJob(job);
+    if (paths.length > providerLimit) {
+      throw new Error(
+        `Final reference set has ${paths.length} images, but the selected provider accepts ${providerLimit}. ` +
+        "Remove non-identity references or use a provider with a larger reference budget.",
+      );
+    }
+    return paths;
   };
   const resolvedPromptForJob = (job = {}) => {
     const bindings = characterBindingsForJob(job);
@@ -2414,7 +2471,7 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE_CHARACTER_CANDIDATES,
       title: "Generate Character Candidates",
-      description: "Create all Generating... frames first, then generate the configured number of distinct lightweight candidate cards for every new character in a workflow. Each card contains one full body and three head angles; defaults to 3 candidates per character. Requires confirmed image settings.",
+      description: "Create all Generating... frames first, then generate three distinct lightweight candidate cards per new character. After a failed diversity review, pass castId + regenerateCandidateLabels to replace only weak anonymous options and rebuild the anonymous packet/contact sheet. Requires confirmed image settings.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2426,6 +2483,9 @@ function toolDefinitions() {
           candidateCount: { type: "number", minimum: 1, maximum: 10 },
           channelStylePrompt: { type: "string" },
           visualProfileId: { type: "string" },
+          generatorContextId: { type: "string", description: "Real Claude Code/Codex task or session id for the machine evidence provenance." },
+          castId: { type: "string", description: "With regenerateCandidateLabels, the workflow cast id or name whose weak options should be replaced." },
+          regenerateCandidateLabels: { type: "array", minItems: 1, maxItems: 5, items: { type: "string", pattern: "^[A-Ea-e]$" }, description: "Anonymous weak labels to regenerate without paying for the passing candidates again." },
           model: { type: "string", enum: IMAGE_MODEL_IDS },
           aspectRatio: { type: "string" },
           imageSize: { type: "string" },
@@ -2452,7 +2512,7 @@ function toolDefinitions() {
     {
       name: TOOL_APPROVE_CHARACTER_CANDIDATE,
       title: "Approve Character Candidate",
-      description: "Select one generated candidate with a concrete approval reason, generate its approved turnaround and expression/head-angle sheets, copy those two approved references into canvas/assets/characters, and register the final character plus approval evidence in characters.json. Requires confirmed image settings.",
+      description: "Validate the anonymous A/B/C real-image diversity review, record the winner and reason, then generate a pending turnaround/expression identity pack. This does not register the character; cell-level QA and register_character_identity are still required. Requires confirmed image settings.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2461,6 +2521,8 @@ function toolDefinitions() {
           candidateLabel: { type: "string", pattern: "^[A-Ea-e]$", description: "Anonymous winner label from the public judge packet." },
           approvalReason: { type: "string", minLength: 4, description: "Why this candidate won; preserve the user's taste judgment for later prompts and audits." },
           approvedBy: { type: "string", description: "Human or agent identity that made the selection. Defaults to user." },
+          candidateReviewPath: { type: "string", description: "Edited passing koya-character-identity-review-v1 candidate-diversity JSON generated beside the anonymous contact sheet." },
+          generatorContextId: { type: "string", description: "Real Claude Code/Codex task or session id that generated the identity pack; the later reviewer context must differ." },
           model: { type: "string", enum: IMAGE_MODEL_IDS },
           aspectRatio: { type: "string" },
           imageSize: { type: "string" },
@@ -2471,7 +2533,7 @@ function toolDefinitions() {
           projectDir: { type: "string" },
           canvasDir: { type: "string" },
         },
-        required: ["workflowId", "castId", "candidateLabel", "approvalReason"],
+        required: ["workflowId", "castId", "candidateLabel", "approvalReason", "candidateReviewPath", "generatorContextId"],
         additionalProperties: false,
       },
       annotations: {
@@ -2479,6 +2541,29 @@ function toolDefinitions() {
         destructiveHint: false,
         idempotentHint: false,
         openWorldHint: true,
+      },
+    },
+    {
+      name: TOOL_REGISTER_CHARACTER_IDENTITY,
+      title: "Register Reviewed Character Identity",
+      description: "Fail-closed final registration for a pending character. Verifies real-file SHA-256, eight turnaround views, all twelve expression cells, reviewer/generator context separation, and every required story-stage outfit sheet before writing characters.json.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workflowId: { type: "string" },
+          castId: { type: "string", description: "Workflow cast id or character name." },
+          identityReviewPath: { type: "string", description: "Edited passing identity-pack review JSON generated after approve_character_candidate." },
+          projectDir: { type: "string" },
+          canvasDir: { type: "string" },
+        },
+        required: ["workflowId", "castId", "identityReviewPath"],
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
       },
     },
     {
@@ -2503,6 +2588,8 @@ function toolDefinitions() {
                 aspectRatio: { type: "string" },
                 imageSize: { type: "string" },
                 quality: { type: "string" },
+                referenceIntent: { type: "string", enum: ["default", "closeup", "expression", "full-body", "profile", "eye-open", "outfit"], description: "Routes only selected-face plus the one task-specific approved sheet." },
+                storyStage: { type: "string", description: "Approved outfit stage id; fails if the character has no matching outfit sheet." },
                 styleTags: { type: "array", items: { type: "string" }, description: "Visual-reference selectors such as interior, exterior, day, night, closeup, wide, dialogue, or action." },
                 shotType: { type: "string", description: "Shot language, for example eye-level medium two-shot or reaction close-up." },
                 camera: { type: "string" },
@@ -2676,6 +2763,8 @@ function toolDefinitions() {
                 quality: { type: "string", description: "Quality hint. high maps to Grok quality mode." },
                 referenceImagePaths: { type: "array", items: { type: "string" }, description: "Optional job-specific local reference images. Merged with the batch-level shared references." },
                 reference_image_paths: { type: "array", items: { type: "string" }, description: "Alias for the job-specific referenceImagePaths." },
+                referenceAssets: { type: "array", items: { type: "object", properties: { path: { type: "string" }, role: { type: "string", enum: ["environment", "prop", "composition"] }, identitySafe: { type: "boolean" }, containsPeople: { type: "boolean" } }, required: ["path", "role", "identitySafe", "containsPeople"], additionalProperties: false }, description: "Role-qualified non-person references. Character-bound jobs require identitySafe=true and containsPeople=false." },
+                reference_assets: { type: "array", items: { type: "object" }, description: "Alias for referenceAssets." },
                 characterIds: { type: "array", items: { type: "string" }, description: "Job-specific character ids from canvas/characters.json. Resolved reference images merge with the shared batch references." },
                 character_ids: { type: "array", items: { type: "string" }, description: "Alias for the job-specific characterIds." },
                 fileName: { type: "string", description: "Optional destination filename under canvas/assets/." },
@@ -2687,6 +2776,8 @@ function toolDefinitions() {
           },
           referenceImagePaths: { type: "array", items: { type: "string" }, description: "Shared absolute local character, subject, product, or style reference image paths inherited by every image job in this batch." },
           reference_image_paths: { type: "array", items: { type: "string" }, description: "Alias for the shared batch referenceImagePaths." },
+          referenceAssets: { type: "array", items: { type: "object", properties: { path: { type: "string" }, role: { type: "string", enum: ["environment", "prop", "composition"] }, identitySafe: { type: "boolean" }, containsPeople: { type: "boolean" } }, required: ["path", "role", "identitySafe", "containsPeople"], additionalProperties: false }, description: "Shared role-qualified non-person references. Character-bound jobs require identitySafe=true and containsPeople=false." },
+          reference_assets: { type: "array", items: { type: "object" }, description: "Alias for referenceAssets." },
           characterIds: { type: "array", items: { type: "string" }, description: "Shared character ids from canvas/characters.json. Their registered reference images are inherited by every image job in this batch." },
           character_ids: { type: "array", items: { type: "string" }, description: "Alias for the shared batch characterIds." },
           columns: { type: "number", description: "Grid columns. Defaults to 5 (10-job chunks render as 2 rows × 5 columns)." },
@@ -2856,6 +2947,52 @@ function toolDefinitions() {
         additionalProperties: false,
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    {
+      name: TOOL_KOYA_MANGA_DOCTOR,
+      title: "Check Koya Manga Harness",
+      description: "Read-only readiness check for the canonical Koya manga harness. Verifies both mandatory skills, production/show/location/thumbnail contracts, every referenced character styling spec, and the only official CLI entrypoint. This does not generate media or alter an episode.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          projectDir: { type: "string" },
+          episodeId: { type: "string", description: "Optional episode id used when resolving an episode override." },
+        },
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    {
+      name: TOOL_RUN_KOYA_MANGA_PIPELINE,
+      title: "Run Canonical Koya Manga Pipeline",
+      description: "Run one action through scripts/koya-manga-video.mjs, including story/location/thumbnail governance, character styling, and SHA-verified handoff export/verify/restore. Read-only contract/audit/plan/status actions return directly; long or mutating work starts as a durable background job by default. This tool never calls the generic manga-video implementation. Mutating or credit-spending actions require confirmed=true.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          action: { type: "string", enum: KOYA_MCP_ACTIONS },
+          projectDir: { type: "string" },
+          confirmed: { type: "boolean", description: "Required for mutating or credit-spending actions, including location-generate; not required for contract, audits, plans, drafts, handoff-verify, or status." },
+          background: { type: "boolean", description: "Defaults to true for mutating/long actions. Set false only for a bounded action." },
+          options: { type: "object", description: "Official CLI options in camelCase, such as episodeId, scriptPath, workflowId, castId, videoPath, reviewerContextId, retryFailed, force, or pass.", additionalProperties: true },
+        },
+        required: ["action"],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    {
+      name: TOOL_GET_KOYA_MANGA_JOB,
+      title: "Get Koya Manga Job Status",
+      description: "Read a durable background Koya job with stdout/stderr tails, or list the latest jobs when jobId is omitted.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          projectDir: { type: "string" },
+          jobId: { type: "string" },
+        },
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     {
       name: TOOL_BUILD_MANGA_VIDEO,
@@ -3600,6 +3737,7 @@ const CANVAS_AUTO_OPEN_TOOLS = new Set([
   TOOL_GENERATE_VIDEOS_BATCH,
   TOOL_GENERATE_CHARACTER_CANDIDATES,
   TOOL_APPROVE_CHARACTER_CANDIDATE,
+  TOOL_REGISTER_CHARACTER_IDENTITY,
   TOOL_GENERATE_CHARACTER_STORYBOARD,
   TOOL_GENERATE_SUBTITLES,
   TOOL_GENERATE_SUBTITLES_BATCH,
@@ -3708,6 +3846,9 @@ async function handleToolCall(params, progress = () => {}) {
 
   if (params?.name === TOOL_GENERATE_CHARACTER_CANDIDATES) {
     const args = params.arguments ?? {};
+    if (!args.payloadPreview && !nonEmptyString(args.generatorContextId)) {
+      throw new Error("generatorContextId is required so candidate review can run in a distinct task/session.");
+    }
     const workflowId = nonEmptyString(args.workflowId);
     const store = workflowId ? await readCharacterWorkflowStore(args) : null;
     let workflow = workflowId ? getCharacterWorkflow(store, workflowId) : null;
@@ -3724,7 +3865,17 @@ async function handleToolCall(params, progress = () => {}) {
         visualProfile: liveVisualProfile,
       };
     }
-    const jobs = await buildCharacterCandidateJobs(workflow, args);
+    const regenerateLabels = Array.isArray(args.regenerateCandidateLabels) ? args.regenerateCandidateLabels : [];
+    if (regenerateLabels.length > 0) {
+      const cast = findWorkflowCast(workflow, args.castId);
+      if (!cast) throw new Error(`Unknown workflow character: ${args.castId || "not specified"}.`);
+      if (cast.candidateGeneratorContextId !== nonEmptyString(args.generatorContextId)) {
+        throw new Error("Weak-candidate regeneration must continue in the original candidate generator task/session.");
+      }
+    }
+    const jobs = regenerateLabels.length > 0
+      ? buildCharacterCandidateRegenerationJobs(workflow, args.castId, regenerateLabels, args)
+      : await buildCharacterCandidateJobs(workflow, args);
     if (jobs.length === 0) {
       return {
         content: [{ type: "text", text: `Workflow ${workflow.id} has no new characters that need candidates.` }],
@@ -3809,6 +3960,11 @@ async function handleToolCall(params, progress = () => {}) {
     const candidateLabel = nonEmptyString(args.candidateLabel).toUpperCase();
     let candidate = findWorkflowCandidate(cast, candidateLabel);
     if (!candidate) throw new Error(`Unknown anonymous candidate for ${cast.name}: ${candidateLabel || "not specified"}.`);
+    await validateCandidateDiversityReview({
+      reviewPath: args.candidateReviewPath,
+      workflow,
+      cast,
+    });
     let verdictResult = null;
     if (!args.payloadPreview) {
       verdictResult = await recordBlindCandidateVerdict({
@@ -3867,8 +4023,12 @@ async function handleToolCall(params, progress = () => {}) {
         },
       };
     }
-    const turnaroundResult = batch.results[0] && !batch.results[0].error ? batch.results[0] : null;
-    const expressionResult = batch.results[1] && !batch.results[1].error ? batch.results[1] : null;
+    const resultForRole = (role) => {
+      const index = identityPackJobs.findIndex((job) => job.pipeline?.identityRole === role);
+      return index >= 0 && batch.results[index] && !batch.results[index].error ? batch.results[index] : null;
+    };
+    const turnaroundResult = resultForRole("turnaround");
+    const expressionResult = resultForRole("expression");
     if (!turnaroundResult || !expressionResult) {
       await updateCharacterWorkflow(args, workflow.id, (current) => {
         current.status = "awaiting-approval";
@@ -3879,7 +4039,7 @@ async function handleToolCall(params, progress = () => {}) {
       });
       throw new Error(batch.results.map((result) => result.error).filter(Boolean).join("\n") || "Approved turnaround or expression sheet generation failed.");
     }
-    const finalized = await finalizeApprovedCharacter({
+    const staged = await stageApprovedCharacterIdentityPack({
       ...args,
       approvalReason,
       approvedBy,
@@ -3889,25 +4049,40 @@ async function handleToolCall(params, progress = () => {}) {
       candidateLabel,
       candidateSetId: verdictResult?.verdict?.setId || candidate.candidateSetId,
       verdictDigest: verdictResult?.verdict?.digest || "",
-      turnaroundResult,
-      expressionResult,
-    });
-    await markCharacterApprovalOnCanvas(args, {
-      workflowId: workflow.id,
-      castId: cast.id,
-      candidateId: candidate.id,
-      characterId: finalized.character.id,
-      turnaroundElementId: turnaroundResult.elementId,
-      expressionElementId: expressionResult.elementId,
+      candidateReviewPath: args.candidateReviewPath,
+      generatorContextId: args.generatorContextId,
+      jobs: identityPackJobs,
+      results: batch.results,
     });
     await requestCanvasFocus(args, expressionResult);
-    progress(identityPackJobs.length, identityPackJobs.length, `${cast.name} registered`);
+    progress(identityPackJobs.length, identityPackJobs.length, `${cast.name} awaiting identity QA`);
     return {
       content: [{
         type: "text",
-        text: `Approved ${cast.name} candidate ${candidateLabel}; recorded the blind verdict and selection reason, generated the turnaround and expression/angle sheets, and registered ${finalized.character.id} with a two-image identity pack.`,
+        text: `Selected ${cast.name} candidate ${candidateLabel} after the real-image diversity gate. The generated identity pack is NOT registered yet. Inspect the original images and every crop in ${staged.identityReviewDraftPath}, complete that review from a different task/session, then call register_character_identity.`,
       }],
-      structuredContent: { ...finalized, turnaroundResult, expressionResult },
+      structuredContent: { ...staged, turnaroundResult, expressionResult },
+    };
+  }
+
+  if (params?.name === TOOL_REGISTER_CHARACTER_IDENTITY) {
+    const args = params.arguments ?? {};
+    const finalized = await finalizeApprovedCharacter({
+      ...args,
+      identityReviewPath: args.identityReviewPath,
+    });
+    const cast = findWorkflowCast(finalized.workflow, args.castId);
+    await markCharacterApprovalOnCanvas(args, {
+      workflowId: finalized.workflow.id,
+      castId: cast?.id || args.castId,
+      candidateId: finalized.character.sourceCandidateId,
+      characterId: finalized.character.id,
+      turnaroundElementId: cast?.turnaroundSheet?.elementId,
+      expressionElementId: cast?.expressionSheet?.elementId,
+    });
+    return {
+      content: [{ type: "text", text: `Registered ${finalized.character.name} only after SHA-bound turnaround, 12-cell expression, and outfit QA passed.` }],
+      structuredContent: finalized,
     };
   }
 
@@ -4050,6 +4225,45 @@ async function handleToolCall(params, progress = () => {}) {
     return {
       content: [{ type: "text", text: `Generated ${generated.durationSeconds.toFixed(2)}s of ${generated.model} speech as ${generated.fileName}.${canvasHintText()}` }],
       structuredContent: { ok: true, kind: "audio", speech: speechAssetPublicResult(generated), ...placement },
+    };
+  }
+
+  if (params?.name === TOOL_KOYA_MANGA_DOCTOR) {
+    const result = await doctorKoyaMcp(params.arguments ?? {});
+    return {
+      content: [{ type: "text", text: result.ok
+        ? result.projectDataRestored
+          ? `Koya harness ready. Canonical contract ${result.contract?.version} passed and project authorities are restored; production entrypoint is ${result.productionEntrypoint}.`
+          : `Koya harness runtime ready. Canonical contract ${result.contract?.version} passed; restore the SHA-verified Koya project handoff bundle before production.`
+        : `Koya harness is not ready: ${result.contractError || result.checks.filter((check) => !check.ok).map((check) => check.path).join(", ")}` }],
+      structuredContent: result,
+      ...(result.ok ? {} : { isError: true }),
+    };
+  }
+
+  if (params?.name === TOOL_RUN_KOYA_MANGA_PIPELINE) {
+    const args = params.arguments ?? {};
+    const readOnly = args.action === "contract" || args.action === "handoff-verify" || args.action === "status";
+    const result = readOnly || args.background === false
+      ? await runKoyaMcpAction(args)
+      : await startKoyaMcpJob(args);
+    const queued = result.status === "queued";
+    return {
+      content: [{ type: "text", text: queued
+        ? `Started canonical Koya job ${result.id} for '${result.action}'. Poll get_koya_manga_job; the job survives this MCP request.`
+        : `Canonical Koya action '${args.action}' completed through scripts/koya-manga-video.mjs.` }],
+      structuredContent: result,
+    };
+  }
+
+  if (params?.name === TOOL_GET_KOYA_MANGA_JOB) {
+    const args = params.arguments ?? {};
+    const result = nonEmptyString(args.jobId) ? await readKoyaMcpJob(args) : await listKoyaMcpJobs(args);
+    return {
+      content: [{ type: "text", text: nonEmptyString(args.jobId)
+        ? `Koya job ${result.id}: ${result.status}${result.exitCode === undefined ? "" : ` (exit ${result.exitCode})`}.`
+        : `Found ${result.jobs.length} recent Koya job(s).` }],
+      structuredContent: result,
     };
   }
 

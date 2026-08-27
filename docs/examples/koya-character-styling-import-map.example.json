@@ -1,0 +1,20 @@
+{
+  "version": "koya-character-styling-import-v1",
+  "characterId": "replace-with-show-bible-character-id",
+  "roundId": "replace-with-stable-round-id",
+  "sourceManifestPath": "../assets/legacy-styling/source-manifest.json",
+  "entries": [
+    {
+      "optionId": "replace-with-spec-option-id-1",
+      "sourceEntryName": "replace-with-unique-source-entry-name-1"
+    },
+    {
+      "optionId": "replace-with-spec-option-id-2",
+      "sourceEntryName": "replace-with-unique-source-entry-name-2"
+    },
+    {
+      "optionId": "replace-with-spec-option-id-3",
+      "sourceEntryName": "replace-with-unique-source-entry-name-3"
+    }
+  ]
+}

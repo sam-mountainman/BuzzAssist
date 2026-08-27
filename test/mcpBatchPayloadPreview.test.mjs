@@ -60,6 +60,9 @@ test("MCP batch payload previews validate and do not start or mutate a canvas", 
       "generate_character_candidates",
       "approve_character_candidate",
       "generate_character_storyboard",
+      "koya_manga_doctor",
+      "run_koya_manga_pipeline",
+      "get_koya_manga_job",
     ]) {
       const tool = tools.tools.find((candidate) => candidate.name === name);
       assert.ok(tool, `${name} should be registered`);
@@ -134,13 +137,46 @@ test("MCP batch payload previews validate and do not start or mutate a canvas", 
     const identityBeforeStyleResult = identityBeforeStylePreview.structuredContent.results[0];
     assert.deepEqual(identityBeforeStyleResult.body.image_urls, [
       "https://preview.invalid/image/hero-identity.png",
-      "https://preview.invalid/image/hero-expressions.png",
-      "https://preview.invalid/image/linework.png",
-      "https://preview.invalid/image/lighting.png",
     ]);
-    assert.match(identityBeforeStyleResult.body.prompt, /reference images 1-2 only for this character/i);
-    assert.match(identityBeforeStyleResult.body.prompt, /Reference images 3-4 are CHANNEL STYLE-ONLY references/);
-    assert.match(identityBeforeStyleResult.body.prompt, /Do not reproduce any person, face, hairstyle, clothing/);
+    assert.match(identityBeforeStyleResult.body.prompt, /reference image 1 only for this character/i);
+    assert.doesNotMatch(identityBeforeStyleResult.body.prompt, /CHANNEL STYLE-ONLY references/);
+
+    const unsafeReferencePreview = await client.callTool({
+      name: "generate_excalidraw_images_batch",
+      arguments: {
+        payloadPreview: true,
+        projectDir,
+        canvasDir,
+        jobs: [{
+          prompt: "Render the registered hero.",
+          model: "nano-banana-2",
+          characterIds: ["hero"],
+          referenceImagePaths: ["/tmp/unknown-person.png"],
+        }],
+      },
+    });
+    assert.equal(unsafeReferencePreview.isError, true);
+    assert.match(unsafeReferencePreview.content[0].text, /Roleless referenceImagePaths are not allowed/u);
+
+    const safeEnvironmentPreview = await client.callTool({
+      name: "generate_excalidraw_images_batch",
+      arguments: {
+        payloadPreview: true,
+        projectDir,
+        canvasDir,
+        jobs: [{
+          prompt: "Render the registered hero in an empty office.",
+          model: "nano-banana-2",
+          characterIds: ["hero"],
+          referenceAssets: [{ path: "/tmp/empty-office.png", role: "environment", identitySafe: true, containsPeople: false }],
+        }],
+      },
+    });
+    assert.equal(safeEnvironmentPreview.isError, undefined, JSON.stringify(safeEnvironmentPreview));
+    assert.deepEqual(safeEnvironmentPreview.structuredContent.results[0].body.image_urls, [
+      "https://preview.invalid/image/empty-office.png",
+      "https://preview.invalid/image/hero-identity.png",
+    ]);
 
     const videoPreview = await client.callTool({
       name: "generate_excalidraw_videos_batch",

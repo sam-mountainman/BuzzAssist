@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +8,61 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+async function passCandidateReview(pathname, castName) {
+  const review = JSON.parse(await readFile(pathname, "utf8"));
+  review.reviewer = { host: "codex", id: "candidate-reviewer", contextId: `candidate-review-${castName}`, reviewedAt: new Date().toISOString() };
+  review.originalScaleInspected = true;
+  for (const candidate of review.candidates) {
+    candidate.faceRegionReviewed = true;
+    candidate.manualFaceRegion = [0, 0, Math.max(1, candidate.width), Math.max(1, candidate.height)];
+  }
+  for (const pair of review.pairChecks) {
+    pair.visualAxes.faceShapeDistinct = true;
+    pair.visualAxes.hairSilhouetteDistinct = true;
+    pair.pass = true;
+    pair.note = "原寸で顔型と髪シルエットを比較済み";
+  }
+  review.pass = true;
+  review.notes = "三候補の実画像差を確認";
+  await writeFile(pathname, `${JSON.stringify(review, null, 2)}\n`);
+}
+
+async function passIdentityReview(pathname, castName) {
+  const review = JSON.parse(await readFile(pathname, "utf8"));
+  const passCell = (cell, extra = {}) => Object.assign(cell, {
+    sameIdentity: true,
+    ageConsistent: true,
+    hairConsistent: true,
+    faceContourConsistent: true,
+    faceRegionReviewed: true,
+    manualFaceRegion: [0, 0, cell.width, cell.height],
+    pass: true,
+    note: "原寸確認済み",
+    ...extra,
+  });
+  review.reviewer = { host: "codex", id: "identity-reviewer", contextId: `identity-review-${castName}`, reviewedAt: new Date().toISOString() };
+  review.originalScaleInspected = true;
+  Object.assign(review.turnaround, { isRealTurnaround: true, notCandidateSubstitute: true, pass: true, note: "8方向を原寸確認" });
+  review.turnaround.grid.alignmentConfirmed = true;
+  for (const row of review.turnaround.viewChecks) passCell(row);
+  Object.assign(review.expression, { pass: true, note: "12セルを原寸確認" });
+  review.expression.grid.alignmentConfirmed = true;
+  for (const row of review.expression.cells) passCell(row);
+  for (const sheet of review.extraSheets) {
+    Object.assign(sheet, { sameIdentity: true, pass: true, note: "同一人物差分" });
+    sheet.grid.alignmentConfirmed = true;
+    for (const cell of sheet.cells) passCell(cell, { stateMatchesSpecification: true });
+  }
+  for (const sheet of review.outfitSheets) {
+    Object.assign(sheet, { sameIdentity: true, outfitMatchesSpecification: true, pass: true, note: "衣装一致" });
+    sheet.grid.alignmentConfirmed = true;
+    for (const cell of sheet.cells) passCell(cell, { outfitMatchesSpecification: true });
+  }
+  review.pass = true;
+  review.notes = "人物登録可";
+  await writeFile(pathname, `${JSON.stringify(review, null, 2)}\n`);
+}
 
 test("MCP character pipeline runs candidates, approval packs, and a multi-character storyboard end to end", async () => {
   const projectDir = await mkdtemp(path.join(os.tmpdir(), "buzzassist-character-e2e-"));
@@ -55,6 +110,7 @@ test("MCP character pipeline runs candidates, approval packs, and a multi-charac
         projectDir,
         canvasDir,
         workflowId,
+        generatorContextId: "candidate-generator-e2e",
         model: "gpt-image-2-codex",
         aspectRatio: "16:9",
         imageSize: "2K",
@@ -69,6 +125,7 @@ test("MCP character pipeline runs candidates, approval packs, and a multi-charac
 
     for (const cast of candidates.structuredContent.workflow.cast) {
       const selected = cast.candidates[1];
+      await passCandidateReview(cast.candidateReviewDraftPath, cast.id);
       const approved = await client.callTool({
         name: "approve_character_candidate",
         arguments: {
@@ -79,6 +136,8 @@ test("MCP character pipeline runs candidates, approval packs, and a multi-charac
           candidateLabel: selected.label,
           approvalReason: `${cast.name}の役割と固定特徴が最も明瞭に出ているため`,
           approvedBy: "integration-test-user",
+          candidateReviewPath: cast.candidateReviewDraftPath,
+          generatorContextId: `identity-generator-${cast.id}`,
           model: "gpt-image-2-codex",
           aspectRatio: "16:9",
           imageSize: "2K",
@@ -87,9 +146,23 @@ test("MCP character pipeline runs candidates, approval packs, and a multi-charac
         },
       });
       assert.equal(approved.isError, undefined, JSON.stringify(approved));
-      assert.equal(approved.structuredContent.character.referenceImagePaths.length, 2);
-      assert.equal(approved.structuredContent.character.approval.approvedBy, "integration-test-user");
-      assert.match(approved.structuredContent.character.approval.reason, /固定特徴/);
+      assert.equal(approved.structuredContent.cast.status, "awaiting-identity-qa");
+      assert.equal(approved.structuredContent.cast.approval.approvedBy, "integration-test-user");
+      assert.match(approved.structuredContent.cast.approval.reason, /固定特徴/);
+      await passIdentityReview(approved.structuredContent.identityReviewDraftPath, cast.id);
+      const registered = await client.callTool({
+        name: "register_character_identity",
+        arguments: {
+          projectDir,
+          canvasDir,
+          workflowId,
+          castId: cast.id,
+          identityReviewPath: approved.structuredContent.identityReviewDraftPath,
+        },
+      });
+      assert.equal(registered.isError, undefined, JSON.stringify(registered));
+      assert.equal(registered.structuredContent.character.referenceImagePaths.length, 3);
+      assert.match(registered.structuredContent.character.approval.identityReviewSha256, /^[a-f0-9]{64}$/u);
     }
 
     const storyboard = await client.callTool({
@@ -115,7 +188,7 @@ test("MCP character pipeline runs candidates, approval packs, and a multi-charac
 
     const registry = JSON.parse(await readFile(path.join(canvasDir, "characters.json"), "utf8"));
     assert.equal(registry.characters.length, 2);
-    assert.ok(registry.characters.every((character) => character.referenceImagePaths.length === 2));
+    assert.ok(registry.characters.every((character) => character.referenceImagePaths.length === 3));
     assert.equal(registry.characters.find((character) => character.name === "佐藤").role, "fixed");
     assert.equal(registry.characters.find((character) => character.name === "田中").episodeId, "e2e-episode");
 

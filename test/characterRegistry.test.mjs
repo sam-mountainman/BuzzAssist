@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -114,7 +114,7 @@ test("character aliases resolve to an identity pack with explicit multi-characte
   assert.match(prompt, /Must preserve: 銀縁眼鏡; 短い白髪/);
 });
 
-test("three-or-more-character generation keeps only the primary identity sheet per character", () => {
+test("multi-character generation keeps only one face lock per character", () => {
   const bindings = ["hero", "manager", "helper"].map((id) => ({
     id,
     referenceImagePaths: [`/${id}-identity.png`, `/${id}-expressions.png`],
@@ -126,9 +126,42 @@ test("three-or-more-character generation keeps only the primary identity sheet p
     ["/manager-identity.png"],
     ["/helper-identity.png"],
   ]);
-  assert.deepEqual(
-    optimizeCharacterBindingsForGeneration(bindings.slice(0, 2)).map((binding) => binding.referenceImagePaths),
-    bindings.slice(0, 2).map((binding) => binding.referenceImagePaths),
+  assert.deepEqual(optimizeCharacterBindingsForGeneration(bindings.slice(0, 2)).map((binding) => binding.referenceImagePaths), [
+    ["/hero-identity.png"],
+    ["/manager-identity.png"],
+  ]);
+});
+
+test("single-character references route by scene role and story stage", () => {
+  const binding = {
+    id: "hero",
+    referenceImagePaths: ["/face.png", "/turnaround.png", "/expressions.png", "/winter.png"],
+    referenceAssets: [
+      { role: "identity-face", path: "/face.png" },
+      { role: "turnaround", path: "/turnaround.png" },
+      { role: "expression", path: "/expressions.png" },
+      { role: "outfit", storyStage: "winter", path: "/winter.png" },
+    ],
+  };
+  assert.deepEqual(optimizeCharacterBindingsForGeneration([binding], { referenceIntent: "closeup" })[0].referenceImagePaths, ["/face.png", "/expressions.png"]);
+  assert.deepEqual(optimizeCharacterBindingsForGeneration([binding], { referenceIntent: "profile" })[0].referenceImagePaths, ["/face.png", "/turnaround.png"]);
+  assert.deepEqual(optimizeCharacterBindingsForGeneration([binding], { storyStage: "winter" })[0].referenceImagePaths, ["/face.png", "/winter.png"]);
+  assert.throws(() => optimizeCharacterBindingsForGeneration([binding], { storyStage: "missing" }), /no approved outfit sheet/u);
+  assert.throws(
+    () => optimizeCharacterBindingsForGeneration([binding], { referenceIntent: "closeup", providerReferenceLimit: 1 }),
+    /require 2 images.*accepts 1/u,
+  );
+});
+
+test("provider reference budgets never silently drop a character identity", () => {
+  const bindings = ["a", "b", "c", "d"].map((id) => ({
+    id,
+    referenceImagePaths: [`/${id}.png`],
+    referenceAssets: [{ role: "identity-face", path: `/${id}.png` }],
+  }));
+  assert.throws(
+    () => optimizeCharacterBindingsForGeneration(bindings, { providerReferenceLimit: 3 }),
+    /require 4 images.*accepts 3.*Do not drop an identity-face/u,
   );
 });
 
@@ -143,7 +176,30 @@ test("character registry round-trips through canvas/characters.json", async () =
     const readBack = await readCharacterRegistry({ projectDir });
     assert.deepEqual(readBack, written);
     const empty = await readCharacterRegistry({ projectDir: path.join(projectDir, "nope") });
-    assert.deepEqual(empty, { characters: [], voices: [] });
+    assert.deepEqual(empty, { version: 1, revision: 0, characters: [], voices: [] });
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("character registry rejects corruption and stale concurrent writes", async () => {
+  const projectDir = await mkdtemp(path.join(os.tmpdir(), "buzzassist-registry-lock-"));
+  try {
+    const first = await writeCharacterRegistry({ projectDir }, { characters: [], voices: [] });
+    assert.equal(first.revision, 1);
+    const snapshotA = await readCharacterRegistry({ projectDir });
+    const snapshotB = await readCharacterRegistry({ projectDir });
+    snapshotA.characters.push({ id: "a", name: "A" });
+    const second = await writeCharacterRegistry({ projectDir }, snapshotA);
+    assert.equal(second.revision, 2);
+    snapshotB.characters.push({ id: "b", name: "B" });
+    await assert.rejects(() => writeCharacterRegistry({ projectDir }, snapshotB), /Stale character registry revision/u);
+
+    const file = path.join(projectDir, "canvas", "characters.json");
+    await writeFile(file, "{broken\n");
+    await assert.rejects(() => readCharacterRegistry({ projectDir }), /JSON/u);
+    await writeFile(file, "\n");
+    await assert.rejects(() => readCharacterRegistry({ projectDir }), /registry is empty/u);
   } finally {
     await rm(projectDir, { recursive: true, force: true });
   }

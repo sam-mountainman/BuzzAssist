@@ -150,7 +150,8 @@ test("agent batch generation defaults to 2 rows x 5 columns with 10 parallel job
   assert.match(mcpSource, /GPT Image 2 on the ChatGPT\/Codex route and Grok Imagine on the local Grok route, image count is 1-10/);
   assert.match(mcpSource, /jobs: Array\.from\(\{ length: requestedCount \}/);
   assert.match(mcpSource, /const sharedExplicitReferenceImagePaths = mergeReferenceImagePaths\(/);
-  assert.match(mcpSource, /const styleReferenceImagePathsForJob = \(job = \{\}\) => mergeReferenceImagePaths\(\s*job\.customData\?\.buzzassistStyleReferencePaths/);
+  assert.match(mcpSource, /const declaredStyleReferenceImagePathsForJob = \(job = \{\}\) => mergeReferenceImagePaths\(\s*job\.customData\?\.buzzassistStyleReferencePaths/);
+  assert.match(mcpSource, /const styleReferenceImagePathsForJob = \(job = \{\}\) => \(\s*characterBindingsForJob\(job\)\.length > 0 \? \[\] : declaredStyleReferenceImagePathsForJob\(job\)/);
   assert.match(mcpSource, /const explicitReferenceImagePathsForJob = \(job = \{\}\) => \{[\s\S]*\.filter\(\(path\) => !stylePaths\.has\(path\)\)/);
   assert.match(mcpSource, /const identityReferenceImagePathsForJob = \(job = \{\}\) => mergeReferenceImagePaths\([\s\S]*binding\.referenceImagePaths/);
   assert.match(mcpSource, /const referenceImagePathsForJob = \(job = \{\}\) => \{[\s\S]*explicitReferenceImagePathsForJob\(job\),\s*identityReferenceImagePathsForJob\(job\),\s*styleReferenceImagePathsForJob\(job\)/);

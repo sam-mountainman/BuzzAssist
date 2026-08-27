@@ -98,14 +98,14 @@ test("character candidates and storyboard scenes inherit the locked channel prof
     bubbleSafeZone: "upper right",
   }]);
   assert.equal(jobs.length, 1);
-  assert.equal(jobs[0].referenceImagePaths.length, 2);
+  assert.equal(jobs[0].referenceImagePaths.length, 0);
   assert.match(jobs[0].prompt, /Reserve clean negative space.*upper right/);
-  assert.match(jobs[0].prompt, /channel visual reference images are STYLE-ONLY/);
+  assert.match(jobs[0].prompt, /CHANNEL VISUAL STYLE LOCK \[channel-lock\]/);
   assert.equal(jobs[0].customData.buzzassistCharacterSceneSourcePrompt, "主人公が夜の住宅街で静かに振り返るクローズアップ");
   assert.equal(jobs[0].customData.buzzassistChannelVisualProfileId, "channel-lock");
   const visualValidation = validateStoryboardVisualProfile(readyWorkflow, jobs);
   assert.equal(visualValidation.ok, true);
-  assert.equal(visualValidation.scenes[0].styleReferenceCount, 2);
+  assert.equal(visualValidation.scenes[0].styleReferenceCount, 0);
   assert.ok(Object.values(visualValidation.scenes[0].checks).every(Boolean));
 
   const crowded = buildCharacterStoryboardJobs(readyWorkflow, [{
@@ -113,7 +113,7 @@ test("character candidates and storyboard scenes inherit the locked channel prof
     characterIds: ["a", "b", "c"],
     styleTags: ["interior", "dialogue"],
   }]);
-  assert.equal(crowded[0].referenceImagePaths.length, 1);
+  assert.equal(crowded[0].referenceImagePaths.length, 0);
 
   const oppositeSide = buildCharacterStoryboardJobs(readyWorkflow, [{
     prompt: "主人公が室内で話す",
