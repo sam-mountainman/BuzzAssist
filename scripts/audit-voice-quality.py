@@ -219,6 +219,29 @@ def check_voice_quality(check):
     if max(lead, tail) > max_edge:
         problems.append(f"edge silence {max(lead, tail):.2f}s > {max_edge}s")
 
+    # Internal silences from the amplitude envelope (provider-agnostic):
+    # warn-level because long pauses can be intentional drama.
+    frame = max(1, sr // 100)
+    envelope = np.abs(audio[: (len(audio) // frame) * frame]).reshape(-1, frame).max(axis=1)
+    if envelope.max() > 0:
+        quiet = envelope < envelope.max() * (10 ** (-45.0 / 20.0))
+        runs, run = [], 0
+        for flag in quiet:
+            run = run + 1 if flag else (runs.append(run) or 0 if run else 0)
+        interior = quiet.copy()
+        first_loud = int(np.argmax(~quiet))
+        last_loud = len(quiet) - 1 - int(np.argmax(~quiet[::-1]))
+        interior[: first_loud] = False
+        interior[last_loud:] = False
+        best, run = 0, 0
+        for flag in interior:
+            run = run + 1 if flag else 0
+            best = max(best, run)
+        internal_pause = best / 100.0
+        metrics["maxInternalPauseSec"] = round(internal_pause, 2)
+        if internal_pause > float(check.get("maxInternalPauseSec", 0.9)):
+            warnings.append(f"internal pause {internal_pause:.2f}s (check intent)")
+
     peak = float(np.abs(audio).max())
     metrics["peak"] = round(peak, 4)
     if peak >= 0.999:
