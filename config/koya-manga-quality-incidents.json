@@ -2,6 +2,34 @@
   "version": 3,
   "incidents": [
     {
+      "signature": "candidate-used-as-turnaround-registration-bypass",
+      "scope": "character-identity-registration",
+      "rule": "real-turnaround-and-cell-review-required",
+      "failure": "Character registration could fall back to the selected candidate bytes when no generated turnaround existed, bypassing angle continuity review.",
+      "severity": "high",
+      "deterministic": true,
+      "occurrences": 1,
+      "promotion": "hard-gate",
+      "evidence": [
+        "lib/characterPipeline.mjs pre-v51 finalizeApprovedCharacter fallback"
+      ],
+      "lastSeenAt": "2026-08-26T00:00:00.000Z"
+    },
+    {
+      "signature": "character-reference-overload-identity-mixing",
+      "scope": "character-scene-generation",
+      "rule": "scene-role-reference-routing",
+      "failure": "Passing every candidate and identity sheet to a scene can blend faces, clothing, age, and body shape across references.",
+      "severity": "high",
+      "deterministic": true,
+      "occurrences": 1,
+      "promotion": "hard-gate",
+      "evidence": [
+        "mcp/server.mjs pre-v51 all-reference merge path"
+      ],
+      "lastSeenAt": "2026-08-26T00:00:00.000Z"
+    },
+    {
       "signature": "bubble-terminal-japanese-period",
       "scope": "bubble-typography",
       "rule": "bubbles.stripTerminalJapanesePeriod",

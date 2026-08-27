@@ -48,7 +48,8 @@
         "imageConcurrency", "qaConcurrency", "maximumQaRetries", "candidateCount",
         "requireApprovedCharacterReferences", "requireCompositionVariation", "requireBubbleNegativeSpace",
         "requireNaturalAnatomyAndPropScale", "forbidGeneratedPseudoText",
-        "refreshSourceAnnotationsAfterImageChange", "pauseForNewCharacterApproval"
+        "refreshSourceAnnotationsAfterImageChange", "pauseForNewCharacterApproval",
+        "characterIdentityReview"
       ],
       "properties": {
         "visualProfileId": { "type": "string", "minLength": 1 },
@@ -70,7 +71,55 @@
         "requireNaturalAnatomyAndPropScale": { "const": true },
         "forbidGeneratedPseudoText": { "const": true },
         "refreshSourceAnnotationsAfterImageChange": { "const": true },
-        "pauseForNewCharacterApproval": { "const": true }
+        "pauseForNewCharacterApproval": { "const": true },
+        "characterIdentityReview": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version", "candidateCount", "requireRealImageDiversityReview", "candidateVisualAxes",
+            "minimumDistinctAxesPerPair", "requireIndependentReviewerContext", "requireOriginalScaleReview",
+            "requireAssetSha256", "requireRealTurnaround", "forbidCandidateTurnaroundSubstitution",
+            "requiredTurnaroundViews", "expressionGrid", "referenceRouting", "outfitSheetPolicy"
+          ],
+          "properties": {
+            "version": { "const": "koya-character-identity-review-v1" },
+            "candidateCount": { "const": 3 },
+            "requireRealImageDiversityReview": { "const": true },
+            "candidateVisualAxes": { "const": ["faceShape", "eyes", "brows", "hairSilhouette", "bodyBuild"] },
+            "minimumDistinctAxesPerPair": { "type": "integer", "minimum": 2, "maximum": 5 },
+            "requireIndependentReviewerContext": { "const": true },
+            "requireOriginalScaleReview": { "const": true },
+            "requireAssetSha256": { "const": true },
+            "requireRealTurnaround": { "const": true },
+            "forbidCandidateTurnaroundSubstitution": { "const": true },
+            "requiredTurnaroundViews": {
+              "const": ["front-full-body", "left-profile-full-body", "right-profile-full-body", "back-full-body", "front-head", "left-three-quarter-head", "right-three-quarter-head", "top-head"]
+            },
+            "expressionGrid": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["columns", "rows", "cellCount", "requireCellIdentityReview"],
+              "properties": {
+                "columns": { "const": 4 },
+                "rows": { "const": 3 },
+                "cellCount": { "const": 12 },
+                "requireCellIdentityReview": { "const": true }
+              }
+            },
+            "referenceRouting": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["closeup", "fullBodyOrProfile", "outfitChange", "multiCharacter"],
+              "properties": {
+                "closeup": { "const": ["identity-face", "expression"] },
+                "fullBodyOrProfile": { "const": ["identity-face", "turnaround"] },
+                "outfitChange": { "const": ["identity-face", "outfit"] },
+                "multiCharacter": { "const": ["identity-face-per-character"] }
+              }
+            },
+            "outfitSheetPolicy": { "const": "required-when-multiple-story-stages" }
+          }
+        }
       }
     },
     "audio": {

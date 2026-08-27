@@ -31,6 +31,13 @@ COMMON_READING_VARIANTS = {
 DEFAULT_MANIFEST = Path("canvas/manga-videos/manga-photo-homecoming-001/episode-manifest.json")
 
 
+# Only the standalone vowel smalls fold. Small ya/yu/yo must not: 「びょういん」
+# and 「びよういん」 are different words, and small tsu is real gemination.
+SMALL_KANA_FOLD = str.maketrans({
+    "ぁ": "あ", "ぃ": "い", "ぅ": "う", "ぇ": "え", "ぉ": "お",
+})
+
+
 def normalize(text, pronunciation_variants=None):
     text = unicodedata.normalize("NFKC", text or "")
     text = re.sub(r"\[[^\]]*\]", "", text)
@@ -52,7 +59,10 @@ def normalize(text, pronunciation_variants=None):
         text = text.replace(src, dst)
     text = re.sub(r"[\s、。！？!?…‥.,「」()（）・/ɾɴ-]", "", text)
     # katakana -> hiragana
-    return "".join(chr(ord(ch) - 0x60) if "ァ" <= ch <= "ヶ" else ch for ch in text)
+    text = "".join(chr(ord(ch) - 0x60) if "ァ" <= ch <= "ヶ" else ch for ch in text)
+    # A transcript writing 「ねぇ」 for 「ねえ」 is the same utterance, and an
+    # acoustically correct line must not fail on that spelling choice.
+    return text.translate(SMALL_KANA_FOLD)
 
 
 def phoneticize_many(texts, project_dir):
@@ -139,6 +149,23 @@ def main():
     )
     raw_expected = [u.get("speechText") or u["text"] for u in manifest["utterances"]]
     expected_ids = [u["id"] for u in manifest["utterances"]]
+    # Neighbouring line edges, so a focused recheck can be clipped to this
+    # line's own silence instead of reaching into the next character's words.
+    ordered = sorted(
+        manifest["utterances"],
+        key=lambda entry: float((entry.get("timing") or {}).get("audioStartSeconds", 0.0)),
+    )
+    previous_audio_end = {}
+    next_audio_start = {}
+    for position, entry in enumerate(ordered):
+        if position > 0:
+            before = ordered[position - 1]
+            previous_audio_end[entry["id"]] = (
+                float(before["timing"]["audioStartSeconds"])
+                + float(before["audio"]["durationSeconds"])
+            )
+        if position + 1 < len(ordered):
+            next_audio_start[entry["id"]] = float(ordered[position + 1]["timing"]["audioStartSeconds"])
     expected_sha256 = hashlib.sha256(json.dumps({
         "utterances": list(zip(expected_ids, raw_expected)),
         "pronunciationVariants": pronunciation_variants,
@@ -215,11 +242,21 @@ def main():
             # window with margins; if the focused pass hears it, the audio is
             # fine and only the long-form transcript was lossy.
             t = u["timing"]
+            # The margins must stay inside this line's own silence. Gaps between
+            # lines are ~0.18 s, so a fixed 0.35/0.45 s margin reaches into the
+            # neighbouring line and makes the recheck score its words against
+            # this line's text.
+            start_seconds = float(t["audioStartSeconds"])
+            end_seconds = start_seconds + float(a["durationSeconds"])
+            previous_end = previous_audio_end.get(u["id"])
+            next_start = next_audio_start.get(u["id"])
+            head_margin = 0.35 if previous_end is None else max(0.0, min(0.35, start_seconds - previous_end - 0.02))
+            tail_margin = 0.45 if next_start is None else max(0.0, min(0.45, next_start - end_seconds - 0.02))
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp2:
                 tmp2_path = tmp2.name
             subprocess.run(["ffmpeg", "-v", "error", "-y",
-                            "-ss", str(max(0, float(t["audioStartSeconds"]) - 0.35)),
-                            "-t", str(float(a["durationSeconds"]) + 0.8),
+                            "-ss", str(max(0, start_seconds - head_margin)),
+                            "-t", str(float(a["durationSeconds"]) + head_margin + tail_margin),
                             "-i", video, "-vn", "-ar", "16000", "-ac", "1", tmp2_path], check=True)
             local_segments, _ = model.transcribe(tmp2_path, language="ja", beam_size=5)
             local_raw = normalize("".join(seg.text for seg in local_segments), pronunciation_variants)

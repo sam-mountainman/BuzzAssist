@@ -12,7 +12,7 @@ test("official Koya CLI exposes a validated read-only contract command", () => {
   });
   assert.equal(result.status, 0, result.stderr);
   const parsed = JSON.parse(result.stdout);
-  assert.equal(parsed.version, "koya-manga-production-v50");
+  assert.equal(parsed.version, "koya-manga-production-v51");
   assert.equal(parsed.validation.pass, true);
 });
 
@@ -35,6 +35,14 @@ test("official Koya CLI advertises the bounded onset-repair action", () => {
   assert.match(result.stdout, /source-face-review-path JSON/u);
   assert.match(result.stdout, /koya-source-region-review-v2/u);
   assert.match(result.stdout, /character-approve/u);
+  assert.match(result.stdout, /character-review-refresh/u);
+  assert.match(result.stdout, /character-style-generate/u);
+  assert.match(result.stdout, /character-style-record-failure/u);
+  assert.match(result.stdout, /character-style-compose/u);
+  assert.match(result.stdout, /character-style-select/u);
+  assert.match(result.stdout, /handoff-export/u);
+  assert.match(result.stdout, /handoff-verify/u);
+  assert.match(result.stdout, /handoff-restore/u);
   assert.match(result.stdout, /image-concurrency N\|auto/u);
   assert.match(result.stdout, /qa-concurrency N/u);
   assert.match(result.stdout, /image-fallback-model MODEL/u);

@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
 import {
   dialogueShotRequiresAnchoredPullout,
+  generateKoyaIdentityPackAssets,
   groupPagesForPacing,
   koyaCameraModeForShot,
   koyaCameraModeForMissingFamily,
@@ -14,9 +16,101 @@ import {
   recommendedKoyaRenderConcurrency,
   recoverKoyaApprovedAudioFromAlignments,
   reuseKoyaApprovedAudio,
+  assertKoyaStylingSequence,
   runSourceFacePlacement,
   sourceAvoidRegionsInOverlaySpace,
 } from "../lib/koyaMangaProduction.mjs";
+import { readKoyaChannelAuthority } from "../lib/koyaChannelGovernance.mjs";
+import { renderEditorialPlatePng } from "../lib/mangaScriptImagePipeline.mjs";
+
+function testRaster(seed = 1, width = 96, height = 72) {
+  return Buffer.concat([renderEditorialPlatePng("white-solid", width, height), Buffer.from(`identity-seed-${seed}`)]);
+}
+
+test("identity-pack generation checkpoints each paid image and resumes without duplicate calls", async () => {
+  const projectDir = await mkdtemp(join(tmpdir(), "koya-identity-checkpoint-"));
+  try {
+    const canvasDir = join(projectDir, "canvas");
+    const identityPackDir = join(canvasDir, "assets/characters/episode/approved-identity-packs");
+    const referencePath = join(canvasDir, "assets/base.png");
+    await mkdir(join(canvasDir, "assets"), { recursive: true });
+    await writeFile(referencePath, testRaster(1));
+    const jobs = ["turnaround", "expression"].map((role) => ({
+      prompt: `Generate ${role}`,
+      model: "test-image-model",
+      aspectRatio: "16:9",
+      imageSize: "2K",
+      quality: "high",
+      referenceImagePaths: [referencePath],
+      fileName: `${role}.png`,
+      pipeline: { identityRole: role },
+    }));
+    let calls = 0;
+    const common = {
+      projectDir,
+      canvasDir,
+      identityPackDir,
+      workflowId: "workflow-1",
+      castId: "cast-1",
+      candidateSha256: createHash("sha256").update(await readFile(referencePath)).digest("hex"),
+      generatorHost: "codex",
+      generatorId: "identity-generator",
+      generatorContextId: "identity-generation-task",
+      jobs,
+    };
+    const first = await generateKoyaIdentityPackAssets({
+      ...common,
+      generateImage: async () => ({ buffer: testRaster(++calls + 10) }),
+    });
+    assert.equal(calls, 2);
+    assert.equal(first.generatedCount, 2);
+    assert.equal(first.resumed, false);
+    const second = await generateKoyaIdentityPackAssets({
+      ...common,
+      generateImage: async () => { throw new Error("must not regenerate checkpointed identity assets"); },
+    });
+    assert.equal(second.reusedCount, 2);
+    assert.equal(second.resumed, true);
+    const checkpoint = JSON.parse(await readFile(first.checkpointPath, "utf8"));
+    checkpoint.entries = checkpoint.entries.map((entry) => entry.key === "expression:"
+      ? { ...entry, status: "generating", outputSha256: "", completedAt: "" }
+      : entry);
+    await writeFile(first.checkpointPath, `${JSON.stringify(checkpoint, null, 2)}\n`);
+    const recovered = await generateKoyaIdentityPackAssets({
+      ...common,
+      generateImage: async () => { throw new Error("must recover atomic output after interruption"); },
+    });
+    assert.equal(recovered.recoveredCount, 1);
+    const repairJob = {
+      ...jobs[0],
+      prompt: "Repair only the failed turnaround grid containment",
+      fileName: "turnaround-repair-grid-v2.png",
+    };
+    const repair = await generateKoyaIdentityPackAssets({
+      ...common,
+      generationScopeId: "repair:grid-v2",
+      jobs: [repairJob],
+      generateImage: async () => ({ buffer: testRaster(++calls + 20) }),
+    });
+    assert.equal(repair.generatedCount, 1);
+    assert.notEqual(repair.checkpointPath, first.checkpointPath);
+    assert.notEqual(repair.results[0].assetFile, first.results[0].assetFile);
+    const resumedRepair = await generateKoyaIdentityPackAssets({
+      ...common,
+      generationScopeId: "repair:grid-v2",
+      jobs: [repairJob],
+      generateImage: async () => { throw new Error("must not regenerate a checkpointed repair role"); },
+    });
+    assert.equal(resumedRepair.reusedCount, 1);
+    await writeFile(first.results[0].assetFile, testRaster(99));
+    await assert.rejects(() => generateKoyaIdentityPackAssets({
+      ...common,
+      generateImage: async () => ({ buffer: testRaster(100) }),
+    }), /checkpoint digest mismatch/u);
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});
 
 test("edge dialogue speakers require an anchored pull-out camera", () => {
   assert.equal(dialogueShotRequiresAnchoredPullout({ x: 0.2, y: 0.15, width: 0.15, height: 0.28 }), true);
@@ -95,6 +189,29 @@ test("character-bible readings become deterministic STT pronunciation aliases", 
     { from: "上沢", to: "かんざわ" },
     { from: "天音", to: "あまね" },
   ]);
+});
+
+test("Koya styling rounds must follow every show-bible spec in order with immutable spec bytes", async () => {
+  const authority = await readKoyaChannelAuthority({ projectDir: process.cwd() });
+  const member = authority.showBible.cast.find((entry) => entry.id === "horo");
+  const expected = member.stylingSpecPaths.map((relativePath) => join(authority.root, relativePath));
+  await assert.rejects(
+    () => assertKoyaStylingSequence(authority, member, { stylingVariationRounds: [] }, expected[1]),
+    /next declared styling spec in order/u,
+  );
+  const selectedRounds = [];
+  for (const [index, specPath] of expected.entries()) {
+    selectedRounds.push({
+      id: `round-${index + 1}`,
+      status: "selected",
+      specPath,
+      specSha256: createHash("sha256").update(await readFile(specPath)).digest("hex"),
+      specCharacterId: "horo",
+    });
+  }
+  const complete = await assertKoyaStylingSequence(authority, member, { stylingVariationRounds: selectedRounds });
+  assert.equal(complete.complete, true);
+  assert.equal(complete.selectedRounds.length, 3);
 });
 
 test("wide Koya source views use a semantic pull-out instead of a fake direction", () => {
@@ -290,7 +407,7 @@ test("Koya production planning writes a contract snapshot and resumable state wi
   assert.equal(result.state.status, "planned");
   assert.ok(result.plan.jobs.length > 0);
   const snapshot = JSON.parse(await readFile(result.paths.contractSnapshotPath, "utf8"));
-  assert.equal(snapshot.contract.version, "koya-manga-production-v50");
+  assert.equal(snapshot.contract.version, "koya-manga-production-v51");
   const state = JSON.parse(await readFile(result.paths.statePath, "utf8"));
   assert.equal(state.currentStage, "images");
   assert.equal(state.protagonistSpeakerId, result.plan.production.protagonistSpeakerId);

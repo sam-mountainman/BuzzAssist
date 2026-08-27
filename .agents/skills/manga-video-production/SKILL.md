@@ -18,6 +18,10 @@ description: 対象チャンネル向け日本語漫画動画の台本設計、�
 5. `references/final-review-ja.md` — 実MP4の知覚レビューと完了判定
 6. `references/source-face-review-ja.md` — 自動顔検出の失敗、実MP4監査で判明した検出漏れ、重要小道具・証拠物の遮蔽を補うhash拘束付き手動領域レビュー
 7. `../../../config/koya-manga-quality-incidents.json` — 新しい環境にも配布する一般化済み事故seed。実行時台帳とマージし、強い昇格状態を下げない
+8. `../../../config/koya-show-bible.json` — 見本町、固定キャラの役割・口調、逆転型、最新の承認/保留状態。後日の明示修正が旧PDF指定を上書きする
+9. `../../../config/koya-location-bible.json` — 小料理屋「山谷」と見本町の人物なし背景ボード仕様。承認画像がないlocationを登録しない
+10. `../../../config/koya-thumbnail-contract.json` — 専用サムネ画像、中央帯、2/3コマ、文字数・具体名詞制約。pendingの色・書体を推測しない
+11. `../../../docs/koya-channel-governance-ja.md` — 台本beat review、背景4視点review、サムネpreflight/finalの実行形式
 
 JSON契約が実行設定の正本、要求台帳が理由の正本である。コード・本スキル・契約が食い違う場合は制作を止め、同じ変更内で整合させる。
 
@@ -42,10 +46,16 @@ node scripts/koya-manga-video.mjs full --script-path /absolute/script.txt --epis
 
 ## 制作手順
 
-1. 台本を省略・要約せず解析し、時系列、人物、読み、感情曲線、発話、画面上の証拠を固定する。
+1. 台本を省略・要約せず解析し、時系列、人物、読み、感情曲線、発話、画面上の証拠を固定する。`koya-story-review-v1`へ攻撃1/2/3、イブキの号砲、証拠、主人公本人のとどめ、登場時だけタツの退路封鎖1行を実発話IDで記録し、実在地名/ブランド、暴力美化、悪役コメディ、酒語彙抑制を確認する。`story-audit`合格後の同じreviewを`plan/full --story-review-path`へ渡す。台本変更後の古いreviewは使わない。
 2. 有料生成前に主人公を一意に決め、`--protagonist-speaker-id`を渡す。複数候補なら推測せず停止する。
 3. 判断を`機械で一意に検証可能 / 単一案へ赤入れ / 複数軸から選択`へ分類する。機械判定可能なことを人へ聞かない。単一案の曖昧点は3±1問、複数案は2〜5個の異なる軸を匿名比較し、高コスト・ブランド・好みの判断は人間が理由付きで決める。公開packetにはA〜E、匿名化した実artifact、SHA-256だけを置き、provider・内部ID・生成順・variationAxisの対応表は別のprivate mappingへ隔離する。
 4. 年齢段階、顔、髪、体格、服、色、装飾、感情域、禁止差分を持つキャラクターバイブルを作る。新キャラクターは候補承認まで停止し、`character-approve`へ`--candidate-label`と具体的な`--approval-reason`を渡す。内部candidate IDやindexでの承認は禁止する。
+   公開済み旧候補シートを正式匿名工程へ移すときは、A〜Eの公開ラベルを保存したまま`character-candidate-migrate-blind --generator-host legacy-migration`を使い、activeラベル、retiredラベル、具体的理由、移行contextを明示する。旧private mappingと公開シートが食い違う場合は衝突記録を残し、ラベルを振り直したり契約上限外の案を黙って昇格したりしない。
+   固定キャラは`koya-show-bible.json`の`designStatus`を先に確認し、`pending`/`on-hold`を自動確定しない。人間が選んだ人物でも、実ターンアラウンド・表情セル・必要な衣装/開眼セルのv2レビューが終わるまで台帳へ登録しない。
+   `character-approve`のidentity pack生成は人物単位checkpointへ候補SHA、生成context、prompt/model/size、参照SHA、各出力SHAを保存する。停止後は同じ入力と同じcontextで再実行し、digestが一致する生成済み画像だけを再利用する。出所不明の既存画像、入力変更、SHA変異を再開扱いにしない。生成完了後も別contextの原寸セル別reviewが通るまで登録しない。
+   固定キャラ準備中は`character-bootstrap-status`でshow bible、既存workflow、選択ラベル、候補review、styling順序、identity pack、台帳を横断し、各人物の次の合法な工程を確認する。新作episodeの前には`cast-readiness`も通す。show bible固定人物が台帳未登録、identity-face/turnaround/expression/指定されたeye-open/outfitのどれか欠落、identity review SHA欠落、またはon-holdなら、その回だけの代替候補を作らず停止する。ももは無言出演でもcharacter bibleへ毎話宣言し、エマ登場回は`episodeRole=ally|antagonist`を明記する。
+   採用候補の髪型・髪色・衣装・体格・細部を選び直す場合は、三面図へ直行せず`character-style-generate`→別contextによる各案の原寸QA→`character-style-compose`→人間選択→`character-style-select`を挟む。画像モデルへ横並び比較表を直接生成させない。各optionは採用顔1枚だけを身元参照にした独立の完全シートとして生成し、合格optionだけを決定論的に比較シートへ合成する。styling review v2では、合格optionの全ペアについて指定軸の可視差、重複takeでないこと、同一人物性、変更対象外の一致、原寸確認を必須にし、同じ設計のtake違いを候補数へ数えない。既存作品人物への非類似が要件なら、比較参照を`canvas/`へ保存し`--styling-comparison-reference-paths`でSHA拘束する。比較参照は生成モデルへ渡さず、各候補の独立QAだけで輪郭・髪・目元・全体印象を原寸比較する。比較シート自体は台帳へ登録せず、選ばれた個別assetだけを三面図・表情シートの唯一の人物参照にする。`--styling-round-id`を安定IDとして指定し、セッション制限や停止後はround/spec/generator contextを変えず同じコマンドを再実行する。各optionは生成入力SHA・出力path・画像SHAを即時checkpointし、完了済みbytesを再生成しない。公式工程外ですでに生成済みのsheetは捨てたり自動承認したりせず、source manifestと人間作成option mapが出力・入力元・prompt・model・時刻をSHA拘束でき、現specの最低比較数を満たす場合だけ`character-style-import --generator-host legacy-migration`で未承認roundへ取り込む。取り込み後も別contextの原寸QAは省略しない。複数属性を決める場合は1roundへ混ぜず、show bibleのspec path順に前roundの人間選択assetを次roundの唯一の基準にする（ももは全体修正→髪色→ジャージ色）。各roundはspec path/SHA/characterIdを保存し、全宣言roundが選択済みになるまで三面図へ進まない。エマは選択後もoffice/private-casual/private-dressyの3衣装シートを作る。
+   山谷・見本町の背景は`location-plan`→`location-generate --location-stage anchor`→`location-anchor-review-draft`→別contextの原寸review→`location-anchor-audit`→そのreview pathを渡した`location-generate --location-stage continuity`で4個別jobを作る。`--location-stage all`は禁止する。continuityはgeneration manifestへSHA拘束された承認済みanchor候補1枚だけを参照し、各boardの生成context、prompt SHA、anchor SHA、画像SHAを保存する。再利用だけの呼出しでmanifestを書き換えず、新規生成は各boardごとにcheckpointする。全生成contextと異なるreviewerによる原寸・人物0・文字/実在ロゴ0・建築連続性review後にだけ`location-register`する。サムネは`thumbnail-audit`のpreflightが通ってから専用画像を生成し、本編frameとのSHA比較を含むfinal auditを通す。pendingの帯色・書体を推測しない。
 5. 発話ごとの意味から構図を設計する。カット見出しだけを全発話へ誤適用しない。人物、背景、証拠、吹き出し余白を同時に設計する。
 6. 独立画像jobを適応並列で生成し、技術・意味QAを行う。合格済みhashを再利用し、不合格だけを修正する。利用上限ではcheckpointを書いて停止する。
 7. 承認済み日本語ネイティブ音声を人物ごとに固定する。声も最低2候補をA〜Eだけで全件実聴し、provider・voice ID・声名・sourceを伏せたまま`winnerLabel`と理由を先に保存してからprivate mappingを開く。新規作品の四角いナレーション枠は視覚様式を保ち、音声は主人公の承認済みVoice ID/Profile/設定/モデルと完全一致させる。専用ナレーターを作らない。

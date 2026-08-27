@@ -126,7 +126,16 @@ async function runHostSetup(host) {
     assert.match(installedOpenSkill, /<current-project>\/canvas\/assets/);
     assert.match(installedViteConfig, /\/api\/assets\/open-folder/);
     await readFile(path.join(pluginRoot, "lib", "projectContext.mjs"), "utf8");
+    await readFile(path.join(pluginRoot, "lib", "koyaHandoffBundle.mjs"), "utf8");
     await readFile(path.join(pluginRoot, "lib", "openLocalFolder.mjs"), "utf8");
+    await readFile(path.join(pluginRoot, "lib", "koyaChannelGovernance.mjs"), "utf8");
+    await readFile(path.join(pluginRoot, "config", "koya-manga-production-contract.json"), "utf8");
+    await readFile(path.join(pluginRoot, "config", "koya-show-bible.json"), "utf8");
+    await readFile(path.join(pluginRoot, "config", "koya-character-styling", "horo-jersey-color-v1.json"), "utf8");
+    await readFile(path.join(pluginRoot, "config", "koya-character-styling", "horo-hair-color-v1.json"), "utf8");
+    await readFile(path.join(pluginRoot, "docs", "koya-channel-requirements-ledger.md"), "utf8");
+    await readFile(path.join(pluginRoot, "docs", "koya-channel-governance-ja.md"), "utf8");
+    await readFile(path.join(pluginRoot, "docs", "koya-harness-handoff-ja.md"), "utf8");
     await readFile(path.join(pluginRoot, "scripts", "update-current.mjs"), "utf8");
     await readFile(path.join(pluginRoot, "scripts", "verify-plugin-runtime.mjs"), "utf8");
     const updaterConfig = JSON.parse(await readFile(path.join(homeDir, ".buzzassist", "updater", "config.json"), "utf8"));

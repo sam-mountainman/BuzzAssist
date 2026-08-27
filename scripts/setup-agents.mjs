@@ -323,6 +323,7 @@ async function refreshManagedPluginSource() {
 
   for (const dirName of [
     "assets",
+    "config",
     "dist",
     "dist-widget",
     "lib",
@@ -345,6 +346,9 @@ async function refreshManagedPluginSource() {
     "GEMINI.md",
     "README.md",
     "SETUP.md",
+    "docs/koya-channel-requirements-ledger.md",
+    "docs/koya-channel-governance-ja.md",
+    "docs/koya-harness-handoff-ja.md",
     "package.json",
     "package-lock.json",
     "vite.config.js",

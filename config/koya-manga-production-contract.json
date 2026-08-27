@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "koya-manga-production-v50",
+  "version": "koya-manga-production-v51",
   "channelId": "koya-manga",
   "description": "Fail-closed production contract for Koya-channel manga videos.",
   "sourceOfTruth": {
@@ -25,7 +25,33 @@
     "requireNaturalAnatomyAndPropScale": true,
     "forbidGeneratedPseudoText": true,
     "refreshSourceAnnotationsAfterImageChange": true,
-    "pauseForNewCharacterApproval": true
+    "pauseForNewCharacterApproval": true,
+    "characterIdentityReview": {
+      "version": "koya-character-identity-review-v1",
+      "candidateCount": 3,
+      "requireRealImageDiversityReview": true,
+      "candidateVisualAxes": ["faceShape", "eyes", "brows", "hairSilhouette", "bodyBuild"],
+      "minimumDistinctAxesPerPair": 2,
+      "requireIndependentReviewerContext": true,
+      "requireOriginalScaleReview": true,
+      "requireAssetSha256": true,
+      "requireRealTurnaround": true,
+      "forbidCandidateTurnaroundSubstitution": true,
+      "requiredTurnaroundViews": ["front-full-body", "left-profile-full-body", "right-profile-full-body", "back-full-body", "front-head", "left-three-quarter-head", "right-three-quarter-head", "top-head"],
+      "expressionGrid": {
+        "columns": 4,
+        "rows": 3,
+        "cellCount": 12,
+        "requireCellIdentityReview": true
+      },
+      "referenceRouting": {
+        "closeup": ["identity-face", "expression"],
+        "fullBodyOrProfile": ["identity-face", "turnaround"],
+        "outfitChange": ["identity-face", "outfit"],
+        "multiCharacter": ["identity-face-per-character"]
+      },
+      "outfitSheetPolicy": "required-when-multiple-story-stages"
+    }
   },
   "audio": {
     "provider": "elevenlabs",
