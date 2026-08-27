@@ -266,5 +266,22 @@
    },
    "checkDigest": "38a2411e59f31421072caa1316765f183fe72f5778cbd18bdc37ddda54e2e9ae"
   }
- ]
+ ],
+ "utmosv2Parallel": {
+  "runAt": "2026-08-28",
+  "scores": {
+   "canary-cut-01-take1": 2.967,
+   "canary-cut-01-take2": 3.134,
+   "canary-cut-02-take1": 3.604,
+   "canary-cut-02-take2": 3.551,
+   "canary-cut-03-take1": 3.505,
+   "canary-cut-03-take2": 3.654,
+   "arano-u01": 3.105,
+   "arano-u02": 2.845,
+   "arano-u03": 2.957
+  },
+  "adoptionAgreement": "1/3 (cut-01 agrees; cut-02 and cut-03 disagree with human adoption)",
+  "verdict": "UTMOS22 stays primary (2/3 vs 1/3 on the same tiny ground truth; no evidence to switch). Revisit after 50-100 human pairwise comparisons.",
+  "environment": "python3.11 user site, utmosv2 fusion model (wav2vec2-base backbone), cpu"
+ }
 }

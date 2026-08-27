@@ -180,7 +180,7 @@ def integrated_lufs(audio, sr):
 _WHISPER = None
 
 
-def transcribe(audio_or_path, model_name=None):
+def whisper_model(model_name=None):
     global _WHISPER
     try:
         from faster_whisper import WhisperModel
@@ -189,9 +189,64 @@ def transcribe(audio_or_path, model_name=None):
     if _WHISPER is None:
         _WHISPER = WhisperModel(model_name or "kotoba-tech/kotoba-whisper-v2.0-faster",
                                 device="cpu", compute_type="int8")
+    return _WHISPER
+
+
+def transcribe(audio_or_path, model_name=None):
+    model = whisper_model(model_name)
+    if model is None:
+        return None
     source = audio_or_path if isinstance(audio_or_path, str) else audio_or_path.astype(np.float32)
-    segments, _ = _WHISPER.transcribe(source, language="ja", beam_size=5)
+    segments, _ = model.transcribe(source, language="ja", beam_size=5)
     return "".join(segment.text for segment in segments)
+
+
+def first_pos(text):
+    try:
+        for word in tagger()(text):
+            return str(word.feature.pos1 or "")
+    except ImportError:
+        return ""
+    return ""
+
+
+_ALIGN_WHISPER = None
+
+
+def align_whisper_model():
+    """Word timestamps need alignment heads, which the distil kotoba model
+    lacks (ctranslate2 align -> bad_alloc). The cached "small" model provides
+    the timing; kotoba stays the CER transcriber."""
+    global _ALIGN_WHISPER
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError:
+        return None
+    if _ALIGN_WHISPER is None:
+        _ALIGN_WHISPER = WhisperModel("small", device="cpu", compute_type="int8")
+    return _ALIGN_WHISPER
+
+
+def pause_position_audit(audio_or_path, min_pause=0.3):
+    """Word-timestamp pause audit: a pause is natural after a phrase, but a
+    pause IMMEDIATELY BEFORE a particle/auxiliary or inside a word reads as a
+    breath in the wrong place. Heuristic soft signal (warn), never a fail."""
+    model = align_whisper_model()
+    if model is None:
+        return None
+    source = audio_or_path if isinstance(audio_or_path, str) else audio_or_path.astype(np.float32)
+    segments, _ = model.transcribe(source, language="ja", beam_size=5, word_timestamps=True)
+    words = [(w.word.strip(), w.start, w.end) for seg in segments for w in (seg.words or []) if w.word.strip()]
+    pauses, suspicious = [], []
+    for i in range(1, len(words)):
+        gap = words[i][1] - words[i - 1][2]
+        if gap >= min_pause:
+            entry = {"afterWord": words[i - 1][0][-8:], "beforeWord": words[i][0][:8], "gapSec": round(gap, 2)}
+            pauses.append(entry)
+            pos = first_pos(words[i][0])
+            if pos in ("助詞", "助動詞"):
+                suspicious.append({**entry, "reason": f"pause-before-{pos}"})
+    return {"pauses": pauses[:16], "suspicious": suspicious[:8]}
 
 
 def reading_error_rate(expected_text, expected_reading, transcript):
@@ -374,6 +429,20 @@ def check_voice_quality(check):
                     problems.append(f"monotone pitch: f0 std {std:.2f} semitones")
         except Exception as error:  # noqa: BLE001
             unavailable.append(f"f0: {str(error)[:80]}")
+
+    if (check.get("expectedText") or segments) and check.get("pausePositionAudit", True):
+        try:
+            audit = pause_position_audit(str(audio_path), float(check.get("minPausePositionSec", 0.3)))
+            if audit is None:
+                unavailable.append("pausePosition: faster-whisper missing")
+            else:
+                metrics["pausePositions"] = audit["pauses"]
+                for finding in audit["suspicious"]:
+                    warnings.append(
+                        f"unnatural pause {finding['gapSec']}s before particle "
+                        f"({finding['afterWord']}|{finding['beforeWord']})")
+        except Exception as error:  # noqa: BLE001
+            unavailable.append(f"pausePosition: {str(error)[:80]}")
 
     anchor = check.get("anchorAudio")
     if anchor:
