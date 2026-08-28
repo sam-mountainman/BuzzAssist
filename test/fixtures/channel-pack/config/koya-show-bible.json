@@ -1,0 +1,444 @@
+{
+  "version": "koya-show-bible-v1",
+  "channel": {
+    "name": "Sample Manga Channel",
+    "reading": "あっぱれまんがでスカッといっぱい",
+    "shortName": "アパイチ",
+    "brandCall": "Sampleれ漫画",
+    "closingCall": "アッパレ！",
+    "fictionNoticeRequired": true,
+    "alcoholKeywordPolicy": "restrained",
+    "alcoholKeywordReason": "YouTube広告親和性のため、チャンネル名・タイトル・シナリオで酒語彙を主軸にしない",
+    "alcoholLexicon": [
+      "日本酒",
+      "焼酎",
+      "ビール",
+      "ワイン",
+      "飲酒",
+      "泥酔",
+      "酒",
+      "呑"
+    ]
+  },
+  "world": {
+    "town": "Sample Town",
+    "townReading": "アッパレちょう",
+    "visualSummary": "和の下町と夜のネオンが混ざる、あたたかい架空の飲み屋街",
+    "realPlaceNamesForbidden": true,
+    "realBrandSignsForbidden": true,
+    "homeBase": "小料理屋・見本"
+  },
+  "storyGrammar": {
+    "escalation": [
+      "攻撃1",
+      "攻撃2",
+      "攻撃3"
+    ],
+    "reversal": [
+      "イブキの号砲",
+      "証拠の提示",
+      "とどめは主人公本人",
+      "タツは退路を塞ぐ一言だけ"
+    ],
+    "villainComedy": "敵同士もマウントを取り合う、憎めない小物の生態を見せる",
+    "protagonistAgencyRequired": true,
+    "tatsuViolenceDepiction": "直接的な暴力を描かず、元組長を美化しない"
+  },
+  "storyReview": {
+    "version": "koya-story-review-v1",
+    "bindToExactScriptSha256": true,
+    "requireIndependentReviewerContext": true,
+    "requiredBeats": [
+      "attack1",
+      "attack2",
+      "attack3",
+      "ibukiSignal",
+      "evidence",
+      "protagonistFinish"
+    ],
+    "optionalBeatWhenCastAppears": "tatsuExitBlock",
+    "requiredChecks": [
+      "realPlaceNamesAbsent",
+      "realBrandSignsAbsent",
+      "directViolenceNotGlorified",
+      "villainComedyPresent",
+      "protagonistAgencyPass",
+      "alcoholKeywordsRestrained"
+    ]
+  },
+  "rosterReview": {
+    "version": "koya-character-roster-review-v1",
+    "requiredBeforeEpisodeProduction": true,
+    "requiredMemberCount": 11,
+    "requiredPairCount": 55,
+    "requireIndependentReviewerContext": true,
+    "requireOriginalScaleInspection": true,
+    "requireThumbnailScaleInspection": true,
+    "requiredPairChecks": [
+      "silhouetteDistinct",
+      "faceAgeRoleDistinct",
+      "hairOutfitColorNotConfusing",
+      "thumbnailScaleDistinct"
+    ]
+  },
+  "cast": [
+    {
+      "id": "horo",
+      "name": "sample-1",
+      "hiddenName": "仮名ヨシ",
+      "role": "ally-mascot",
+      "speech": {
+        "dialect": "関西弁",
+        "firstPerson": "私",
+        "anchors": [
+          "ベロベロちゃう！もも酔いや！",
+          "その話、酒場で聞いたで",
+          "一杯奢ってや",
+          "ほな、また呑もな",
+          "にゃはは！",
+          "Sampleれや！",
+          "ほな、ぼちぼち反撃といこか"
+        ]
+      },
+      "usage": "毎話どこかに映る。説教せず肯定から入る。開眼は切り札。",
+      "requiredEveryEpisode": true,
+      "requiredReferenceRoles": [
+        "identity-face",
+        "turnaround",
+        "expression",
+        "eye-open"
+      ],
+      "designStatus": "pending-revision-selection",
+      "selectedBaseLabel": "A",
+      "stylingSpecPath": "config/koya-character-styling/horo-refinement-v5.json",
+      "stylingSpecPaths": [
+        "config/koya-character-styling/horo-refinement-v5.json",
+        "config/koya-character-styling/horo-hair-color-v1.json",
+        "config/koya-character-styling/horo-jersey-color-v1.json"
+      ],
+      "currentDesignDirective": [
+        "Aの束感とハネ感を土台",
+        "編み込みなし",
+        "髪飾りなし",
+        "八重歯",
+        "だぼっとしたジャージ",
+        "黒無地インナー",
+        "短パンは軽いダメージ",
+        "スニーカー",
+        "赤茶を含む重複しない髪色を複数比較"
+      ],
+      "supersedes": [
+        "灰色固定髪",
+        "スカジャン",
+        "装飾髪留め"
+      ]
+    },
+    {
+      "id": "ibuki",
+      "name": "sample-2",
+      "role": "ally-brain",
+      "speech": {
+        "dialect": "男勝りな標準語",
+        "firstPerson": "私",
+        "anchors": [
+          "ほぅ…",
+          "お前…ときめきの匂いがするな",
+          "答え合わせ、始めましょうか"
+        ]
+      },
+      "usage": "人間観察・推理・証拠提示。恋愛小説家の秘密と甘い趣味をギャップにする。",
+      "designStatus": "approved",
+      "selectedLabel": "C"
+    },
+    {
+      "id": "nodoka",
+      "name": "sample-3",
+      "role": "ally-natural-heiress",
+      "speech": {
+        "dialect": "おっとり敬語",
+        "firstPerson": "私",
+        "anchors": [
+          "あら、かわいい",
+          "あらあら〜",
+          "めっ、ですよ〜",
+          "まぁまぁ",
+          "いい子、いい子",
+          "うふふ"
+        ]
+      },
+      "usage": "本物しか知らない鑑定眼で、悪意なく嘘・偽物・粉飾を見抜く。",
+      "designStatus": "approved",
+      "selectedLabel": "E"
+    },
+    {
+      "id": "reiji",
+      "name": "sample-4",
+      "role": "ally-technical",
+      "speech": {
+        "dialect": "陰キャ、時々厨二病の標準語",
+        "firstPerson": "僕",
+        "anchors": [
+          "帰りたい",
+          "はぁ、やだやだ",
+          "これだからリア充は…",
+          "コイツ、素人ですね"
+        ]
+      },
+      "usage": "キーボードがスイッチ。普段は臆病だが技術と正義感で反転する。",
+      "designStatus": "pending-revision-approval",
+      "selectedBaseLabel": "A",
+      "stylingSpecPath": "config/koya-character-styling/reiji-hairstyle-v5.json",
+      "currentDesignDirective": [
+        "Aを土台",
+        "前髪を短く",
+        "見える片目は本人の左目",
+        "頭頂のアホ毛・ちょんまげ状のハネなし",
+        "提示された既存アニメ人物に似せない"
+      ]
+    },
+    {
+      "id": "tatsu",
+      "name": "sample-5",
+      "role": "ally-closer",
+      "speech": {
+        "dialect": "丁寧な老人語",
+        "firstPerson": "わし",
+        "anchors": [
+          "ケジメ、つけてもらおうか",
+          "逃げなさんな",
+          "腰が入っとらんのぅ",
+          "落とし前、どうつける？"
+        ]
+      },
+      "usage": "スポット起用。退路を静かに塞ぐ。元組長だが暴力を直接描かない。",
+      "requiredReferenceRoles": [
+        "identity-face",
+        "turnaround",
+        "expression",
+        "eye-open"
+      ],
+      "designStatus": "pending-revision-approval",
+      "selectedBaseLabel": "C",
+      "stylingSpecPath": "config/koya-character-styling/tatsu-refinement-v1.json",
+      "currentDesignDirective": [
+        "腰は曲げずまっすぐ",
+        "首タオルあり",
+        "開眼差分必須"
+      ]
+    },
+    {
+      "id": "taisho",
+      "name": "sample-6",
+      "role": "neutral-location-anchor",
+      "speech": {
+        "dialect": "最小限の標準語",
+        "firstPerson": "俺・自分",
+        "anchors": [
+          "自分は不器用なんで",
+          "人生ってのは山あり谷ありですよ",
+          "Sampleれでしたね"
+        ]
+      },
+      "usage": "店は立てるがキャラは立てない。ギャップや切り札を足さない。",
+      "designStatus": "approved",
+      "selectedLabel": "A"
+    },
+    {
+      "id": "fuku",
+      "name": "sample-7",
+      "role": "neutral-sub-mascot",
+      "speech": {
+        "anchors": [
+          "ニャ〜",
+          "フシャー！"
+        ]
+      },
+      "usage": "2〜3回に1回。『デブ』と呼んだ悪人は末路が悪い。『ぽっちゃり』は許す。",
+      "designStatus": "pending-revision-approval",
+      "selectedBaseLabel": "A",
+      "stylingSpecPath": "config/koya-character-styling/fuku-body-v1.json",
+      "currentDesignDirective": [
+        "ぶっちょう面を維持",
+        "体だけ一回り小さく",
+        "白茶の招き猫柄",
+        "古い鈴"
+      ]
+    },
+    {
+      "id": "ema",
+      "name": "sample-8",
+      "role": "variable-ally-or-antagonist",
+      "speech": {
+        "dialect": "ギャル語",
+        "firstPerson": "私",
+        "anchors": [
+          "それな",
+          "きも",
+          "マジないわー",
+          "エマ的にポイント高め"
+        ]
+      },
+      "usage": "味方・敵を明示してから書く。若者の代弁者。",
+      "episodeRoleSelectionRequired": true,
+      "requiredReferenceRoles": [
+        "identity-face",
+        "turnaround",
+        "expression",
+        "outfit"
+      ],
+      "outfitStages": [
+        {
+          "id": "office",
+          "label": "社会人OL",
+          "description": "sample-9",
+          "invariants": [
+            "高校制服に見せない",
+            "プリーツミニを使わない",
+            "実在ブランドなし"
+          ]
+        },
+        {
+          "id": "private-casual",
+          "label": "社会人の私服カジュアル",
+          "description": "sample-10",
+          "invariants": [
+            "学生服に見せない",
+            "顔・髪・ギャル感は同一",
+            "実在ブランドなし"
+          ]
+        },
+        {
+          "id": "private-dressy",
+          "label": "社会人のきれいめ私服",
+          "description": "sample-11",
+          "invariants": [
+            "丈は膝下",
+            "アイドル衣装にしない",
+            "顔・髪・ギャル感は同一"
+          ]
+        }
+      ],
+      "designStatus": "pending-outfit-selection",
+      "selectedBaseLabel": "B",
+      "stylingSpecPath": "config/koya-character-styling/ema-outfit-v1.json",
+      "currentDesignDirective": [
+        "顔・髪・ギャル感はB",
+        "高校生に見えない社会人服",
+        "OL・私服カジュアル・私服きれいめを比較",
+        "採用後はstoryStage衣装シートへ"
+      ]
+    },
+    {
+      "id": "ibariyama",
+      "name": "sample-12",
+      "role": "antagonist-showa",
+      "speech": {
+        "dialect": "偉そうな標準語",
+        "firstPerson": "俺",
+        "anchors": [
+          "俺を誰だと思ってる？",
+          "これだから最近の若いやつは"
+        ]
+      },
+      "usage": "死亡フラグ台詞の後は毎回ブーメラン。長いものには巻かれる小物。",
+      "designStatus": "approved",
+      "selectedLabel": "A"
+    },
+    {
+      "id": "heito",
+      "name": "sample-13",
+      "role": "antagonist-modern",
+      "speech": {
+        "dialect": "横文字を混ぜる標準語",
+        "firstPerson": "俺",
+        "anchors": [
+          "そのエビデンスは？",
+          "よう、陰キャ",
+          "ダッセェなぁw",
+          "無能はコスパ悪りぃなぁ"
+        ]
+      },
+      "usage": "対立山と世代2レーン。自称エリートだが浅い。",
+      "designStatus": "pending-color-selection",
+      "selectedBaseLabel": "C",
+      "stylingSpecPath": "config/koya-character-styling/heito-refinement-v4.json",
+      "currentDesignDirective": [
+        "ネクタイあり",
+        "明るめ茶またはオレンジ系の髪",
+        "最終色は人間が選ぶ"
+      ]
+    },
+    {
+      "id": "miehara",
+      "name": "sample-14",
+      "role": "antagonist-female",
+      "speech": {
+        "dialect": "猫なで声から金切り声",
+        "firstPerson": "私",
+        "anchors": [
+          "〜のくせに",
+          "私まだ20代だし",
+          "この価値がわからないの？"
+        ]
+      },
+      "usage": "お局・義母・ママ友ボス。実年齢は公開しない。",
+      "designStatus": "candidate-selection-required",
+      "currentDesignDirective": [
+        "固定11人目として必ず用意する",
+        "現行A/B/Cは採用しない",
+        "38〜45歳相当の成熟した女性",
+        "ギャル感と無理な若作りをなくす",
+        "怪物的に誇張せず表面上は上品",
+        "お局・義母・ママ友ボスへ衣装差分で横断利用できる基礎人物",
+        "顔型・目・眉・髪外形・体格が異なる匿名3候補から選ぶ"
+      ]
+    }
+  ],
+  "heightConstraints": {
+    "exactCentimetersForbiddenUntilApproved": true,
+    "sameHeightGroups": [
+      [
+        "ibuki",
+        "nodoka"
+      ]
+    ],
+    "shorterThan": [
+      [
+        "horo",
+        "ibuki"
+      ],
+      [
+        "horo",
+        "nodoka"
+      ]
+    ],
+    "notes": [
+      "ももは低身長で小柄",
+      "タツは小柄で痩せ型だが腰は曲げない",
+      "店主はガタイがよい",
+      "ハトは人物身長表と別枠"
+    ]
+  },
+  "assetReadiness": {
+    "channelIcon": "blocked-by-horo-approval-and-eye-open-sheet",
+    "channelHeader": "blocked-by-horo-and-fuku-approval",
+    "heightChart": "blocked-by-approved-identity-faces",
+    "thumbnailCanary": "blocked-by-character-and-band-token-approval"
+  },
+  "provenance": [
+    {
+      "source": "2026-08-22制作共有PDF",
+      "priority": 1
+    },
+    {
+      "source": "2026-08-26sample-channelさんフィードバック",
+      "priority": 2,
+      "rule": "後日の明示修正はPDF旧指定を上書きする"
+    },
+    {
+      "source": "2026-08-27ユーザー原寸再監査・見栄原明示指示",
+      "priority": 3,
+      "rule": "見栄原を固定11人目へ復帰し、もも・レイジ・弊斗の弱い比較案は最終承認前に再制作する"
+    }
+  ]
+}

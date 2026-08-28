@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { resolveChannelPackPath } from "../lib/channelPackResolver.mjs";
+import { channelPackPresent, resolveChannelPackPath } from "../lib/channelPackResolver.mjs";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -59,7 +59,14 @@ test("Koya authority is all-or-nothing and validates the three channel contracts
   await assert.rejects(() => readKoyaChannelAuthority({ projectDir, runtimeRoot: root }), /must start with stylingSpecPath/u);
 });
 
-test("Koya story review binds ordered reversal beats to the exact script and protagonist", async () => {
+test("Koya story review binds ordered reversal beats to the exact script and protagonist", async (t) => {
+  // この検証は台本の話者名が実際のキャストと一致することに依存している。
+  // 合成 fixture では名前が別物なので成立しない——他の6件と違い、
+  // 契約の形ではなく実データとの対応を見ているため。
+  if (!channelPackPresent(root)) {
+    t.skip("channel pack が無い環境（合成 fixture では話者名が一致しない）");
+    return;
+  }
   const authority = await readKoyaChannelAuthority({ projectDir: root });
   const scriptText = `タイトル: 記録が嘘を崩す
 
