@@ -77,6 +77,19 @@ export const OVERLAY_HEADER = [
   "",
 ].join("\n");
 
+// overlay は次のセッションが**指示として読む**。捕捉した文字列をそのまま
+// Markdown へ埋めると、改行や見出しで箇条書きの外へ出て、あたかも
+// 正規の指示のように見える行を作れてしまう。1行へ畳んで記法を無効化する。
+export function sanitizeForOverlay(value) {
+  return String(value ?? "")
+    .replace(/\r?\n/gu, " ")        // 改行で項目の外へ出さない
+    .replace(/^[\s>#*-]+/u, "")      // 行頭の見出し・引用・箇条書き記号
+    .replace(/`/gu, "'")             // コードブロックを開かせない
+    .replace(/<!--|-->/gu, "")       // HTMLコメントでマーカーを偽装させない
+    .replace(/\s{2,}/gu, " ")
+    .trim();
+}
+
 export function renderOverlay(entries, now) {
   const lines = [OVERLAY_HEADER];
   if (entries.length === 0) {
@@ -84,8 +97,8 @@ export function renderOverlay(entries, now) {
   } else {
     for (const entry of entries) {
       const repeat = entry.occurrences > 1 ? `（${entry.occurrences}回指摘）` : "";
-      lines.push(`- **${entry.text}**${repeat}`);
-      for (const ev of entry.evidence) lines.push(`  - 根拠: ${ev}`);
+      lines.push(`- **${sanitizeForOverlay(entry.text)}**${repeat}`);
+      for (const ev of entry.evidence) lines.push(`  - 根拠: ${sanitizeForOverlay(ev)}`);
       lines.push(`  - 種別: ${entry.kind} / 初回: ${String(entry.firstSeenAt).slice(0, 10)} / id: \`${entry.id}\``);
     }
     lines.push("");
@@ -118,7 +131,16 @@ function readJsonl(filePath) {
 
 function appendJsonl(filePath, entry) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.appendFileSync(filePath, `${JSON.stringify(entry)}\n`);
+  // 1行を1回の write で出す。JSON.stringify は改行を含まないので、
+  // 追記モードの単一 write なら別プロセスと行が混ざらない。
+  const line = `${JSON.stringify(entry)}\n`;
+  const fd = fs.openSync(filePath, "a");
+  try {
+    fs.writeSync(fd, line);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 export function proposalId(entry) {
@@ -131,8 +153,28 @@ export function proposalId(entry) {
 // 同じ指摘が何度も来るのは「まだ直っていない」という強い信号なので、
 // 重複を捨てずに回数として数える。1回の思いつきと、3回言われたことを
 // 同じ重みで扱わないための材料。
-export function summarizeProposals(proposals, applied) {
-  const appliedIds = new Set(applied.map((entry) => entry.id));
+// 反映済みの判定。id が1行あるだけでは足りない——正本にその規則が
+// 実在することまで見る。以前は id だけで判定していたので、正本を
+// 1文字も変えずに apply を通せてしまい、status からも消えていた。
+export function isActuallyApplied(record, readCanonical) {
+  if (!record?.id) return false;
+  // 昇格記録には、何をどこへ書いたかが要る。
+  if (!record.reviewer || !String(record.reviewer).trim()) return false;
+  if (!record.targetPath) return false;
+  const text = readCanonical(record.targetPath);
+  if (text === null) return false;
+  // 正本にその規則の痕跡があること。丸写しは求めないので、
+  // 記録した note か text の主要部分のどちらかが載っていればよい。
+  const needles = [record.note, record.text].filter((v) => typeof v === "string" && v.trim().length >= 5);
+  return needles.some((n) => text.includes(n.trim()));
+}
+
+export function summarizeProposals(proposals, applied, readCanonical = null) {
+  const appliedIds = new Set(
+    readCanonical
+      ? applied.filter((entry) => isActuallyApplied(entry, readCanonical)).map((entry) => entry.id)
+      : applied.map((entry) => entry.id),
+  );
   const byId = new Map();
   for (const entry of proposals) {
     const id = entry.id ?? proposalId(entry);
@@ -276,7 +318,12 @@ function main() {
 
   const proposals = readJsonl(PROPOSALS_PATH);
   const applied = readJsonl(APPLIED_PATH);
-  const summary = summarizeProposals(proposals, applied);
+  // 正本を実際に読んで反映を確かめる。記録を信じない。
+  const readCanonical = (rel) => {
+    const full = path.join(REPO_ROOT, rel);
+    return fs.existsSync(full) ? fs.readFileSync(full, "utf8") : null;
+  };
+  const summary = summarizeProposals(proposals, applied, readCanonical);
 
   switch (args.action) {
     case "capture": {
@@ -399,16 +446,20 @@ function main() {
       if (!entry) throw new Error(`提案が見つかりません: ${args.id}`);
       if (entry.applied) throw new Error(`${args.id} は既に昇格済みです`);
       const { rel, full } = requireTarget(entry.target);
-      // overlay にまだ載っているだけの項目を「人が確認した」ことにしない。
-      const def = loadTargets()[entry.target];
-      if (def?.overlay) {
-        const overlayFull = path.join(REPO_ROOT, def.overlay);
-        if (fs.existsSync(overlayFull) && fs.readFileSync(overlayFull, "utf8").includes(entry.text)) {
-          throw new Error(
-            `${args.id} はまだ overlay（${def.overlay}）にあります。`
-            + "先に正本へ人の言葉で書いてから promote してください",
-          );
-        }
+      // overlay に載っているのは sync の当然の結果なので、それを拒否の
+      // 条件にすると promote が永久に通らなくなる（実際そうなっていた）。
+      // 見るべきは overlay ではなく **正本に書かれたか**。
+      const canonicalText = fs.readFileSync(full, "utf8");
+      const note = typeof args.note === "string" ? args.note.trim() : "";
+      const evidenceInCanon = [note, entry.text]
+        .filter((v) => v && v.length >= 5)
+        .some((v) => canonicalText.includes(v));
+      if (!evidenceInCanon) {
+        throw new Error(
+          `${rel} に該当の記述が見つかりません。\n`
+          + "promote は「正本へ書いたことの記録」です。先に人の言葉で正本へ書き、\n"
+          + "--note にその文言（正本に実在する一節）を渡してください。",
+        );
       }
       appendJsonl(APPLIED_PATH, {
         id: entry.id,
@@ -435,16 +486,25 @@ function main() {
       if (!entry) throw new Error(`提案が見つかりません: ${args.id}`);
       if (entry.applied) throw new Error(`${args.id} は既に反映済みです`);
       const { rel, full } = requireTarget(entry.target);
+      // apply も promote と同じ検証を通す。緩い経路を1つでも残すと、
+      // そちらから素通りできてしまう。
+      const applyNote = typeof args.note === "string" ? args.note.trim() : "";
+      const applyText = fs.readFileSync(full, "utf8");
+      if (![applyNote, entry.text].filter((v) => v && v.length >= 5).some((v) => applyText.includes(v))) {
+        throw new Error(
+          `${rel} に該当の記述が見つかりません。\n`
+          + "apply は「正本へ書いたことの記録」です。先に書いてから、\n"
+          + "--note に正本へ実在する一節を渡してください。",
+        );
+      }
       appendJsonl(APPLIED_PATH, {
         id: entry.id,
         target: entry.target,
         targetPath: rel,
-        // 反映後の正本のダイジェスト。後から「本当にこの版に入ったのか」を
-        // 突き合わせられるようにする。
         targetSha256: createHash("sha256").update(fs.readFileSync(full)).digest("hex"),
         text: entry.text,
         reviewer: args.reviewer.trim(),
-        note: typeof args.note === "string" ? args.note.trim() : "",
+        note: applyNote,
         appliedAt: now,
       });
       process.stdout.write(`${entry.id} を反映済みとして記録しました（reviewer: ${args.reviewer}）\n`);
