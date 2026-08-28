@@ -143,3 +143,35 @@ test("音声QAの判定が、別の interpreter の結果を流用しない", as
     "逆向きにも流用しないこと",
   );
 });
+
+test("ffmpeg は版を答えるだけでなく、実際に1本作って読み返せること", async () => {
+  // -version が答えるだけでは足りない。終了0で版を出すだけの stub も、
+  // libx264 を欠いた最小ビルドも通ってしまう。ready と言った直後に
+  // レンダーが落ちるなら、それは ready ではない。
+  const report = await runHarnessDoctor();
+  const capability = report.checks.find((check) => check.id === "ffmpeg-capability");
+  assert.ok(capability, "機能確認のチェックがあること");
+  assert.equal(capability.required, true, "本編が作れない状態を任意にしないこと");
+  if (capability.ok) {
+    assert.match(capability.detail, /全デコードが通った/u, "一覧の確認だけで合格にしていないこと");
+  } else {
+    assert.ok(capability.missing === undefined || Array.isArray(capability.missing));
+    assert.ok(capability.fix.length > 10);
+  }
+});
+
+test("正規入口は、宣言に書いてあるだけでなく実際に起動すること", async () => {
+  // 表の値だけを根拠に「正規入口」と報告するのは、観測していない事実を
+  // 合格理由にすること。存在しないコマンドへ書き換えても通っていた。
+  const manga = await runHarnessDoctor({ harnessId: "koya-manga-video" });
+  const route = manga.checks.find((check) => check.id === "harness-production-route");
+  assert.ok(route, "配布路のチェックがあること");
+  assert.equal(route.ok, true);
+  assert.match(route.detail, /起動した/u, "起動を確かめたことが detail に出ること");
+
+  // 未登録のジャンルは通さない。
+  const narrated = await runHarnessDoctor({ harnessId: "narrated-story-video" });
+  const blocked = narrated.checks.find((check) => check.id === "harness-production-route");
+  assert.equal(blocked.ok, false, "正規ルーティングに載っていないハーネスを ready にしないこと");
+  assert.equal(narrated.ready, false);
+});
