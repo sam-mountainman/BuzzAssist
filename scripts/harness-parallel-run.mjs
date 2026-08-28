@@ -226,6 +226,56 @@ export function normalizeLockKey(lock, baseDir) {
   return `path:${path.resolve(baseDir, String(lock))}`;
 }
 
+// ロックはプロセス内の Set だけでは足りない。Claude Code と Codex が
+// それぞれランナーを起動すれば、同じ共有台帳を同時に更新できてしまう。
+// O_EXCL のディレクトリ作成で、マシン全体で1本だけが取れるようにする。
+const CROSS_PROCESS_LOCK_ROOT = path.join(os.tmpdir(), "harness-parallel-locks");
+const STALE_LOCK_MS = 30 * 60_000;
+
+function lockDirFor(key) {
+  return path.join(CROSS_PROCESS_LOCK_ROOT, createHash("sha256").update(key).digest("hex"));
+}
+
+export function acquireCrossProcessLock(key) {
+  fs.mkdirSync(CROSS_PROCESS_LOCK_ROOT, { recursive: true });
+  const dir = lockDirFor(key);
+  try {
+    fs.mkdirSync(dir);
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error;
+    // 落ちたランナーのロックが残ることがある。ただし奪う条件は厳しくする。
+    // mkdir が成功してから pid を書くまでには隙間があり、その瞬間の
+    // ロックは「pid が読めない」状態になる。それを古いロックとみなして
+    // 奪うと、取ったばかりの相手を追い出して両方が走る（実測で再現した）。
+    let ageMs = Infinity;
+    try { ageMs = Date.now() - fs.statSync(dir).mtimeMs; } catch { return null; }
+
+    // 十分に古くなければ、持ち主が誰であれ待つ。
+    if (ageMs < STALE_LOCK_MS) {
+      let holderDead = false;
+      try {
+        const holder = Number(fs.readFileSync(path.join(dir, "pid"), "utf8").trim());
+        if (Number.isInteger(holder) && holder > 0) {
+          try { process.kill(holder, 0); } catch { holderDead = true; }
+        }
+      } catch {
+        // pid をまだ書けていないだけかもしれない。奪わない。
+        return null;
+      }
+      if (!holderDead) return null;
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+    try { fs.mkdirSync(dir); } catch { return null; }
+  }
+  fs.writeFileSync(path.join(dir, "pid"), `${process.pid}\n`);
+  fs.writeFileSync(path.join(dir, "key"), `${key}\n`);
+  return dir;
+}
+
+export function releaseCrossProcessLock(dir) {
+  if (dir) fs.rmSync(dir, { recursive: true, force: true });
+}
+
 function normalizeLocks(job, baseDir) {
   // 正規化したうえでソートして取る。取得順を全ジョブで揃えることが、
   // 2つのジョブが互いのロックを待ち合うデッドロックを防ぐ唯一の方法。
@@ -350,6 +400,7 @@ export async function executePlan(plan, options = {}) {
   const running = new Set();
   const pending = new Set(jobs.map((job) => job.id));
   const startedAt = Date.now();
+  let blockedByExternalLock = false;
 
   const dependencyBlocked = (job) => {
     for (const need of job.needs ?? []) {
@@ -392,6 +443,24 @@ export async function executePlan(plan, options = {}) {
       const locks = normalizeLocks(job, path.resolve(job.cwd ?? defaults.cwd ?? REPO_ROOT));
       if (locks.some((lock) => heldLocks.has(lock))) continue;
 
+      // 他プロセスのランナーが同じロックを持っていないか確かめる。
+      // 1つでも取れなければ全部返して、次の周回でやり直す（部分取得は
+      // デッドロックの元なので、全部か何も取らないかにする）。
+      const acquired = [];
+      let blocked = false;
+      if (!dryRun) {
+        for (const lock of locks) {
+          const handle = acquireCrossProcessLock(lock);
+          if (!handle) { blocked = true; break; }
+          acquired.push(handle);
+        }
+        if (blocked) {
+          for (const handle of acquired) releaseCrossProcessLock(handle);
+          blockedByExternalLock = true;
+          continue;
+        }
+      }
+
       for (const lock of locks) heldLocks.add(lock);
       pending.delete(id);
       const task = runJob(job, { logDir, defaults, dryRun })
@@ -411,6 +480,7 @@ export async function executePlan(plan, options = {}) {
         })
         .finally(() => {
           for (const lock of locks) heldLocks.delete(lock);
+          for (const handle of acquired) releaseCrossProcessLock(handle);
           running.delete(task);
         });
       running.add(task);
@@ -421,11 +491,17 @@ export async function executePlan(plan, options = {}) {
     if (running.size > 0) {
       await Promise.race(running);
     } else if (!launched && pending.size > 0) {
-      // ここに来るのは検証を通ったのに進めなくなった場合だけ。
-      // 黙って無限ループするより、状態を出して止める方が直しやすい。
-      throw new Error(
-        `実行できないジョブが残りました（ロック待ちの循環の可能性）: ${[...pending].join(", ")}`,
-      );
+      // 他プロセスのランナーがロックを持っている場合、待てば進む。
+      // ここで即座に例外にすると、二重起動のたびに片方が落ちてしまう。
+      if (blockedByExternalLock) {
+        blockedByExternalLock = false;
+        await new Promise((resolve) => { setTimeout(resolve, 500); });
+      } else {
+        // ロック待ちでもないのに進めないなら、それは計画の問題。
+        throw new Error(
+          `実行できないジョブが残りました（ロック待ちの循環の可能性）: ${[...pending].join(", ")}`,
+        );
+      }
     }
   }
 

@@ -211,6 +211,14 @@ export async function selectEngine(requested, options = {}) {
   throw new Error(`使えるエージェントCLIがありません（${detail}）`);
 }
 
+// 結果本文から合否を読む。パターンが指定されていなければ判定しない。
+// 「判定していない」を「合格」に丸めないことが、この関数の唯一の役割。
+export function evaluateVerdict(text, pattern) {
+  if (!pattern) return "unjudged";
+  const re = pattern instanceof RegExp ? pattern : new RegExp(pattern, "u");
+  return re.test(String(text ?? "")) ? "pass" : "fail";
+}
+
 async function runTask(task, { engine, binary, outDir, disableMcp, readOnly, defaultTimeoutMs }) {
   const startedAt = Date.now();
   const outputPath = path.join(outDir, `${task.id}.result.txt`);
@@ -267,11 +275,18 @@ async function runTask(task, { engine, binary, outDir, disableMcp, readOnly, def
     try { result = fs.readFileSync(outputPath, "utf8").trim(); } catch { result = ""; }
   }
 
-  const ok = outcome.code === 0 && result.length > 0 && !outcome.timedOut;
+  // 「エージェントが最後まで走った」と「そのエージェントの判断が合格だった」は
+  // 別のこと。ここで分かるのは前者だけなので、status は completed / errored と
+  // 名乗る。passed と書くと、本文に「重大な問題あり」と書かれたレビューまで
+  // 成功として集計され、実際そうなっていた。
+  const completed = outcome.code === 0 && result.length > 0 && !outcome.timedOut;
   return {
     id: task.id,
     title: task.title ?? null,
-    status: ok ? "passed" : "failed",
+    status: completed ? "completed" : "errored",
+    // 呼び出し側が合否を判定したい場合は verdictPattern を渡す。
+    // 渡されなければ「未判定」であって「合格」ではない。
+    verdict: completed ? evaluateVerdict(result, task.verdictPattern) : "not-run",
     exitCode: outcome.code,
     timedOut: Boolean(outcome.timedOut),
     spawnError: outcome.spawnError ?? null,
@@ -371,8 +386,12 @@ export async function runAgentTasks(tasks, options = {}) {
     outDir,
     counts: {
       total: ordered.length,
-      passed: ordered.filter((r) => r.status === "passed").length,
-      failed: ordered.filter((r) => r.status === "failed").length,
+      completed: ordered.filter((r) => r.status === "completed").length,
+      errored: ordered.filter((r) => r.status === "errored").length,
+      // verdictPattern を渡したタスクだけが pass / fail を持つ。
+      verdictPass: ordered.filter((r) => r.verdict === "pass").length,
+      verdictFail: ordered.filter((r) => r.verdict === "fail").length,
+      unjudged: ordered.filter((r) => r.verdict === "unjudged").length,
     },
     tasks: ordered,
   };
@@ -381,12 +400,19 @@ export async function runAgentTasks(tasks, options = {}) {
   if (ordered.length !== tasks.length) {
     summary.counts.missing = tasks.length - ordered.length;
   }
-  summary.ok = summary.counts.failed === 0 && ordered.length === tasks.length;
+  // ok は「全部走り切ったか」であって「全部合格したか」ではない。
+  // 判定を求めた場合は fail が1件でもあれば ok にしない。
+  summary.ok = summary.counts.errored === 0
+    && summary.counts.verdictFail === 0
+    && ordered.length === tasks.length;
   return summary;
 }
 
 function parseArgs(argv) {
-  const out = { tasks: null, engine: "auto", concurrency: null, report: null, outDir: null, mcp: false };
+  // read-only を既定にする。この扇形展開の主用途はレビューと監査で、
+  // 6体が同じ作業ツリーを書き換えられる状態を既定にする理由がない。
+  // 書き込みが要るときだけ --allow-write を明示する。
+  const out = { tasks: null, engine: "auto", concurrency: null, report: null, outDir: null, mcp: false, readOnly: true };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     const next = () => {
@@ -401,7 +427,9 @@ function parseArgs(argv) {
     else if (arg === "--report") out.report = next();
     else if (arg === "--out-dir") out.outDir = next();
     else if (arg === "--with-mcp") out.mcp = true;
+    else if (arg === "--verdict-pattern") out.verdictPattern = next();
     else if (arg === "--read-only") out.readOnly = true;
+    else if (arg === "--allow-write") out.readOnly = false;
     else if (arg === "--probe") out.probe = true;
     else if (arg === "--help" || arg === "-h") out.help = true;
     else throw new Error(`不明な引数: ${arg}`);
@@ -421,7 +449,10 @@ function printHelp() {
   --report <path>      レポートJSONの出力先
   --out-dir <path>     各タスクの結果の出力先
   --with-mcp           MCPサーバを読み込む（既定は切る。並列時に不安定なため）
-  --read-only          エージェントにファイル変更を許さない（レビュー・監査用）
+  --read-only          エージェントにファイル変更を許さない（既定。レビュー・監査用）
+  --allow-write        ファイル変更を許す（既定は禁止。必要なときだけ明示する）
+  --verdict-pattern    結果本文がこの正規表現に一致したら合格とする。
+                       指定しなければ合否は判定せず「未判定」と記録する
   --probe              使えるエンジンを調べて終了する
 
   タスクJSONの形:
@@ -490,6 +521,9 @@ async function main() {
   }
   process.stdout.write(`エンジン: ${engineInfo.engineId} (${engineInfo.binary})\n`);
 
+  if (options.verdictPattern) {
+    for (const task of tasks) task.verdictPattern = task.verdictPattern ?? options.verdictPattern;
+  }
   const summary = await runAgentTasks(tasks, {
     engineInfo,
     concurrency: options.concurrency ?? 8,
@@ -500,9 +534,14 @@ async function main() {
       if (event.type === "started") {
         process.stdout.write(`▶ ${event.id}${event.title ? ` — ${event.title}` : ""}\n`);
       } else {
-        const mark = event.result.status === "passed" ? "✅" : "❌";
+        const { status, verdict } = event.result;
+        const mark = status !== "completed" ? "❌"
+          : verdict === "fail" ? "❌"
+          : verdict === "pass" ? "✅"
+          : "▫";  // 走り切ったが合否は判定していない
+        const note = verdict === "unjudged" ? " 完了（合否未判定）" : "";
         process.stdout.write(
-          `${mark} ${event.id} (${(event.result.durationMs / 1000).toFixed(1)}秒)\n`,
+          `${mark} ${event.id}${note} (${(event.result.durationMs / 1000).toFixed(1)}秒)\n`,
         );
       }
     },
@@ -516,7 +555,9 @@ async function main() {
   }
 
   process.stdout.write(
-    `\n合計 ${summary.counts.total} 件 / 成功 ${summary.counts.passed} / 失敗 ${summary.counts.failed}`
+    `\n合計 ${summary.counts.total} 件 / 完走 ${summary.counts.completed} / エラー ${summary.counts.errored}`
+      + (summary.counts.unjudged > 0 ? ` / 合否未判定 ${summary.counts.unjudged}` : "")
+      + (summary.counts.verdictFail > 0 ? ` / 不合格 ${summary.counts.verdictFail}` : "")
       + ` / 同時 ${summary.concurrency} / 所要 ${(summary.totalDurationMs / 1000).toFixed(1)}秒\n`
       + `結果: ${summary.outDir}\n`,
   );

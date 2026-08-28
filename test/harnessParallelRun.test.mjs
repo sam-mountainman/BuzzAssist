@@ -3,11 +3,13 @@ import fsSync from "node:fs";
 import test from "node:test";
 
 import {
+  acquireCrossProcessLock,
   defaultConcurrency,
   executePlan,
   expandPlanJobs,
   normalizeLockKey,
   planDigest,
+  releaseCrossProcessLock,
   resolveConcurrency,
   validatePlan,
 } from "../scripts/harness-parallel-run.mjs";
@@ -414,4 +416,27 @@ test("品質ゲートの不合格を expectExitCode で成功に付け替えら�
     validatePlan({ jobs: [{ id: "g", command: "node", args: ["audit-x.mjs"], expectExitCode: 0 }] }),
     [],
   );
+});
+
+test("別プロセスのランナーとも排他される", async () => {
+  // プロセス内の Set だけでは、Claude Code と Codex がそれぞれランナーを
+  // 起動したときに同じ共有台帳を同時更新できてしまう。
+  const key = `test-ledger-${process.pid}.json`;
+  const first = acquireCrossProcessLock(key);
+  assert.ok(first, "1本目がロックを取れない");
+  // 取得直後（pid を書いた後）に2本目が奪えないこと
+  assert.equal(acquireCrossProcessLock(key), null, "生きているロックを奪ってしまった");
+  releaseCrossProcessLock(first);
+  // 解放後は取れる
+  const second = acquireCrossProcessLock(key);
+  assert.ok(second, "解放後に取れない");
+  releaseCrossProcessLock(second);
+});
+
+test("別の鍵どうしは互いを妨げない", () => {
+  const a = acquireCrossProcessLock(`a-${process.pid}`);
+  const b = acquireCrossProcessLock(`b-${process.pid}`);
+  assert.ok(a && b, "無関係な鍵が衝突した");
+  releaseCrossProcessLock(a);
+  releaseCrossProcessLock(b);
 });
