@@ -445,7 +445,16 @@ async function rewriteSkillRelativeDepth(skillDir) {
     // 要求台帳と番組ガバナンスはチャンネル固有なので配布しない。
     // それらは Channel Pack 側（運営者の手元）にあり、共有される
     // 配布物に入れると、パックを分離した意味が無くなる。
+    //
+    // 一方、スキルが参照する運用 runbook と測定証跡はジャンル／
+    // プラットフォーム層のもので、これが無いと配布先には**手順名だけが届き、
+    // 手順の実体と測定根拠を読めない**。固有語を含まないことは
+    // audit-public-surface で確認済み。
     "docs/koya-harness-handoff-ja.md",
+    "docs/koya-character-gate-runbook-ja.md",
+    "docs/koya-voice-quality-runbook-ja.md",
+    "docs/learning/targets.json",
+    "docs/measurements/parallel-limits-2026-08-28.json",
     "package.json",
     "package-lock.json",
     "vite.config.js",
