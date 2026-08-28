@@ -1,0 +1,65 @@
+{
+  "version": "koya-character-styling-spec-v1",
+  "characterId": "ema",
+  "kind": "outfit",
+  "minimumPassingCandidates": 4,
+  "sharedInvariants": [
+    "ema-outfit-v1-1",
+    "ema-outfit-v1-2",
+    "ema-outfit-v1-3",
+    "ema-outfit-v1-4",
+    "ema-outfit-v1-5",
+    "ema-outfit-v1-6",
+    "ema-outfit-v1-7",
+    "ema-outfit-v1-8",
+    "ema-outfit-v1-9"
+  ],
+  "options": [
+    {
+      "id": "ol-pants",
+      "label": "ema-outfit-v1-label-10",
+      "description": "ema-outfit-v1-description-11",
+      "invariants": [
+        "ema-outfit-v1-12",
+        "ema-outfit-v1-13"
+      ]
+    },
+    {
+      "id": "ol-midi-skirt",
+      "label": "ema-outfit-v1-label-14",
+      "description": "ema-outfit-v1-description-15",
+      "invariants": [
+        "ema-outfit-v1-16",
+        "ema-outfit-v1-17"
+      ]
+    },
+    {
+      "id": "adult-casual-slacks",
+      "label": "ema-outfit-v1-label-18",
+      "description": "ema-outfit-v1-description-19",
+      "invariants": [
+        "ema-outfit-v1-20",
+        "ema-outfit-v1-21"
+      ]
+    },
+    {
+      "id": "adult-denim-trousers",
+      "label": "ema-outfit-v1-label-22",
+      "description": "ema-outfit-v1-description-23",
+      "invariants": [
+        "ema-outfit-v1-24",
+        "ema-outfit-v1-25"
+      ]
+    },
+    {
+      "id": "kireime-midi-dress",
+      "label": "ema-outfit-v1-label-26",
+      "description": "ema-outfit-v1-description-27",
+      "invariants": [
+        "ema-outfit-v1-28",
+        "ema-outfit-v1-29",
+        "ema-outfit-v1-30"
+      ]
+    }
+  ]
+}

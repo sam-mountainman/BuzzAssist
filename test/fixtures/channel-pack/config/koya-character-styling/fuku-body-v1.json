@@ -1,0 +1,45 @@
+{
+  "version": "koya-character-styling-spec-v1",
+  "characterId": "fuku",
+  "kind": "bodyBuild",
+  "minimumPassingCandidates": 2,
+  "sharedInvariants": [
+    "fuku-body-v1-1",
+    "fuku-body-v1-2",
+    "fuku-body-v1-3",
+    "fuku-body-v1-4",
+    "fuku-body-v1-5",
+    "fuku-body-v1-6",
+    "fuku-body-v1-7",
+    "fuku-body-v1-8"
+  ],
+  "options": [
+    {
+      "id": "slightly-smaller",
+      "label": "fuku-body-v1-label-9",
+      "description": "fuku-body-v1-description-10",
+      "invariants": [
+        "fuku-body-v1-11",
+        "fuku-body-v1-12"
+      ]
+    },
+    {
+      "id": "compact-plump",
+      "label": "fuku-body-v1-label-13",
+      "description": "fuku-body-v1-description-14",
+      "invariants": [
+        "fuku-body-v1-15",
+        "fuku-body-v1-16"
+      ]
+    },
+    {
+      "id": "medium-chubby",
+      "label": "fuku-body-v1-label-17",
+      "description": "fuku-body-v1-description-18",
+      "invariants": [
+        "fuku-body-v1-19",
+        "fuku-body-v1-20"
+      ]
+    }
+  ]
+}

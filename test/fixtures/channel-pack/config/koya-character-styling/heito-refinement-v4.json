@@ -1,0 +1,57 @@
+{
+  "version": "koya-character-styling-spec-v1",
+  "characterId": "heito",
+  "kind": "hairColor",
+  "minimumPassingCandidates": 4,
+  "comparisonEvidenceRequired": false,
+  "comparisonRequirements": [
+    "heito-refinement-v4-1",
+    "heito-refinement-v4-2",
+    "heito-refinement-v4-3"
+  ],
+  "sharedInvariants": [
+    "heito-refinement-v4-4",
+    "heito-refinement-v4-5",
+    "heito-refinement-v4-6",
+    "heito-refinement-v4-7",
+    "heito-refinement-v4-8"
+  ],
+  "options": [
+    {
+      "id": "honey-caramel",
+      "label": "heito-refinement-v4-label-9",
+      "description": "heito-refinement-v4-description-10",
+      "invariants": [
+        "heito-refinement-v4-11",
+        "heito-refinement-v4-12"
+      ]
+    },
+    {
+      "id": "red-chestnut",
+      "label": "heito-refinement-v4-label-13",
+      "description": "heito-refinement-v4-description-14",
+      "invariants": [
+        "heito-refinement-v4-15",
+        "heito-refinement-v4-16"
+      ]
+    },
+    {
+      "id": "realistic-copper-orange",
+      "label": "heito-refinement-v4-label-17",
+      "description": "heito-refinement-v4-description-18",
+      "invariants": [
+        "heito-refinement-v4-19",
+        "heito-refinement-v4-20"
+      ]
+    },
+    {
+      "id": "golden-amber",
+      "label": "heito-refinement-v4-label-21",
+      "description": "heito-refinement-v4-description-22",
+      "invariants": [
+        "heito-refinement-v4-23",
+        "heito-refinement-v4-24"
+      ]
+    }
+  ]
+}

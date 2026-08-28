@@ -1,0 +1,45 @@
+{
+  "version": "koya-character-styling-spec-v1",
+  "characterId": "tatsu",
+  "kind": "designRefinement",
+  "minimumPassingCandidates": 2,
+  "sharedInvariants": [
+    "tatsu-refinement-v1-1",
+    "tatsu-refinement-v1-2",
+    "tatsu-refinement-v1-3",
+    "tatsu-refinement-v1-4",
+    "tatsu-refinement-v1-5",
+    "tatsu-refinement-v1-6",
+    "tatsu-refinement-v1-7",
+    "tatsu-refinement-v1-8"
+  ],
+  "options": [
+    {
+      "id": "plain-u-drape",
+      "label": "tatsu-refinement-v1-label-9",
+      "description": "tatsu-refinement-v1-description-10",
+      "invariants": [
+        "tatsu-refinement-v1-11",
+        "tatsu-refinement-v1-12"
+      ]
+    },
+    {
+      "id": "offset-work-drape",
+      "label": "tatsu-refinement-v1-label-13",
+      "description": "tatsu-refinement-v1-description-14",
+      "invariants": [
+        "tatsu-refinement-v1-15",
+        "tatsu-refinement-v1-16"
+      ]
+    },
+    {
+      "id": "compact-neck-fold",
+      "label": "tatsu-refinement-v1-label-17",
+      "description": "tatsu-refinement-v1-description-18",
+      "invariants": [
+        "tatsu-refinement-v1-19",
+        "tatsu-refinement-v1-20"
+      ]
+    }
+  ]
+}

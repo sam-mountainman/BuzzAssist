@@ -1,0 +1,64 @@
+{
+  "version": "koya-character-styling-spec-v1",
+  "characterId": "horo",
+  "kind": "hairColor",
+  "minimumPassingCandidates": 4,
+  "sharedInvariants": [
+    "horo-hair-color-v1-1",
+    "horo-hair-color-v1-2",
+    "horo-hair-color-v1-3",
+    "horo-hair-color-v1-4",
+    "horo-hair-color-v1-5",
+    "horo-hair-color-v1-6"
+  ],
+  "options": [
+    {
+      "id": "red-brown",
+      "label": "horo-hair-color-v1-label-7",
+      "description": "horo-hair-color-v1-description-8",
+      "invariants": [
+        "horo-hair-color-v1-9"
+      ]
+    },
+    {
+      "id": "rose-brown",
+      "label": "horo-hair-color-v1-label-10",
+      "description": "horo-hair-color-v1-description-11",
+      "invariants": [
+        "horo-hair-color-v1-12"
+      ]
+    },
+    {
+      "id": "dark-chocolate",
+      "label": "horo-hair-color-v1-label-13",
+      "description": "horo-hair-color-v1-description-14",
+      "invariants": [
+        "horo-hair-color-v1-15"
+      ]
+    },
+    {
+      "id": "wine-brown",
+      "label": "horo-hair-color-v1-label-16",
+      "description": "horo-hair-color-v1-description-17",
+      "invariants": [
+        "horo-hair-color-v1-18"
+      ]
+    },
+    {
+      "id": "olive-brown",
+      "label": "horo-hair-color-v1-label-19",
+      "description": "horo-hair-color-v1-description-20",
+      "invariants": [
+        "horo-hair-color-v1-21"
+      ]
+    },
+    {
+      "id": "smoky-copper",
+      "label": "horo-hair-color-v1-label-22",
+      "description": "horo-hair-color-v1-description-23",
+      "invariants": [
+        "horo-hair-color-v1-24"
+      ]
+    }
+  ]
+}

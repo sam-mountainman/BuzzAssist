@@ -1,0 +1,54 @@
+{
+  "version": "koya-character-styling-spec-v1",
+  "characterId": "horo",
+  "kind": "outfit",
+  "minimumPassingCandidates": 3,
+  "sharedInvariants": [
+    "horo-jersey-color-v1-1",
+    "horo-jersey-color-v1-2",
+    "horo-jersey-color-v1-3",
+    "horo-jersey-color-v1-4",
+    "horo-jersey-color-v1-5",
+    "horo-jersey-color-v1-6",
+    "horo-jersey-color-v1-7",
+    "horo-jersey-color-v1-8",
+    "horo-jersey-color-v1-9",
+    "horo-jersey-color-v1-10",
+    "horo-jersey-color-v1-11",
+    "horo-jersey-color-v1-12"
+  ],
+  "options": [
+    {
+      "id": "brick-red",
+      "label": "horo-jersey-color-v1-label-13",
+      "description": "horo-jersey-color-v1-description-14",
+      "invariants": [
+        "horo-jersey-color-v1-15"
+      ]
+    },
+    {
+      "id": "charcoal",
+      "label": "horo-jersey-color-v1-label-16",
+      "description": "horo-jersey-color-v1-description-17",
+      "invariants": [
+        "horo-jersey-color-v1-18"
+      ]
+    },
+    {
+      "id": "deep-navy",
+      "label": "horo-jersey-color-v1-label-19",
+      "description": "horo-jersey-color-v1-description-20",
+      "invariants": [
+        "horo-jersey-color-v1-21"
+      ]
+    },
+    {
+      "id": "warm-gray",
+      "label": "horo-jersey-color-v1-label-22",
+      "description": "horo-jersey-color-v1-description-23",
+      "invariants": [
+        "horo-jersey-color-v1-24"
+      ]
+    }
+  ]
+}

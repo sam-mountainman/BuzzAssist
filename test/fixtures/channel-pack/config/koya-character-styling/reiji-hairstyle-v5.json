@@ -1,0 +1,52 @@
+{
+  "version": "koya-character-styling-spec-v1",
+  "characterId": "reiji",
+  "kind": "hairstyle",
+  "minimumPassingCandidates": 3,
+  "comparisonEvidenceRequired": true,
+  "comparisonRequirements": [
+    "reiji-hairstyle-v5-1",
+    "reiji-hairstyle-v5-2",
+    "reiji-hairstyle-v5-3",
+    "reiji-hairstyle-v5-4"
+  ],
+  "sharedInvariants": [
+    "reiji-hairstyle-v5-5",
+    "reiji-hairstyle-v5-6",
+    "reiji-hairstyle-v5-7",
+    "reiji-hairstyle-v5-8",
+    "reiji-hairstyle-v5-9"
+  ],
+  "options": [
+    {
+      "id": "micro-ragged-eye-crop",
+      "label": "reiji-hairstyle-v5-label-10",
+      "description": "reiji-hairstyle-v5-description-11",
+      "invariants": [
+        "reiji-hairstyle-v5-12",
+        "reiji-hairstyle-v5-13",
+        "reiji-hairstyle-v5-14"
+      ]
+    },
+    {
+      "id": "broken-four-lock-crop",
+      "label": "reiji-hairstyle-v5-label-15",
+      "description": "reiji-hairstyle-v5-description-16",
+      "invariants": [
+        "reiji-hairstyle-v5-17",
+        "reiji-hairstyle-v5-18",
+        "reiji-hairstyle-v5-19"
+      ]
+    },
+    {
+      "id": "uneven-side-shag-crop",
+      "label": "reiji-hairstyle-v5-label-20",
+      "description": "reiji-hairstyle-v5-description-21",
+      "invariants": [
+        "reiji-hairstyle-v5-22",
+        "reiji-hairstyle-v5-23",
+        "reiji-hairstyle-v5-24"
+      ]
+    }
+  ]
+}

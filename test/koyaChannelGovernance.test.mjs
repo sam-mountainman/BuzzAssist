@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { channelPackPresent, resolveChannelPackPath } from "../lib/channelPackResolver.mjs";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -46,13 +46,13 @@ async function installAuthority(projectDir) {
 
 test("Koya authority is all-or-nothing and validates the three channel contracts", async () => {
   const projectDir = await mkdtemp(join(tmpdir(), "koya-authority-"));
-  const fallback = await readKoyaChannelAuthority({ projectDir, runtimeRoot: root });
+  const fallback = await readKoyaChannelAuthority({ allowFixture: true, projectDir, runtimeRoot: root });
   assert.equal(fallback.source, "runtime-template");
   await mkdir(join(projectDir, "config"), { recursive: true });
   await writeFile(join(projectDir, "config/koya-show-bible.json"), await readFile(resolveChannelPackPath(root, "config/koya-show-bible.json")));
-  await assert.rejects(() => readKoyaChannelAuthority({ projectDir, runtimeRoot: root }), /authority is partial/u);
+  await assert.rejects(() => readKoyaChannelAuthority({ allowFixture: true, projectDir, runtimeRoot: root }), /authority is partial/u);
   await installAuthority(projectDir);
-  const authority = await readKoyaChannelAuthority({ projectDir, runtimeRoot: root });
+  const authority = await readKoyaChannelAuthority({ allowFixture: true, projectDir, runtimeRoot: root });
   assert.equal(authority.source, "project");
   assert.equal(authority.validation.show.castCount, 11);
   assert.equal(authority.validation.locations.locationCount, 2);
@@ -60,7 +60,7 @@ test("Koya authority is all-or-nothing and validates the three channel contracts
   const brokenShow = structuredClone(authority.showBible);
   brokenShow.cast.find((member) => member.id === "horo").stylingSpecPaths.reverse();
   await writeFile(join(projectDir, "config/koya-show-bible.json"), `${JSON.stringify(brokenShow, null, 2)}\n`);
-  await assert.rejects(() => readKoyaChannelAuthority({ projectDir, runtimeRoot: root }), /must start with stylingSpecPath/u);
+  await assert.rejects(() => readKoyaChannelAuthority({ allowFixture: true, projectDir, runtimeRoot: root }), /must start with stylingSpecPath/u);
 });
 
 test("Koya story review binds ordered reversal beats to the exact script and protagonist", async (t) => {
@@ -71,7 +71,7 @@ test("Koya story review binds ordered reversal beats to the exact script and pro
     t.skip("channel pack が無い環境（合成 fixture では話者名が一致しない）");
     return;
   }
-  const authority = await readKoyaChannelAuthority({ projectDir: root });
+  const authority = await readKoyaChannelAuthority({ allowFixture: true, projectDir: root });
   const scriptText = `タイトル: 記録が嘘を崩す
 
 【カット1：攻撃】
@@ -119,7 +119,7 @@ test("Koya story review binds ordered reversal beats to the exact script and pro
 });
 
 test("Koya fixed cast cannot be replaced by episode-local candidates and must carry required identity roles", async () => {
-  const authority = await readKoyaChannelAuthority({ projectDir: root });
+  const authority = await readKoyaChannelAuthority({ allowFixture: true, projectDir: root });
   const parsed = parseMangaScript("もも: ほな、ぼちぼち反撃といこか");
   const baseCharacter = {
     id: "horo",
@@ -161,7 +161,7 @@ test("Koya fixed cast cannot be replaced by episode-local candidates and must ca
 });
 
 test("Koya character bootstrap status reports the next legal action without inventing approvals", async () => {
-  const authority = await readKoyaChannelAuthority({ projectDir: root });
+  const authority = await readKoyaChannelAuthority({ allowFixture: true, projectDir: root });
   const empty = await auditKoyaCharacterBootstrap({
     showBible: authority.showBible,
     registry: { characters: [] },
@@ -178,7 +178,7 @@ test("Koya character bootstrap status reports the next legal action without inve
 test("Koya roster gate binds all 11 identity faces and requires 55 independent original/thumbnail-scale pair checks", async () => {
   const projectDir = await mkdtemp(join(tmpdir(), "koya-roster-review-"));
   await installAuthority(projectDir);
-  const authority = await readKoyaChannelAuthority({ projectDir, runtimeRoot: root });
+  const authority = await readKoyaChannelAuthority({ allowFixture: true, projectDir, runtimeRoot: root });
   const characters = [];
   await mkdir(join(projectDir, "canvas", "assets", "roster-fixture"), { recursive: true });
   await mkdir(join(projectDir, "canvas", "reviews", "roster-fixture"), { recursive: true });
@@ -243,7 +243,7 @@ test("Koya roster gate binds all 11 identity faces and requires 55 independent o
 test("Koya location registration requires four SHA-bound, independently reviewed boards", async () => {
   const projectDir = await mkdtemp(join(tmpdir(), "koya-location-"));
   await installAuthority(projectDir);
-  const authority = await readKoyaChannelAuthority({ projectDir, runtimeRoot: root });
+  const authority = await readKoyaChannelAuthority({ allowFixture: true, projectDir, runtimeRoot: root });
   const plan = buildKoyaLocationBoardPlan({ projectDir, locationBible: authority.locationBible, locationId: "yamatani" });
   const emptyDraft = await createKoyaLocationReviewDraft({ projectDir, locationBible: authority.locationBible, locationId: "yamatani" });
   assert.ok(emptyDraft.boards.every((row) => row.sha256 === "" && row.checks.originalScalePass === false));
@@ -341,7 +341,7 @@ test("Koya location registration requires four SHA-bound, independently reviewed
 
 test("Koya thumbnail preflight blocks pending tokens and final audit rejects reused video frames", async () => {
   const projectDir = await mkdtemp(join(tmpdir(), "koya-thumbnail-"));
-  const authority = await readKoyaChannelAuthority({ projectDir, runtimeRoot: root });
+  const authority = await readKoyaChannelAuthority({ allowFixture: true, projectDir, runtimeRoot: root });
   const plan = {
     version: "koya-thumbnail-plan-v1",
     stage: "preflight",
@@ -383,4 +383,57 @@ test("Koya thumbnail preflight blocks pending tokens and final audit rejects reu
   });
   assert.equal(finalAudit.pass, false);
   assert.match(finalAudit.failures.join("\n"), /reuses a main-video frame/u);
+});
+
+test("合成 fixture は正本を名乗れず、本番の読み込みは既定で閉じる", async () => {
+  // pack を持たない環境で fixture へ落ちたとき、source が "project" のままだと
+  // サンプルのキャストで本番が走り、監査記録には「プロジェクトの正本」と書かれる。
+  // 読める道は契約テストのために残すが、名乗りと既定は分ける。
+  const sandbox = await mkdtemp(join(tmpdir(), "koya-nopack-"));
+  await mkdir(join(sandbox, "test/fixtures"), { recursive: true });
+  await cp(join(root, "test/fixtures/channel-pack"), join(sandbox, "test/fixtures/channel-pack"), { recursive: true });
+
+  await assert.rejects(
+    () => readKoyaChannelAuthority({ projectDir: sandbox, runtimeRoot: root }),
+    /合成 fixture の番組正本に落ちている/u,
+    "pack が無い環境の既定は拒否でなければならない",
+  );
+
+  const optedIn = await readKoyaChannelAuthority({ allowFixture: true, projectDir: sandbox, runtimeRoot: root });
+  assert.equal(optedIn.source, "test-fixture", "fixture 由来であることが source に出ること");
+  assert.notEqual(optedIn.source, "project", "fixture が project を名乗らないこと");
+  assert.equal(optedIn.validation.styling.pass, true, "pack 無しでも styling 契約は検証できること");
+  await rm(sandbox, { recursive: true, force: true });
+});
+
+test("Channel Pack が選ばれている限り、キャスト未検出は免除ではなく失敗になる", async (t) => {
+  if (!channelPackPresent(root)) {
+    t.skip("channel pack が無い環境");
+    return;
+  }
+  // 話者名の表記ゆれひとつで18の番組ルールが黙って全部外れるのを塞ぐ。
+  // どのハーネスを使うかは上位のルーターが決めることで、台本からキャストが
+  // 見つからないことを「この番組ではない」証拠にはしない。
+  const authority = await readKoyaChannelAuthority({ projectDir: root });
+  const scriptText = `タイトル: 別番組の台本
+
+【カット1】
+知らない人A: これは違う番組です。
+知らない人B: キャストが一致しません。
+`;
+  const parsed = parseMangaScript(scriptText);
+
+  const story = auditKoyaStory({ showBible: authority.showBible, scriptText, parsed, storyReview: null, enforce: true });
+  assert.equal(story.castDetected, false);
+  assert.equal(story.pass, false, "pack 選択済みでキャスト未検出なら story 監査は落ちること");
+  assert.match(story.failures.join("\n"), /固定キャストが一人も現れない/u);
+
+  const readiness = auditKoyaFixedCastReadiness({ showBible: authority.showBible, parsed, registry: { characters: [] }, enforce: true });
+  assert.equal(readiness.pass, false, "pack 選択済みでキャスト未検出なら配役ゲートも落ちること");
+  assert.match(readiness.failures.join("\n"), /固定キャストが一人も現れない/u);
+
+  // pack を選んでいない（ジャンル共通ハーネス）ときは従来どおり素通り。
+  const compat = auditKoyaStory({ showBible: authority.showBible, scriptText, parsed, storyReview: null, enforce: false });
+  assert.equal(compat.active, false);
+  assert.equal(compat.pass, true, "pack 未選択のときまで縛らないこと");
 });
