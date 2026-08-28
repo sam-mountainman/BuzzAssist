@@ -115,3 +115,31 @@ test("秘密の判定は本体と同じ解決関数に聞く", async () => {
   assert.equal(report.checks.find((c) => c.id === "tts-key").ok, ttsResolves, "本体の判定と一致すること");
   assert.equal(report.checks.find((c) => c.id === "image-key").ok, imageResolves, "本体の判定と一致すること");
 });
+
+test("音声QAの判定が、別の interpreter の結果を流用しない", async (t) => {
+  // キャッシュが単一のブール値だったので、最初に聞いた interpreter の答えを
+  // 以降の全 interpreter に返していた。動く python を1度調べた後は、
+  // 存在しない python も「利用可能」になり、doctor がゲートを走らせられない
+  // 環境を ready と報告した。
+  //
+  // 「存在しない2つ」を比べても、単一キャッシュでも答えが揃うので何も
+  // 検証しない——最初に書いた版がそれで、変異を捕まえられなかった。
+  // 結果の違う2つを、その順で聞く必要がある。
+  const { voiceQualityAvailable, resetVoiceQualityAvailabilityCache, DEFAULT_VOICE_QA_PYTHON } =
+    await import("../lib/voiceQualityGate.mjs");
+  resetVoiceQualityAvailabilityCache();
+
+  const working = await voiceQualityAvailable(DEFAULT_VOICE_QA_PYTHON);
+  if (!working) {
+    // 動く interpreter が無い環境では、この順序依存は再現できない。
+    // 飛ばしたことを述べる——「検証した」ことにしない。
+    t.skip(`音声QA環境が無いので順序依存を再現できない（${DEFAULT_VOICE_QA_PYTHON}）`);
+    return;
+  }
+  const missing = await voiceQualityAvailable("/nonexistent/python-for-doctor-test");
+  assert.equal(missing, false, "動く interpreter の答えを、存在しない interpreter に流用しないこと");
+  assert.equal(
+    await voiceQualityAvailable(DEFAULT_VOICE_QA_PYTHON), true,
+    "逆向きにも流用しないこと",
+  );
+});
