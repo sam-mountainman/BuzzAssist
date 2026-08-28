@@ -160,3 +160,11 @@ node scripts/koya-manga-video.mjs audit --episode-id <episode-id>
 
 完了は、契約の完了status、全必須監査PASS、`knownRemainingIssues=[]`、実MP4の全デコード、MP4 hashに結び付いたClaude/Codex署名がすべて揃ったときだけ宣言する。報告には絶対MP4パス、尺、解像度、fps、容量、主要監査、残課題0件を含める。
 `quality-harness-final`は空の品質ループ状態や事前ゲートだけでは合格しない。独立contextの全rubric採点を含む完了roundが最低1回必要である。自分自身を除く全必須監査の結果・実在証拠SHA-256・契約digest・実MP4 SHA-256・証拠Merkle rootを集約した`final-decision.json`が`passed`であることを確認する。失敗監査は永続incident ledgerへ記録し、再発時の指示/hard-gate昇格を次の新規台本へ引き継ぐ。
+
+## 自動で積み上がった指摘
+
+<!-- LEARNED:BEGIN — この節は harness-learn が自動で書く。手で編集しない -->
+
+_まだ自動反映された項目はありません。_
+
+<!-- LEARNED:END -->

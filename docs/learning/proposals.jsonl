@@ -2,3 +2,5 @@
 {"kind":"constraint","target":"ledger:koya","text":"完了報告の前に必ず実測する。スクリプトが自分で書いたサインオフを根拠にしない","evidence":"本日3件の自作サインオフを検出（av-master / review-master / final-audit-v3）","session":null,"capturedAt":"2026-08-28T18:04:45.229Z","id":"5e77143546cd"}
 {"kind":"preference","target":"ledger:koya","text":"スキルの作成・更新は必ず skill-creator を通す。中身は基本的に日本語","evidence":"ユーザー指示 2026-08-28","session":null,"capturedAt":"2026-08-28T18:04:45.278Z","id":"9065742665fe"}
 {"kind":"constraint","target":"ledger:koya","text":"完了報告の前に必ず実測する。スクリプトが自分で書いたサインオフを根拠にしない","evidence":"本日3件の自作サインオフを検出（av-master / review-master / final-audit-v3）","session":null,"capturedAt":"2026-08-28T18:04:45.338Z","id":"5e77143546cd"}
+{"kind":"fact","target":"skill:harness-parallel-execution","text":"Codexのネイティブ子スレッドは同時3本で、4本目は agent thread limit reached","evidence":"Codexレビューでの実測（0.150.0-alpha.8）","session":null,"capturedAt":"2026-08-28T18:13:05.335Z","id":"af895bf4ea2c"}
+{"kind":"constraint","target":"ledger:koya","text":"マーカーが無い文書への自動反映は保留されるべき","evidence":"設計の検証","session":null,"capturedAt":"2026-08-28T18:13:27.176Z","id":"1902c67afb7e"}

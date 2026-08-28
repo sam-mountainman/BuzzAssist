@@ -2,12 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  LEARNED_BEGIN,
+  LEARNED_END,
   LEARNING_TARGETS,
   PROPOSAL_KINDS,
   buildProposal,
   clusterForConsolidation,
+  extractLearnedSection,
   proposalId,
+  renderLearnedSection,
   summarizeProposals,
+  writeLearnedSection,
 } from "../scripts/harness-learn.mjs";
 
 const NOW = "2026-08-29T00:00:00.000Z";
@@ -105,4 +110,74 @@ test("提案IDは記録の順序に依存しない", () => {
     proposalId(entry),
     proposalId({ text: "実測した値", target: "ledger:koya", kind: "fact" }),
   );
+});
+
+// --- 自動反映（sync）が触ってよい範囲 ---
+
+test("自動反映はマーカーの内側だけを書き換える", () => {
+  const before = [
+    "# 人が書いた見出し",
+    "",
+    "人が書いた本文。ここは機械が触ってはいけない。",
+    "",
+    LEARNED_BEGIN,
+    "",
+    "_古い内容_",
+    "",
+    LEARNED_END,
+    "",
+    "## これも人が書いた節",
+    "末尾の本文。",
+  ].join("\n");
+
+  const after = writeLearnedSection(before, [
+    { id: "abc123", kind: "fact", text: "測った値", evidence: ["実測"], occurrences: 1, firstSeenAt: "2026-08-29T00:00:00Z" },
+  ], "2026-08-29T00:00:00Z");
+
+  // 人が書いた部分が1文字も変わっていないこと
+  assert.ok(after.startsWith("# 人が書いた見出し\n\n人が書いた本文。ここは機械が触ってはいけない。\n\n"));
+  assert.ok(after.endsWith("## これも人が書いた節\n末尾の本文。"));
+  // 機械区画は差し替わっていること
+  assert.ok(!after.includes("_古い内容_"), "古い機械区画が残っている");
+  assert.match(after, /測った値/u);
+  assert.match(after, /根拠: 実測/u);
+  // マーカーは1組のまま
+  assert.equal(after.split(LEARNED_BEGIN).length - 1, 1);
+  assert.equal(after.split(LEARNED_END).length - 1, 1);
+});
+
+test("マーカーの無い文書には節を作らない", () => {
+  // 人の文書の構造を機械が勝手に変えることの方が、反映漏れより高くつく。
+  assert.equal(writeLearnedSection("# マーカーのない文書\n\n本文。", [], "2026-08-29T00:00:00Z"), null);
+  assert.equal(extractLearnedSection("マーカーなし"), null);
+});
+
+test("マーカーの順序が壊れていたら黙って直さず落とす", () => {
+  assert.throws(
+    () => extractLearnedSection(`${LEARNED_END}\n中身\n${LEARNED_BEGIN}`),
+    /順序が逆/u,
+  );
+});
+
+test("繰り返し回数と根拠が自動区画に残る", () => {
+  const out = renderLearnedSection([
+    { id: "x", kind: "correction", text: "二度言われたこと", evidence: ["根拠A", "根拠B"], occurrences: 2, firstSeenAt: "2026-08-01T00:00:00Z" },
+  ], "2026-08-29T00:00:00Z");
+  assert.match(out, /2回指摘/u);
+  assert.match(out, /根拠A/u);
+  assert.match(out, /根拠B/u);
+  assert.match(out, /2026-08-01/u);
+  // 由来を追えるよう id を残す
+  assert.match(out, /`x`/u);
+});
+
+test("空でも区画は成立し、内容が無いと分かる", () => {
+  const out = renderLearnedSection([], "2026-08-29T00:00:00Z");
+  assert.match(out, /まだ自動反映された項目はありません/u);
+});
+
+test("同じ入力なら同じ区画になる（sync が毎回差分を作らない）", () => {
+  const entries = [{ id: "x", kind: "fact", text: "同じ値", evidence: [], occurrences: 1, firstSeenAt: "2026-08-01T00:00:00Z" }];
+  const now = "2026-08-29T00:00:00Z";
+  assert.equal(renderLearnedSection(entries, now), renderLearnedSection(entries, now));
 });

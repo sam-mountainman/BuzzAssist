@@ -44,6 +44,60 @@ export const LEARNING_TARGETS = {
   "doc:mike-audio-gates": "deployments/narrated-story-video/docs/AUDIO-BGM-GATES.md",
 };
 
+// 機械が書き換えてよい範囲の境界。hermes の curator が
+// 「agent-created skill だけ触り、bundled / hub-installed には手を出さない」
+// としているのと同じ役割を、ここでは**文書内の区画**が担う。
+// このマーカーの内側だけを自動で書き換え、外側の人が書いた本文には触らない。
+// 機械が書いた節だと一目で分かることが重要で、人の記述と混ざった瞬間に
+// 「誰が書いたのか分からない文書」になって証跡としての意味を失う。
+export const LEARNED_BEGIN = "<!-- LEARNED:BEGIN — この節は harness-learn が自動で書く。手で編集しない -->";
+export const LEARNED_END = "<!-- LEARNED:END -->";
+
+export function extractLearnedSection(text) {
+  const begin = text.indexOf(LEARNED_BEGIN);
+  const end = text.indexOf(LEARNED_END);
+  if (begin === -1 || end === -1) return null;
+  if (end < begin) throw new Error("LEARNED マーカーの順序が逆です");
+  return { begin, end: end + LEARNED_END.length, body: text.slice(begin + LEARNED_BEGIN.length, end) };
+}
+
+// 自動セクションの本文を組み立てる。人が読んで判断できる形にする——
+// 機械が書いたからといって、由来の分からない箇条書きを並べてよいことには
+// ならない。各項目に根拠と、いつ何回言われたかを残す。
+export function renderLearnedSection(entries, now) {
+  if (entries.length === 0) {
+    return `\n\n_まだ自動反映された項目はありません。_\n\n`;
+  }
+  const lines = [
+    "",
+    "",
+    "ここは `node scripts/harness-learn.mjs sync` が自動で書く区画。",
+    "**手で編集しない**（次回の sync で上書きされる）。人が書いた規則として",
+    "残したいものは、この区画の外へ書き写してから `promote` する。",
+    "",
+  ];
+  for (const entry of entries) {
+    const repeat = entry.occurrences > 1 ? `（${entry.occurrences}回指摘）` : "";
+    lines.push(`- **${entry.text}**${repeat}`);
+    for (const ev of entry.evidence) lines.push(`  - 根拠: ${ev}`);
+    lines.push(`  - 種別: ${entry.kind} / 初回: ${String(entry.firstSeenAt).slice(0, 10)} / id: \`${entry.id}\``);
+  }
+  lines.push("", `_最終更新: ${now}_`, "");
+  return lines.join("\n");
+}
+
+// 自動で書き換えてよいのはマーカーの内側だけ。マーカーが無い文書は
+// 対象外にする（勝手に節を作って人の文書の構造を変えない）。
+export function writeLearnedSection(text, entries, now) {
+  const section = extractLearnedSection(text);
+  if (!section) return null;
+  return text.slice(0, section.begin)
+    + LEARNED_BEGIN
+    + renderLearnedSection(entries, now)
+    + LEARNED_END
+    + text.slice(section.end);
+}
+
 export const PROPOSAL_KINDS = new Set([
   "correction",   // ユーザーがこちらの誤りを正した
   "preference",   // 作り方・進め方の好み
@@ -197,6 +251,12 @@ function printHelp() {
 
   status    未反映の提案を、繰り返された回数順に出す
 
+  sync      **自動反映**。LEARNED マーカーのある正本の機械区画を書き直す。
+            人が書いた本文には触らないので reviewer は要らない
+
+  promote   機械区画の項目を人の規則へ格上げする（reviewer 必須）
+    --id <提案ID>  --reviewer <名前>  --note "どこにどう書いたか"
+
   review    統合案を出す（既定は dry-run。スキルには触らない）
     --apply-hint   まとめ方の助言を詳しく出す
 
@@ -282,6 +342,84 @@ function main() {
         + "個別事象を並べた文書は読まれなくなり、学習として機能しない。\n"
         + "書いたあと apply --id <id> --reviewer <名前> --note \"どう書いたか\" を実行する。\n",
       );
+      break;
+    }
+
+    case "sync": {
+      // 自動反映。マーカーのある正本だけを対象に、機械管理セクションを
+      // 書き直す。人が書いた本文には触らない。reviewer を要求しないのは、
+      // 書き込む先が「機械が書いた区画」だと文書自身に明示されているから。
+      // 逆に言えば、マーカーの外へ出すには promote が要る。
+      const pending = summary.filter((entry) => !entry.applied);
+      const byTarget = new Map();
+      for (const entry of pending) {
+        if (!byTarget.has(entry.target)) byTarget.set(entry.target, []);
+        byTarget.get(entry.target).push(entry);
+      }
+      let wrote = 0;
+      let skipped = 0;
+      for (const [target, rel] of Object.entries(LEARNING_TARGETS)) {
+        const full = path.join(REPO_ROOT, rel);
+        if (!fs.existsSync(full)) continue;
+        const before = fs.readFileSync(full, "utf8");
+        const after = writeLearnedSection(before, byTarget.get(target) ?? [], now);
+        if (after === null) {
+          // マーカーが無い文書には節を作らない。人の文書の構造を
+          // 機械が勝手に変えることの方が、反映漏れより高くつく。
+          if (byTarget.has(target)) {
+            process.stdout.write(`⏭  ${rel} は LEARNED マーカーが無いので対象外（${byTarget.get(target).length}件保留）\n`);
+            skipped += byTarget.get(target).length;
+          }
+          continue;
+        }
+        if (after === before) continue;
+        fs.writeFileSync(full, after);
+        const count = (byTarget.get(target) ?? []).length;
+        process.stdout.write(`✅ ${rel} の自動区画を更新（${count}件）\n`);
+        wrote += 1;
+      }
+      if (wrote === 0 && skipped === 0) process.stdout.write("更新するものはありませんでした\n");
+      if (skipped > 0) {
+        process.stdout.write(
+          `\n${skipped}件はマーカーが無い文書向けです。人の規則として書くか、`
+          + `対象文書へ LEARNED マーカーを置いてください。\n`,
+        );
+      }
+      break;
+    }
+
+    case "promote": {
+      // 機械区画の項目を、人が書いた規則へ格上げする。ここは reviewer 必須。
+      // 「機械が書いた」と「人が確認した」の差がこの一手で、
+      // この差が無くなると自己改善が自己認証に変わる。
+      if (!args.id) throw new Error("--id が必要です");
+      if (typeof args.reviewer !== "string" || args.reviewer.trim() === "") {
+        throw new Error(
+          "--reviewer <名前> が必要です。機械区画から人の規則へ上げるのは人の判断です",
+        );
+      }
+      const entry = summary.find((item) => item.id === args.id);
+      if (!entry) throw new Error(`提案が見つかりません: ${args.id}`);
+      if (entry.applied) throw new Error(`${args.id} は既に昇格済みです`);
+      const { rel, full } = requireTarget(entry.target);
+      const text = fs.readFileSync(full, "utf8");
+      const section = extractLearnedSection(text);
+      if (section && section.body.includes(entry.text)) {
+        throw new Error(
+          `${args.id} はまだ機械区画にあります。先に区画の外へ人の言葉で書き写してから promote してください`,
+        );
+      }
+      appendJsonl(APPLIED_PATH, {
+        id: entry.id,
+        target: entry.target,
+        targetPath: rel,
+        targetSha256: createHash("sha256").update(fs.readFileSync(full)).digest("hex"),
+        text: entry.text,
+        reviewer: args.reviewer.trim(),
+        note: typeof args.note === "string" ? args.note.trim() : "",
+        promotedAt: now,
+      });
+      process.stdout.write(`${entry.id} を人の規則へ昇格しました（reviewer: ${args.reviewer}）\n`);
       break;
     }
 
