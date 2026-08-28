@@ -161,3 +161,69 @@ test("R138 speaker identity comes from spectral timbre, not pitch", () => {
   // Silence carries no identity and must be reported as such, never guessed.
   assert.equal(spectralEnvelope(new Float32Array(sampleRate), 0.1, 0.9), null);
 });
+
+test("課金TTSは 5xx だけ再送し、4xx と 2xx は再送しない", async () => {
+  // ここには再送が1つも無く、一過性の503でテイクが死んでいた。
+  // 反対に 4xx を再送すると、結果は変わらず課金だけ増える。
+  const { requestElevenLabsDialogue } = await import("../lib/koyaDialogueSpeech.mjs");
+  const url = new URL("https://api.elevenlabs.io/v1/text-to-dialogue/with-timestamps");
+  const noSleep = async () => {};
+
+  let calls = 0;
+  const recovered = await requestElevenLabsDialogue({
+    url,
+    apiKey: "xi-secret-0123456789",
+    body: {},
+    sleepFn: noSleep,
+    fetchImpl: async () => {
+      calls += 1;
+      return calls < 3
+        ? { ok: false, status: 503, json: async () => ({ detail: "upstream" }) }
+        : { ok: true, status: 200, json: async () => ({ audio_base64: "AAA" }) };
+    },
+  });
+  assert.equal(calls, 3, "5xx を再送すること");
+  assert.equal(recovered.response.ok, true);
+
+  let fourxx = 0;
+  const denied = await requestElevenLabsDialogue({
+    url,
+    apiKey: "xi-secret-0123456789",
+    body: {},
+    sleepFn: noSleep,
+    fetchImpl: async () => {
+      fourxx += 1;
+      return { ok: false, status: 422, json: async () => ({ detail: "output format" }) };
+    },
+  });
+  assert.equal(fourxx, 1, "4xx を再送しないこと（課金だけ増える）");
+  assert.equal(denied.response.status, 422);
+  assert.deepEqual(denied.payload, { detail: "output format" }, "本文が呼び出し側へ渡ること");
+
+  let ok = 0;
+  await requestElevenLabsDialogue({
+    url, apiKey: "xi-secret-0123456789", body: {}, sleepFn: noSleep,
+    fetchImpl: async () => { ok += 1; return { ok: true, status: 200, json: async () => ({ audio_base64: "AAA" }) }; },
+  });
+  assert.equal(ok, 1, "成功を再送しないこと");
+});
+
+test("課金TTSの例外に API キーが載らない", async () => {
+  const { requestElevenLabsDialogue } = await import("../lib/koyaDialogueSpeech.mjs");
+  const apiKey = "xi-secret-0123456789abcdef";
+  await assert.rejects(
+    () => requestElevenLabsDialogue({
+      url: new URL("https://api.elevenlabs.io/v1/text-to-dialogue/with-timestamps"),
+      apiKey,
+      body: {},
+      maxAttempts: 2,
+      sleepFn: async () => {},
+      fetchImpl: async () => { throw new Error(`connect failed for key ${apiKey}`); },
+    }),
+    (error) => {
+      assert.equal(error.message.includes(apiKey), false, "例外はログとレポートに残る");
+      assert.match(error.message, /\[redacted\]/u);
+      return true;
+    },
+  );
+});
