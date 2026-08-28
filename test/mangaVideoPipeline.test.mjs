@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { requireArtifacts, requireChannelPack } from "./helpers/requirePrerequisites.mjs";
 
 import {
   bubbleSegmentSpeechBoundaries,
@@ -1022,7 +1023,8 @@ test("camera shot sequences can hold one view across consecutive utterances", ()
   assert.equal(sequence[0].reason, "hold the establishing view while only the bubble changes");
 });
 
-test("V4 artwork is preferred over earlier cut assets", async () => {
+test("V4 artwork is preferred over earlier cut assets", async (t) => {
+  if (!requireArtifacts(t, ["canvas/manga-videos/manga-photo-homecoming-001/episode-manifest.json"], "V4 原画の優先選択")) return;
   const canvasDir = resolve("canvas");
   assert.match(await resolveEpisodeImageForCut(canvasDir, "cut-01"), /e2e-v4-cut-01\.png$/);
   assert.match(await resolveEpisodeImageForCut(canvasDir, "cut-10"), /e2e-v4-cut-10\.png$/);

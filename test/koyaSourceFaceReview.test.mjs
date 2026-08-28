@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { requireArtifacts, requireChannelPack } from "./helpers/requirePrerequisites.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
@@ -34,7 +35,8 @@ print(json.dumps({"faces": faces, "primary": primary, "applied": sorted(applied)
   assert.deepEqual(output.applied, ["real-speaker"]);
 });
 
-test("Arano's long-form source review inventories the missed cut-07-u04 protagonist head", async () => {
+test("Arano's long-form source review inventories the missed cut-07-u04 protagonist head", async (t) => {
+  if (!requireArtifacts(t, ["config/koya-manga-source-face-reviews"], "原画レビューの棚卸し")) return;
   const review = JSON.parse(await readFile(resolve(
     root,
     "config/koya-manga-source-face-reviews/manga-arano-amane-effort-001.json",
@@ -48,7 +50,8 @@ test("Arano's long-form source review inventories the missed cut-07-u04 protagon
   assert.match(annotation.note, /305\.25〜307\.25秒/u);
 });
 
-test("Arano's reflected and foreground heads are separate hard source-image inventory", async () => {
+test("Arano's reflected and foreground heads are separate hard source-image inventory", async (t) => {
+  if (!requireArtifacts(t, ["config/koya-manga-source-face-reviews"], "原画レビューの棚卸し")) return;
   const review = JSON.parse(await readFile(resolve(
     root,
     "config/koya-manga-source-face-reviews/manga-arano-amane-effort-001.json",

@@ -4,6 +4,7 @@ import { test } from "node:test";
 
 import { auditKoyaEditorialQuality } from "../lib/koyaEditorialQualityAudit.mjs";
 import { resolveKoyaMangaProductionContract } from "../lib/koyaMangaProductionContract.mjs";
+import { requireArtifacts, requireChannelPack } from "./helpers/requirePrerequisites.mjs";
 
 async function benchmarkFixture() {
   const manifest = JSON.parse(await readFile("canvas/manga-videos/manga-photo-homecoming-001/episode-manifest.json", "utf8"));
@@ -11,7 +12,8 @@ async function benchmarkFixture() {
   return { manifest, contract: resolved.contract };
 }
 
-test("editorial audit measures real image holds and passes the approved benchmark edit", async () => {
+test("editorial audit measures real image holds and passes the approved benchmark edit", async (t) => {
+  if (!requireArtifacts(t, ["canvas/manga-videos/manga-photo-homecoming-001/episode-manifest.json"], "編集品質の実測監査")) return;
   const { manifest, contract } = await benchmarkFixture();
   const report = auditKoyaEditorialQuality(manifest, contract);
   assert.equal(report.pass, true);
@@ -21,7 +23,8 @@ test("editorial audit measures real image holds and passes the approved benchmar
   assert.ok(report.metrics.medianImageHoldSeconds >= contract.editorial.minimumMedianImageHoldSeconds);
 });
 
-test("editorial audit rejects contextless inserts and unassigned dialogue", async () => {
+test("editorial audit rejects contextless inserts and unassigned dialogue", async (t) => {
+  if (!requireArtifacts(t, ["canvas/manga-videos/manga-photo-homecoming-001/episode-manifest.json"], "編集品質の実測監査")) return;
   const { manifest, contract } = await benchmarkFixture();
   const broken = structuredClone(manifest);
   broken.cuts.find((cut) => cut.id === "cut-02").cameraSequence[0].utteranceIds = [];
@@ -31,7 +34,8 @@ test("editorial audit rejects contextless inserts and unassigned dialogue", asyn
   assert.ok(report.failures.some((failure) => failure.id === "missing-utterance-image"));
 });
 
-test("editorial audit rejects conditional split-page lead-ins and image churn", async () => {
+test("editorial audit rejects conditional split-page lead-ins and image churn", async (t) => {
+  if (!requireArtifacts(t, ["canvas/manga-videos/manga-photo-homecoming-001/episode-manifest.json"], "編集品質の実測監査")) return;
   const { manifest, contract } = await benchmarkFixture();
   const conditional = structuredClone(manifest);
   const split = conditional.cuts.find((cut) => cut.panelLayout?.enabled);
