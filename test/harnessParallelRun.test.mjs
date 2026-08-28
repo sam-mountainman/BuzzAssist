@@ -117,7 +117,18 @@ test("ロックが違えば同時に走る", async () => {
     concurrency: 4,
     logDir: `/tmp/harness-parallel-test-${process.pid}-distinct`,
   });
-  assert.ok(summary.totalDurationMs < 1900, `不要に直列化された: ${summary.totalDurationMs}ms`);
+  // 総時間から並列性を推測すると、負荷が乗ったときに崩れる——重なって
+  // いても遅ければ直列に見えるので、CPU が埋まっているだけで落ちる。
+  // 落ちるテストは失敗を無視する習慣を作るので、**実際に重なったか**を
+  // 直接見る。
+  const [w1, w2] = ["w1", "w2"].map((id) => summary.jobs.find((job) => job.id === id));
+  assert.ok(w1 && w2, "両方のジョブが記録されていること");
+  const overlapMs = Math.min(w1.endedAtMs, w2.endedAtMs) - Math.max(w1.startedAtMs, w2.startedAtMs);
+  assert.ok(
+    overlapMs > 500,
+    `ロックが違うのに重なって走っていない（重なり ${overlapMs}ms）: `
+    + `w1 ${w1.startedAtMs}-${w1.endedAtMs} / w2 ${w2.startedAtMs}-${w2.endedAtMs}`,
+  );
 });
 
 test("依存が失敗したジョブは走らせずスキップし、全体を失敗にする", async () => {
