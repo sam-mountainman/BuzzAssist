@@ -28,17 +28,35 @@ import path from "node:path";
 import { channelPackPresent } from "../lib/channelPackResolver.mjs";
 import { requireElevenLabsApiKey } from "../lib/speechGeneration.mjs";
 import { resolveLovartCredentials } from "../lib/lovartMediaGeneration.mjs";
+import { DEFAULT_VOICE_QA_PYTHON, voiceQualityAvailable } from "../lib/voiceQualityGate.mjs";
+import { readKoyaChannelAuthority } from "../lib/koyaChannelGovernance.mjs";
 
 const run = promisify(execFile);
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 
-/** 起動して版を答えさせる。名前が PATH にあるだけでは通さない。 */
-async function probeCommand(command, args, { versionPattern = /(\d+\.\d+(?:\.\d+)?)/u } = {}) {
+/**
+ * 起動して名乗らせる。名前が PATH にあるだけでは通さない。
+ *
+ * 終了コード0だけで通す形にすると、終了0で何も出さない偽の実行ファイルや、
+ * 名前が同じ別のツールのラッパーが「揃っている」ことになる。
+ * そのコマンド固有の署名に一致しなければ落とす。
+ */
+async function probeCommand(command, args, { signature, versionPattern = /(\d+\.\d+(?:\.\d+)?)/u } = {}) {
   try {
     const { stdout, stderr } = await run(command, args, { timeout: 15_000 });
     const text = `${stdout}${stderr}`;
+    if (signature && !signature.test(text)) {
+      return {
+        ok: false,
+        missing: false,
+        detail: `${command} を名乗る何かが応答したが、${command} の出力署名に一致しない: ${text.slice(0, 80).replace(/\s+/gu, " ")}`,
+      };
+    }
     const match = text.match(versionPattern);
-    return { ok: true, version: match ? match[1] : text.split("\n")[0].slice(0, 60) };
+    if (!match) {
+      return { ok: false, missing: false, detail: `${command} が版を答えなかった: ${text.slice(0, 80).replace(/\s+/gu, " ")}` };
+    }
+    return { ok: true, version: match[1] };
   } catch (error) {
     const message = String(error?.message || error);
     const missing = /ENOENT|not found|command not found/iu.test(message);
@@ -87,7 +105,9 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT } = {}) {
   });
 
   for (const [id, command] of [["ffmpeg", "ffmpeg"], ["ffprobe", "ffprobe"]]) {
-    const probe = await probeCommand(command, ["-version"]);
+    const probe = await probeCommand(command, ["-version"], {
+      signature: new RegExp(`${command} version`, "iu"),
+    });
     add({
       id,
       required: true,
@@ -97,26 +117,21 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT } = {}) {
     });
   }
 
-  // --- 音声品質ゲート（任意だが、無いとゲートが skip になる） ---
-  const python = await probeCommand("python3", ["--version"]);
+  // --- 音声品質ゲート ---
+  // 本体の判定関数に聞く。doctor が PATH の python3 を見る形にすると、
+  // 本体が使う VOICE_QA_PYTHON（既定 /usr/bin/python3）と別の interpreter を
+  // 調べることになり、揃っていないのに ready と言う。実際そうなっていた。
+  // 必須にするのは、正規入口が音声品質ゲートを既定で有効にしていて、
+  // QA環境が無いと有償生成の手前で止まるため——ready と言った直後に
+  // 止まるなら、それは ready ではない。
+  const voiceQa = await voiceQualityAvailable().then((value) => value === true, () => false);
   add({
-    id: "python3",
-    required: false,
-    ok: python.ok,
-    detail: python.ok ? `python3 ${python.version}` : python.detail,
-    fix: python.ok ? "" : "python3 が無いと音声品質ゲート（CER/UTMOS/F0分散）が走らない。ゲートは skip になり、テイクの選別が人手だけになる",
+    id: "voice-quality-python",
+    required: true,
+    ok: voiceQa,
+    detail: voiceQa ? `利用可能（${DEFAULT_VOICE_QA_PYTHON}）` : `利用不可（${DEFAULT_VOICE_QA_PYTHON}）`,
+    fix: voiceQa ? "" : `音声品質ゲートが動かない。正規入口はこのゲートを既定で有効にしているので、有償生成の手前で止まる。${DEFAULT_VOICE_QA_PYTHON} に numpy / soundfile / pyworld / torch / faster_whisper / fugashi を入れるか、別の interpreter を VOICE_QA_PYTHON で指定する`,
   });
-  if (python.ok) {
-    const mods = await probePythonModules(["numpy", "huggingface_hub", "matplotlib"]);
-    const missing = mods.ok ? Object.entries(mods.modules).filter(([, v]) => !v).map(([k]) => k) : ["(判定不能)"];
-    add({
-      id: "python-modules",
-      required: false,
-      ok: mods.ok && missing.length === 0,
-      detail: mods.ok ? `不足: ${missing.join(", ") || "なし"}` : mods.detail,
-      fix: missing.length === 0 ? "" : `\`python3 -m pip install ${missing.filter((m) => m !== "(判定不能)").join(" ")}\`。無いと音声品質ゲートが skip になる`,
-    });
-  }
 
   // --- 有償API（必須。無いと生成が1つも通らない） ---
   const tts = await probeSecretVia(() => requireElevenLabsApiKey({}), {
@@ -131,14 +146,28 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT } = {}) {
   });
   add({ id: "image-key", required: true, ...image });
 
-  // --- Channel Pack（そのチャンネルの本番に必須） ---
-  const pack = channelPackPresent(projectDir);
+  // --- Channel Pack ---
+  // ディレクトリの存在だけを見ると、空ディレクトリでも「設置済み」になる。
+  // 正本が実際に読めて検証を通ることまで見る。
+  let packDetail = "未設置";
+  let packOk = false;
+  if (channelPackPresent(projectDir)) {
+    try {
+      const authority = await readKoyaChannelAuthority({ projectDir });
+      packOk = authority.source === "project";
+      packDetail = packOk
+        ? `設置済み・正本を検証（cast ${authority.validation.show.castCount}名 / styling ${authority.validation.styling.specCount}件）`
+        : `ディレクトリはあるが正本の出所が ${authority.source}`;
+    } catch (error) {
+      packDetail = `設置されているが正本を読めない: ${String(error?.message || error).slice(0, 120)}`;
+    }
+  }
   add({
     id: "channel-pack",
     required: false,
-    ok: pack,
-    detail: pack ? "設置済み" : "未設置",
-    fix: pack ? "" : "自分のチャンネルの本番を回すには Channel Pack が要る（キャスト、番組規則、承認記録）。`node scripts/koya-manga-video.mjs handoff-restore --bundle-dir <配布された束>` で入れる。無くてもジャンル共通の工程は動くが、番組ルールは適用されない",
+    ok: packOk,
+    detail: packDetail,
+    fix: packOk ? "" : "自分のチャンネルの本番を回すには Channel Pack が要る（キャスト、番組規則、承認記録）。`node scripts/koya-manga-video.mjs handoff-restore --bundle-dir <配布された束>` で入れる。無くてもジャンル共通の工程は動くが、番組ルールは適用されない",
   });
 
   const blocking = checks.filter((c) => c.required && !c.ok);

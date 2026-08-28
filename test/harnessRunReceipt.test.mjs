@@ -32,8 +32,17 @@ test("ハーネスの指紋は3層を別々に取る", () => {
   assert.equal(build.harness.id, "koya-manga-video");
   assert.match(build.harness.declarationDigest, /^[0-9a-f]{64}$/u);
   assert.ok(build.declaredGates.length > 0, "宣言された保証がゲート一覧になること");
-  assert.ok(Object.keys(build.genreSkills).length > 0, "ジャンルスキルの指紋が取れること");
-  assert.ok(build.platform["lib/harnessRouting.mjs"], "プラットフォーム層の指紋が取れること");
+  // キーの有無だけを見ていたせいで、**全スキルの指紋が null のまま**
+  // このテストが通っていた。宣言が完全相対パスなのにスキル名として扱って
+  // いたのが原因。形ではなく中身を見る。
+  const skillNames = Object.keys(build.genreSkills);
+  assert.ok(skillNames.length > 0, "ジャンルスキルの指紋が取れること");
+  for (const [name, skill] of Object.entries(build.genreSkills)) {
+    assert.match(skill.tree || "", /^[0-9a-f]{64}$/u, `${name}: スキル本体の指紋が実体でない`);
+    assert.ok(skill.fileCount > 0, `${name}: 0ファイルを畳んだ指紋になっている`);
+    assert.equal(name.includes("/"), false, `${name}: 宣言のパスがそのままキーになっている`);
+  }
+  assert.match(build.platform["lib/harnessRouting.mjs"] || "", /^[0-9a-f]{64}$/u, "プラットフォーム層の指紋が実体であること");
   // 層を混ぜた1つのハッシュだと、どこを直して結果が変わったのか読めない。
   assert.notEqual(
     JSON.stringify(build.genreSkills),
@@ -357,5 +366,25 @@ test("どのハーネス宣言も、保証の裏づけを書くか、書けな�
       assert.ok(declaration.receiptAdapter.requiredWork, `${file}: receiptAdapter に requiredWork が無い`);
       assert.equal(declaration.receiptAdapter.status, "pending");
     }
+  }
+});
+
+test("Channel Pack の指紋は解決層と同じ探索順で取る", async (t) => {
+  // `<project>/channel-packs` だけを見ていたので、BUZZASSIST_CHANNEL_PACK で
+  // 外を指した pack が記録に残らなかった。版ずれを辿るのが記録の目的なのに、
+  // どの pack で走ったかが落ちていた。
+  const { channelPackPresent } = await import("../lib/channelPackResolver.mjs");
+  if (!channelPackPresent(root)) {
+    t.skip("channel pack が無い環境");
+    return;
+  }
+  const build = computeHarnessBuild({ projectDir: root, harnessId: "koya-manga-video" });
+  assert.ok(Array.isArray(build.channelPack) && build.channelPack.length > 0, "pack の指紋が取れること");
+  for (const pack of build.channelPack) {
+    assert.match(pack.digest || "", /^[0-9a-f]{64}$/u, `${pack.packId}: 指紋が実体でない`);
+    assert.ok(pack.fileCount > 0, `${pack.packId}: 0ファイルを畳んだ指紋`);
+    assert.ok(["pack", "env"].includes(pack.source), `${pack.packId}: 出所が記録されていない`);
+    // pack の内部ディレクトリが pack ID として並ぶ不具合の再発防止。
+    assert.equal(["config", "docs", "scripts"].includes(pack.packId), false, `pack の中身を pack ID にしている: ${pack.packId}`);
   }
 });
