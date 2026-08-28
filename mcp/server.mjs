@@ -73,6 +73,7 @@ import {
   validateStoryboardVisualProfile,
 } from "../lib/characterPipeline.mjs";
 import { recordBlindCandidateVerdict } from "../lib/mangaBlindCandidateStore.mjs";
+import { assertCanonicalRouting } from "../lib/harnessRouting.mjs";
 import { resolveChannelVisualProfileSnapshot } from "../lib/channelVisualProfile.mjs";
 import { refineSilenceCutFromPlan, silenceCutVideo } from "../lib/tempoCut.mjs";
 import { estimateCreditsForJob } from "../lib/mediaCredits.mjs";
@@ -2956,11 +2957,12 @@ function toolDefinitions() {
     {
       name: TOOL_BUILD_MANGA_VIDEO,
       title: "Build Excalidraw Manga Video",
-      description: "Plan, synthesize, or render a script-driven manga episode. Speech alignment controls cut duration and the visibility window of each deterministic speech bubble. Rendering uses ffmpeg with a source-viewpoint-preserving pull-out and no SFX by default; split layouts are flattened and moved as one completed page.",
+      description: "BENCHMARK MIGRATION ONLY when a Channel Pack is installed — new episodes must use run_koya_manga_pipeline, which is the only entrypoint that applies show rules, cast gates, and external signoff. Plan, synthesize, or render a script-driven manga episode. Speech alignment controls cut duration and the visibility window of each deterministic speech bubble. Rendering uses ffmpeg with a source-viewpoint-preserving pull-out and no SFX by default; split layouts are flattened and moved as one completed page.",
       inputSchema: {
         type: "object",
         properties: {
           action: { type: "string", enum: ["plan", "speech", "render", "full"], description: "plan creates the manifest/bubbles; speech generates all dialogue; render creates mp4; full runs all three." },
+          benchmarkMigration: { type: "boolean", description: "Acknowledge that this run reproduces a historical benchmark episode and deliberately bypasses the canonical governed pipeline. Required when a Channel Pack is installed; never set it for a new episode." },
           episodeId: { type: "string" },
           manifestPath: { type: "string" },
           scriptPath: { type: "string" },
@@ -3007,10 +3009,11 @@ function toolDefinitions() {
     {
       name: TOOL_RUN_MANGA_PRODUCTION_DAG,
       title: "Run Excalidraw Manga Production DAG",
-      description: "Prepare, execute/resume, or inspect the checkpointed manga production DAG. Execute uses built-in fail-closed quality nodes and an optional explicit runtime handler module for production node kinds.",
+      description: "BENCHMARK MIGRATION ONLY when a Channel Pack is installed — new episodes must use run_koya_manga_pipeline, which is the only entrypoint that applies show rules, cast gates, and external signoff. Prepare, execute/resume, or inspect the checkpointed manga production DAG. Execute uses built-in fail-closed quality nodes and an optional explicit runtime handler module for production node kinds.",
       inputSchema: {
         type: "object",
         properties: {
+          benchmarkMigration: { type: "boolean", description: "Acknowledge that this run reproduces a historical benchmark episode and deliberately bypasses the canonical governed pipeline. Required when a Channel Pack is installed; never set it for a new episode." },
           action: { type: "string", enum: ["prepare", "execute", "status"] },
           manifestPath: { type: "string" },
           dagPath: { type: "string" },
@@ -4198,6 +4201,7 @@ if (params?.name === TOOL_GENERATE_SPEECH) {
 
   if (params?.name === TOOL_BUILD_MANGA_VIDEO) {
     const args = params.arguments ?? {};
+    assertCanonicalRouting({ toolName: TOOL_BUILD_MANGA_VIDEO, projectDir: args.projectDir, acknowledgedBenchmarkMigration: args.benchmarkMigration });
     const action = args.action || "full";
     let current = null;
     if (action === "plan" || action === "full") {
@@ -4225,6 +4229,7 @@ if (params?.name === TOOL_GENERATE_SPEECH) {
 
   if (params?.name === TOOL_RUN_MANGA_PRODUCTION_DAG) {
     const args = params.arguments ?? {};
+    assertCanonicalRouting({ toolName: TOOL_RUN_MANGA_PRODUCTION_DAG, projectDir: args.projectDir, acknowledgedBenchmarkMigration: args.benchmarkMigration });
     const action = args.action;
     const projectDir = resolve(args.projectDir || process.cwd());
     const manifestPath = resolve(args.manifestPath || join(
