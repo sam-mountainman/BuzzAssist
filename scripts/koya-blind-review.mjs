@@ -91,7 +91,7 @@ if (command === "open") {
   const tournamentId = (stdout.match(/\b\d{8}T\d{6}-[a-z0-9]+\b/i) || [])[0];
   if (!tournamentId) throw new Error(`could not read tournament id from bon output: ${stdout.slice(0, 200)}`);
   await mkdir(dirname(privatePath), { recursive: true });
-  await writeFile(privatePath, `${JSON.stringify({
+  const body = {
     setId: spec.setId,
     kind: spec.kind || "image",
     prompt: spec.prompt || "",
@@ -99,7 +99,12 @@ if (command === "open") {
     tournamentId,
     openedAt: new Date().toISOString(),
     mapping,
-  }, null, 1)}\n`);
+  };
+  // Opening commitment: the digest is computed BEFORE the review and checked
+  // again at record time, so editing the mapping mid-review is detectable
+  // (previously the digest was recomputed from whatever the file then held).
+  const commitmentDigest = createHash("sha256").update(JSON.stringify(body)).digest("hex");
+  await writeFile(privatePath, `${JSON.stringify({ ...body, commitmentDigest }, null, 1)}\n`);
   console.log(JSON.stringify({
     status: "opened", setId: spec.setId, tournamentId,
     candidates: mapping.length, privateMapping: privatePath,
@@ -108,6 +113,14 @@ if (command === "open") {
 } else {
   if (!args.winner || !args.reviewer) usage();
   const priv = JSON.parse(await readFile(privatePath, "utf8"));
+  const { commitmentDigest, ...openedBody } = priv;
+  if (!commitmentDigest) throw new Error("private mapping has no opening commitment; reopen the set");
+  if (createHash("sha256").update(JSON.stringify(openedBody)).digest("hex") !== commitmentDigest) {
+    throw new Error("private mapping changed after the set was opened; reopen the set");
+  }
+  if (!args.note || String(args.note).trim().length < 4) {
+    throw new Error("--note is required: a decision without a stated reason cannot be carried into the harness");
+  }
   const winner = priv.mapping.find((entry) => entry.label === String(args.winner).toUpperCase());
   if (!winner) throw new Error(`unknown label ${args.winner}`);
   // Re-verify every candidate: a file replaced during the review must not be
@@ -130,7 +143,7 @@ if (command === "open") {
     decidedAt: new Date().toISOString(),
     openedAt: priv.openedAt,
     candidates: priv.mapping.map((entry) => ({ label: entry.label, id: entry.id, sha256: entry.sha256 })),
-    mappingDigest: createHash("sha256").update(JSON.stringify(priv.mapping)).digest("hex"),
+    openingCommitmentDigest: commitmentDigest,
     tool: "bestofn (bon) judge UI, executed from its own checkout",
   };
   await writeFile(decisionPath, `${JSON.stringify(decision, null, 1)}\n`);
