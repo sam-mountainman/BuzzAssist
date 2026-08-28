@@ -26,7 +26,7 @@
     "visualSummary": "和の下町と夜のネオンが混ざる、あたたかい架空の飲み屋街",
     "realPlaceNamesForbidden": true,
     "realBrandSignsForbidden": true,
-    "homeBase": "小料理屋・見本"
+    "homeBase": "小料理屋・sample-x0"
   },
   "storyGrammar": {
     "escalation": [
@@ -35,10 +35,10 @@
       "攻撃3"
     ],
     "reversal": [
-      "イブキの号砲",
+      "sample-x3の号砲",
       "証拠の提示",
       "とどめは主人公本人",
-      "タツは退路を塞ぐ一言だけ"
+      "sample-x4は退路を塞ぐ一言だけ"
     ],
     "villainComedy": "敵同士もマウントを取り合う、憎めない小物の生態を見せる",
     "protagonistAgencyRequired": true,
@@ -85,13 +85,13 @@
     {
       "id": "horo",
       "name": "sample-1",
-      "hiddenName": "仮名ヨシ",
+      "hiddenName": "sample-x1",
       "role": "ally-mascot",
       "speech": {
         "dialect": "関西弁",
         "firstPerson": "私",
         "anchors": [
-          "ベロベロちゃう！もも酔いや！",
+          "ベロベロちゃう！sample-x2酔いや！",
           "その話、酒場で聞いたで",
           "一杯奢ってや",
           "ほな、また呑もな",
@@ -275,7 +275,7 @@
           "それな",
           "きも",
           "マジないわー",
-          "エマ的にポイント高め"
+          "sample-1的にポイント高め"
         ]
       },
       "usage": "味方・敵を明示してから書く。若者の代弁者。",
@@ -358,7 +358,7 @@
           "無能はコスパ悪りぃなぁ"
         ]
       },
-      "usage": "対立山と世代2レーン。自称エリートだが浅い。",
+      "usage": "sample-2と世代2レーン。自称エリートだが浅い。",
       "designStatus": "pending-color-selection",
       "selectedBaseLabel": "C",
       "stylingSpecPath": "config/koya-character-styling/heito-refinement-v4.json",
@@ -413,10 +413,10 @@
       ]
     ],
     "notes": [
-      "ももは低身長で小柄",
-      "タツは小柄で痩せ型だが腰は曲げない",
-      "店主はガタイがよい",
-      "ハトは人物身長表と別枠"
+      "sample-x2は低身長で小柄",
+      "sample-x4は小柄で痩せ型だが腰は曲げない",
+      "sample-3はガタイがよい",
+      "sample-4は人物身長表と別枠"
     ]
   },
   "assetReadiness": {
@@ -438,7 +438,7 @@
     {
       "source": "2026-08-27ユーザー原寸再監査・見栄原明示指示",
       "priority": 3,
-      "rule": "見栄原を固定11人目へ復帰し、もも・レイジ・弊斗の弱い比較案は最終承認前に再制作する"
+      "rule": "見栄原を固定11人目へ復帰し、sample-x2・sample-5・弊斗の弱い比較案は最終承認前に再制作する"
     }
   ]
 }

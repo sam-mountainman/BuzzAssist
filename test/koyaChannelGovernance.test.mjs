@@ -65,29 +65,32 @@ test("Koya authority is all-or-nothing and validates the three channel contracts
 
 test("Koya story review binds ordered reversal beats to the exact script and protagonist", async (t) => {
   // この検証は台本の話者名が実際のキャストと一致することに依存している。
-  // 合成 fixture では名前が別物なので成立しない——他の6件と違い、
-  // 契約の形ではなく実データとの対応を見ているため。
-  if (!channelPackPresent(root)) {
-    t.skip("channel pack が無い環境（合成 fixture では話者名が一致しない）");
-    return;
-  }
+  // 話者名は pack から引く——公開リポジトリにキャスト名を直書きすると、
+  // 運営者の実名を消してもチャンネルは特定できてしまう。
+  // pack を持たない環境でも合成 fixture の名前で同じ形が成立する。
   const authority = await readKoyaChannelAuthority({ allowFixture: true, projectDir: root });
+  const nameFor = (id) => {
+    const member = (authority.showBible.cast || []).find((entry) => entry.id === id);
+    assert.ok(member, `show bible に ${id} が無い`);
+    return member.hiddenName || member.name;
+  };
+  const [villain, signal, protagonist, elder] = ["ibariyama", "ibuki", "nodoka", "tatsu"].map(nameFor);
   const scriptText = `タイトル: 記録が嘘を崩す
 
 【カット1：攻撃】
-対立山: お前には無理だ。
-対立山: 証拠などない。
-対立山: 俺を誰だと思ってる？
+${villain}: お前には無理だ。
+${villain}: 証拠などない。
+${villain}: 俺を誰だと思ってる？
 
 【カット2：逆転】
-標本イツキ: 答え合わせ、始めましょうか。
+${signal}: 答え合わせ、始めましょうか。
 ナレーション: 改ざん前の記録が映し出された。
-例示アオイ: 私の仕事は、あなたの嘘では消えません。
-標準タカシ: 逃げなさんな。
+${protagonist}: 私の仕事は、あなたの嘘では消えません。
+${elder}: 逃げなさんな。
 `;
   const parsed = parseMangaScript(scriptText);
   const ids = parsed.utterances.map((row) => row.id);
-  const draft = createKoyaStoryReviewDraft({ showBible: authority.showBible, scriptText, parsed, protagonistSpeakerId: "例示アオイ" });
+  const draft = createKoyaStoryReviewDraft({ showBible: authority.showBible, scriptText, parsed, protagonistSpeakerId: protagonist });
   assert.equal(draft.scriptSha256, hash(scriptText));
   assert.equal(draft.utteranceInventory.length, 7);
   assert.equal(draft.checks.protagonistAgencyPass, false);
@@ -96,7 +99,7 @@ test("Koya story review binds ordered reversal beats to the exact script and pro
     scriptSha256: hash(scriptText),
     reviewer: { host: "codex", id: "reviewer-1", contextId: "review-task-1" },
     reviewedAt: "2026-08-27T00:00:00.000Z",
-    protagonistSpeakerId: "例示アオイ",
+    protagonistSpeakerId: protagonist,
     beats: {
       attack1: ids[0], attack2: ids[1], attack3: ids[2], ibukiSignal: ids[3], evidence: ids[4], protagonistFinish: ids[5], tatsuExitBlock: ids[6],
     },
@@ -120,14 +123,27 @@ test("Koya story review binds ordered reversal beats to the exact script and pro
 
 test("Koya fixed cast cannot be replaced by episode-local candidates and must carry required identity roles", async () => {
   const authority = await readKoyaChannelAuthority({ allowFixture: true, projectDir: root });
-  const parsed = parseMangaScript("もも: ほな、ぼちぼち反撃といこか");
+  // 名前は pack から引く。テストに直書きすると、運営者の実名を消しても
+  // キャスト名からチャンネルが特定できてしまう。
+  const memberFor = (id) => {
+    const member = (authority.showBible.cast || []).find((entry) => entry.id === id);
+    assert.ok(member, `show bible に ${id} が無い`);
+    return member;
+  };
+  const horo = memberFor("horo");
+  const horoName = horo.hiddenName || horo.name;
+  const protagonistName = (() => {
+    const member = memberFor("nodoka");
+    return member.hiddenName || member.name;
+  })();
+  const parsed = parseMangaScript(`${horoName}: ほな、ぼちぼち反撃といこか`);
   const baseCharacter = {
     id: "horo",
-    name: "もも",
+    name: horoName,
     kind: "character",
     role: "fixed",
     status: "approved",
-    aliases: ["仮名ヨシ"],
+    aliases: Array.isArray(horo.aliases) && horo.aliases.length > 0 ? horo.aliases : [`${horoName}-alias`],
     referenceAssets: ["identity-face", "turnaround", "expression"].map((role) => ({ id: role, role, path: `${role}.png`, sha256: "a".repeat(64) })),
     approval: { identityReviewPath: "review.json", identityReviewSha256: "b".repeat(64) },
   };
@@ -135,7 +151,7 @@ test("Koya fixed cast cannot be replaced by episode-local candidates and must ca
     showBible: authority.showBible,
     registry: { characters: [baseCharacter] },
     parsed,
-    characterBible: { cast: [{ id: "horo", name: "もも" }] },
+    characterBible: { cast: [{ id: "horo", name: horoName }] },
     enforce: true,
   });
   assert.equal(missingEyeOpen.pass, false);
@@ -144,7 +160,7 @@ test("Koya fixed cast cannot be replaced by episode-local candidates and must ca
     showBible: authority.showBible,
     registry: { characters: [{ ...baseCharacter, referenceAssets: [...baseCharacter.referenceAssets, { id: "eye-open", role: "eye-open", path: "eye.png", sha256: "c".repeat(64) }] }] },
     parsed,
-    characterBible: { cast: [{ id: "horo", name: "もも" }] },
+    characterBible: { cast: [{ id: "horo", name: horoName }] },
     enforce: true,
     rosterReviewAudit: { pass: true, failures: [] },
   });
@@ -152,8 +168,8 @@ test("Koya fixed cast cannot be replaced by episode-local candidates and must ca
   const absentSilentHoro = auditKoyaFixedCastReadiness({
     showBible: authority.showBible,
     registry: { characters: [] },
-    parsed: parseMangaScript("例示アオイ: 私が証拠を示します"),
-    characterBible: { cast: [{ name: "例示アオイ" }] },
+    parsed: parseMangaScript(`${protagonistName}: 私が証拠を示します`),
+    characterBible: { cast: [{ name: protagonistName }] },
     enforce: true,
   });
   assert.equal(absentSilentHoro.pass, false);

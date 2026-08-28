@@ -1,19 +1,65 @@
 {
   "version": "koya-thumbnail-contract-v1",
   "status": "draft-awaiting-brand-token-approval",
-  "canvas": { "width": 1280, "height": 720, "safeMarginPx": 36 },
-  "sourcePolicy": { "dedicatedThumbnailArtworkRequired": true, "mainVideoFrameReuseForbidden": true, "sha256ComparisonRequired": true, "normalizedGray32MaximumReuseDistance": 0.025 },
+  "canvas": {
+    "width": 1280,
+    "height": 720,
+    "safeMarginPx": 36
+  },
+  "sourcePolicy": {
+    "dedicatedThumbnailArtworkRequired": true,
+    "mainVideoFrameReuseForbidden": true,
+    "sha256ComparisonRequired": true,
+    "normalizedGray32MaximumReuseDistance": 0.025
+  },
   "layouts": {
-    "twoPanel": { "default": true, "structure": ["left-image", "center-band", "right-image"] },
-    "threePanel": { "default": false, "structure": ["left-image", "center-band", "right-top-image", "right-bottom-image"], "onlyWhenThemeNeedsThirdBeat": true }
+    "twoPanel": {
+      "default": true,
+      "structure": [
+        "left-image",
+        "center-band",
+        "right-image"
+      ]
+    },
+    "threePanel": {
+      "default": false,
+      "structure": [
+        "left-image",
+        "center-band",
+        "right-top-image",
+        "right-bottom-image"
+      ],
+      "onlyWhenThemeNeedsThirdBeat": true
+    }
   },
   "copy": {
-    "band": { "lines": 2, "maxCharactersPerLine": 15 },
-    "speechBubble": { "maximumPerBubble": 1, "lines": 2, "maxCharactersPerLine": 8 },
-    "telop": { "minCharacters": 2, "maxCharacters": 4, "concreteNounOnly": true },
-    "forbiddenAbstractHooks": ["実は", "まさか", "衝撃", "驚愕"],
+    "band": {
+      "lines": 2,
+      "maxCharactersPerLine": 15
+    },
+    "speechBubble": {
+      "maximumPerBubble": 1,
+      "lines": 2,
+      "maxCharactersPerLine": 8
+    },
+    "telop": {
+      "minCharacters": 2,
+      "maxCharacters": 4,
+      "concreteNounOnly": true
+    },
+    "forbiddenAbstractHooks": [
+      "実は",
+      "まさか",
+      "衝撃",
+      "驚愕"
+    ],
     "exactTextMustBeApproved": true,
-    "approvalBinding": { "version": "koya-thumbnail-copy-approval-v1", "requireApprovedBy": true, "requireApprovedAt": true, "requireCopySha256": true }
+    "approvalBinding": {
+      "version": "koya-thumbnail-copy-approval-v1",
+      "requireApprovedBy": true,
+      "requireApprovedAt": true,
+      "requireCopySha256": true
+    }
   },
   "visual": {
     "bandColorToken": "PENDING_HUMAN_APPROVAL",
@@ -22,5 +68,15 @@
     "primaryEmotionReadableAtMobileSize": true,
     "characterIdentityReferencesApprovedOnly": true
   },
-  "qa": ["1280x720原寸", "320x180縮小", "文字切れ0", "顔欠け0", "帯2行制約", "吹き出し制約", "具体名詞テロップ", "本編流用なし", "実在ロゴなし"]
+  "qa": [
+    "1280x720原寸",
+    "320x180縮小",
+    "文字切れ0",
+    "顔欠け0",
+    "帯2行制約",
+    "吹き出し制約",
+    "具体名詞テロップ",
+    "本編流用なし",
+    "実在ロゴなし"
+  ]
 }
