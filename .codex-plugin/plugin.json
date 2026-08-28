@@ -38,7 +38,7 @@
       "Canvas selection reading",
       "Image generation",
       "Video generation",
-      "Canonical Koya manga production harness",
+      "Canonical manga-video production harness",
       "Koya background-job monitoring",
       "SHA-verified Koya project handoff"
     ],
@@ -46,7 +46,7 @@
       "Call open_buzzassist_canvas with the current task project directory, then open the returned local URL in the in-app browser. Only if that Browser capability is unavailable, call it again with openExternalBrowser=true.",
       "Use read_me and create_view to draw into the live BuzzAssist canvas.",
       "Generate a new image into the selected Excalidraw AI holder.",
-      "For a Koya manga project, call koya_manga_doctor first and use run_koya_manga_pipeline instead of the generic manga-video tool. Use its handoff export, verify, and restore actions to move approved project data without session logs or credentials."
+      "For a manga-video project, call koya_manga_doctor first and use run_koya_manga_pipeline instead of the generic manga-video tool. Use its handoff export, verify, and restore actions to move approved project data without session logs or credentials."
     ]
   }
 }
