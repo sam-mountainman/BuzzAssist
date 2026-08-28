@@ -118,8 +118,24 @@ test("all-hard-fail selection refuses instead of picking the least bad", () => {
     () => selectKoyaDialogueTake(candidates, cutPlan, null, { 0: failed, 1: failed }),
     /refusing automatic selection/,
   );
-  const forced = selectKoyaDialogueTake(candidates, cutPlan, 1, { 0: failed, 1: failed });
+  // ゲートに落ちたテイクを人が明示的に選ぶことは認めるが、理由が無いと
+  // ライブラリ呼び出し1つでゲートを無効化できてしまう。
+  assert.throws(
+    () => selectKoyaDialogueTake(candidates, cutPlan, 1, { 0: failed, 1: failed }),
+    /理由（forcedTakeReasons）を記録/u,
+  );
+  const forced = selectKoyaDialogueTake(
+    candidates, cutPlan, 1, { 0: failed, 1: failed },
+    "全テイクがCER超過だが、収録し直しまで暫定でtake1を使う（taiyu判断）",
+  );
   assert.equal(forced.takeIndex, 1);
+
+  // ゲートに落ちていないテイクを forced 選択するのは、理由なしで従来どおり通る
+  const clean = { hardFail: false, penalty: 0.1, problems: [], warnings: [], unavailable: [], metrics: {} };
+  assert.equal(
+    selectKoyaDialogueTake(candidates, cutPlan, 0, { 0: clean, 1: failed }).takeIndex,
+    0,
+  );
 });
 
 test("missing required metrics hard-fail the take instead of passing silently", () => {

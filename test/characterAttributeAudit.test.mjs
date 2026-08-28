@@ -11,7 +11,7 @@ const inventory = {
   reference: "/ref.png",
   assets: [
     { id: "front", file: "/front.png", base: "/front-base.png", allowedRegions: [[0, 0, 0.5, 0.5]] },
-    { id: "back", file: "/back.png", base: "/back-base.png" },
+    { id: "back", file: "/back.png", base: "/back-base.png", cleanReference: "/back-clean.png" },
   ],
 };
 
@@ -20,7 +20,11 @@ test("inventory expands into per-asset checks plus one set-wide duplicate check"
   const ids = checks.map((check) => check.id);
   assert.ok(ids.includes("front:hairColorDelta"));
   assert.ok(ids.includes("front:unintendedChange"));
-  assert.ok(ids.includes("front:neckOrnament"));
+  // cleanReference の無い asset には neckOrnament を出さない。装飾検出は
+  // 「装飾のない同キャラ画像との相対比較」で初めて意味を持つので、
+  // 参照が無いまま実行済みに数えると、見逃したまま被覆だけが埋まる。
+  assert.ok(!ids.includes("front:neckOrnament"), "参照なしで neckOrnament を実行してしまった");
+  assert.ok(ids.includes("back:neckOrnament"), "参照ありの asset で実行されていない");
   assert.ok(ids.includes("back:hairColorDelta"));
   assert.equal(ids.filter((id) => id === "set:duplicateTakes").length, 1);
   const unintended = checks.find((check) => check.id === "front:unintendedChange");
