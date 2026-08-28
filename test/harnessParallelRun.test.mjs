@@ -393,3 +393,25 @@ test("レポートは引数の境界と依存・ロックを構造のまま残�
   assert.equal(job.timeoutMs, 60_000);
   assert.equal(job.expectExitCode, 0);
 });
+
+test("品質ゲートの不合格を expectExitCode で成功に付け替えられない", () => {
+  const gate = validatePlan({
+    jobs: [{
+      id: "g", command: "node",
+      args: ["scripts/koya-manga-video.mjs", "character-attribute-gate", "--inventory-path", "x.json"],
+      expectExitCode: 3,
+    }],
+  });
+  assert.ok(gate.some((e) => /品質ゲートに expectExitCode/u.test(e)));
+
+  // ゲート以外のコマンドでは従来どおり使える（grep の 1 など）
+  assert.deepEqual(
+    validatePlan({ jobs: [{ id: "g", command: "grep", args: ["-q", "x", "f"], expectExitCode: 1 }] }),
+    [],
+  );
+  // ゲートでも 0 は当然通る
+  assert.deepEqual(
+    validatePlan({ jobs: [{ id: "g", command: "node", args: ["audit-x.mjs"], expectExitCode: 0 }] }),
+    [],
+  );
+});

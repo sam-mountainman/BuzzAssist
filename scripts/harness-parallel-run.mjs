@@ -152,6 +152,18 @@ export function validatePlan(plan) {
     if (job.expectExitCode !== undefined && !Number.isInteger(job.expectExitCode)) {
       errors.push(`${id}: expectExitCode は整数にしてください`);
     }
+    // 品質ゲートの不合格（非0終了）を「期待どおり」に付け替えると、
+    // 下流の needs が走って「並列にしたら通った」ができてしまう。
+    // ゲートを呼ぶジョブでは非0の expectExitCode を認めない。
+    if (job.expectExitCode !== undefined && job.expectExitCode !== 0) {
+      const commandLine = `${job.command} ${(job.args ?? []).join(" ")}`;
+      if (/\bgate\b|\baudit\b|audit-|-gate\b/u.test(commandLine)) {
+        errors.push(
+          `${id}: 品質ゲートに expectExitCode: ${job.expectExitCode} は指定できません`
+          + "（不合格を成功として記録することになります）",
+        );
+      }
+    }
     if (job.env !== undefined && (typeof job.env !== "object" || job.env === null || Array.isArray(job.env))) {
       errors.push(`${id}: env はオブジェクトにしてください`);
     }
