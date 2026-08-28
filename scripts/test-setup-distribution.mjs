@@ -141,13 +141,14 @@ async function runHostSetup(host) {
       path.join(pluginRoot, "config", "koya-show-bible.json"),
       path.join(pluginRoot, "config", "koya-character-styling"),
       path.join(pluginRoot, "channel-packs"),
+      path.join(pluginRoot, "docs", "koya-channel-governance-ja.md"),
+      path.join(pluginRoot, "docs", "koya-channel-requirements-ledger.md"),
     ]) {
       assert.equal(
         existsSync(leaked), false,
         `Channel Pack が配布物に含まれています: ${path.relative(pluginRoot, leaked)}`,
       );
     }
-    await readFile(path.join(pluginRoot, "docs", "koya-channel-governance-ja.md"), "utf8");
     await readFile(path.join(pluginRoot, "docs", "koya-harness-handoff-ja.md"), "utf8");
     await readFile(path.join(pluginRoot, "scripts", "update-current.mjs"), "utf8");
     await readFile(path.join(pluginRoot, "scripts", "verify-plugin-runtime.mjs"), "utf8");
