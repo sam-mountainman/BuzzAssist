@@ -28,6 +28,22 @@ function testRaster(seed = 1, width = 96, height = 72) {
   return Buffer.concat([renderEditorialPlatePng("white-solid", width, height), Buffer.from(`identity-seed-${seed}`)]);
 }
 
+// 一時プロジェクトへ Channel Pack を置く。
+//
+// 以前はプロジェクト側に正本を置かず、ランタイム（リポジトリ）側の pack を
+// 暗黙に借りていた。それは開発機でしか成立しない上に、本番でやると
+// 別チャンネルの番組ルールで走ることになるので、本番の入口が拒むようにした。
+// テストも借りるのをやめ、使う pack を明示する。
+async function installChannelPack(projectDir) {
+  const { cp } = await import("node:fs/promises");
+  const source = join(process.cwd(), "channel-packs");
+  const { existsSync } = await import("node:fs");
+  if (!existsSync(source)) return false;
+  await cp(source, join(projectDir, "channel-packs"), { recursive: true });
+  return true;
+}
+
+
 test("identity-pack generation checkpoints each paid image and resumes without duplicate calls", async () => {
   const projectDir = await mkdtemp(join(tmpdir(), "koya-identity-checkpoint-"));
   try {
@@ -398,6 +414,11 @@ test("Koya production planning writes a contract snapshot and resumable state wi
     cast: [{ name: "悠斗", description: "高校生から社会人まで同じ顔を保つ主人公。" }],
   }));
   const result = await planKoyaMangaProduction({
+    // このプロジェクトには Channel Pack が無く、ランタイム側のものを借りている。
+    // 本番はこれを拒む（別チャンネルの番組ルールで走ることになるため）。
+    // ここはジャンル共通ハーネスの経路——プラン生成の仕組みと再開状態を見る
+    // のが目的で、番組ルールは対象外——なので明示的に許す。
+    allowBorrowedChannelData: true,
     projectDir,
     scriptPath: join(projectDir, "script.txt"),
     episodeId: "koya-plan-test",
@@ -426,6 +447,11 @@ test("Koya planning refuses to overwrite an episode id owned by another script",
   const projectDir = await mkdtemp(join(tmpdir(), "koya-plan-collision-"));
   const scriptPath = join(projectDir, "script.txt");
   const options = {
+    // このプロジェクトには Channel Pack が無く、ランタイム側のものを借りている。
+    // 本番はこれを拒む（別チャンネルの番組ルールで走ることになるため）。
+    // ここはジャンル共通ハーネスの経路——プラン生成の仕組みと再開状態を見る
+    // のが目的で、番組ルールは対象外——なので明示的に許す。
+    allowBorrowedChannelData: true,
     projectDir,
     scriptPath,
     episodeId: "koya-collision-test",
@@ -443,6 +469,11 @@ test("Koya planning stops before paid generation when a narrated multi-character
   const scriptPath = join(projectDir, "script.txt");
   await writeFile(scriptPath, script);
   await assert.rejects(() => planKoyaMangaProduction({
+    // このプロジェクトには Channel Pack が無く、ランタイム側のものを借りている。
+    // 本番はこれを拒む（別チャンネルの番組ルールで走ることになるため）。
+    // ここはジャンル共通ハーネスの経路——プラン生成の仕組みと再開状態を見る
+    // のが目的で、番組ルールは対象外——なので明示的に許す。
+    allowBorrowedChannelData: true,
     projectDir,
     scriptPath,
     episodeId: "koya-protagonist-required",

@@ -46,8 +46,19 @@ async function installAuthority(projectDir) {
 
 test("Koya authority is all-or-nothing and validates the three channel contracts", async () => {
   const projectDir = await mkdtemp(join(tmpdir(), "koya-authority-"));
+  // 空のプロジェクトが、ランタイム側の Channel Pack を借りていることを
+  // source に出す。以前は "runtime-template" と記録していたので、
+  // **開発機のチャンネルデータで動いている事実が隠れて**いた。
+  // このテスト自身が、その間違った挙動を正解として固定していた。
   const fallback = await readKoyaChannelAuthority({ allowFixture: true, projectDir, runtimeRoot: root });
-  assert.equal(fallback.source, "runtime-template");
+  assert.equal(
+    fallback.source,
+    channelPackPresent(root) ? "borrowed-channel-data" : "test-fixture",
+    "借りていることが source に出ること",
+  );
+  // 読み取りは通るが、本番の入口は拒む。
+  const { assertProductionChannelAuthority } = await import("../lib/koyaChannelGovernance.mjs");
+  assert.throws(() => assertProductionChannelAuthority(fallback, "本編プラン"), /実行できない/u);
   await mkdir(join(projectDir, "config"), { recursive: true });
   await writeFile(join(projectDir, "config/koya-show-bible.json"), await readFile(resolveChannelPackPath(root, "config/koya-show-bible.json")));
   await assert.rejects(() => readKoyaChannelAuthority({ allowFixture: true, projectDir, runtimeRoot: root }), /authority is partial/u);
