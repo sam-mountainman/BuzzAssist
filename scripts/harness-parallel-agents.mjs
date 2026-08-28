@@ -12,7 +12,7 @@
 // 一方 codex exec はプロセス並列なのでコア数に縛られず、実測で16体が同時に完走した。
 // 同じ台数を両ホストで出すには、両方が同じ外部CLIを呼ぶ形にするのが唯一の方法。
 
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -282,6 +282,18 @@ async function runTask(task, { engine, binary, outDir, disableMcp, readOnly, def
   };
 }
 
+// 同じ計画でも、どの CLI のどの版で走ったかで結果は変わる。このマシンには
+// codex が2つあり、片方にしか `agents` サブコマンドが無い。レポートだけ見て
+// 再現しようとしたときに、どちらで走ったのか分からないと困る。
+function describeBinary(binaryPath) {
+  try {
+    const out = execFileSync(binaryPath, ["--version"], { encoding: "utf8", timeout: 20_000 });
+    return out.trim().split("\n")[0];
+  } catch {
+    return null;
+  }
+}
+
 export async function runAgentTasks(tasks, options = {}) {
   const engineInfo = options.engineInfo ?? (await selectEngine(options.engine ?? "auto"));
   const engine = ENGINES[engineInfo.engineId];
@@ -336,9 +348,22 @@ export async function runAgentTasks(tasks, options = {}) {
   const summary = {
     engine: engineInfo.engineId,
     binary: engineInfo.binary,
+    binaryVersion: describeBinary(engineInfo.binary),
+    readOnly: Boolean(options.readOnly),
+    mcpEnabled: !(options.disableMcp ?? true),
     concurrency,
     cpuCount: os.cpus().length,
     host: options.host ?? process.env.HARNESS_PARALLEL_HOST ?? "unspecified",
+    // digest はタスクだけでなく、どのエンジン・どの設定で走ったかまで含める。
+    // 同じ digest なのに engine が違えば「同じ実行」とは言えない。
+    runDigest: createHash("sha256")
+      .update(JSON.stringify({
+        tasks: tasks.map((t) => [t.id, t.prompt, t.model ?? null]),
+        engine: engineInfo.engineId,
+        readOnly: Boolean(options.readOnly),
+        mcp: !(options.disableMcp ?? true),
+      }))
+      .digest("hex"),
     tasksDigest: createHash("sha256")
       .update(JSON.stringify(tasks.map((t) => [t.id, t.prompt])))
       .digest("hex"),

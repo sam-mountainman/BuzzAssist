@@ -1,0 +1,64 @@
+{
+  "measuredOn": "2026-08-28",
+  "note": "並列上限の主張の原証跡。数値を文書へ書き写す前に、ここへ何をどう測ったかを残す。1台・少数回の観測であり、上限そのものではない。",
+  "machine": {
+    "cpuCount": 8,
+    "memoryBytes": 17179869184,
+    "platform": "darwin",
+    "node": "v20.19.1"
+  },
+  "binaries": {
+    "codexBundled": {
+      "path": "/Applications/ChatGPT.app/Contents/Resources/codex",
+      "version": "codex-cli 0.150.0-alpha.8",
+      "sha256": "4ff5e75f028e913cfeb53bd7319f87573cdce6538c1b1ccc44ce62d5ce51ca1d"
+    },
+    "codexOnPath": {
+      "path": "/Users/higataiyu/.nvm/versions/node/v20.19.1/bin/codex",
+      "version": "codex-cli 0.144.1",
+      "note": "同一マシンに2版あり、agents サブコマンドは bundled 版にしかない"
+    },
+    "claude": {
+      "path": "/Users/higataiyu/.nvm/versions/node/v20.19.1/bin/claude",
+      "version": "2.1.197 (Claude Code)",
+      "authenticated": false
+    }
+  },
+  "codexFeatures": {
+    "multi_agent": "stable/true",
+    "note": "Codex はネイティブのサブエージェントを持つ。外側の codex exec をN本並べると、各プロセスが内部でさらにスレッドを起こしうる"
+  },
+  "observations": [
+    {
+      "id": "codex-exec-concurrency",
+      "what": "codex exec をシェルのバックグラウンドでN本同時起動し、全て完走するか",
+      "runs": [
+        { "n": 4, "wallSeconds": 28, "succeeded": 4, "mcp": "有効" },
+        { "n": 12, "wallSeconds": 81, "succeeded": 12, "mcp": "有効", "warnings": "モデル一覧更新とMCP接続がタイムアウト" },
+        { "n": 8, "wallSeconds": 50, "succeeded": 8, "mcp": "無効" },
+        { "n": 16, "wallSeconds": 154, "succeeded": 16, "mcp": "無効", "task": "実ファイル読み取りあり。16体とも同一の正解(202)を返した" },
+        { "n": 11, "wallSeconds": null, "succeeded": 11, "mcp": "無効", "task": "本番のレビュー11件。read-onlyサンドボックス" }
+      ],
+      "conclusion": "8コア機で16体まで成功した観測値であり、上限を測ったものではない。CPUコア数には比例しなかった",
+      "notMeasured": ["他スペックのマシン", "反復による分散", "429の発生率", "16体超"]
+    },
+    {
+      "id": "ffmpeg-parallel-gain",
+      "what": "scale->zoompan->libx264(preset medium, 1080p) を逐次と並列で比較",
+      "singleProcessCpuPercent": 486,
+      "runs": [
+        { "clipSeconds": 1, "n": 8, "sequentialMs": 9409, "parallel2Ms": 8617, "parallel4Ms": 8357, "parallel6Ms": 8270, "parallel8Ms": 8591 },
+        { "clipSeconds": 10, "n": 6, "sequentialSeconds": 28, "parallel6Seconds": 27 }
+      ],
+      "conclusion": "1本の ffmpeg が単体で約5コアを使うため、8コア機では並列化しても3.6%しか縮まらない",
+      "scope": "この測定は8コア機・この1080p設定に限る。コア数が多い機械では別の結果になりうる"
+    },
+    {
+      "id": "claude-code-subagent-limit",
+      "what": "Workflowツールの同時実行上限",
+      "value": "min(16, CPUコア数-2)",
+      "source": "Workflowツールの仕様記述。実測ではなく仕様値",
+      "onThisMachine": 6
+    }
+  ]
+}
