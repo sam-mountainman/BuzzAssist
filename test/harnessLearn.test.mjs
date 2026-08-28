@@ -2,17 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  LEARNED_BEGIN,
-  LEARNED_END,
   LEARNING_TARGETS,
   PROPOSAL_KINDS,
   buildProposal,
   clusterForConsolidation,
-  extractLearnedSection,
+  loadTargets,
   proposalId,
-  renderLearnedSection,
+  renderOverlay,
   summarizeProposals,
-  writeLearnedSection,
 } from "../scripts/harness-learn.mjs";
 
 const NOW = "2026-08-29T00:00:00.000Z";
@@ -114,70 +111,51 @@ test("提案IDは記録の順序に依存しない", () => {
 
 // --- 自動反映（sync）が触ってよい範囲 ---
 
-test("自動反映はマーカーの内側だけを書き換える", () => {
-  const before = [
-    "# 人が書いた見出し",
-    "",
-    "人が書いた本文。ここは機械が触ってはいけない。",
-    "",
-    LEARNED_BEGIN,
-    "",
-    "_古い内容_",
-    "",
-    LEARNED_END,
-    "",
-    "## これも人が書いた節",
-    "末尾の本文。",
-  ].join("\n");
-
-  const after = writeLearnedSection(before, [
-    { id: "abc123", kind: "fact", text: "測った値", evidence: ["実測"], occurrences: 1, firstSeenAt: "2026-08-29T00:00:00Z" },
-  ], "2026-08-29T00:00:00Z");
-
-  // 人が書いた部分が1文字も変わっていないこと
-  assert.ok(after.startsWith("# 人が書いた見出し\n\n人が書いた本文。ここは機械が触ってはいけない。\n\n"));
-  assert.ok(after.endsWith("## これも人が書いた節\n末尾の本文。"));
-  // 機械区画は差し替わっていること
-  assert.ok(!after.includes("_古い内容_"), "古い機械区画が残っている");
-  assert.match(after, /測った値/u);
-  assert.match(after, /根拠: 実測/u);
-  // マーカーは1組のまま
-  assert.equal(after.split(LEARNED_BEGIN).length - 1, 1);
-  assert.equal(after.split(LEARNED_END).length - 1, 1);
+test("overlay は機械が丸ごと所有し、正本は別ファイルのまま", () => {
+  // 当初は正本の中にマーカーを埋める方式にしたが、機械が人の文書の一部を
+  // 編集する構造だと、マーカー破損が人の記述を巻き込む。ファイル単位に改めた。
+  const targets = loadTargets();
+  for (const [id, def] of Object.entries(targets)) {
+    assert.ok(def.canonical, `${id}: canonical が無い`);
+    if (def.mode === "auto-guidance") {
+      assert.ok(def.overlay, `${id}: auto-guidance なのに overlay が無い`);
+      assert.notEqual(def.overlay, def.canonical, `${id}: overlay と canonical が同じ`);
+    }
+  }
 });
 
-test("マーカーの無い文書には節を作らない", () => {
-  // 人の文書の構造を機械が勝手に変えることの方が、反映漏れより高くつく。
-  assert.equal(writeLearnedSection("# マーカーのない文書\n\n本文。", [], "2026-08-29T00:00:00Z"), null);
-  assert.equal(extractLearnedSection("マーカーなし"), null);
+test("承認と監査の記録は自動反映しない", () => {
+  // 台帳とゲート基準は、機械が書き足すと何を人が決めたのか分からなくなる。
+  const targets = loadTargets();
+  assert.equal(targets["ledger:koya"].mode, "review-only");
+  assert.equal(targets["doc:mike-audio-gates"].mode, "review-only");
+  assert.equal(targets["ledger:koya"].overlay, undefined, "台帳に overlay があってはいけない");
 });
 
-test("マーカーの順序が壊れていたら黙って直さず落とす", () => {
-  assert.throws(
-    () => extractLearnedSection(`${LEARNED_END}\n中身\n${LEARNED_BEGIN}`),
-    /順序が逆/u,
-  );
+test("overlay は自分が正本でないと明記する", () => {
+  // 次のセッションがこれを読む。証跡として使われないことが本文から分かる必要がある。
+  const out = renderOverlay([], "2026-08-29T00:00:00Z");
+  assert.match(out, /SKILL\.md が優先/u);
+  assert.match(out, /証跡には使えません/u);
+  assert.match(out, /手で編集しないでください/u);
 });
 
-test("繰り返し回数と根拠が自動区画に残る", () => {
-  const out = renderLearnedSection([
+test("overlay には根拠と繰り返し回数が残る", () => {
+  const out = renderOverlay([
     { id: "x", kind: "correction", text: "二度言われたこと", evidence: ["根拠A", "根拠B"], occurrences: 2, firstSeenAt: "2026-08-01T00:00:00Z" },
   ], "2026-08-29T00:00:00Z");
   assert.match(out, /2回指摘/u);
   assert.match(out, /根拠A/u);
   assert.match(out, /根拠B/u);
-  assert.match(out, /2026-08-01/u);
-  // 由来を追えるよう id を残す
   assert.match(out, /`x`/u);
 });
 
-test("空でも区画は成立し、内容が無いと分かる", () => {
-  const out = renderLearnedSection([], "2026-08-29T00:00:00Z");
-  assert.match(out, /まだ自動反映された項目はありません/u);
-});
-
-test("同じ入力なら同じ区画になる（sync が毎回差分を作らない）", () => {
+test("同じ入力なら同じ overlay になる（sync が毎回差分を作らない）", () => {
   const entries = [{ id: "x", kind: "fact", text: "同じ値", evidence: [], occurrences: 1, firstSeenAt: "2026-08-01T00:00:00Z" }];
   const now = "2026-08-29T00:00:00Z";
-  assert.equal(renderLearnedSection(entries, now), renderLearnedSection(entries, now));
+  assert.equal(renderOverlay(entries, now), renderOverlay(entries, now));
+});
+
+test("空でも overlay は成立し、内容が無いと分かる", () => {
+  assert.match(renderOverlay([], "2026-08-29T00:00:00Z"), /まだ自動反映された項目はありません/u);
 });

@@ -36,66 +36,62 @@ const APPLIED_PATH = path.join(LEARN_DIR, "applied.jsonl");
 // 提案が向かう先。ここに無いものは apply できない。
 // 正本スキルと台帳だけを対象にするのは、次のセッションが必ず読む場所が
 // この2つだからで、それ以外へ書いても学習として効かない。
-export const LEARNING_TARGETS = {
-  "skill:manga-video-production": ".agents/skills/manga-video-production/SKILL.md",
-  "skill:manga-page-camera": ".agents/skills/manga-page-camera/SKILL.md",
-  "skill:harness-parallel-execution": ".agents/skills/harness-parallel-execution/SKILL.md",
-  "ledger:koya": "docs/koya-channel-requirements-ledger.md",
-  "doc:mike-audio-gates": "deployments/narrated-story-video/docs/AUDIO-BGM-GATES.md",
-};
+// 宛先の定義は docs/learning/targets.json に持つ。コード内に二重に
+// 持たせると、片方だけ古くなる——今日このリポジトリで何度も見た形。
+export const LEARNING_TARGETS = new Proxy({}, {
+  get(_t, key) {
+    if (typeof key !== "string") return undefined;
+    return loadTargets()[key]?.canonical;
+  },
+  has(_t, key) { return typeof key === "string" && key in loadTargets(); },
+  ownKeys() { return Object.keys(loadTargets()); },
+  getOwnPropertyDescriptor() { return { enumerable: true, configurable: true }; },
+});
 
 // 機械が書き換えてよい範囲の境界。hermes の curator が
-// 「agent-created skill だけ触り、bundled / hub-installed には手を出さない」
-// としているのと同じ役割を、ここでは**文書内の区画**が担う。
-// このマーカーの内側だけを自動で書き換え、外側の人が書いた本文には触らない。
-// 機械が書いた節だと一目で分かることが重要で、人の記述と混ざった瞬間に
-// 「誰が書いたのか分からない文書」になって証跡としての意味を失う。
-export const LEARNED_BEGIN = "<!-- LEARNED:BEGIN — この節は harness-learn が自動で書く。手で編集しない -->";
-export const LEARNED_END = "<!-- LEARNED:END -->";
+// 「agent作成スキルだけ触り、bundled / hub-installed には手を出さない」
+// としているのと同じ役割を、ここでは**ファイル単位の所有**が担う。
+//
+// 当初は正本の中にマーカーを埋めて内側だけ書き換える方式にしたが、
+// Codexレビューの指摘で改めた。機械が人の文書の一部を編集する構造だと、
+// マーカーが壊れたときに人の記述を巻き込むうえ、差分と巻き戻しを
+// 独立して扱えない。機械には**専用のファイルを丸ごと持たせる**方が明快。
+//
+// もう一点、overlay は「運用上の補助指示」であって
+// **監査・承認・合否の証跡には使えない**。だから台帳やゲート基準のように
+// 承認の記録そのものである文書は review-only にして自動反映しない。
+const TARGETS_PATH = path.join(LEARN_DIR, "targets.json");
 
-export function extractLearnedSection(text) {
-  const begin = text.indexOf(LEARNED_BEGIN);
-  const end = text.indexOf(LEARNED_END);
-  if (begin === -1 || end === -1) return null;
-  if (end < begin) throw new Error("LEARNED マーカーの順序が逆です");
-  return { begin, end: end + LEARNED_END.length, body: text.slice(begin + LEARNED_BEGIN.length, end) };
+export function loadTargets(targetsPath = TARGETS_PATH) {
+  const raw = JSON.parse(fs.readFileSync(targetsPath, "utf8"));
+  return raw.targets ?? {};
 }
 
-// 自動セクションの本文を組み立てる。人が読んで判断できる形にする——
-// 機械が書いたからといって、由来の分からない箇条書きを並べてよいことには
-// ならない。各項目に根拠と、いつ何回言われたかを残す。
-export function renderLearnedSection(entries, now) {
+export const OVERLAY_HEADER = [
+  "<!-- このファイルは harness-learn が自動で書きます。手で編集しないでください。 -->",
+  "",
+  "# 自動で積み上がった指摘",
+  "",
+  "隣の `SKILL.md` が正本で、**矛盾したときは SKILL.md が優先**します。",
+  "ここは運用上の補助指示であって、**監査・承認・合否の証跡には使えません**。",
+  "",
+].join("\n");
+
+export function renderOverlay(entries, now) {
+  const lines = [OVERLAY_HEADER];
   if (entries.length === 0) {
-    return `\n\n_まだ自動反映された項目はありません。_\n\n`;
+    lines.push("_まだ自動反映された項目はありません。_", "");
+  } else {
+    for (const entry of entries) {
+      const repeat = entry.occurrences > 1 ? `（${entry.occurrences}回指摘）` : "";
+      lines.push(`- **${entry.text}**${repeat}`);
+      for (const ev of entry.evidence) lines.push(`  - 根拠: ${ev}`);
+      lines.push(`  - 種別: ${entry.kind} / 初回: ${String(entry.firstSeenAt).slice(0, 10)} / id: \`${entry.id}\``);
+    }
+    lines.push("");
   }
-  const lines = [
-    "",
-    "",
-    "ここは `node scripts/harness-learn.mjs sync` が自動で書く区画。",
-    "**手で編集しない**（次回の sync で上書きされる）。人が書いた規則として",
-    "残したいものは、この区画の外へ書き写してから `promote` する。",
-    "",
-  ];
-  for (const entry of entries) {
-    const repeat = entry.occurrences > 1 ? `（${entry.occurrences}回指摘）` : "";
-    lines.push(`- **${entry.text}**${repeat}`);
-    for (const ev of entry.evidence) lines.push(`  - 根拠: ${ev}`);
-    lines.push(`  - 種別: ${entry.kind} / 初回: ${String(entry.firstSeenAt).slice(0, 10)} / id: \`${entry.id}\``);
-  }
-  lines.push("", `_最終更新: ${now}_`, "");
+  lines.push(`_最終更新: ${now}_`, "");
   return lines.join("\n");
-}
-
-// 自動で書き換えてよいのはマーカーの内側だけ。マーカーが無い文書は
-// 対象外にする（勝手に節を作って人の文書の構造を変えない）。
-export function writeLearnedSection(text, entries, now) {
-  const section = extractLearnedSection(text);
-  if (!section) return null;
-  return text.slice(0, section.begin)
-    + LEARNED_BEGIN
-    + renderLearnedSection(entries, now)
-    + LEARNED_END
-    + text.slice(section.end);
 }
 
 export const PROPOSAL_KINDS = new Set([
@@ -346,10 +342,11 @@ function main() {
     }
 
     case "sync": {
-      // 自動反映。マーカーのある正本だけを対象に、機械管理セクションを
-      // 書き直す。人が書いた本文には触らない。reviewer を要求しないのは、
-      // 書き込む先が「機械が書いた区画」だと文書自身に明示されているから。
-      // 逆に言えば、マーカーの外へ出すには promote が要る。
+      // 自動反映。機械が丸ごと所有する overlay ファイルだけを書き直す。
+      // 人が書く正本（canonical）には一切触らない。
+      // review-only の宛先は、そこが承認と監査の記録そのものなので
+      // 自動反映しない——機械がゲート基準を緩められる余地を作らない。
+      const targets = loadTargets();
       const pending = summary.filter((entry) => !entry.applied);
       const byTarget = new Map();
       for (const entry of pending) {
@@ -357,32 +354,32 @@ function main() {
         byTarget.get(entry.target).push(entry);
       }
       let wrote = 0;
-      let skipped = 0;
-      for (const [target, rel] of Object.entries(LEARNING_TARGETS)) {
-        const full = path.join(REPO_ROOT, rel);
-        if (!fs.existsSync(full)) continue;
-        const before = fs.readFileSync(full, "utf8");
-        const after = writeLearnedSection(before, byTarget.get(target) ?? [], now);
-        if (after === null) {
-          // マーカーが無い文書には節を作らない。人の文書の構造を
-          // 機械が勝手に変えることの方が、反映漏れより高くつく。
-          if (byTarget.has(target)) {
-            process.stdout.write(`⏭  ${rel} は LEARNED マーカーが無いので対象外（${byTarget.get(target).length}件保留）\n`);
-            skipped += byTarget.get(target).length;
-          }
+      const held = [];
+      for (const [target, def] of Object.entries(targets)) {
+        const entries = byTarget.get(target) ?? [];
+        if (def.mode === "review-only") {
+          if (entries.length > 0) held.push({ target, count: entries.length, reason: def.reason });
           continue;
         }
-        if (after === before) continue;
-        fs.writeFileSync(full, after);
-        const count = (byTarget.get(target) ?? []).length;
-        process.stdout.write(`✅ ${rel} の自動区画を更新（${count}件）\n`);
+        if (!def.overlay) continue;
+        const full = path.join(REPO_ROOT, def.overlay);
+        const next = renderOverlay(entries, now);
+        const before = fs.existsSync(full) ? fs.readFileSync(full, "utf8") : null;
+        if (before === next) continue;
+        fs.mkdirSync(path.dirname(full), { recursive: true });
+        // 一時ファイル＋rename。書き込み途中で落ちた overlay を
+        // 次のセッションが指示として読むことがないように。
+        const temp = `${full}.${process.pid}.partial`;
+        fs.writeFileSync(temp, next);
+        fs.renameSync(temp, full);
+        process.stdout.write(`✅ ${def.overlay}（${entries.length}件）\n`);
         wrote += 1;
       }
-      if (wrote === 0 && skipped === 0) process.stdout.write("更新するものはありませんでした\n");
-      if (skipped > 0) {
+      if (wrote === 0 && held.length === 0) process.stdout.write("更新するものはありませんでした\n");
+      for (const h of held) {
         process.stdout.write(
-          `\n${skipped}件はマーカーが無い文書向けです。人の規則として書くか、`
-          + `対象文書へ LEARNED マーカーを置いてください。\n`,
+          `⏸  ${h.target} は review-only なので自動反映しません（${h.count}件保留）\n`
+          + `    ${h.reason ?? "人が書く記録です"}\n`,
         );
       }
       break;
@@ -402,12 +399,16 @@ function main() {
       if (!entry) throw new Error(`提案が見つかりません: ${args.id}`);
       if (entry.applied) throw new Error(`${args.id} は既に昇格済みです`);
       const { rel, full } = requireTarget(entry.target);
-      const text = fs.readFileSync(full, "utf8");
-      const section = extractLearnedSection(text);
-      if (section && section.body.includes(entry.text)) {
-        throw new Error(
-          `${args.id} はまだ機械区画にあります。先に区画の外へ人の言葉で書き写してから promote してください`,
-        );
+      // overlay にまだ載っているだけの項目を「人が確認した」ことにしない。
+      const def = loadTargets()[entry.target];
+      if (def?.overlay) {
+        const overlayFull = path.join(REPO_ROOT, def.overlay);
+        if (fs.existsSync(overlayFull) && fs.readFileSync(overlayFull, "utf8").includes(entry.text)) {
+          throw new Error(
+            `${args.id} はまだ overlay（${def.overlay}）にあります。`
+            + "先に正本へ人の言葉で書いてから promote してください",
+          );
+        }
       }
       appendJsonl(APPLIED_PATH, {
         id: entry.id,

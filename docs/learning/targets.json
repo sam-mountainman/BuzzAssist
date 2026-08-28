@@ -1,0 +1,39 @@
+{
+  "note": "学習の宛先と、それぞれの反映方式。overlay は機械が丸ごと所有するファイルで、canonical は人が書く正本。Hermes の curator が『agent作成スキルだけ触る』としているのと同じ境界を、ここではファイル単位で引く。文書の中にマーカーを埋める方式から変えた理由は、機械が人の文書の一部を編集する構造だと、マーカーの破損が人の記述を巻き込むうえ、差分と巻き戻しが独立して扱えないため。",
+  "modes": {
+    "auto-guidance": "overlay へ自動反映する。運用上の補助指示であって、監査・承認・合否の証跡には使えない",
+    "review-only": "自動反映しない。ここは監査と承認の記録そのものなので、人が書く"
+  },
+  "targets": {
+    "skill:manga-video-production": {
+      "mode": "auto-guidance",
+      "canonical": ".agents/skills/manga-video-production/SKILL.md",
+      "overlay": ".agents/skills/manga-video-production/references/learned-auto.md"
+    },
+    "skill:manga-page-camera": {
+      "mode": "auto-guidance",
+      "canonical": ".agents/skills/manga-page-camera/SKILL.md",
+      "overlay": ".agents/skills/manga-page-camera/references/learned-auto.md"
+    },
+    "skill:harness-parallel-execution": {
+      "mode": "auto-guidance",
+      "canonical": ".agents/skills/harness-parallel-execution/SKILL.md",
+      "overlay": ".agents/skills/harness-parallel-execution/references/learned-auto.md"
+    },
+    "skill:harness-self-improvement": {
+      "mode": "auto-guidance",
+      "canonical": ".agents/skills/harness-self-improvement/SKILL.md",
+      "overlay": ".agents/skills/harness-self-improvement/references/learned-auto.md"
+    },
+    "ledger:koya": {
+      "mode": "review-only",
+      "canonical": "docs/koya-channel-requirements-ledger.md",
+      "reason": "要求台帳は承認と監査の記録そのもの。機械が書き足すと、何を人が決めたのかが分からなくなる"
+    },
+    "doc:mike-audio-gates": {
+      "mode": "review-only",
+      "canonical": "deployments/narrated-story-video/docs/AUDIO-BGM-GATES.md",
+      "reason": "ゲートの合否基準そのもの。機械が緩める余地を作らない"
+    }
+  }
+}

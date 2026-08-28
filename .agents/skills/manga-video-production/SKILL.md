@@ -3,6 +3,8 @@ name: manga-video-production
 description: 対象チャンネル向け日本語漫画動画の台本設計、キャラクター、画像、ElevenLabs音声、吹き出し、カメラ、レンダー、修復、実MP4監査を行う。漫画動画を新規制作・変更・レビュー・監査するときは常に使い、旧version固有スクリプトを新作へ流用しない。
 ---
 
+
+> 作業前に `references/learned-auto.md` を読む。矛盾したときはこの SKILL.md が優先。learned-auto は運用上の補助指示であって、監査・承認・合否の証跡には使えない。
 # 漫画動画動画制作
 
 これはClaude CodeとCodexが共用する正本スキルである。作業開始時に本スキルを使うことを伝え、カメラを扱う場合は`../manga-page-camera/SKILL.md`も最後まで読む。
@@ -161,10 +163,3 @@ node scripts/koya-manga-video.mjs audit --episode-id <episode-id>
 完了は、契約の完了status、全必須監査PASS、`knownRemainingIssues=[]`、実MP4の全デコード、MP4 hashに結び付いたClaude/Codex署名がすべて揃ったときだけ宣言する。報告には絶対MP4パス、尺、解像度、fps、容量、主要監査、残課題0件を含める。
 `quality-harness-final`は空の品質ループ状態や事前ゲートだけでは合格しない。独立contextの全rubric採点を含む完了roundが最低1回必要である。自分自身を除く全必須監査の結果・実在証拠SHA-256・契約digest・実MP4 SHA-256・証拠Merkle rootを集約した`final-decision.json`が`passed`であることを確認する。失敗監査は永続incident ledgerへ記録し、再発時の指示/hard-gate昇格を次の新規台本へ引き継ぐ。
 
-## 自動で積み上がった指摘
-
-<!-- LEARNED:BEGIN — この節は harness-learn が自動で書く。手で編集しない -->
-
-_まだ自動反映された項目はありません。_
-
-<!-- LEARNED:END -->
