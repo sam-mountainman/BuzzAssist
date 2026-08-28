@@ -229,3 +229,35 @@ test("wd14 gate separates fang and necklace on real assets", async (t) => {
   assert.equal(byId.fang.status, "pass");
   assert.equal(byId.necklace.status, "warn");
 });
+
+test("mandatory gate coverage: a partial run cannot report pass", () => {
+  const contract = buildCharacterCandidateQualityContract({ castId: "horo" });
+  const partial = {
+    overall: "pass",
+    checks: [{ id: "only-color", type: "hairColorDelta", status: "pass", inputSha256: {} }],
+  };
+  const partialReport = attributeHardGateReport(partial, contract);
+  assert.equal(partialReport.pass, false);
+  assert.ok(partialReport.missingGateIds.includes("attribute-duplicate-takes"));
+  assert.ok(partialReport.missingGateIds.includes("attribute-eye-side-fullview-human"));
+
+  const full = {
+    overall: "pass",
+    checks: [
+      { id: "c1", type: "hairColorDelta", status: "pass", inputSha256: {} },
+      { id: "c2", type: "duplicateTakes", status: "pass", inputSha256: {} },
+      { id: "c3", type: "unintendedChange", status: "pass", inputSha256: {} },
+      { id: "c4", type: "neckOrnament", status: "warn", inputSha256: {} },
+    ],
+  };
+  assert.equal(attributeHardGateReport(full, contract).pass, false, "human gate still missing");
+  const withHuman = attributeHardGateReport(full, contract, {
+    humanGates: [{ id: "attribute-eye-side-fullview-human", status: "pass", reviewer: "taiyu" }],
+  });
+  assert.equal(withHuman.pass, true);
+  assert.deepEqual(withHuman.missingGateIds, []);
+  assert.throws(
+    () => attributeHardGateReport(full, contract, { humanGates: [{ id: "x", status: "pass" }] }),
+    /reviewer/,
+  );
+});

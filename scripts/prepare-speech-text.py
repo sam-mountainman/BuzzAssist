@@ -41,9 +41,12 @@ def load_dictionary(path):
     if not path:
         return []
     try:
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        raw = Path(path).read_text(encoding="utf-8")
+    except FileNotFoundError:
         return []
+    # A corrupt dictionary must stop the preflight, not silently become empty
+    # (fail-closed, matching lib/readingDictionary.mjs).
+    data = json.loads(raw)
     entries = [e for e in data.get("entries", []) if e.get("status") == "active"]
     return sorted(entries, key=lambda e: -len(e.get("from", "")))
 

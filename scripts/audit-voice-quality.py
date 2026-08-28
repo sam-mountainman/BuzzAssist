@@ -112,10 +112,11 @@ def utmos_score(audio, sr):
         raise RuntimeError(_UTMOS_ERROR)
     if _UTMOS is None:
         import torch
-        if not UTMOS_CACHE_DIR.exists():
+        checkpoint = Path.home() / ".cache/torch/hub/checkpoints/utmos22_strong_step7459_v1.pt"
+        if not UTMOS_CACHE_DIR.exists() or not checkpoint.exists():
             _UTMOS_ERROR = (
-                f"UTMOS cache missing at {UTMOS_CACHE_DIR}; pre-fetch once with "
-                "torch.hub.load('tarepan/SpeechMOS:v1.2.0', 'utmos22_strong') on a trusted run"
+                f"UTMOS cache incomplete ({UTMOS_CACHE_DIR}, {checkpoint.name}); pre-fetch once "
+                "on a trusted run — this gate never downloads at audit time"
             )
             raise RuntimeError(_UTMOS_ERROR)
         # source="local" executes only the already-audited cached snapshot —
@@ -187,8 +188,13 @@ def whisper_model(model_name=None):
     except ImportError:
         return None
     if _WHISPER is None:
-        _WHISPER = WhisperModel(model_name or "kotoba-tech/kotoba-whisper-v2.0-faster",
-                                device="cpu", compute_type="int8")
+        name = model_name or "kotoba-tech/kotoba-whisper-v2.0-faster"
+        try:
+            _WHISPER = WhisperModel(name, device="cpu", compute_type="int8", local_files_only=True)
+        except Exception:  # noqa: BLE001 - cache miss
+            if os.environ.get("VOICE_QA_ALLOW_DOWNLOAD") != "1":
+                return None
+            _WHISPER = WhisperModel(name, device="cpu", compute_type="int8")
     return _WHISPER
 
 
@@ -223,7 +229,12 @@ def align_whisper_model():
     except ImportError:
         return None
     if _ALIGN_WHISPER is None:
-        _ALIGN_WHISPER = WhisperModel("small", device="cpu", compute_type="int8")
+        try:
+            _ALIGN_WHISPER = WhisperModel("small", device="cpu", compute_type="int8", local_files_only=True)
+        except Exception:  # noqa: BLE001
+            if os.environ.get("VOICE_QA_ALLOW_DOWNLOAD") != "1":
+                return None
+            _ALIGN_WHISPER = WhisperModel("small", device="cpu", compute_type="int8")
     return _ALIGN_WHISPER
 
 

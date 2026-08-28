@@ -121,3 +121,26 @@ test("all-hard-fail selection refuses instead of picking the least bad", () => {
   const forced = selectKoyaDialogueTake(candidates, cutPlan, 1, { 0: failed, 1: failed });
   assert.equal(forced.takeIndex, 1);
 });
+
+test("missing required metrics hard-fail the take instead of passing silently", () => {
+  const noUtmos = voiceQualityPenalty(
+    { status: "warn", metrics: { cer: 0.02 }, problems: [], warnings: [], unavailable: ["utmos: cache incomplete"] },
+    { requiredMetrics: ["utmos", "cer"] },
+  );
+  assert.equal(noUtmos.hardFail, true);
+  assert.deepEqual(noUtmos.missingRequiredMetrics, ["utmos"]);
+  assert.match(noUtmos.problems.at(-1), /required metric unavailable: utmos/);
+
+  const perSegment = voiceQualityPenalty(
+    { status: "pass", metrics: { utmos: 3.6, segments: [{ id: "u01", cer: 0.04 }] }, problems: [] },
+    { requiredMetrics: ["utmos", "cer"] },
+  );
+  assert.equal(perSegment.hardFail, false);
+  assert.deepEqual(perSegment.missingRequiredMetrics, []);
+});
+
+test("a forced take index that does not exist is an error, not a silent fallback", () => {
+  const cutPlan = { cutId: "cut-11", inputs: [] };
+  const candidates = [{ takeIndex: 0, sourcePath: "a.wav", quality: { score: 0.2, rows: [] } }];
+  assert.throws(() => selectKoyaDialogueTake(candidates, cutPlan, 7), /forced take 7 does not exist/);
+});

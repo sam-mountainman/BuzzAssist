@@ -122,6 +122,7 @@ function usage() {
     "render: [--cut-ids cut-01,cut-02] rerenders at least the named cuts; unselected cuts are reused only when their completed input hash still matches and the MP4 decodes",
     "signoff: --reviewer claude|codex [--reviewer-id ID] [--reviewer-context-id TASK_OR_SESSION_ID] --review-notes-path /absolute/review.json --pass (the evaluator task/session must differ from the generator)",
     "handoff-export: [--output-dir DIR] [--bundle-id ID] [--character-ids id1,id2] [--visual-profile-ids id1] [--force] (exports only approved Koya data and SHA evidence; excludes candidate mappings, sessions and credentials)",
+    "speech: R194 voice quality gate is always on; --no-voice-quality-gate requires --voice-quality-gate-override-reason",
     "handoff-verify: --bundle-dir DIR (read-only full manifest/SHA/path/symlink verification)",
     "handoff-restore: --bundle-dir DIR (requires the matching installed production contract, then merges approved registry/profile data)",
   ].join("\n");
@@ -137,6 +138,11 @@ const common = {
   contractPath: args.contractPath ? resolve(args.contractPath) : "",
   overridePath: args.overridePath ? resolve(args.overridePath) : "",
   protagonistSpeakerId: args.protagonistSpeakerId || "",
+  // R194: the voice quality gate is ON for every official speech run. Turning
+  // it off is an audited human override, never a default or an env-only flag.
+  voiceQualityGate: args.noVoiceQualityGate === true ? false : true,
+  voiceQualityGateOverrideReason: args.voiceQualityGateOverrideReason || "",
+  readingDictionaryPath: args.readingDictionaryPath ? resolve(args.readingDictionaryPath) : "",
   characterBiblePath: args.characterBiblePath ? resolve(args.characterBiblePath) : "",
   sourceFaceReviewPath: args.sourceFaceReviewPath ? resolve(args.sourceFaceReviewPath) : "",
   storyReviewPath: args.storyReviewPath ? resolve(args.storyReviewPath) : "",
@@ -605,6 +611,9 @@ switch (args.action) {
   }
   case "speech": {
     requireEpisodeId();
+    if (common.voiceQualityGate === false && !common.voiceQualityGateOverrideReason) {
+      throw new Error("--no-voice-quality-gate requires --voice-quality-gate-override-reason <text>");
+    }
     const result = await generateKoyaMangaSpeech({ ...common, dryRun: args.dryRun === true });
     print({ episodeId: args.episodeId, status: result.state?.status, waiting: result.waiting, reportPath: result.reportPath });
     if (result.waiting) exitCode = 3;

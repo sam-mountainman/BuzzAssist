@@ -242,14 +242,30 @@ def wd14_scores(image_bgr, model_path, tags_path):
     return dict(zip(names, [float(v) for v in logits]))
 
 
+WD14_MODEL_SHA256 = "e6774bff34d43bd49f75a47db4ef217dce701c9847b546523eb85ff6dbba1db1"
+WD14_TAGS_SHA256 = "298633d94d0031d2081c0893f29c82eab7f0df00b08483ba8f29d1e979441217"
+_WD14_VERIFIED = False
+
+
 def check_wd14_tags(check):
     # ML screening for attributes the deterministic gates cannot see
     # (fang presence, jewelry on bright jackets, hair-over-one-eye). WD14
     # cannot tell WHICH eye is covered; the side check stays geometric/human.
+    global _WD14_VERIFIED
     model_path = Path(check.get("model", "models/wd14/model.onnx"))
     tags_path = Path(check.get("tags", "models/wd14/selected_tags.csv"))
     if not model_path.exists() or not tags_path.exists():
         fail(f"wd14Tags model files missing: {model_path}, {tags_path}")
+    if not _WD14_VERIFIED:
+        # Pinned-SHA verification at runtime, not just in the README (Codex
+        # review 2026-08-28): a swapped model silently changes every verdict.
+        expected_model = check.get("modelSha256", WD14_MODEL_SHA256)
+        expected_tags = check.get("tagsSha256", WD14_TAGS_SHA256)
+        actual_model = hashlib.sha256(model_path.read_bytes()).hexdigest()
+        actual_tags = hashlib.sha256(tags_path.read_bytes()).hexdigest()
+        if actual_model != expected_model or actual_tags != expected_tags:
+            fail(f"wd14Tags model SHA mismatch: {actual_model[:16]}/{actual_tags[:16]}")
+        _WD14_VERIFIED = True
     image = load_bgr(check["image"])
     if check.get("region"):
         image = crop_region(image, check["region"])
