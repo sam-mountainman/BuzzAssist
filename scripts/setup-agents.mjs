@@ -366,8 +366,9 @@ async function refreshManagedPluginSource() {
     "GEMINI.md",
     "README.md",
     "SETUP.md",
-    "docs/koya-channel-requirements-ledger.md",
-    "docs/koya-channel-governance-ja.md",
+    // 要求台帳と番組ガバナンスはチャンネル固有なので配布しない。
+    // それらは Channel Pack 側（運営者の手元）にあり、共有される
+    // 配布物に入れると、パックを分離した意味が無くなる。
     "docs/koya-harness-handoff-ja.md",
     "package.json",
     "package-lock.json",
