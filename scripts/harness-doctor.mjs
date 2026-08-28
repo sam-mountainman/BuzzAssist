@@ -24,7 +24,7 @@
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import path from "node:path";
@@ -110,6 +110,49 @@ async function probeSecretVia(resolve, { label, fix }) {
  * 見ておらず、存在しないコマンドへ書き換えても通った。表の値だけを根拠に
  * 「正規入口」と報告するのは、観測していない事実を合格理由にすること。
  */
+/**
+ * 正本のスキルと、ホストが実際に読む配布コピーがずれていないかを見る。
+ *
+ * 自己改善（harness-learn sync）は正本の references/learned-auto.md を
+ * 書き換えるが、配布コピーは setup を再実行するまで古いまま。すると
+ * **運営者のエージェントは古い指示を読み、記録には新しい指紋が残る**——
+ * 記録が、実際に使われたものと別のものを指すことになる。
+ */
+function probeShippedSkillDrift() {
+  const canonicalRoot = path.join(REPO_ROOT, ".agents", "skills");
+  const shippedRoot = path.join(homedir(), "plugins", "buzzassist", "plugin", "skills");
+  if (!existsSync(shippedRoot)) {
+    return { ok: true, detail: "配布コピーが無い（未インストール）", fix: "" };
+  }
+  const drifted = [];
+  for (const entry of readdirSync(canonicalRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const canonicalSkill = path.join(canonicalRoot, entry.name, "SKILL.md");
+    const shippedSkill = path.join(shippedRoot, entry.name, "SKILL.md");
+    if (!existsSync(canonicalSkill)) continue;
+    if (!existsSync(shippedSkill)) { drifted.push(`${entry.name}(未配布)`); continue; }
+    // overlay は自己改善が書き換える層なので、ここを重点的に見る。
+    const overlayName = path.join("references", "learned-auto.md");
+    for (const [rel, label] of [[overlayName, "learned-auto"], ["SKILL.md", "SKILL"]]) {
+      const a = path.join(canonicalRoot, entry.name, rel);
+      const b = path.join(shippedRoot, entry.name, rel);
+      if (!existsSync(a) && !existsSync(b)) continue;
+      if (!existsSync(a) || !existsSync(b)) { drifted.push(`${entry.name}/${label}(片方のみ)`); continue; }
+      // SKILL.md は配布時に相対参照を書き換えるので、その差は無視する。
+      const left = readFileSync(a, "utf8").replaceAll("../../../", "../../");
+      if (left !== readFileSync(b, "utf8")) drifted.push(`${entry.name}/${label}`);
+    }
+  }
+  return {
+    ok: drifted.length === 0,
+    detail: drifted.length === 0 ? "配布コピーが正本と一致" : `ずれ: ${drifted.join(", ")}`,
+    fix: drifted.length === 0 ? ""
+      : "正本と配布コピーがずれている。自己改善（harness-learn sync）の後に setup を再実行していないと、"
+        + "エージェントは古い指示を読み、記録には新しい指紋が残る。"
+        + "`node scripts/setup-agents.mjs --agent <host> --project-dir <dir> --no-launch` で配布し直すこと",
+  };
+}
+
 async function probeProductionRoute(declaration, harnessId) {
   if (!declaration) {
     return { ok: false, detail: `宣言が読めない: config/harnesses/${harnessId}.harness.json`,
@@ -291,6 +334,9 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "" 
     fix: packOk ? "" : "自分のチャンネルの本番を回すには Channel Pack が要る（キャスト、番組規則、承認記録）。`node scripts/koya-manga-video.mjs handoff-restore --bundle-dir <配布された束>` で入れる。無くてもジャンル共通の工程は動くが、番組ルールは適用されない",
   });
 
+  const drift = probeShippedSkillDrift();
+  add({ id: "shipped-skill-drift", required: false, ...drift });
+
   const blocking = checks.filter((c) => c.required && !c.ok);
   const advisory = checks.filter((c) => !c.required && !c.ok);
   return {
@@ -317,7 +363,13 @@ function render(report) {
   if (report.blocking.length > 0) {
     lines.push(`このままでは本番を回せない: ${report.blocking.join(", ")}`);
   } else if (report.advisory.length > 0) {
-    lines.push(`回せるが、次のゲートは skip になる: ${report.advisory.join(", ")}`);
+    // 任意項目の影響は項目ごとに違う。「ゲートが skip になる」と一括で
+    // 書くと、実際には起きないことを述べることになる。
+    lines.push("本番は回せるが、次が未充足:");
+    for (const id of report.advisory) {
+      const check = report.checks.find((entry) => entry.id === id);
+      lines.push(`  - ${id}: ${check?.detail || ""}`);
+    }
   }
   return lines.join("\n");
 }

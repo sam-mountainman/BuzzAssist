@@ -521,6 +521,14 @@ function main() {
           + `    ${h.reason ?? "人が書く記録です"}\n`,
         );
       }
+      // 正本を書き換えても、ホストが読むのは配布コピー。setup を再実行
+      // しないと、エージェントは古い指示を読み続ける。
+      process.stdout.write(
+        "\n配布し直しが要ります: 正本を書き換えたので、ホストが読む配布コピーは古いままです。\n"
+        + "  node scripts/setup-agents.mjs --agent <host> --project-dir <dir> --no-launch\n"
+        + "  確認: node scripts/harness-doctor.mjs（shipped-skill-drift）\n",
+      );
+
       break;
     }
 
