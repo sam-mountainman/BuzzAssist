@@ -48,8 +48,15 @@ test("Channel Pack が無い環境ではジャンル共通ハーネスとして�
   await rm(bare, { recursive: true, force: true });
 });
 
-test("このリポジトリ自身では旧入口が塞がれている", () => {
-  // 実 pack が置かれた開発機で、旧入口が本当に止まることの確認。
+test("このリポジトリ自身では旧入口が塞がれている", async (t) => {
+  // 実 pack が置かれた環境で、旧入口が本当に止まることの確認。
+  // pack を持たない clone では前提が無いので飛ばす——合成の sandbox で
+  // 同じことは上の2件が見ている。
+  const { channelPackPresent } = await import("../lib/channelPackResolver.mjs");
+  if (!channelPackPresent(root)) {
+    t.skip("channel pack が無い環境");
+    return;
+  }
   const verdict = checkCanonicalRouting({ toolName: "build_excalidraw_manga_video", projectDir: root });
   assert.equal(verdict.allowed, false);
 });

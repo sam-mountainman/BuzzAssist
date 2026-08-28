@@ -299,7 +299,7 @@ test("契約から保証の裏づけが全部消えたら pass ではなく skip
   assert.equal(done.summary.passed, done.summary.declaredGateCount - 1);
 });
 
-test("実在する過去の監査レポートで、記録とレポートの判定が一致する", async () => {
+test("実在する過去の監査レポートで、記録とレポートの判定が一致する", async (t) => {
   // 合成データだけで検証すると、実際の監査ステップ ID と対応表のずれを見逃す。
   const { readFileSync, existsSync } = await import("node:fs");
   const { recordGatesFromAuditSteps } = await import("../lib/harnessRunReceipt.mjs");
@@ -309,7 +309,12 @@ test("実在する過去の監査レポートで、記録とレポートの判�
     "canvas/manga-videos/manga-arano-amane-effort-001/audits/koya-final/final-audit.json",
     "canvas/manga-videos/manga-photo-homecoming-001/audits/koya-final/final-audit.json",
   ].filter((rel) => existsSync(join(root, rel)));
-  assert.ok(reports.length > 0, "検証に使える過去の監査レポートが1件も無い");
+  if (reports.length === 0) {
+    // 過去の成果物は運営者の手元にしかない。clone しただけの環境では
+    // この照合はできないので飛ばす——合成データ側の検証は上の2件が見ている。
+    t.skip("過去の監査レポートが無い環境");
+    return;
+  }
 
   for (const rel of reports) {
     const report = JSON.parse(readFileSync(join(root, rel), "utf8"));
