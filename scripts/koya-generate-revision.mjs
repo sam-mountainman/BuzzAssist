@@ -11,6 +11,10 @@
 // (prompt, refs+SHA, output SHA, model, timestamps) to the manifest so every
 // revision stays traceable without a live session context.
 import { createHash } from "node:crypto";
+import {
+  AdaptiveConcurrencyController,
+  runWithAdaptiveConcurrency,
+} from "../lib/adaptiveConcurrency.mjs";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import process from "node:process";
@@ -65,15 +69,48 @@ function containedOutputPath(name) {
 
 let failures = 0;
 const seenOutputs = new Set();
+
+// job.out の重複検査は、生成を始める前に全件まとめて済ませる。
+// 並列にすると Set への追加順が実行順に依存してしまい、
+// 「どちらが重複と判定されるか」が実行のたびに変わるため。
 for (const job of spec.jobs) {
+  if (job && typeof job === "object" && typeof job.out === "string") {
+    const outPath = containedOutputPath(job.out);
+    if (seenOutputs.has(outPath)) throw new Error(`duplicate job.out: ${job.out}`);
+    seenOutputs.add(outPath);
+  }
+}
+
+// 修正ラウンドは1回で複数枚を出し直す。1枚ずつ待つと、直したい枚数に
+// 比例してそのまま待ち時間が伸びる。台数制御は画像生成用のAIMD（R62）
+// に任せ、429と使用上限もそこで面倒を見る。
+const revisionConcurrency = new AdaptiveConcurrencyController({
+  mode: "auto",
+  initial: Math.max(1, Number(process.env.KOYA_REVISION_CONCURRENCY) || 4),
+});
+
+// マニフェストは追記ファイル。並列のワーカーから直接 appendFile すると
+// 行が混ざるので、書き込みだけは直列に流す。
+let manifestWrite = Promise.resolve();
+const appendManifest = (entry) => {
+  const write = async () => {
+    try {
+      await appendFile(manifestPath, `${JSON.stringify(entry)}\n`);
+    } catch (manifestError) {
+      console.error("MANIFEST-WRITE-FAILED", String(manifestError).slice(0, 200));
+    }
+  };
+  manifestWrite = manifestWrite.then(write, write);
+  return manifestWrite;
+};
+
+const runRevisionJob = (job) => async () => {
   const startedAt = new Date().toISOString();
   let refs = [];
   try {
     if (!job || typeof job !== "object") throw new Error("every job must be an object");
     if (!job.prompt) throw new Error("job.prompt is required");
     const outPath = containedOutputPath(job.out);
-    if (seenOutputs.has(outPath)) throw new Error(`duplicate job.out: ${job.out}`);
-    seenOutputs.add(outPath);
     if (job.refs !== undefined && !Array.isArray(job.refs)) throw new Error("job.refs must be an array");
     refs = (job.refs ?? []).map((ref) => absolutize(projectDir, ref));
     if (refs.includes(outPath)) throw new Error(`job.out must not overwrite a reference image: ${job.out}`);
@@ -101,7 +138,7 @@ for (const job of spec.jobs) {
     };
     // Provenance first, pixels second: an image must never exist without its
     // manifest row, while a row without its file is a visible, harmless gap.
-    await appendFile(manifestPath, `${JSON.stringify(entry)}\n`);
+    await appendManifest(entry);
     await writeFile(outPath, media.buffer);
     console.log("ok", job.out);
   } catch (error) {
@@ -115,13 +152,16 @@ for (const job of spec.jobs) {
       status: "failed",
       error: String(error).slice(0, 300),
     };
-    try {
-      await appendFile(manifestPath, `${JSON.stringify(entry)}\n`);
-    } catch (manifestError) {
-      console.error("MANIFEST-WRITE-FAILED", String(manifestError).slice(0, 200));
-    }
+    await appendManifest(entry);
     console.error("FAIL", job?.out ?? "(missing out)", String(error).slice(0, 300));
   }
-}
+};
+
+await runWithAdaptiveConcurrency(
+  spec.jobs.map((job) => runRevisionJob(job)),
+  revisionConcurrency,
+);
+// 追記を全て流し切ってから終了コードを決める。
+await manifestWrite;
 await disposeMediaGenerationResources();
 process.exit(failures === 0 ? 0 : 2);
