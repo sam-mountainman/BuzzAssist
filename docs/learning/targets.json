@@ -1,39 +1,52 @@
 {
-  "note": "学習の宛先と、それぞれの反映方式。overlay は機械が丸ごと所有するファイルで、canonical は人が書く正本。Hermes の curator が『agent作成スキルだけ触る』としているのと同じ境界を、ここではファイル単位で引く。文書の中にマーカーを埋める方式から変えた理由は、機械が人の文書の一部を編集する構造だと、マーカーの破損が人の記述を巻き込むうえ、差分と巻き戻しが独立して扱えないため。",
+  "note": "学習の宛先と反映方式。宛先は3層に分ける——`platform:` は運営者に依らない craft、`genre:` はジャンル共通のハーネス、`channel-pack:` は個々のチャンネル固有。Codexレビュー(g1)が koyaChannelGovernance の18規則を判定した結果、『番組固有』『ジャンル共通に一般化できる』『そもそも共通基盤』の3種が混在していたため。overlay は機械が丸ごと所有するファイルで、canonical は人が書く正本。",
   "modes": {
     "auto-guidance": "overlay へ自動反映する。運用上の補助指示であって、監査・承認・合否の証跡には使えない",
     "review-only": "自動反映しない。ここは監査と承認の記録そのものなので、人が書く"
   },
   "targets": {
-    "skill:manga-video-production": {
+    "genre:manga-video-production": {
       "mode": "auto-guidance",
       "canonical": ".agents/skills/manga-video-production/SKILL.md",
-      "overlay": ".agents/skills/manga-video-production/references/learned-auto.md"
+      "overlay": ".agents/skills/manga-video-production/references/learned-auto.md",
+      "scope": "genre"
     },
-    "skill:manga-page-camera": {
+    "genre:manga-page-camera": {
       "mode": "auto-guidance",
       "canonical": ".agents/skills/manga-page-camera/SKILL.md",
-      "overlay": ".agents/skills/manga-page-camera/references/learned-auto.md"
+      "overlay": ".agents/skills/manga-page-camera/references/learned-auto.md",
+      "scope": "genre"
     },
-    "skill:harness-parallel-execution": {
+    "platform:harness-parallel-execution": {
       "mode": "auto-guidance",
       "canonical": ".agents/skills/harness-parallel-execution/SKILL.md",
-      "overlay": ".agents/skills/harness-parallel-execution/references/learned-auto.md"
+      "overlay": ".agents/skills/harness-parallel-execution/references/learned-auto.md",
+      "scope": "platform"
     },
-    "skill:harness-self-improvement": {
+    "platform:harness-self-improvement": {
       "mode": "auto-guidance",
       "canonical": ".agents/skills/harness-self-improvement/SKILL.md",
-      "overlay": ".agents/skills/harness-self-improvement/references/learned-auto.md"
+      "overlay": ".agents/skills/harness-self-improvement/references/learned-auto.md",
+      "scope": "platform"
     },
-    "ledger:koya": {
+    "channel-pack:koya": {
       "mode": "review-only",
       "canonical": "docs/koya-channel-requirements-ledger.md",
-      "reason": "要求台帳は承認と監査の記録そのもの。機械が書き足すと、何を人が決めたのかが分からなくなる"
+      "reason": "要求台帳は承認と監査の記録そのもの。機械が書き足すと、何を人が決めたのかが分からなくなる なお channel-pack の内容は共有層へ流さない（クライアント固有）。",
+      "scope": "channel-pack",
+      "confidential": true
     },
-    "doc:mike-audio-gates": {
+    "channel-pack:narrated-story": {
       "mode": "review-only",
       "canonical": "deployments/narrated-story-video/docs/AUDIO-BGM-GATES.md",
-      "reason": "ゲートの合否基準そのもの。機械が緩める余地を作らない"
+      "reason": "ゲートの合否基準そのもの。機械が緩める余地を作らない",
+      "scope": "channel-pack",
+      "confidential": true
     }
+  },
+  "scopes": {
+    "platform": "運営者・ジャンルに依らない craft（有償APIの扱い、証跡、並列制御など）。全ハーネスへ効く",
+    "genre": "ジャンル共通のハーネス（漫画動画、ナレーション物語）。そのジャンルの全チャンネルへ効く",
+    "channel-pack": "個々のチャンネル固有（キャスト名、番組規則、語彙ポリシー）。共有層へ流してはいけない"
   }
 }

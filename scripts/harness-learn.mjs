@@ -41,9 +41,9 @@ const APPLIED_PATH = path.join(LEARN_DIR, "applied.jsonl");
 export const LEARNING_TARGETS = new Proxy({}, {
   get(_t, key) {
     if (typeof key !== "string") return undefined;
-    return loadTargets()[key]?.canonical;
+    return loadTargets()[resolveTarget(key)]?.canonical;
   },
-  has(_t, key) { return typeof key === "string" && key in loadTargets(); },
+  has(_t, key) { return typeof key === "string" && resolveTarget(key) in loadTargets(); },
   ownKeys() { return Object.keys(loadTargets()); },
   getOwnPropertyDescriptor() { return { enumerable: true, configurable: true }; },
 });
@@ -65,6 +65,24 @@ const TARGETS_PATH = path.join(LEARN_DIR, "targets.json");
 export function loadTargets(targetsPath = TARGETS_PATH) {
   const raw = JSON.parse(fs.readFileSync(targetsPath, "utf8"));
   return raw.targets ?? {};
+}
+
+// 宛先の名前空間を platform: / genre: / channel-pack: の3層へ変えたとき、
+// 既に記録した提案は旧IDのまま残る。捨てるとその指摘が無かったことに
+// なるので、読むときに翻訳する。提案IDは kind+target+text から作るため、
+// **翻訳は解決時だけに留め、記録した target 文字列は書き換えない**
+// （書き換えるとIDが変わり、過去の apply 記録と結び付かなくなる）。
+export const TARGET_ALIASES = {
+  "skill:manga-video-production": "genre:manga-video-production",
+  "skill:manga-page-camera": "genre:manga-page-camera",
+  "skill:harness-parallel-execution": "platform:harness-parallel-execution",
+  "skill:harness-self-improvement": "platform:harness-self-improvement",
+  "ledger:koya": "channel-pack:koya",
+  "doc:mike-audio-gates": "channel-pack:narrated-story",
+};
+
+export function resolveTarget(target) {
+  return TARGET_ALIASES[target] ?? target;
 }
 
 export const OVERLAY_HEADER = [
@@ -156,7 +174,7 @@ export function proposalId(entry) {
 // 反映済みの判定。id が1行あるだけでは足りない——正本にその規則が
 // 実在することまで見る。以前は id だけで判定していたので、正本を
 // 1文字も変えずに apply を通せてしまい、status からも消えていた。
-export function isActuallyApplied(record, readCanonical) {
+export function isActuallyApplied(record, readCanonical, hashCanonical = null) {
   if (!record?.id) return false;
   // 昇格記録には、何をどこへ書いたかが要る。
   if (!record.reviewer || !String(record.reviewer).trim()) return false;
@@ -166,13 +184,24 @@ export function isActuallyApplied(record, readCanonical) {
   // 正本にその規則の痕跡があること。丸写しは求めないので、
   // 記録した note か text の主要部分のどちらかが載っていればよい。
   const needles = [record.note, record.text].filter((v) => typeof v === "string" && v.trim().length >= 5);
-  return needles.some((n) => text.includes(n.trim()));
+  if (!needles.some((n) => text.includes(n.trim()))) return false;
+  // 記録した digest は保存するだけでなく突き合わせる。保存して照合しない
+  // ハッシュは、証跡があるように見えて何も担保していない。
+  // 正本が変わっていれば「別の版に対する記録」なので、文言が残っていても
+  // その記録は現在の版を保証しない。
+  if (record.targetSha256 && typeof hashCanonical === "function") {
+    const current = hashCanonical(record.targetPath);
+    if (current && current !== record.targetSha256) return false;
+  }
+  return true;
 }
 
-export function summarizeProposals(proposals, applied, readCanonical = null) {
+export function summarizeProposals(proposals, applied, readCanonical = null, hashCanonical = null) {
   const appliedIds = new Set(
     readCanonical
-      ? applied.filter((entry) => isActuallyApplied(entry, readCanonical)).map((entry) => entry.id)
+      ? applied
+        .filter((entry) => isActuallyApplied(entry, readCanonical, hashCanonical))
+        .map((entry) => entry.id)
       : applied.map((entry) => entry.id),
   );
   const byId = new Map();
@@ -226,7 +255,8 @@ export function clusterForConsolidation(summary) {
     .sort((a, b) => b.entries.length - a.entries.length);
 }
 
-function requireTarget(target) {
+function requireTarget(rawTarget) {
+  const target = resolveTarget(rawTarget);
   if (!LEARNING_TARGETS[target]) {
     throw new Error(
       `未知の target: ${target}\n使えるのは:\n`
@@ -289,10 +319,13 @@ function printHelp() {
 
   status    未反映の提案を、繰り返された回数順に出す
 
-  sync      **自動反映**。LEARNED マーカーのある正本の機械区画を書き直す。
-            人が書いた本文には触らないので reviewer は要らない
+  sync      **自動反映**。各スキルの references/learned-auto.md（機械が
+            丸ごと所有するファイル）を書き直す。人が書く SKILL.md には
+            触らないので reviewer は要らない。review-only の宛先
+            （台帳・ゲート基準）は自動反映せず保留として報告する
 
-  promote   機械区画の項目を人の規則へ格上げする（reviewer 必須）
+  promote   overlay の項目を人の規則へ格上げする（reviewer 必須）。
+            正本にその文言が実在しないと通らない
     --id <提案ID>  --reviewer <名前>  --note "どこにどう書いたか"
 
   review    統合案を出す（既定は dry-run。スキルには触らない）
@@ -323,7 +356,13 @@ function main() {
     const full = path.join(REPO_ROOT, rel);
     return fs.existsSync(full) ? fs.readFileSync(full, "utf8") : null;
   };
-  const summary = summarizeProposals(proposals, applied, readCanonical);
+  const hashCanonical = (rel) => {
+    const full = path.join(REPO_ROOT, rel);
+    return fs.existsSync(full)
+      ? createHash("sha256").update(fs.readFileSync(full)).digest("hex")
+      : null;
+  };
+  const summary = summarizeProposals(proposals, applied, readCanonical, hashCanonical);
 
   switch (args.action) {
     case "capture": {
@@ -403,7 +442,13 @@ function main() {
       let wrote = 0;
       const held = [];
       for (const [target, def] of Object.entries(targets)) {
-        const entries = byTarget.get(target) ?? [];
+        // 旧IDで記録された提案も拾う
+      const entries = [
+        ...(byTarget.get(target) ?? []),
+        ...Object.entries(TARGET_ALIASES)
+          .filter(([, to]) => to === target)
+          .flatMap(([from]) => byTarget.get(from) ?? []),
+      ];
         if (def.mode === "review-only") {
           if (entries.length > 0) held.push({ target, count: entries.length, reason: def.reason });
           continue;

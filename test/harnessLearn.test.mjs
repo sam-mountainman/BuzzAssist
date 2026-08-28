@@ -10,6 +10,7 @@ import {
   loadTargets,
   proposalId,
   renderOverlay,
+  resolveTarget,
   sanitizeForOverlay,
   summarizeProposals,
 } from "../scripts/harness-learn.mjs";
@@ -129,9 +130,10 @@ test("overlay は機械が丸ごと所有し、正本は別ファイルのまま
 test("承認と監査の記録は自動反映しない", () => {
   // 台帳とゲート基準は、機械が書き足すと何を人が決めたのか分からなくなる。
   const targets = loadTargets();
-  assert.equal(targets["ledger:koya"].mode, "review-only");
-  assert.equal(targets["doc:mike-audio-gates"].mode, "review-only");
-  assert.equal(targets["ledger:koya"].overlay, undefined, "台帳に overlay があってはいけない");
+  // 名前空間を3層へ変えたので、旧IDは resolveTarget を通して引く。
+  assert.equal(targets[resolveTarget("ledger:koya")].mode, "review-only");
+  assert.equal(targets[resolveTarget("doc:mike-audio-gates")].mode, "review-only");
+  assert.equal(targets[resolveTarget("ledger:koya")].overlay, undefined, "台帳に overlay があってはいけない");
 });
 
 test("overlay は自分が正本でないと明記する", () => {
@@ -216,4 +218,54 @@ test("overlay へ入る文字列は記法を無効化する", () => {
   ], "2026-08-29T00:00:00Z");
   const bogus = out.split("\n").filter((l) => l.startsWith("## 偽の見出し"));
   assert.equal(bogus.length, 0, "偽の見出しが立った");
+});
+
+// --- 3層の名前空間（Codexレビュー g1/g3 を受けて） ---
+
+test("宛先は platform / genre / channel-pack の3層に分かれる", () => {
+  // g1 の判定で、番組規則は「番組固有」「ジャンル共通」「共通基盤」の
+  // 3種が混在していた。2層で扱うと必ずどれかが混ざる。
+  const targets = loadTargets();
+  const scopes = new Set(Object.values(targets).map((t) => t.scope));
+  assert.ok(scopes.has("platform"));
+  assert.ok(scopes.has("genre"));
+  assert.ok(scopes.has("channel-pack"));
+  for (const [id, def] of Object.entries(targets)) {
+    assert.ok(id.startsWith(`${def.scope}:`), `${id} と scope=${def.scope} が食い違う`);
+  }
+});
+
+test("channel-pack は自動反映せず、共有してはいけないと印がある", () => {
+  const targets = loadTargets();
+  for (const [id, def] of Object.entries(targets)) {
+    if (def.scope !== "channel-pack") continue;
+    assert.equal(def.mode, "review-only", `${id} が自動反映になっている`);
+    assert.equal(def.confidential, true, `${id} に confidential 印が無い`);
+    assert.equal(def.overlay, undefined, `${id} に overlay がある`);
+  }
+});
+
+test("名前を変えても過去の記録が孤児にならない", () => {
+  // 提案IDは kind+target+text から作るので、記録の target を書き換えると
+  // IDが変わって過去の apply 記録と結び付かなくなる。解決時だけ翻訳する。
+  assert.equal(resolveTarget("ledger:koya"), "channel-pack:koya");
+  assert.equal(resolveTarget("skill:manga-page-camera"), "genre:manga-page-camera");
+  assert.equal(resolveTarget("skill:harness-parallel-execution"), "platform:harness-parallel-execution");
+  // 新しいIDはそのまま通る
+  assert.equal(resolveTarget("genre:manga-page-camera"), "genre:manga-page-camera");
+  // 未知のものは触らない
+  assert.equal(resolveTarget("unknown:x"), "unknown:x");
+  // 旧IDでも宛先として解決できる
+  assert.ok(LEARNING_TARGETS["ledger:koya"], "旧IDが解決できない");
+});
+
+test("保存した digest は照合に使う（保存するだけにしない）", () => {
+  const record = { id: "a", reviewer: "x", targetPath: "docs/x.md", note: "書いた規則", targetSha256: "aaa" };
+  const read = () => "書いた規則がある正本";
+  // digest が一致すれば反映済み
+  assert.equal(isActuallyApplied(record, read, () => "aaa"), true);
+  // 正本が変わっていれば、文言が残っていても別の版に対する記録
+  assert.equal(isActuallyApplied(record, read, () => "bbb"), false);
+  // 照合手段が無いときは文言だけで判断（後方互換）
+  assert.equal(isActuallyApplied(record, read), true);
 });
