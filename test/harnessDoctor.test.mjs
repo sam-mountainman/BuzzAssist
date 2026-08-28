@@ -175,3 +175,28 @@ test("正規入口は、宣言に書いてあるだけでなく実際に起動�
   assert.equal(blocked.ok, false, "正規ルーティングに載っていないハーネスを ready にしないこと");
   assert.equal(narrated.ready, false);
 });
+
+test("自己改善が正本を書き換えたあと、配布コピーのずれを検出する", async () => {
+  // harness-learn sync は正本の references/learned-auto.md を書き換えるが、
+  // 配布コピーは setup を再実行するまで古いまま。すると運営者のエージェントは
+  // 古い指示を読み、記録には新しい指紋が残る——記録が、実際に使われたものと
+  // 別のものを指す。
+  const report = await runHarnessDoctor();
+  const drift = report.checks.find((check) => check.id === "shipped-skill-drift");
+  assert.ok(drift, "ずれの検査があること");
+  assert.equal(drift.required, false, "canvas だけ使う人を止めないこと");
+  if (!drift.ok) {
+    assert.match(drift.fix, /setup-agents/u, "配布し直しの手順を示すこと");
+  }
+});
+
+test("任意項目の未充足を、実害と違う言い方で報告しない", async () => {
+  // 「ゲートが skip になる」と一括で書くと、実際には起きないことを述べる
+  // ことになる（配布コピーのずれはゲートを skip させない）。
+  const report = await runHarnessDoctor();
+  for (const id of report.advisory) {
+    const check = report.checks.find((entry) => entry.id === id);
+    assert.ok(check, `${id} の詳細があること`);
+    assert.ok(check.detail && check.detail.length > 0, `${id}: 何が未充足なのかを述べること`);
+  }
+});
