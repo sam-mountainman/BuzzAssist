@@ -87,6 +87,11 @@ test("証拠のない判定と、理由のない skip は受け取らない", ()
   assert.equal(done.summary.skipped, 1);
   assert.deepEqual(done.summary.skippedGates, [gate]);
   assert.equal(done.summary.passed, done.summary.declaredGateCount - 1, "skip を通過に数えないこと");
+  // skip は「測っていない」であって「通った」ではない。全体の判定が
+  // skipped を見ていなかったので、測っていない保証があるのに pass に
+  // なっていた——欠落を許可として扱う型。
+  assert.equal(done.outcome, "fail", "測っていない保証があるのに pass にしないこと");
+  assert.equal(done.outcomeOverridden, true);
 });
 
 test("落ちたゲートがあれば、pass と申告されても pass にならない", () => {
@@ -306,6 +311,7 @@ test("契約から保証の裏づけが全部消えたら pass ではなく skip
   assert.equal(done.gates["voice-quality-gate"].verdict, "skip", "測られていない保証を pass にしないこと");
   assert.equal(done.summary.skipped, 1);
   assert.equal(done.summary.passed, done.summary.declaredGateCount - 1);
+  assert.equal(done.outcome, "fail", "契約が縮んで測れなくなった保証を、全体 pass に飲み込まないこと");
 });
 
 test("実在する過去の監査レポートで、記録とレポートの判定が一致する", async (t) => {
@@ -423,4 +429,68 @@ test("契約に監査が増えて対応付けを忘れたら、記録は作れ�
     }),
     /複数の保証に紐づいている/u,
   );
+});
+
+test("同じ id の重複を、黙って後勝ちにしない", async () => {
+  // Map は同じ id を黙って上書きする。fail のあとに pass が来れば pass に
+  // なり、順序ひとつで判定が変わる。どちらが正しいか決められない入力は、
+  // 黙って片方を選ぶより落とす方がいい。
+  const { readFileSync } = await import("node:fs");
+  const { recordGatesFromAuditSteps } = await import("../lib/harnessRunReceipt.mjs");
+  const declaration = JSON.parse(readFileSync(join(root, "config/harnesses/koya-manga-video.harness.json"), "utf8"));
+  const mapped = declaration.guarantees.flatMap((g) => g.evidenceAuditIds);
+  const target = mapped[0];
+
+  // 同じ監査が fail → pass の順で2度来る。
+  assert.throws(
+    () => recordGatesFromAuditSteps(openManga(), {
+      declaration,
+      steps: [{ id: target, pass: false }, ...mapped.map((id) => ({ id, pass: true }))],
+      requiredAuditIds: mapped,
+      contractVersion: "koya-manga-production-v51",
+    }),
+    /監査結果 .+ が重複|同じ id が重複/u,
+    "重複した監査結果を落とすこと",
+  );
+
+  // 保証の id が重複。
+  const dupGuarantee = structuredClone(declaration);
+  dupGuarantee.guarantees.push({ ...dupGuarantee.guarantees[0], evidenceAuditIds: ["contract-manifest"] });
+  assert.throws(
+    () => recordGatesFromAuditSteps(openManga(), {
+      declaration: dupGuarantee,
+      steps: mapped.map((id) => ({ id, pass: true })),
+      requiredAuditIds: mapped,
+      contractVersion: "koya-manga-production-v51",
+    }),
+    /同じ id が重複/u,
+    "重複した保証を落とすこと",
+  );
+
+  // 契約の必須監査が重複。
+  assert.throws(
+    () => recordGatesFromAuditSteps(openManga(), {
+      declaration,
+      steps: mapped.map((id) => ({ id, pass: true })),
+      requiredAuditIds: [...mapped, target],
+      contractVersion: "koya-manga-production-v51",
+    }),
+    /同じ id が重複/u,
+  );
+});
+
+test("指紋の取れない層があれば、記録を作らない", async () => {
+  // null の指紋を受理していたせいで「全スキルの指紋が null」が長く残った。
+  // 同じ故障は別環境でいつでも再発する——空の pack、配置替え、パスの取り違え。
+  const { computeHarnessBuild } = await import("../lib/harnessRunReceipt.mjs");
+  const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+  const sandbox = await mkdtemp(join(tmpdir(), "empty-pack-"));
+  await mkdir(join(sandbox, "channel-packs", "hollow"), { recursive: true });
+  await writeFile(join(sandbox, "channel-packs", "hollow", "README.txt"), "json が1つも無い pack\n");
+  assert.throws(
+    () => computeHarnessBuild({ projectDir: sandbox, harnessId: "koya-manga-video" }),
+    /指紋を取れなかった層がある/u,
+    "空の pack を受理しないこと",
+  );
+  await rm(sandbox, { recursive: true, force: true });
 });
