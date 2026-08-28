@@ -453,3 +453,28 @@ test("Channel Pack が選ばれている限り、キャスト未検出は免除�
   assert.equal(compat.active, false);
   assert.equal(compat.pass, true, "pack 未選択のときまで縛らないこと");
 });
+
+test("共有層は特定チャンネルを既定として知らない", async () => {
+  // 共有層に既定の pack id を直書きしていると、3層分離が崩れる。
+  // 運営者が増えるたび「誰の pack が既定か」が暗黙になり、
+  // 複数あるときに黙って1つを選ぶと、別チャンネルの番組ルールで本番が走る。
+  const { resolveDefaultPackId } = await import("../lib/channelPackResolver.mjs");
+  const source = await readFile(join(root, "lib/channelPackResolver.mjs"), "utf8");
+  assert.equal(/\|\|\s*"[a-z-]+"\s*;/u.test(source.split("resolveDefaultPackId")[0]), false,
+    "解決層にクライアント由来の既定 pack id が直書きされている");
+
+  const bare = await mkdtemp(join(tmpdir(), "packless-"));
+  assert.equal(resolveDefaultPackId(bare), "", "pack が無ければ既定も無い");
+
+  const many = await mkdtemp(join(tmpdir(), "multipack-"));
+  await mkdir(join(many, "channel-packs", "alpha"), { recursive: true });
+  await mkdir(join(many, "channel-packs", "beta"), { recursive: true });
+  assert.throws(() => resolveDefaultPackId(many), /明示すること/u,
+    "複数あるのに黙って1つを選んではいけない");
+
+  const one = await mkdtemp(join(tmpdir(), "onepack-"));
+  await mkdir(join(one, "channel-packs", "solo"), { recursive: true });
+  assert.equal(resolveDefaultPackId(one), "solo", "1つしか無ければそれを使う");
+
+  for (const dir of [bare, many, one]) await rm(dir, { recursive: true, force: true });
+});
