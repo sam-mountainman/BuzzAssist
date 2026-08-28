@@ -22,10 +22,13 @@ test("必須と任意を混ぜない", async () => {
   const required = report.checks.filter((check) => check.required).map((check) => check.id);
   const optional = report.checks.filter((check) => !check.required).map((check) => check.id);
 
-  for (const id of ["node", "ffmpeg", "ffprobe", "tts-key", "image-key"]) {
+  // 音声品質ゲートは必須。正規入口が既定で有効にしていて、環境が無いと
+  // 有償生成の手前で止まる——ready と言った直後に止まるなら ready ではない。
+  for (const id of ["node", "ffmpeg", "ffprobe", "voice-quality-python", "tts-key", "image-key"]) {
     assert.ok(required.includes(id), `${id} は必須であること`);
   }
-  for (const id of ["python3", "channel-pack"]) {
+  // Channel Pack だけが任意。無くてもジャンル共通の工程は動く。
+  for (const id of ["channel-pack"]) {
     assert.ok(optional.includes(id), `${id} は任意であること（無くても回せる工程がある）`);
   }
   // ready は必須だけで決まる。
@@ -77,7 +80,7 @@ test("足りないものには必ず直し方が付く（全部欠けた環境�
     assert.ok(check.fix && check.fix.length > 10, `${check.id}: 直し方が書かれていない`);
   }
   // 必須の全項目が、この環境では落ちていること。
-  for (const id of ["ffmpeg", "ffprobe", "tts-key", "image-key"]) {
+  for (const id of ["ffmpeg", "ffprobe", "voice-quality-python", "tts-key", "image-key"]) {
     const check = report.checks.find((entry) => entry.id === id);
     assert.equal(check.ok, false, `${id} は前提の無い環境で落ちること`);
     assert.ok(check.fix.length > 10, `${id} の直し方`);
