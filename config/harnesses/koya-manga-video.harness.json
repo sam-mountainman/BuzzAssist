@@ -1,0 +1,81 @@
+{
+  "id": "koya-manga-video",
+  "version": "1.0.0",
+  "displayName": "漫画動画（固定キャスト・縦組み吹き出し）",
+  "note": "クライアント名・チャンネル名はここに書かない。ここは『何が作れるか』の宣言であって、誰のためのものかの記録ではない。ルーターと横断レビューはこのファイルだけを読む。",
+  "produces": {
+    "kind": "manga-video",
+    "description": "台本から、固定キャストの漫画ページを生成し、縦組み吹き出しと音声を載せた動画にする",
+    "aspectRatios": [
+      "16:9"
+    ],
+    "typicalLengthSeconds": [
+      180,
+      600
+    ]
+  },
+  "requiresFromOperator": [
+    {
+      "id": "script",
+      "what": "日本語の台本",
+      "blocking": true
+    },
+    {
+      "id": "cast",
+      "what": "登場人物の設定（承認済みキャラシート）",
+      "blocking": true
+    },
+    {
+      "id": "protagonist-voice",
+      "what": "主人公の承認済み音声。ナレーションも同じ声を使う",
+      "blocking": true
+    },
+    {
+      "id": "visual-profile",
+      "what": "チャンネルの画風ロック",
+      "blocking": true
+    }
+  ],
+  "guarantees": [
+    {
+      "id": "character-attribute-gate",
+      "what": "髪色ドリフト・微差テイク・意図外変更・装飾混入を決定論で落とす",
+      "human": "目の左右のみ人手（reviewer名必須）"
+    },
+    {
+      "id": "voice-quality-gate",
+      "what": "CER・UTMOS・F0分散・モーラ速度・端無音・クリッピングでテイクを選別。全滅なら停止"
+    },
+    {
+      "id": "camera-grammar",
+      "what": "方向移動／引き／方向後引きの3系統を強制し、全カット引きを防ぐ"
+    },
+    {
+      "id": "final-audit",
+      "what": "レンダー済みMP4の実測監査。設定値ではなく出力を見る"
+    }
+  ],
+  "entrypoint": "node scripts/koya-manga-video.mjs",
+  "canonicalSkills": [
+    ".agents/skills/manga-video-production/SKILL.md",
+    ".agents/skills/manga-page-camera/SKILL.md"
+  ],
+  "learningTargets": [
+    "skill:manga-video-production",
+    "skill:manga-page-camera",
+    "ledger:koya"
+  ],
+  "status": "in-production",
+  "statusNote": "固定キャスト11人のうち4人が承認済み。残りはクライアントの選択待ち",
+  "keywords": [
+    "漫画",
+    "まんが",
+    "マンガ",
+    "コマ",
+    "吹き出し",
+    "キャラ",
+    "スカッと",
+    "manga"
+  ],
+  "keywordsNote": "依頼文からこのハーネスを言い当てるための短い手掛かり。日本語は空白で区切れないので、依頼文を刻むのではなくこちらの語が現れるかで見る。"
+}

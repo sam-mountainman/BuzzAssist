@@ -1,0 +1,90 @@
+{
+  "id": "narrated-story-video",
+  "version": "1.0.0",
+  "displayName": "ナレーション物語動画（実写素材＋カメラワーク）",
+  "note": "クライアント名・チャンネル名はここに書かない。ここは『何が作れるか』の宣言であって、誰のためのものかの記録ではない。",
+  "produces": {
+    "kind": "narrated-story-video",
+    "description": "台本から、シーン画像にカメラワークを当て、ナレーションと字幕とBGMを載せた動画にする",
+    "aspectRatios": [
+      "16:9"
+    ],
+    "typicalLengthSeconds": [
+      120,
+      300
+    ]
+  },
+  "requiresFromOperator": [
+    {
+      "id": "script",
+      "what": "日本語の台本（セグメント分割済み）",
+      "blocking": true
+    },
+    {
+      "id": "scene-images",
+      "what": "各セグメントの画像",
+      "blocking": true
+    },
+    {
+      "id": "voice-selection",
+      "what": "匿名試聴で選んだ音声。ライセンス済みのもの",
+      "blocking": true
+    },
+    {
+      "id": "bgm",
+      "what": "BGM素材と、その割当の人手承認",
+      "blocking": true
+    },
+    {
+      "id": "presenter-video",
+      "what": "本人の撮影素材（レビュー章を付ける場合のみ）",
+      "blocking": false
+    }
+  ],
+  "guarantees": [
+    {
+      "id": "audio-loudness",
+      "what": "統合-14 LUFS ±0.5、トゥルーピーク ≤ -1.5 dBFS"
+    },
+    {
+      "id": "narration-intelligibility",
+      "what": "各発話区間で voice RMS − bed RMS ≥ 6dB。全体が合格でもナレーションが埋もれていれば落とす"
+    },
+    {
+      "id": "duration-conformance",
+      "what": "ナレーション実尺が計画比±3%。超えたら画の尺を再計画する"
+    },
+    {
+      "id": "content-addressing",
+      "what": "text/voice/model/endpoint/params の指紋でキャッシュを識別。台本を直せば必ず作り直す"
+    },
+    {
+      "id": "external-visual-signoff",
+      "what": "目視サインオフは外部が書いたものだけを受け取る。finalizerは転記のみ"
+    },
+    {
+      "id": "camera-continuity",
+      "what": "全カットの開始/終了フレームを実測し、停止・逆走・座標飛びを落とす"
+    }
+  ],
+  "entrypoint": "npm run --prefix <deployment-dir>",
+  "canonicalSkills": [],
+  "learningTargets": [
+    "doc:mike-audio-gates"
+  ],
+  "status": "awaiting-operator-assets",
+  "statusNote": "本編マスターは完成・監査済み。レビュー章は本人の撮影素材待ち",
+  "entrypointNote": "実際の配置先は config/harness-deployments.json に持つ。宣言にクライアント固有のパスを書くと、この台帳自体を共有できなくなる。",
+  "keywords": [
+    "ナレーション",
+    "朗読",
+    "物語",
+    "ストーリー",
+    "実話",
+    "bgm",
+    "字幕",
+    "テロップ",
+    "感動"
+  ],
+  "keywordsNote": "依頼文からこのハーネスを言い当てるための短い手掛かり。日本語は空白で区切れないので、依頼文を刻むのではなくこちらの語が現れるかで見る。"
+}
