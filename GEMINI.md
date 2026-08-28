@@ -1,4 +1,19 @@
 <!-- BUZZASSIST:START -->
+# Koya manga video — mandatory route
+
+For any request that produces, changes, reviews, repairs, renders, or audits a
+Japanese manga video, read these canonical skills completely first:
+
+- `.agents/skills/manga-video-production/SKILL.md`
+- `.agents/skills/manga-page-camera/SKILL.md`
+
+Use `node scripts/koya-manga-video.mjs` as the only production entrypoint for new
+episodes. The quality gates documented in that skill (voice quality, character
+attribute gate, blind comparison) are host-agnostic and apply here identically.
+Do not claim completion until the official final audit passes, the MP4-derived
+contact-sheet signoff is valid, `knownRemainingIssues` is empty, and the real
+MP4 fully decodes.
+
 # BuzzAssist Agent Setup
 
 When the user gives this repository URL and asks to set it up, do the setup end to end for Antigravity only.

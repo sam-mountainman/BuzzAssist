@@ -9,6 +9,11 @@
         "EXCALIDRAW_PROJECT_DIR": "${workspaceFolder}",
         "EXCALIDRAW_CANVAS_DIR": "${workspaceFolder}/canvas"
       }
+    },
+    "excalidraw_official": {
+      "type": "http",
+      "url": "https://mcp.excalidraw.com/mcp",
+      "note": "Official Excalidraw MCP App. Present in .mcp.json for Claude Code; mirrored here so Codex and other hosts get the same tool surface."
     }
   }
 }

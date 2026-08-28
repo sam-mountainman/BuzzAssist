@@ -44,6 +44,65 @@ node scripts/koya-manga-video.mjs full --script-path /absolute/script.txt --epis
 
 `full`は再開可能である。終了コード2または3は完成ではない。`koya-production-state.json`を読み、承認待ち・利用上限・失敗箇所から、合格済み成果を再生成せず再開する。
 
+## 品質ゲート（2026-08-28 追加。Claude Code / Codex 共通）
+
+機械で測れるものは人間の目視より先に落とす。実行系はホストに依存しないため、
+どちらのホストから起動しても同じ判定になる。
+
+### 音声（台帳R194〜R195、R197、R199）
+
+`speech`と`full`では音声品質ゲートが**既定でON**である。無効化するには
+理由の明示が要る。
+
+```bash
+node scripts/koya-manga-video.mjs speech --episode-id <id>
+# 無効化する場合のみ（監査に残る）
+node scripts/koya-manga-video.mjs speech --episode-id <id> \
+  --no-voice-quality-gate --voice-quality-gate-override-reason "<理由>"
+```
+
+- hard failのテイクは選定の適格集合から除外される。全滅時は最大4テイクまで
+  自動追加し、それでも全滅ならカットを停止して人間へ渡す。
+- 必須メトリクス（UTMOS、全発話のCER）が測れなかったテイクもhard failとする。
+  測れなかったものをpassにしない。
+- Python実行系は`VOICE_QA_PYTHON`（既定`/usr/bin/python3`）で固定する。
+  `python3`はホストや起動経路によって解決先が変わり、依存の無い実行系を引くと
+  ゲートが黙って無効になる。
+- 手順の詳細は`docs/koya-voice-quality-runbook-ja.md`。
+
+### キャラクター（台帳R192、R196、R200）
+
+候補・修正画像は人間の目視の前に属性ゲートを通す。
+
+```bash
+node scripts/koya-manga-video.mjs character-attribute-gate \
+  --inventory-path canvas/attribute-gates/<cast>-<round>.json
+```
+
+- 髪色Δ、微差テイク（pHash）、意図外変更、装飾スクリーニング、目の左右（人手）。
+- 被覆はasset単位で、別assetの同型チェックで代替できない。必須ゲートが1件でも
+  未実行なら不合格。
+- 目の左右は機械判定できないため、reviewer名付きのアテステーションが要る。
+- 実行系は`KOYA_GATE_PYTHON`（既定`/usr/bin/python3`）。
+- 不合格からのやり直しは`lib/characterRepairPlan.mjs`のrepair-planを作ってから。
+  修正ROIが次ラウンドの許可領域になり、それ以外の変化は落とされる。
+- 手順の詳細は`docs/koya-character-gate-runbook-ja.md`。
+
+### 匿名比較（台帳R198）
+
+人間が選ぶ場面では出所を伏せる。
+
+```bash
+# 公式blind packetを見る（閲覧用）
+node scripts/koya-open-blind-arena.mjs --public <judge-packet.json>
+# パケット外（音声テイク等）を匿名化して比較
+node scripts/koya-blind-review.mjs open --set <spec.json>
+node scripts/koya-blind-review.mjs record --set <spec.json> --winner A --reviewer <名前> --note "<理由>"
+```
+
+採用の記録は公式CLI（`character-approve`、`character-style-select`）に残す。
+アリーナの選択は記録ではない。
+
 ## 制作手順
 
 1. 台本を省略・要約せず解析し、時系列、人物、読み、感情曲線、発話、画面上の証拠を固定する。`koya-story-review-v1`へ攻撃1/2/3、イブキの号砲、証拠、主人公本人のとどめ、登場時だけタツの退路封鎖1行を実発話IDで記録し、実在地名/ブランド、暴力美化、悪役コメディ、酒語彙抑制を確認する。`story-audit`合格後の同じreviewを`plan/full --story-review-path`へ渡す。台本変更後の古いreviewは使わない。
