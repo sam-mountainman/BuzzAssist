@@ -28,6 +28,17 @@ MP4 fully decodes.
 `node scripts/harness-parallel-agents.mjs`（LLM判断層）で、
 Claude Code と Codex のどちらから実行しても同じ結果になる。
 
+# 自己改善 — 指摘を次のセッションへ残す
+
+ユーザーから訂正・好み・禁止事項を受けたとき、こちらの誤りが判明したとき、
+実測で新しい事実が分かったときは、その場の修正で終わらせずに先にこれを読む:
+
+- `.agents/skills/harness-self-improvement/SKILL.md`
+
+入口は `node scripts/harness-learn.mjs`。捕捉は何も書き換えず、統合は既定で
+dry-run、正本への反映には reviewer 名が要る。自動で正本を書き換える作りに
+していないのは、それが「自分で自分に合格を出す」構造になるため。
+
 # BuzzAssist Agent Setup
 
 When the user gives this repository URL and asks to set it up, do the setup end to end for Antigravity only.
