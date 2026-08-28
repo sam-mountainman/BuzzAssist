@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { access, cp, mkdir, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
-import { constants } from "node:fs";
+import { constants, existsSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
@@ -357,6 +357,55 @@ async function refreshManagedPluginSource() {
     ".agents",
   ]) {
     await copyIfExists(join(repoRoot, dirName), join(tmpPluginRoot, dirName));
+  }
+
+  // ハーネスの正本スキルを、ホストが実際に読む場所へ置く。
+  //
+  // plugin.json の "skills" は ./skills/ を指している。正本は .agents/skills/ に
+  // あり、プラグインには同梱されていたが**その位置からは読み込まれない**ので、
+  // 運営者が入れても manga-video-production も platform-craft も1つも
+  // 有効にならなかった。CLAUDE.md が「必ず先に読め」と定めた正本が、
+  // 配布物の中に在るのに届いていない状態だった。
+  // 開発機ではリポジトリの .claude/skills アダプタが効くので気づけない。
+/**
+ * 配布先の深さに合わせて、スキル内の相対参照を1階層浅くする。
+ *
+ * 正本は `.agents/skills/<name>/SKILL.md`（リポジトリルートまで ../../../）、
+ * 配布先は `skills/<name>/SKILL.md`（プラグインルートまで ../../）。
+ * 書き換えずに配ると、全ての参照がプラグインの外を指す。
+ */
+async function rewriteSkillRelativeDepth(skillDir) {
+  for (const entry of await readdir(skillDir, { withFileTypes: true, recursive: true })) {
+    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+    const filePath = join(entry.parentPath ?? entry.path ?? skillDir, entry.name);
+    const original = await readFile(filePath, "utf8");
+    const rewritten = original.replaceAll("../../../", "../../");
+    if (rewritten !== original) await writeFile(filePath, rewritten, "utf8");
+  }
+}
+
+  const canonicalSkillsRoot = join(repoRoot, ".agents", "skills");
+  const shippedSkillsRoot = join(tmpPluginRoot, "skills");
+  let shippedHarnessSkills = 0;
+  if (existsSync(canonicalSkillsRoot)) {
+    for (const entry of await readdir(canonicalSkillsRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const source = join(canonicalSkillsRoot, entry.name);
+      if (!existsSync(join(source, "SKILL.md"))) continue;
+      const destination = join(shippedSkillsRoot, entry.name);
+      await copyIfExists(source, destination);
+      // 正本は .agents/skills/<name>/ にあり、配布先は skills/<name>/ で
+      // 1階層浅い。相対参照をそのまま持ち込むと全部プラグインの外を指す。
+      await rewriteSkillRelativeDepth(destination);
+      shippedHarnessSkills += 1;
+    }
+  }
+  if (shippedHarnessSkills === 0) {
+    throw new Error(
+      "ハーネスの正本スキルを1つも配布物へ入れられませんでした。"
+      + ".agents/skills/<name>/SKILL.md を確認してください"
+      + "（スキルの無い配布物は、MCP は動いても手順の正本が届かない）。",
+    );
   }
 
   for (const fileName of [

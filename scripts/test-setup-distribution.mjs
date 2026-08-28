@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -150,6 +150,34 @@ async function runHostSetup(host) {
       );
     }
     await readFile(path.join(pluginRoot, "docs", "koya-harness-handoff-ja.md"), "utf8");
+
+    // ハーネスの正本スキルがホストの読む位置に在ること。
+    // plugin.json の "skills" は ./skills/ を指すので、.agents/skills/ に
+    // 同梱されているだけでは1つも有効にならない。実際その状態で配っており、
+    // 運営者には MCP は届くのに手順の正本が届いていなかった。
+    // 開発機ではリポジトリの .claude/skills アダプタが効くので気づけない。
+    const canonicalSkillsRoot = path.join(repoRoot, ".agents", "skills");
+    const canonicalSkillNames = (await readdir(canonicalSkillsRoot, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory() && existsSync(path.join(canonicalSkillsRoot, entry.name, "SKILL.md")))
+      .map((entry) => entry.name);
+    assert.ok(canonicalSkillNames.length > 0, "正本スキルが1つも無い");
+    for (const name of canonicalSkillNames) {
+      const shipped = path.join(pluginRoot, "skills", name, "SKILL.md");
+      assert.equal(existsSync(shipped), true, `正本スキルが配布物のskills/に無い: ${name}`);
+    }
+
+    // 配布物の中で相対参照が解決すること。正本は .agents/skills/<name>/ で
+    // 配布先は skills/<name>/ と1階層浅いので、書き換えずに配ると全部外を指す。
+    for (const name of canonicalSkillNames) {
+      const skillDir = path.join(pluginRoot, "skills", name);
+      const body = await readFile(path.join(skillDir, "SKILL.md"), "utf8");
+      for (const ref of new Set(body.match(/\.\.\/[.\/a-zA-Z0-9_-]+/gu) || [])) {
+        assert.equal(
+          existsSync(path.resolve(skillDir, ref)), true,
+          `配布物のスキル ${name} の相対参照が壊れています: ${ref}`,
+        );
+      }
+    }
     await readFile(path.join(pluginRoot, "scripts", "update-current.mjs"), "utf8");
     await readFile(path.join(pluginRoot, "scripts", "verify-plugin-runtime.mjs"), "utf8");
     const updaterConfig = JSON.parse(await readFile(path.join(homeDir, ".buzzassist", "updater", "config.json"), "utf8"));

@@ -14,7 +14,7 @@ description: 日本語漫画動画の台本設計、キャラクター、画像�
 変更や有料生成の前に次を最後まで読む。
 
 1. `../../../config/koya-manga-production-contract.json` — 実行可能な既定値と必須監査。全項目は隣接するJSON Schemaで閉じ、未知キーや型崩れを許さない
-2. `../../../docs/koya-channel-requirements-ledger.md` — ユーザー要求の時系列。矛盾時は、明示されたエピソード例外を除き、後の要求を優先する
+2. Channel Pack の要求台帳（`channel-packs/<id>/docs/koya-channel-requirements-ledger.md`）— ユーザー要求の時系列。矛盾時は、明示されたエピソード例外を除き、後の要求を優先する
 3. `../../../config/koya-manga-episode-overrides/<episode-id>.json` — 存在するときだけ読む凍結済み例外
 4. `references/quality-contract-ja.md` — セッション横断で一般化した台本・絵・音声・編集品質
 5. `references/final-review-ja.md` — 実MP4の知覚レビューと完了判定
@@ -22,8 +22,8 @@ description: 日本語漫画動画の台本設計、キャラクター、画像�
 7. `../../../config/koya-manga-quality-incidents.json` — 新しい環境にも配布する一般化済み事故seed。実行時台帳とマージし、強い昇格状態を下げない
 8. Channel Pack の show bible（`channel-packs/<id>/config/koya-show-bible.json`。解決は `resolveChannelPackPath`）— 舞台設定、固定キャラの役割・口調、逆転型、最新の承認/保留状態。後日の明示修正が旧PDF指定を上書きする
 9. Channel Pack の location bible — 番組の定点となる店舗と町の、人物なし背景ボード仕様。承認画像がないlocationを登録しない
-10. `../../../config/koya-thumbnail-contract.json` — 専用サムネ画像、中央帯、2/3コマ、文字数・具体名詞制約。pendingの色・書体を推測しない
-11. `../../../docs/koya-channel-governance-ja.md` — 台本beat review、背景4視点review、サムネpreflight/finalの実行形式
+10. Channel Pack の thumbnail contract（解決は `resolveChannelPackPath`）— 専用サムネ画像、中央帯、2/3コマ、文字数・具体名詞制約。pendingの色・書体を推測しない
+11. Channel Pack の番組ガバナンス文書（`channel-packs/<id>/docs/koya-channel-governance-ja.md`）— 台本beat review、背景4視点review、サムネpreflight/finalの実行形式
 
 JSON契約が実行設定の正本、要求台帳が理由の正本である。コード・本スキル・契約が食い違う場合は制作を止め、同じ変更内で整合させる。
 
