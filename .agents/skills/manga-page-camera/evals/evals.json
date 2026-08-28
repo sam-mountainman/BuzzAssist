@@ -1,28 +1,37 @@
 {
-  "skill": "manga-page-camera",
+  "skill_name": "manga-page-camera",
   "evals": [
     {
-      "id": "pullout-monotony",
+      "id": 1,
+      "name": "pullout-monotony",
       "prompt": "全カットがズームアウトで単調。漫画動画の基準に直して。",
-      "expectedBehavior": [
+      "expected_output": "方向のみと方向後の引きを追加する",
+      "files": [],
+      "expectations": [
         "方向のみと方向後の引きを追加する",
         "元画像の視点意味と移動量を検証する",
         "実MP4を測り、push-in・停止・clampを拒否する"
       ]
     },
     {
-      "id": "split-page",
+      "id": 2,
+      "name": "split-page",
       "prompt": "3分割画面の各パネルを別々に動かしたい。",
-      "expectedBehavior": [
+      "expected_output": "panel別の動きを拒否する",
+      "files": [],
+      "expectations": [
         "panel別の動きを拒否する",
         "静止panelをflattenしてからページ全体を1台のカメラで動かす",
         "黒ガターと実レンダー移動を監査する"
       ]
     },
     {
-      "id": "source-viewpoint",
+      "id": 3,
+      "name": "source-viewpoint",
       "prompt": "正面絵を横へパンすればleft-view扱いでいい？",
-      "expectedBehavior": [
+      "expected_output": "crop移動で元画像視点を偽装する案を拒否する",
+      "files": [],
+      "expectations": [
         "crop移動で元画像視点を偽装する案を拒否する",
         "left/right/topを実際の生成視点として設計する",
         "視点とページ変換を別の項目として監査する"
