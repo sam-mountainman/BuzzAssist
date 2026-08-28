@@ -1019,6 +1019,37 @@ async function main() {
   }
   const autoUpdateStatus = await configureAutoUpdate(pluginDir, results);
 
+  // ホストの設定が済んだことと、ハーネスが動かせることは別。ここを区別せずに
+  // 「configured」だけ出していたので、運営者が最初の本番を回したときに
+  // パイプラインの奥で生の ENOENT が出て止まっていた。
+  //
+  // 自動更新ブロックの中に置いていたせいで、対象外のホストと
+  // --no-auto-update では yes/no/unknown のどれも出ないまま
+  // 「configured」だけが見えていた——確認しなかったことが、
+  // 確認して問題なかったことと区別できない状態。必ず1回出す。
+  // setup 自体は止めない（canvas だけ使いたい人まで設定できなくなる）。
+  try {
+    const { runHarnessDoctor } = await import("./harness-doctor.mjs");
+    const report = await runHarnessDoctor({ projectDir });
+    console.log(`BUZZASSIST_HARNESS_READY=${report.ready ? "yes" : "no"}`);
+    if (!report.ready) {
+      console.log("動画ハーネスを回すには、まだ足りないものがあります:");
+      for (const check of report.checks.filter((entry) => entry.required && !entry.ok)) {
+        console.log(`  - ${check.id}: ${check.fix}`);
+      }
+      console.log("  詳しくは: node scripts/harness-doctor.mjs");
+    } else if (report.advisory.length > 0) {
+      console.log(`任意の前提が未充足（該当ゲートは skip されます）: ${report.advisory.join(", ")}`);
+    }
+    // doctor は setup を起動したシェルの環境を見ている。GUI ホストから
+    // 起動したときに同じ環境が見えるとは限らないので、そのことを記録する。
+    console.log("BUZZASSIST_HARNESS_READY_SCOPE=setup-shell-environment");
+  } catch (error) {
+    // 「確認できなかった」を「問題なし」に見せない。
+    console.log("BUZZASSIST_HARNESS_READY=unknown");
+    console.log(`  前提チェックを実行できませんでした: ${String(error?.message || error).slice(0, 160)}`);
+  }
+
   const tunnelStatus = launchTunnel ? await launchCanvasTunnel() : null;
   const discovery = launchCanvas
     ? (launchTunnel
@@ -1050,30 +1081,6 @@ async function main() {
   }
   if (autoUpdateStatus?.enabled) {
     console.log("BUZZASSIST_AUTO_UPDATE=enabled");
-
-    // ホストの設定が済んだことと、ハーネスが動かせることは別。ここを
-    // 区別せずに「configured」だけ出していたので、運営者が最初の本番を
-    // 回したときにパイプラインの奥で生の ENOENT が出て止まっていた。
-    // setup 自体は止めない——canvas だけ使いたい人まで設定できなくなる。
-    try {
-      const { runHarnessDoctor } = await import("./harness-doctor.mjs");
-      const report = await runHarnessDoctor({ projectDir });
-      console.log(`BUZZASSIST_HARNESS_READY=${report.ready ? "yes" : "no"}`);
-      if (!report.ready) {
-        console.log("動画ハーネスを回すには、まだ足りないものがあります:");
-        for (const check of report.checks.filter((entry) => entry.required && !entry.ok)) {
-          console.log(`  - ${check.id}: ${check.fix}`);
-        }
-        console.log("  詳しくは: node scripts/harness-doctor.mjs");
-      } else if (report.advisory.length > 0) {
-        console.log(`任意の前提が未充足（該当ゲートは skip されます）: ${report.advisory.join(", ")}`);
-      }
-    } catch (error) {
-      // 前提チェック自体が落ちても setup は成立している。ただし
-      // 「確認できなかった」を「問題なし」に見せない。
-      console.log("BUZZASSIST_HARNESS_READY=unknown");
-      console.log(`  前提チェックを実行できませんでした: ${String(error?.message || error).slice(0, 160)}`);
-    }
     console.log(`BUZZASSIST_AUTO_UPDATE_HOSTS=${autoUpdateStatus.hosts.join(",")}`);
     console.log("Stable GitHub Releases are checked daily at 03:17 local time. Updates are verified and rolled back on failure; restart the host to load a newly installed version.");
   }
