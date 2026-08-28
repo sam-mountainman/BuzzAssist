@@ -37,7 +37,11 @@ async function installAuthority(projectDir) {
   }
   const showBible = JSON.parse(await readFile(resolveChannelPackPath(root, "config/koya-show-bible.json"), "utf8"));
   const paths = [...new Set(showBible.cast.flatMap((member) => [member.stylingSpecPath, ...(member.stylingSpecPaths || [])]).filter(Boolean))];
-  for (const relativePath of paths) await writeFile(join(projectDir, relativePath), await readFile(join(root, relativePath)));
+  // styling spec も Channel Pack 側にある。複製元を解決層に探させないと、
+  // pack を分離した環境で fixture が組み立てられない。
+  for (const relativePath of paths) {
+    await writeFile(join(projectDir, relativePath), await readFile(resolveChannelPackPath(root, relativePath)));
+  }
 }
 
 test("Koya authority is all-or-nothing and validates the three channel contracts", async () => {

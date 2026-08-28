@@ -35,3 +35,7 @@ channel-packs/
 # gitlink であっても、公開リポジトリに案件名が残る。
 client-work/
 config/harness-deployments.json
+
+# Channel Pack への橋渡しリンク（従来パスからの互換）。実体は channel-packs/。
+config/koya-character-styling
+config/koya-manga-source-face-reviews

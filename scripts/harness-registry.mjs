@@ -31,9 +31,10 @@ const HARNESS_DIR = path.join(REPO_ROOT, "config", "harnesses");
 // 自分自身を弾く状態になった）。
 export const CLIENT_IDENTIFIERS = Object.freeze([
   "\u5e78\u8c37",        // 運営者の姓
-  "\u30de\u30a4\u30af", // 運営者の通称
+  "\u30de\u30a4\u30af\u3055\u3093", // 運営者の通称（敬称つきでのみ判定。
+                                          // 「マイク」単体は音響機材の一般語で誤検出する）
   "manga-channel",
-  "narrated-story",
+  "narrated-story-deployment",
 ]);
 
 export function loadHarnesses(dir = HARNESS_DIR) {

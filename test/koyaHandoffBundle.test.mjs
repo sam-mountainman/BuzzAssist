@@ -33,7 +33,7 @@ async function prepareProject(root, withData = true) {
     "config/koya-manga-quality-incidents.json",
   ];
   for (const relativePath of configFiles) await copyConfig(repoRoot, root, relativePath);
-  const stylingDirectory = path.join(repoRoot, "config", "koya-character-styling");
+  const stylingDirectory = resolveChannelPackPath(repoRoot, "config/koya-character-styling");
   for (const name of (await readdir(stylingDirectory)).filter((entry) => entry.endsWith(".json")).sort()) {
     await copyConfig(repoRoot, root, path.join("config", "koya-character-styling", name));
   }
