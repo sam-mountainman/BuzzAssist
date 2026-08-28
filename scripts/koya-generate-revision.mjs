@@ -71,13 +71,19 @@ let failures = 0;
 const seenOutputs = new Set();
 
 // job.out の重複検査は、生成を始める前に全件まとめて済ませる。
-// 並列にすると Set への追加順が実行順に依存してしまい、
-// 「どちらが重複と判定されるか」が実行のたびに変わるため。
-for (const job of spec.jobs) {
-  if (job && typeof job === "object" && typeof job.out === "string") {
+// 並列にすると Set への追加順が実行順に依存してしまい、「どちらが重複と
+// 判定されるか」が実行のたびに変わるため。ここで例外を投げてしまうと
+// 後続ジョブの問題が報告されなくなるので、却下は記録に留めて
+// 全件の検査を続ける（従来どおり全部の理由を出して exit 2 で終わる）。
+const preRejected = new Map();
+for (const [index, job] of spec.jobs.entries()) {
+  try {
+    if (!job || typeof job !== "object") throw new Error("every job must be an object");
     const outPath = containedOutputPath(job.out);
     if (seenOutputs.has(outPath)) throw new Error(`duplicate job.out: ${job.out}`);
     seenOutputs.add(outPath);
+  } catch (error) {
+    preRejected.set(index, error);
   }
 }
 
@@ -104,10 +110,13 @@ const appendManifest = (entry) => {
   return manifestWrite;
 };
 
-const runRevisionJob = (job) => async () => {
+const runRevisionJob = (job, index) => async () => {
   const startedAt = new Date().toISOString();
   let refs = [];
   try {
+    // 事前検査で却下されたジョブは、生成せずにそのまま失敗として報告する。
+    const preRejection = preRejected.get(index);
+    if (preRejection) throw preRejection;
     if (!job || typeof job !== "object") throw new Error("every job must be an object");
     if (!job.prompt) throw new Error("job.prompt is required");
     const outPath = containedOutputPath(job.out);
@@ -158,7 +167,7 @@ const runRevisionJob = (job) => async () => {
 };
 
 await runWithAdaptiveConcurrency(
-  spec.jobs.map((job) => runRevisionJob(job)),
+  spec.jobs.map((job, index) => runRevisionJob(job, index)),
   revisionConcurrency,
 );
 // 追記を全て流し切ってから終了コードを決める。
