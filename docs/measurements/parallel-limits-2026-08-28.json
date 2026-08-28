@@ -33,32 +33,105 @@
       "id": "codex-exec-concurrency",
       "what": "codex exec をシェルのバックグラウンドでN本同時起動し、全て完走するか",
       "runs": [
-        { "n": 4, "wallSeconds": 28, "succeeded": 4, "mcp": "有効" },
-        { "n": 12, "wallSeconds": 81, "succeeded": 12, "mcp": "有効", "warnings": "モデル一覧更新とMCP接続がタイムアウト" },
-        { "n": 8, "wallSeconds": 50, "succeeded": 8, "mcp": "無効" },
-        { "n": 16, "wallSeconds": 154, "succeeded": 16, "mcp": "無効", "task": "実ファイル読み取りあり。16体とも同一の正解(202)を返した" },
-        { "n": 11, "wallSeconds": null, "succeeded": 11, "mcp": "無効", "task": "本番のレビュー11件。read-onlyサンドボックス" }
+        {
+          "n": 4,
+          "wallSeconds": 28,
+          "succeeded": 4,
+          "mcp": "有効"
+        },
+        {
+          "n": 12,
+          "wallSeconds": 81,
+          "succeeded": 12,
+          "mcp": "有効",
+          "warnings": "モデル一覧更新とMCP接続がタイムアウト"
+        },
+        {
+          "n": 8,
+          "wallSeconds": 50,
+          "succeeded": 8,
+          "mcp": "無効"
+        },
+        {
+          "n": 16,
+          "wallSeconds": 154,
+          "succeeded": 16,
+          "mcp": "無効",
+          "task": "実ファイル読み取りあり。16体とも同一の正解(202)を返した"
+        },
+        {
+          "n": 11,
+          "wallSeconds": null,
+          "succeeded": 11,
+          "mcp": "無効",
+          "task": "本番のレビュー11件。read-onlyサンドボックス"
+        }
       ],
-      "conclusion": "8コア機で16体まで成功した観測値であり、上限を測ったものではない。CPUコア数には比例しなかった",
-      "notMeasured": ["他スペックのマシン", "反復による分散", "429の発生率", "16体超"]
+      "conclusion": "この8コア機で16本が完走した観測値。上限を測ったものではない。CPU数を変えずに測っているため『コア数に比例しない』とまでは言えない。",
+      "notMeasured": [
+        "他スペックのマシン",
+        "反復による分散",
+        "429の発生率",
+        "16本超",
+        "各プロセスのexit codeと生ログ（今回のJSONには残っていない）"
+      ]
     },
     {
       "id": "ffmpeg-parallel-gain",
       "what": "scale->zoompan->libx264(preset medium, 1080p) を逐次と並列で比較",
       "singleProcessCpuPercent": 486,
       "runs": [
-        { "clipSeconds": 1, "n": 8, "sequentialMs": 9409, "parallel2Ms": 8617, "parallel4Ms": 8357, "parallel6Ms": 8270, "parallel8Ms": 8591 },
-        { "clipSeconds": 10, "n": 6, "sequentialSeconds": 28, "parallel6Seconds": 27 }
+        {
+          "clipSeconds": 1,
+          "n": 8,
+          "sequentialMs": 9409,
+          "parallel2Ms": 8617,
+          "parallel4Ms": 8357,
+          "parallel6Ms": 8270,
+          "parallel8Ms": 8591
+        },
+        {
+          "clipSeconds": 10,
+          "n": 6,
+          "sequentialSeconds": 28,
+          "parallel6Seconds": 27
+        }
       ],
       "conclusion": "1本の ffmpeg が単体で約5コアを使うため、8コア機では並列化しても3.6%しか縮まらない",
       "scope": "この測定は8コア機・この1080p設定に限る。コア数が多い機械では別の結果になりうる"
     },
     {
       "id": "claude-code-subagent-limit",
-      "what": "Workflowツールの同時実行上限",
-      "value": "min(16, CPUコア数-2)",
-      "source": "Workflowツールの仕様記述。実測ではなく仕様値",
-      "onThisMachine": 6
+      "what": "Claude Code の同時実行上限（3系統あるので区別する）",
+      "regularSubagents": {
+        "value": 10,
+        "envVar": "CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY",
+        "cpuDependent": false,
+        "source": "実行ファイル 2.1.237 に `CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY??10` を確認"
+      },
+      "workflowAgentPool": {
+        "formula": "min(16, max(2, コア数-2))",
+        "onThisMachine": 6,
+        "cpuDependent": true,
+        "source": "実行ファイル 2.1.237 に `Math.min(16,Math.max(2,e-2))` を確認"
+      },
+      "agentTeams": {
+        "value": null,
+        "note": "公式文書にハード上限の記載なし。未実測"
+      }
+    },
+    {
+      "id": "codex-native-subagents",
+      "what": "Codex の1セッション内ネイティブ子スレッド数",
+      "observed": "同時3本まで。4本目は agent thread limit reached",
+      "configKey": {
+        "0.150.0-alpha.8": "agents.max_concurrent_threads_per_session（有効）",
+        "0.144.1": "同キーは設定読み込みに失敗。旧名 agents.max_threads は両版で有効"
+      },
+      "currentConfig": "~/.codex/config.toml に [agents] 節なし＝既定のまま",
+      "note": "外側の codex exec を N 本並べると、各プロセスが内側でさらに子を持ちうる"
     }
-  ]
+  ],
+  "correctedOn": "2026-08-29",
+  "correctionNote": "初版は Claude Code の並列上限を min(16, コア数-2) と書いていたが、これは Workflow ツールの agent() プール専用の式であり、しかも内側の max(2, …) が抜けていた。通常のサブエージェントは CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY の既定10でコア数に依存しない。Codex レビューの指摘で修正。"
 }

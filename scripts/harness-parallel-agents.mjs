@@ -7,10 +7,13 @@
 //
 //   node scripts/harness-parallel-agents.mjs --tasks <tasks.json> [--engine auto]
 //
-// なぜホスト内蔵のサブエージェントを使わないか:
-// Claude Code の並列上限は min(16, CPU-2) でマシンのコア数に縛られる（8コア機で6体）。
-// 一方 codex exec はプロセス並列なのでコア数に縛られず、実測で16体が同時に完走した。
-// 同じ台数を両ホストで出すには、両方が同じ外部CLIを呼ぶ形にするのが唯一の方法。
+// なぜホスト内蔵のサブエージェントを使わないか（台数のためではない）:
+// 当初は「Claude Code は 6 体で頭打ちだから」と書いていたが、これは誤りだった。
+// min(16, max(2, CPU-2)) は Workflow ツールの agent() プール専用の式で、
+// 通常のサブエージェントは CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY の既定 10、
+// コア数には依存しない。理由は次の2点に限られる:
+//   1. ホスト差をなくす。同じタスク定義が Claude Code からでも Codex からでも動く
+//   2. read-only の強制・秘密のマスキング・レポート形式を1箇所で決められる
 
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
