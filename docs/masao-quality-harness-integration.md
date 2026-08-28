@@ -197,8 +197,28 @@ npm run manga-video:preflight -- \
 - 無限自己改善: 費用と時間を浪費し、品質の自己申告を強めるため不採用。
 - 生成AIによる自己合格: 独立評価の原則に反するため不採用。
 - 画像モデルへの日本語吹き出し生成: 文字破綻と修正不能を招くため禁止。
-- `bestofn` コードの直接コピー: 明示ライセンスが見当たらないため、概念だけを独自実装。
-- akapenの質問を毎工程へ増やすこと: 機械検査できない高コスト判断だけに限定する。
+- ~~`bestofn` コードの直接コピー: 明示ライセンスが見当たらないため、概念だけを独自実装。~~
+  **2026-08-28更新**: 利用可否は権利者と直接つながっているユーザーの判断により解決。現在は
+  bestofn/akapen とも通常のツールとして利用する。bestofn は 3 skill (`run-bestofn`,
+  `run-bestofn-auto`, `run-bestofn-multi`) と akapen skill を `~/.claude/skills/` へ導入済み。
+  bon 本体には音声候補の再生対応を上流へ追加した (self-test 73/73 維持)。ハーネス側は
+  `scripts/koya-open-blind-arena.mjs` (公式 blind packet のビューア) と
+  `scripts/koya-blind-review.mjs` (パケット外の匿名比較) で接続し、**判断の記録は公式CLI**に残す。
+- akapenの質問を毎工程へ増やすこと: 機械検査できない高コスト判断だけに限定する（この方針は継続）。
+
+## 2026-08-28 全件再照合
+
+`/Users/higataiyu/まさお` の資産を用途別に突き合わせ、未活用が残っていないことを確認した。
+
+| 資産 | 状態 |
+|---|---|
+| note記事 `1.md`〜`20.md`、他者記事 `84.md`〜`88.md` | 設計原則として台帳R1〜R198へ反映済み |
+| `X記事_ハーネスエンジニアリング.md` の3原則 | 「できましたを信じない」=hard gate群、「作った本人にチェックさせない」=generatorEvaluatorSeparation、「お願いは負け、仕組みが勝ち」=事故のchecklist→instruction→hard-gate昇格として実装済み |
+| `bestofn` | 3 skill (`run-bestofn` / `-auto` / `-multi`) を `~/.claude/skills/` へ導入。bon本体へ音声再生を上流追加。ハーネス接続は`koya-open-blind-arena.mjs`と`koya-blind-review.mjs` |
+| `akapen` | skillとして `~/.claude/skills/akapen` へ導入 (MIT)。クライアント確認の3±1問フローに使用 |
+| `.fable/last-plan.md` | 制作AI／審査AI／審査基準書／人間の4部品構成と Human in/on/out の切り分けは品質契約とループ状態に反映済み |
+| `.hiroya_obsidian_work` 字幕64本 | **2026-08-28に変換実行**。`vtt_to_markdown.py` により `21.md`〜`82.md` を生成 (generated=64 / with_transcript=64 / missing=0)。参考チャンネルの知識ベースとして利用可能 |
+| `plugins/`・`e2e-*`・`docs/`・`scripts/` | 実体のない空ディレクトリ (CLAUDE.mdプレースホルダのみ)。導入対象なし |
 
 ## 実データ確認
 
