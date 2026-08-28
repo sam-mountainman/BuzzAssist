@@ -1,0 +1,58 @@
+{
+  "planId": "mike-fish-audio-to-master",
+  "note": "ナレーション物語の運営者の音声→マスターまで。並列にできるのはTTSのセグメント内側（--tts-concurrency）だけで、工程どうしは実尺の依存があるため直列。この計画の値打ちは速さではなく、依存と承認ゲートを飛ばせないことにある。BGM承認と目視サインオフは人の同期点なので、そこで止まるのが正しい。",
+  "defaults": {
+    "cwd": "/Users/higataiyu/Documents/Excalidraw/deployments/narrated-story-video"
+  },
+  "jobs": [
+    {
+      "id": "tts-full",
+      "title": "Fish TTS 30セグメント（内側4並列）",
+      "command": "node",
+      "args": ["production/generate-fish-audio-full-v1.mjs", "--tts-concurrency", "4"],
+      "locks": ["audits/audio/fish-audio-full-generation-v1.json"],
+      "timeoutMs": 2400000
+    },
+    {
+      "id": "tts-finalize",
+      "title": "品質ゲート＋絵の尺再計画",
+      "command": "node",
+      "args": ["production/finalize-fish-audio-full-v1.mjs"],
+      "needs": ["tts-full"],
+      "locks": [
+        "audits/audio/fish-audio-full-generation-v1.json",
+        "audits/audio/fish-audio-picture-retime-plan-v1.json"
+      ],
+      "timeoutMs": 1800000
+    },
+    {
+      "id": "bgm-analyze",
+      "title": "BGM素材の解析",
+      "command": "npm",
+      "args": ["run", "bgm:analyze:v1"],
+      "locks": ["audits/audio/bgm-analysis-v1.json"],
+      "timeoutMs": 900000
+    },
+    {
+      "id": "bgm-plan",
+      "title": "BGM割当案（承認ではない）",
+      "command": "npm",
+      "args": ["run", "bgm:plan:v1"],
+      "needs": ["tts-finalize", "bgm-analyze"],
+      "locks": ["audits/audio/bgm-allocation-proposal-v1.json"],
+      "timeoutMs": 600000
+    },
+    {
+      "id": "master-render",
+      "title": "本編マスターのレンダー（BGM承認済みが前提）",
+      "command": "npm",
+      "args": ["run", "av:fish:render:v1"],
+      "needs": ["bgm-plan"],
+      "locks": [
+        "production/work-fish-av-v1",
+        "audits/audio/fish-av-master-v1/fish-av-master-v1-audit.json"
+      ],
+      "timeoutMs": 5400000
+    }
+  ]
+}

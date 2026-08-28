@@ -1,0 +1,26 @@
+{
+  "planId": "koya-cast-attribute-gates",
+  "note": "固定キャスト分の属性ゲートを一度に流す。character-attribute-gate は --output-path にしか書かないので、キャラ同士は完全に独立して並列にできる。over の配列を、そのラウンドで検査するキャラの inventory 名に置き換えて使う。",
+  "defaults": {
+    "cwd": "/Users/higataiyu/Documents/Excalidraw",
+    "env": { "KOYA_GATE_PYTHON": "/usr/bin/python3" }
+  },
+  "expand": [
+    {
+      "over": [
+        "ibuki", "nodoka", "taisho", "ibariyama", "reiji",
+        "horo", "tatsu", "renji", "rose", "kanata", "sumire"
+      ],
+      "id": "attribute-gate-{item}",
+      "title": "{item} 属性ゲート",
+      "command": "node",
+      "args": [
+        "scripts/koya-manga-video.mjs",
+        "character-attribute-gate",
+        "--inventory-path", "canvas/attribute-gates/{item}.json",
+        "--output-path", "canvas/attribute-gates/{item}-attribute-gate.json"
+      ],
+      "timeoutMs": 900000
+    }
+  ]
+}

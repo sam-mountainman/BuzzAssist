@@ -14,6 +14,20 @@ Do not claim completion until the official final audit passes, the MP4-derived
 contact-sheet signoff is valid, `knownRemainingIssues` is empty, and the real
 MP4 fully decodes.
 
+# 並列実行 — 両ハーネス共通ルート
+
+複数の作業を同時に流すとき（「並列で」「同時に」「一気に」「最短で」、
+また11人分のキャラゲートや30セグメントのTTSのように同種の作業が並ぶとき）は、
+先にこの正本を最後まで読む:
+
+- `.agents/skills/harness-parallel-execution/SKILL.md`
+
+実測した並列上限、並列にしてよい工程と直列必須の工程、同時書き込みで壊れる
+共有状態ファイルの一覧がそこにある。推測で並列化しないこと。入口は
+`node scripts/harness-parallel-run.mjs`（決定論層）と
+`node scripts/harness-parallel-agents.mjs`（LLM判断層）で、
+Claude Code と Codex のどちらから実行しても同じ結果になる。
+
 # BuzzAssist Agent Setup
 
 When the user gives this repository URL and asks to set it up, do the setup end to end for Antigravity only.
