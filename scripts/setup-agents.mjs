@@ -281,15 +281,42 @@ async function ensureWidgetBuild() {
 // キャスト・承認記録を同梱しない。ジャンル共通の契約とスキルだけを配る。
 // 以前は config/ を丸ごとコピーしており、show bible と character styling が
 // そのまま配布されていた（配布テストもその存在を要求していた）。
-const CHANNEL_PACK_EXCLUDES = new Set([
-  "koya-show-bible.json",
-  "koya-character-styling",
-  "koya-manga-source-face-reviews",
-  "channel-packs",
+// 配布物に入れてよいものを**列挙する**（allowlist）。
+//
+// 以前は「入れないもの」を4件挙げる denylist だった。新しいチャンネル固有の
+// ファイルが1つ増えるたびに、除外リストへの追加を人が覚えていないと公開される
+// ——秘密の境界が人の記憶に依存する fail-open 設計。実際、
+// koya-location-bible.json / harness-deployments.json / episode-overrides の
+// 3件が漏れていた。harness-deployments.json に至っては、自分自身に
+// 「クライアント固有なので共有しない」と書いてありながら配布されていた。
+//
+// config/ の直下だけは列挙する。ここがチャンネル固有物の集まる場所で、
+// lib/ や scripts/ のように「全部ジャンル共通」と言い切れないため。
+export const DISTRIBUTABLE_CONFIG_ENTRIES = Object.freeze([
+  "harness-deployments.example.json",   // 例。実体（harness-deployments.json）は運営者固有
+  "harnesses",                          // ハーネス宣言。名前を含まない
+  "koya-manga-legacy-migrations.json",
+  "koya-manga-production-contract.json",
+  "koya-manga-production-contract.schema.json",
+  "koya-manga-quality-incidents.json",
+  "koya-manga-episode-overrides",       // モデル選択の上書き。固有情報を含まない
+  "koya-reading-dictionary.json",
+  "parallel-plans",
 ]);
 
-function isChannelPackPath(sourcePath) {
-  return sourcePath.split(sep).some((part) => CHANNEL_PACK_EXCLUDES.has(part));
+// ディレクトリ名として、どこに現れても配布しないもの。
+// allowlist の網から漏れた場合の二重の歯止め。
+const NEVER_DISTRIBUTE = new Set(["channel-packs", "client-work", ".codex-tmp", "node_modules"]);
+
+function isChannelPackPath(sourcePath, repoRootPath = repoRoot) {
+  const parts = sourcePath.split(sep);
+  if (parts.some((part) => NEVER_DISTRIBUTE.has(part))) return true;
+  // config/ 直下は列挙されたものだけ通す。
+  const relative = sourcePath.startsWith(repoRootPath) ? sourcePath.slice(repoRootPath.length).split(sep).filter(Boolean) : parts;
+  if (relative[0] === "config" && relative.length >= 2) {
+    return !DISTRIBUTABLE_CONFIG_ENTRIES.includes(relative[1]);
+  }
+  return false;
 }
 
 async function copyIfExists(source, target) {
