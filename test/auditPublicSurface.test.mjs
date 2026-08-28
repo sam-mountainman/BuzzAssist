@@ -58,14 +58,27 @@ test("npm pack に、追跡外・チャンネル固有のものが入らない",
   // package.json の files は .gitignore を見ない。gitignore しただけでは
   // 守れず、実際に運営者の配置マップと122.6kBの要求台帳が tarball に
   // 入っていた。リリースワークフローもこの pack を使う。
-  // npm notice は **stderr** に出る。stdout だけを見ると listed が空になり、
-  // 以降の assert が何も検証しない——最初に書いた版がまさにそれで、
-  // files に台帳を戻す変異を捕まえられなかった。
+  // npm notice は stderr に出る。stdout だけを見ると以降の assert が
+  // 何も検証しない——それは前回直した。だが status も見ていなかったので、
+  // **npm pack 自体が失敗しても通る**状態が残っていた。
+  // 「出力が取れた」を「中身を確かめた」と取り違えないよう、JSON で受けて
+  // 件数まで突き合わせる。
   const { execFileSync, spawnSync } = require("node:child_process");
-  const run = spawnSync("npm", ["pack", "--dry-run"], { cwd: root, encoding: "utf8" });
-  const listed = `${run.stdout || ""}${run.stderr || ""}`;
-  assert.ok(listed.includes("npm notice"), "npm pack の出力を取れていない（取れないと以降が無検査になる）");
-  assert.ok(listed.includes("total files"), "ファイル一覧を取れていない");
+  const run = spawnSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], { cwd: root, encoding: "utf8" });
+  assert.equal(run.error, undefined, `npm pack を起動できていない: ${run.error?.message || ""}`);
+  assert.equal(run.status, 0, `npm pack が失敗した（exit ${run.status}）: ${String(run.stderr || "").slice(0, 300)}`);
+
+  let manifest;
+  try {
+    manifest = JSON.parse(run.stdout)[0];
+  } catch (error) {
+    assert.fail(`npm pack --json の出力を解析できない: ${String(error?.message || error)}`);
+  }
+  const packed = (manifest.files || []).map((entry) => entry.path);
+  assert.ok(packed.length > 0, "tarball のファイル一覧が空（空配列への反復は何も検査しない）");
+  assert.equal(packed.length, manifest.entryCount, "解析件数が npm の報告と一致しないこと");
+  assert.ok(packed.includes("package.json"), "必須ファイルが一覧に無い（一覧の取り違え）");
+  const listed = packed.join("\n");
 
   for (const forbidden of [
     "config/harness-deployments.json",
@@ -86,7 +99,6 @@ test("npm pack に、追跡外・チャンネル固有のものが入らない",
   const tracked = new Set(
     execFileSync("git", ["ls-files"], { cwd: root, encoding: "utf8" }).split("\n").filter(Boolean),
   );
-  const packed = [...listed.matchAll(/^npm notice\s+[\d.]+\s*[kMG]?B\s+(.+)$/gmu)].map((m) => m[1].trim());
   const untracked = packed.filter((file) =>
     !tracked.has(file) && !file.startsWith("dist/") && !file.startsWith("dist-widget/") && file !== "package.json");
   assert.deepEqual(untracked, [], `追跡外のファイルが npm pack に入っています: ${untracked.join(", ")}`);

@@ -8,18 +8,19 @@ import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
 
+// 判定は本体と同じ関数に聞く。ここが独自に PATH の python3 と別のモジュール
+// 集合を調べていたので、「本体は動くのにテストは skip」「本体は動かないのに
+// テストは走る」のどちらも起こりえた。可用性の定義が3つあった
+// （本体 / doctor / このテスト）のを1つに寄せる。
 async function voiceDepsAvailable() {
-  try {
-    await execFile("python3", ["-c", "import numpy, soundfile, pyworld, pyloudnorm"]);
-    return true;
-  } catch {
-    return false;
-  }
+  const { voiceQualityAvailable } = await import("../lib/voiceQualityGate.mjs");
+  return voiceQualityAvailable();
 }
 
 test("voice quality gate reports metrics and honest unavailability", async (t) => {
   if (!(await voiceDepsAvailable())) {
-    t.skip("python3 voice QA dependencies are unavailable");
+    const { DEFAULT_VOICE_QA_PYTHON } = await import("../lib/voiceQualityGate.mjs");
+    t.skip(`音声QA環境が無い（${DEFAULT_VOICE_QA_PYTHON} に numpy/soundfile/pyworld/torch/faster_whisper/fugashi と UTMOS キャッシュが要る）`);
     return;
   }
   const dir = await mkdtemp(join(tmpdir(), "voice-gate-"));
