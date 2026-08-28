@@ -38,13 +38,19 @@ test("Channel Pack 設置済みの環境では、ガバナンスを迂回する�
   await rm(packed, { recursive: true, force: true });
 });
 
-test("Channel Pack が無い環境ではジャンル共通ハーネスとして素通りする", async () => {
-  // pack を持たない人にまで番組固有の入口を強制すると、
-  // ジャンル共通ハーネスとして配っている意味がなくなる。
+test("Channel Pack が無い環境でも旧入口は塞がる", async () => {
+  // 当初は pack が無ければ素通りさせていたが、それは間違いだった。
+  // 旧入口が迂回するのは番組ルール（channel 層）だけでなく、最終監査・
+  // カメラ文法・サインオフというジャンル層のゲート全部。しかも新しい
+  // 運営者の初期状態は「pack 無し」で、最も危険な時間帯だけ迂回路が
+  // 開いていた。CLAUDE.md も旧入口を条件なしでベンチマーク専用と定めている。
   const bare = await mkdtemp(join(tmpdir(), "harness-bare-"));
   const verdict = checkCanonicalRouting({ toolName: "build_excalidraw_manga_video", projectDir: bare });
-  assert.equal(verdict.allowed, true);
-  assert.match(verdict.reason, /Channel Pack 未設置/u);
+  assert.equal(verdict.allowed, false, "pack が無くても塞がること");
+  assert.match(verdict.message, /run_koya_manga_pipeline/u);
+
+  // 正規入口は当然通る。
+  assert.equal(checkCanonicalRouting({ toolName: "run_koya_manga_pipeline", projectDir: bare }).allowed, true);
   await rm(bare, { recursive: true, force: true });
 });
 

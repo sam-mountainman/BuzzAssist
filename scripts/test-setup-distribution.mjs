@@ -5,7 +5,7 @@ import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const packageVersion = JSON.parse(await readFile(path.join(repoRoot, "package.json"), "utf8")).version;
@@ -150,6 +150,31 @@ async function runHostSetup(host) {
       );
     }
     await readFile(path.join(pluginRoot, "docs", "koya-harness-handoff-ja.md"), "utf8");
+
+    // 配布は allowlist。config/ 直下に列挙外のものが1つでも入っていたら止める。
+    //
+    // 以前は denylist で、新しいチャンネル固有ファイルが増えるたびに
+    // 除外を人が覚えていないと配布された——秘密の境界が人の記憶に依存する
+    // fail-open 設計。実際3件漏れており、うち1件は自分自身に
+    // 「クライアント固有なので共有しない」と書いてあった。
+    const { DISTRIBUTABLE_CONFIG_ENTRIES } = await import(pathToFileURL(path.join(repoRoot, "scripts", "setup-agents.mjs")).href)
+      .catch(() => ({ DISTRIBUTABLE_CONFIG_ENTRIES: null }));
+    if (DISTRIBUTABLE_CONFIG_ENTRIES) {
+      const shippedConfig = existsSync(path.join(pluginRoot, "config"))
+        ? await readdir(path.join(pluginRoot, "config"))
+        : [];
+      const unexpected = shippedConfig.filter((name) => !DISTRIBUTABLE_CONFIG_ENTRIES.includes(name));
+      assert.deepEqual(unexpected, [], `配布の許可一覧に無いものが config/ に入っています: ${unexpected.join(", ")}`);
+    }
+
+    // 運営者固有・チャンネル固有のものが、どの深さにも無いこと。
+    for (const forbidden of ["channel-packs", "client-work", ".codex-tmp"]) {
+      assert.equal(existsSync(path.join(pluginRoot, forbidden)), false, `配布物に ${forbidden} が入っています`);
+    }
+    assert.equal(
+      existsSync(path.join(pluginRoot, "config", "harness-deployments.json")), false,
+      "運営者固有の配置先マップが配布物に入っています",
+    );
 
     // ハーネスの正本スキルがホストの読む位置に在ること。
     // plugin.json の "skills" は ./skills/ を指すので、.agents/skills/ に

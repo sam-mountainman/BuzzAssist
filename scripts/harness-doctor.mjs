@@ -22,6 +22,7 @@
 //     セットアップできなくなる
 
 import { execFile } from "node:child_process";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { promisify } from "node:util";
 import path from "node:path";
 
@@ -30,6 +31,7 @@ import { requireElevenLabsApiKey } from "../lib/speechGeneration.mjs";
 import { resolveLovartCredentials } from "../lib/lovartMediaGeneration.mjs";
 import { DEFAULT_VOICE_QA_PYTHON, voiceQualityAvailable } from "../lib/voiceQualityGate.mjs";
 import { readKoyaChannelAuthority } from "../lib/koyaChannelGovernance.mjs";
+import { GENRE_CANONICAL_ENTRYPOINTS } from "../lib/harnessRouting.mjs";
 
 const run = promisify(execFile);
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
@@ -90,9 +92,35 @@ async function probeSecretVia(resolve, { label, fix }) {
   }
 }
 
-export async function runHarnessDoctor({ projectDir = REPO_ROOT } = {}) {
+export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "" } = {}) {
   const checks = [];
   const add = (entry) => { checks.push(entry); return entry; };
+
+  // ハーネスを名指しされたら、そのハーネスが実際に配れる状態かを見る。
+  // 入口がプレースホルダのまま、正規ルーティングにも載っていないハーネスは、
+  // 前提が全部揃っても運営者は「台本をどこへ渡すのか」で止まる。
+  // それは前提不足ではなく配布路の欠落なので、ready と言ってはいけない。
+  if (harnessId) {
+    const declarationPath = path.join(REPO_ROOT, "config", "harnesses", `${harnessId}.harness.json`);
+    let declaration = null;
+    try { declaration = JSON.parse(readFileSync(declarationPath, "utf8")); } catch { /* 下で落とす */ }
+    const routed = declaration ? Boolean(GENRE_CANONICAL_ENTRYPOINTS[declaration.produces?.kind]) : false;
+    const entrypoint = String(declaration?.entrypoint || "");
+    const placeholder = /<[^>]+>/u.test(entrypoint) || entrypoint === "";
+    add({
+      id: "harness-production-route",
+      required: true,
+      ok: Boolean(declaration) && routed && !placeholder,
+      detail: !declaration
+        ? `宣言が読めない: config/harnesses/${harnessId}.harness.json`
+        : placeholder
+          ? `入口がプレースホルダのまま: ${entrypoint || "(未設定)"}`
+          : routed ? `正規入口: ${GENRE_CANONICAL_ENTRYPOINTS[declaration.produces.kind].mcpTool}`
+            : `${declaration.produces?.kind} が正規ルーティングに登録されていない`,
+      fix: (declaration && routed && !placeholder) ? ""
+        : `${harnessId} はまだ配れる状態にない。lib/harnessRouting.mjs の GENRE_CANONICAL_ENTRYPOINTS に登録し、宣言の entrypoint を実在するコマンドにすること。前提が揃っても、台本を渡す先が無ければ運営者は止まる`,
+    });
+  }
 
   // --- 実行環境（必須） ---
   const nodeMajor = Number(process.versions.node.split(".")[0]);
@@ -175,6 +203,7 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT } = {}) {
   return {
     version: "harness-doctor-v1",
     projectDir: path.resolve(projectDir),
+    harnessId: harnessId || null,
     ready: blocking.length === 0,
     checks,
     blocking: blocking.map((c) => c.id),
@@ -200,12 +229,46 @@ function render(report) {
   return lines.join("\n");
 }
 
+/** ハーネス宣言を読み、未知のIDを黙って受け流さない。 */
+function knownHarnessIds(repoRoot = REPO_ROOT) {
+  const dir = path.join(repoRoot, "config", "harnesses");
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((name) => name.endsWith(".harness.json"))
+    .map((name) => name.replace(/\.harness\.json$/u, ""))
+    .sort();
+}
+
+function parseArgs(argv) {
+  const known = new Set(["--json", "--project-dir", "--harness"]);
+  const args = { json: false, projectDir: REPO_ROOT, harnessId: "" };
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = argv[i];
+    if (!token.startsWith("--")) throw new Error(`余分な引数: ${token}`);
+    if (!known.has(token)) {
+      // 未知の引数を黙って無視すると、運営者は希望した診断が通ったと
+      // 誤認する。実際 --harness は使用例にあるのに解析されておらず、
+      // 別ジャンルを指定しても漫画動画と同じ検査をしていた。
+      throw new Error(`未知の引数: ${token}\n使えるのは ${[...known].join(" / ")}`);
+    }
+    if (token === "--json") { args.json = true; continue; }
+    const value = argv[i + 1];
+    if (!value || value.startsWith("--")) throw new Error(`${token} に値が要る`);
+    i += 1;
+    if (token === "--project-dir") args.projectDir = path.resolve(value);
+    if (token === "--harness") args.harnessId = value;
+  }
+  return args;
+}
+
 async function main() {
-  const asJson = process.argv.includes("--json");
-  const dirIndex = process.argv.indexOf("--project-dir");
-  const projectDir = dirIndex >= 0 ? process.argv[dirIndex + 1] : REPO_ROOT;
-  const report = await runHarnessDoctor({ projectDir });
-  process.stdout.write(asJson ? `${JSON.stringify(report, null, 2)}\n` : `${render(report)}\n`);
+  const args = parseArgs(process.argv.slice(2));
+  const ids = knownHarnessIds();
+  if (args.harnessId && !ids.includes(args.harnessId)) {
+    throw new Error(`未知のハーネス: ${args.harnessId}\n宣言があるのは: ${ids.join(", ")}`);
+  }
+  const report = await runHarnessDoctor({ projectDir: args.projectDir, harnessId: args.harnessId });
+  process.stdout.write(args.json ? `${JSON.stringify(report, null, 2)}\n` : `${render(report)}\n`);
   // 必須が欠けているときだけ非0。任意の欠落で止めると、canvas だけ使いたい人が
   // セットアップできなくなる。
   if (!report.ready) process.exitCode = 2;

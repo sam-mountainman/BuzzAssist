@@ -388,3 +388,39 @@ test("Channel Pack の指紋は解決層と同じ探索順で取る", async (t) 
     assert.equal(["config", "docs", "scripts"].includes(pack.packId), false, `pack の中身を pack ID にしている: ${pack.packId}`);
   }
 });
+
+test("契約に監査が増えて対応付けを忘れたら、記録は作れない", async () => {
+  // これが最終監査と記録の食い違いの正体だった。契約に必須監査が増えたのに
+  // 宣言への対応付けを忘れると、最終監査は落ちるのに**記録だけが pass**に
+  // なる。テストでは捕まえていたが、それは「対応表の更新漏れと同時に
+  // テストの更新漏れも起きない」前提に乗っていて、実行時には何も守っていなかった。
+  const { readFileSync } = await import("node:fs");
+  const { recordGatesFromAuditSteps } = await import("../lib/harnessRunReceipt.mjs");
+  const declaration = JSON.parse(readFileSync(join(root, "config/harnesses/koya-manga-video.harness.json"), "utf8"));
+  const mapped = declaration.guarantees.flatMap((g) => g.evidenceAuditIds);
+
+  const receipt = openManga();
+  assert.throws(
+    () => recordGatesFromAuditSteps(receipt, {
+      declaration,
+      steps: [...mapped, "brand-new-audit"].map((id) => ({ id, pass: true })),
+      requiredAuditIds: [...mapped, "brand-new-audit"],   // 契約には在るが、宣言には無い
+      contractVersion: "koya-manga-production-v99",
+    }),
+    /どの保証にも紐づいていない: brand-new-audit/u,
+    "対応付け漏れを実行時に落とすこと",
+  );
+
+  // 同じ監査を2つの保証に紐づけるのも落とす（どちらが裏づけたのか曖昧になる）。
+  const duplicated = structuredClone(declaration);
+  duplicated.guarantees[1].evidenceAuditIds = [...duplicated.guarantees[1].evidenceAuditIds, duplicated.guarantees[0].evidenceAuditIds[0]];
+  assert.throws(
+    () => recordGatesFromAuditSteps(openManga(), {
+      declaration: duplicated,
+      steps: mapped.map((id) => ({ id, pass: true })),
+      requiredAuditIds: mapped,
+      contractVersion: "koya-manga-production-v51",
+    }),
+    /複数の保証に紐づいている/u,
+  );
+});
