@@ -191,16 +191,37 @@ async function runHostSetup(host) {
       assert.equal(existsSync(shipped), true, `正本スキルが配布物のskills/に無い: ${name}`);
     }
 
-    // 配布物の中で相対参照が解決すること。正本は .agents/skills/<name>/ で
-    // 配布先は skills/<name>/ と1階層浅いので、書き換えずに配ると全部外を指す。
+    // 配布物の中で、スキルが指すローカル参照が全て解決すること。
+    //
+    // 以前は SKILL.md の `../` だけを正規表現で拾っていたので、
+    // `docs/...` のようなルート相対の参照と、references/ 配下の
+    // Markdown を検査していなかった。**配布先には手順名だけが届き、
+    // 手順の実体と測定根拠を読めない**状態がそれで残っていた。
+    // Channel Pack 側にあるものだけを明示的に除外する。
+    const packOnly = /channel-packs\/|koya-channel-requirements-ledger|koya-channel-governance-ja|koya-show-bible|koya-location-bible|koya-thumbnail-contract|koya-character-styling/u;
     for (const name of canonicalSkillNames) {
       const skillDir = path.join(pluginRoot, "skills", name);
-      const body = await readFile(path.join(skillDir, "SKILL.md"), "utf8");
-      for (const ref of new Set(body.match(/\.\.\/[.\/a-zA-Z0-9_-]+/gu) || [])) {
-        assert.equal(
-          existsSync(path.resolve(skillDir, ref)), true,
-          `配布物のスキル ${name} の相対参照が壊れています: ${ref}`,
-        );
+      const markdowns = (await readdir(skillDir, { withFileTypes: true, recursive: true }))
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
+        .map((entry) => path.join(entry.parentPath ?? entry.path ?? skillDir, entry.name));
+      for (const file of markdowns) {
+        const body = await readFile(file, "utf8");
+        const references = new Set([
+          ...(body.match(/\.\.\/[.\/a-zA-Z0-9_-]+/gu) || []),
+          // `docs/...` のようにバッククォートで囲まれたルート相対の参照。
+          ...[...body.matchAll(/`((?:docs|config|scripts|lib)\/[a-zA-Z0-9_./-]+)`/gu)].map((m) => m[1]),
+        ]);
+        for (const ref of references) {
+          if (packOnly.test(ref)) continue;
+          if (ref.includes("*")) continue;
+          const resolved = ref.startsWith("..")
+            ? path.resolve(path.dirname(file), ref)
+            : path.join(pluginRoot, ref);
+          assert.equal(
+            existsSync(resolved), true,
+            `配布物のスキル ${name}（${path.basename(file)}）の参照が解決しません: ${ref}`,
+          );
+        }
       }
     }
     await readFile(path.join(pluginRoot, "scripts", "update-current.mjs"), "utf8");

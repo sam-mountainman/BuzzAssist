@@ -50,7 +50,12 @@
     "./README.md",
     "./SETUP.md",
     "package-lock.json",
-    "vite.config.js"
+    "vite.config.js",
+    "docs/koya-harness-handoff-ja.md",
+    "docs/koya-character-gate-runbook-ja.md",
+    "docs/koya-voice-quality-runbook-ja.md",
+    "docs/learning/targets.json",
+    "docs/measurements/parallel-limits-2026-08-28.json"
   ],
   "scripts": {
     "dev": "vite",
