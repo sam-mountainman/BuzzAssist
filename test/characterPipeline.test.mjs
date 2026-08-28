@@ -1,4 +1,5 @@
 import test from "node:test";
+import { resolveChannelPackPath } from "../lib/channelPackResolver.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -671,7 +672,7 @@ test("approval stages real sheets and registers only after eight-view and twelve
     await passCandidateReview(cast.candidateReviewDraftPath);
 
     const selected = cast.candidates[1];
-    const showBible = JSON.parse(await readFile(new URL("../config/koya-show-bible.json", import.meta.url), "utf8"));
+    const showBible = JSON.parse(await readFile(resolveChannelPackPath(new URL("..", import.meta.url).pathname, "config/koya-show-bible.json"), "utf8"));
     const bootstrapMember = showBible.cast.find((member) => member.id === "ibuki");
     bootstrapMember.hiddenName = cast.name;
     bootstrapMember.selectedBaseLabel = selected.blindLabel;

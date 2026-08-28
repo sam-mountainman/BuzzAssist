@@ -2,7 +2,7 @@
 import { spawn } from "node:child_process";
 import { access, cp, mkdir, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { resolveCodexCommand } from "./codex-image-bridge.mjs";
@@ -277,9 +277,29 @@ async function ensureWidgetBuild() {
   await run(commandName("npm"), ["run", "build:widget"], { inherit: true });
 }
 
+// このプラグインは PUBLIC な配布物なので、特定チャンネルの番組設定・
+// キャスト・承認記録を同梱しない。ジャンル共通の契約とスキルだけを配る。
+// 以前は config/ を丸ごとコピーしており、show bible と character styling が
+// そのまま配布されていた（配布テストもその存在を要求していた）。
+const CHANNEL_PACK_EXCLUDES = new Set([
+  "koya-show-bible.json",
+  "koya-character-styling",
+  "koya-manga-source-face-reviews",
+  "channel-packs",
+]);
+
+function isChannelPackPath(sourcePath) {
+  return sourcePath.split(sep).some((part) => CHANNEL_PACK_EXCLUDES.has(part));
+}
+
 async function copyIfExists(source, target) {
   if (!(await pathExists(source))) return;
-  await cp(source, target, { recursive: true, force: true, dereference: false });
+  await cp(source, target, {
+    recursive: true,
+    force: true,
+    dereference: false,
+    filter: (src) => !isChannelPackPath(src),
+  });
 }
 
 async function replaceDirectoryChildrenPreservingRoot(sourceDir, targetDir, { preserveNames = [] } = {}) {

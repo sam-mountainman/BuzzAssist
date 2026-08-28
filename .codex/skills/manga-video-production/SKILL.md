@@ -1,6 +1,6 @@
 ---
 name: manga-video-production
-description: Codexで対象チャンネルの漫画動画を制作・修復・レビュー・監査するときに使う共通正本アダプター。
+description: Codexで漫画動画を制作・修復・レビュー・監査するときに使う共通正本アダプター。
 ---
 
 # Codex用アダプター

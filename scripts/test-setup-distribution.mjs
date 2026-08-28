@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -129,11 +130,23 @@ async function runHostSetup(host) {
     await readFile(path.join(pluginRoot, "lib", "koyaHandoffBundle.mjs"), "utf8");
     await readFile(path.join(pluginRoot, "lib", "openLocalFolder.mjs"), "utf8");
     await readFile(path.join(pluginRoot, "lib", "koyaChannelGovernance.mjs"), "utf8");
+    // ジャンル共通の契約は配布する。
     await readFile(path.join(pluginRoot, "config", "koya-manga-production-contract.json"), "utf8");
-    await readFile(path.join(pluginRoot, "config", "koya-show-bible.json"), "utf8");
-    await readFile(path.join(pluginRoot, "config", "koya-character-styling", "horo-jersey-color-v1.json"), "utf8");
-    await readFile(path.join(pluginRoot, "config", "koya-character-styling", "horo-hair-color-v1.json"), "utf8");
-    await readFile(path.join(pluginRoot, "docs", "koya-channel-requirements-ledger.md"), "utf8");
+
+    // Channel Pack は配布しない。このプラグインは PUBLIC な配布物なので、
+    // 特定チャンネルの番組名・キャスト・承認記録が入ってはいけない。
+    // 以前はこのテストが「配布物に show bible が存在すること」を
+    // 要求しており、テスト自体が漏えいを固定していた。
+    for (const leaked of [
+      path.join(pluginRoot, "config", "koya-show-bible.json"),
+      path.join(pluginRoot, "config", "koya-character-styling"),
+      path.join(pluginRoot, "channel-packs"),
+    ]) {
+      assert.equal(
+        existsSync(leaked), false,
+        `Channel Pack が配布物に含まれています: ${path.relative(pluginRoot, leaked)}`,
+      );
+    }
     await readFile(path.join(pluginRoot, "docs", "koya-channel-governance-ja.md"), "utf8");
     await readFile(path.join(pluginRoot, "docs", "koya-harness-handoff-ja.md"), "utf8");
     await readFile(path.join(pluginRoot, "scripts", "update-current.mjs"), "utf8");

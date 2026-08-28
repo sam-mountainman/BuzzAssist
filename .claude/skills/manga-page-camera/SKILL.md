@@ -1,6 +1,6 @@
 ---
 name: manga-page-camera
-description: Claude Codeで漫画動画ページのカメラを設計・修復・監査するときに使う共通正本アダプター。
+description: Claude Codeで漫画ページのカメラを設計・修復・監査するときに使う共通正本アダプター。
 ---
 
 # Claude Code用カメラアダプター

@@ -4,7 +4,7 @@
     {
       "id": 1,
       "name": "pullout-monotony",
-      "prompt": "全カットがズームアウトで単調。漫画動画の基準に直して。",
+      "prompt": "全カットがズームアウトで単調。このジャンルの基準に直して。",
       "expected_output": "方向のみと方向後の引きを追加する",
       "files": [],
       "expectations": [

@@ -1,6 +1,6 @@
 ---
 name: manga-video-production
-description: Claude Codeで対象チャンネルの漫画動画を制作・修復・レビュー・監査するときに使う共通正本アダプター。
+description: Claude Codeで漫画動画を制作・修復・レビュー・監査するときに使う共通正本アダプター。
 ---
 
 # Claude Code用アダプター

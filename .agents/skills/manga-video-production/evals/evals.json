@@ -4,7 +4,7 @@
     {
       "id": 1,
       "name": "new-episode-full-production",
-      "prompt": "この新しい台本を運営者向け漫画動画の完成MP4にして。最後まで監査して。",
+      "prompt": "この新しい台本を漫画動画の完成MP4にして。最後まで監査して。",
       "expected_output": "旧経路ではなくscripts/koya-manga-video.mjsを使う",
       "files": [],
       "expectations": [

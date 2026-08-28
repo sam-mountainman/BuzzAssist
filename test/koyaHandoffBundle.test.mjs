@@ -1,4 +1,5 @@
 import test from "node:test";
+import { resolveChannelPackPath } from "../lib/channelPackResolver.mjs";
 import assert from "node:assert/strict";
 import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -14,7 +15,9 @@ import {
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 async function copyConfig(sourceProject, targetProject, relativePath) {
-  const source = path.join(sourceProject, relativePath);
+  // Channel Pack はリポジトリ直下ではなく channel-packs/ に置かれるので、
+  // fixture の元も解決層に探させる。
+  const source = resolveChannelPackPath(sourceProject, relativePath);
   const target = path.join(targetProject, relativePath);
   await mkdir(path.dirname(target), { recursive: true });
   await copyFile(source, target);

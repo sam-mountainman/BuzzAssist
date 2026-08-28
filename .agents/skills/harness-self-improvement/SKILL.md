@@ -124,7 +124,7 @@ node scripts/harness-learn.mjs apply --id <提案ID> \
 | 漫画動画の制作手順・品質基準 | `skill:manga-video-production` |
 | カメラ移動の文法 | `skill:manga-page-camera` |
 | 並列実行の上限・粒度 | `skill:harness-parallel-execution` |
-| 対象チャンネルの要求・禁止事項 | `ledger:koya`（R番号を採番して追記） |
+| チャンネル固有の要求・禁止事項 | `ledger:koya`（R番号を採番して追記） |
 | ナレーション物語の運営者の音声・BGMゲート | `doc:mike-audio-gates` |
 
 迷ったら台帳へ。台帳は番号つきで、後からスキルへ引き上げられる。

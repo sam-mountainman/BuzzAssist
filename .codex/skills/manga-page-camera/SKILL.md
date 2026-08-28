@@ -1,6 +1,6 @@
 ---
 name: manga-page-camera
-description: Codexで漫画動画ページのカメラを設計・修復・監査するときに使う共通正本アダプター。
+description: Codexで漫画ページのカメラを設計・修復・監査するときに使う共通正本アダプター。
 ---
 
 # Codex用カメラアダプター

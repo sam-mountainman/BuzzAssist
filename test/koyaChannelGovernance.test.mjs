@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { resolveChannelPackPath } from "../lib/channelPackResolver.mjs";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -32,9 +33,9 @@ const hash = (value) => createHash("sha256").update(value).digest("hex");
 async function installAuthority(projectDir) {
   await mkdir(join(projectDir, "config/koya-character-styling"), { recursive: true });
   for (const name of ["koya-show-bible.json", "koya-location-bible.json", "koya-thumbnail-contract.json"]) {
-    await writeFile(join(projectDir, "config", name), await readFile(join(root, "config", name)));
+    await writeFile(join(projectDir, "config", name), await readFile(resolveChannelPackPath(root, `config/${name}`)));
   }
-  const showBible = JSON.parse(await readFile(join(root, "config/koya-show-bible.json"), "utf8"));
+  const showBible = JSON.parse(await readFile(resolveChannelPackPath(root, "config/koya-show-bible.json"), "utf8"));
   const paths = [...new Set(showBible.cast.flatMap((member) => [member.stylingSpecPath, ...(member.stylingSpecPaths || [])]).filter(Boolean))];
   for (const relativePath of paths) await writeFile(join(projectDir, relativePath), await readFile(join(root, relativePath)));
 }
@@ -44,7 +45,7 @@ test("Koya authority is all-or-nothing and validates the three channel contracts
   const fallback = await readKoyaChannelAuthority({ projectDir, runtimeRoot: root });
   assert.equal(fallback.source, "runtime-template");
   await mkdir(join(projectDir, "config"), { recursive: true });
-  await writeFile(join(projectDir, "config/koya-show-bible.json"), await readFile(join(root, "config/koya-show-bible.json")));
+  await writeFile(join(projectDir, "config/koya-show-bible.json"), await readFile(resolveChannelPackPath(root, "config/koya-show-bible.json")));
   await assert.rejects(() => readKoyaChannelAuthority({ projectDir, runtimeRoot: root }), /authority is partial/u);
   await installAuthority(projectDir);
   const authority = await readKoyaChannelAuthority({ projectDir, runtimeRoot: root });

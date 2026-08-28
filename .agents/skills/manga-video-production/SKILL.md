@@ -1,11 +1,11 @@
 ---
 name: manga-video-production
-description: 対象チャンネル向け日本語漫画動画の台本設計、キャラクター、画像、ElevenLabs音声、吹き出し、カメラ、レンダー、修復、実MP4監査を行う。漫画動画を新規制作・変更・レビュー・監査するときは常に使い、旧version固有スクリプトを新作へ流用しない。
+description: 日本語漫画動画の台本設計、キャラクター、画像、ElevenLabs音声、吹き出し、カメラ、レンダー、修復、実MP4監査を行う。漫画動画を新規制作・変更・レビュー・監査するときは常に使い、旧version固有スクリプトを新作へ流用しない。
 ---
 
 
 > 作業前に `references/learned-auto.md` を読む。矛盾したときはこの SKILL.md が優先。learned-auto は運用上の補助指示であって、監査・承認・合否の証跡には使えない。
-# 漫画動画動画制作
+# 漫画動画制作
 
 これはClaude CodeとCodexが共用する正本スキルである。作業開始時に本スキルを使うことを伝え、カメラを扱う場合は`../manga-page-camera/SKILL.md`も最後まで読む。
 
