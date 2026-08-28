@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  CLIENT_IDENTIFIERS,
   findGaps,
   harnessKeywords,
   loadHarnesses,
@@ -18,7 +19,7 @@ const base = () => ({
 
 test("宣言にクライアントを特定できる語を入れられない", () => {
   // この台帳は共有される前提なので、ここが緩むと外へ出せなくなる。
-  for (const banned of ["漫画動画ハーネス", "マイク", "narrated-story", "manga-channel"]) {
+  for (const banned of CLIENT_IDENTIFIERS) {
     const bad = { ...base(), statusNote: `${banned}さんの案件` };
     assert.ok(
       validateHarness(bad).some((e) => /クライアントを特定/u.test(e)),

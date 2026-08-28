@@ -38,10 +38,11 @@
     },
     "channel-pack:narrated-story": {
       "mode": "review-only",
-      "canonical": "deployments/narrated-story-video/docs/AUDIO-BGM-GATES.md",
-      "reason": "ゲートの合否基準そのもの。機械が緩める余地を作らない",
+      "canonical": "docs/AUDIO-BGM-GATES.md",
+      "reason": "ゲートの合否基準そのもの。機械が緩める余地を作らない パスは deployment 相対。配置先は config/harness-deployments.json（追跡しない）が持つ。",
       "scope": "channel-pack",
-      "confidential": true
+      "confidential": true,
+      "relativeToDeployment": "narrated-story-video"
     }
   },
   "scopes": {

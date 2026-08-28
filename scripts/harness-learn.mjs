@@ -255,6 +255,18 @@ export function clusterForConsolidation(summary) {
     .sort((a, b) => b.entries.length - a.entries.length);
 }
 
+// 宛先が deployment 相対なら、配置先を config/harness-deployments.json から引く。
+// 配置先はクライアント固有なので追跡しない。未設定なら「まだ配置していない」
+// として扱い、パスを勝手に決めない。
+function resolveDeploymentRoot(harnessId) {
+  const mapPath = path.join(REPO_ROOT, "config", "harness-deployments.json");
+  if (!fs.existsSync(mapPath)) return null;
+  try {
+    const map = JSON.parse(fs.readFileSync(mapPath, "utf8"));
+    return (map.deployments ?? []).find((d) => d.harnessId === harnessId)?.root ?? null;
+  } catch { return null; }
+}
+
 function requireTarget(rawTarget) {
   const target = resolveTarget(rawTarget);
   if (!LEARNING_TARGETS[target]) {
@@ -263,7 +275,19 @@ function requireTarget(rawTarget) {
         + Object.keys(LEARNING_TARGETS).map((key) => `  ${key}`).join("\n"),
     );
   }
-  const rel = LEARNING_TARGETS[target];
+  const def = loadTargets()[target];
+  let rel = def.canonical;
+  if (def.relativeToDeployment) {
+    const root = resolveDeploymentRoot(def.relativeToDeployment);
+    if (!root) {
+      throw new Error(
+        `${target} は ${def.relativeToDeployment} の配置先が要ります。`
+        + "config/harness-deployments.json に root を書いてください"
+        + "（このファイルは運営者固有なので追跡しません）",
+      );
+    }
+    rel = path.join(root, rel);
+  }
   const full = path.join(REPO_ROOT, rel);
   if (!fs.existsSync(full)) {
     throw new Error(`target のファイルがありません: ${rel}`);

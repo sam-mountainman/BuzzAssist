@@ -2,7 +2,7 @@
   "planId": "mike-fish-audio-to-master",
   "note": "ナレーション物語の運営者の音声→マスターまで。並列にできるのはTTSのセグメント内側（--tts-concurrency）だけで、工程どうしは実尺の依存があるため直列。この計画の値打ちは速さではなく、依存と承認ゲートを飛ばせないことにある。BGM承認と目視サインオフは人の同期点なので、そこで止まるのが正しい。",
   "defaults": {
-    "cwd": "/Users/higataiyu/Documents/Excalidraw/deployments/narrated-story-video"
+    "cwd": "<narrated-story-video deployment dir>"
   },
   "jobs": [
     {

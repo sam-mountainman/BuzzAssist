@@ -1,0 +1,7 @@
+{
+  "note": "ハーネス宣言（config/harnesses/）と実際の配置先の対応。実ファイル config/harness-deployments.json は運営者固有なので追跡しない（.gitignore 済み）。これを写して使う。",
+  "deployments": [
+    { "harnessId": "manga-video", "root": ".", "entrypoint": "node scripts/koya-manga-video.mjs" },
+    { "harnessId": "narrated-story-video", "root": "<deployment-dir>", "entrypoint": "npm run --prefix <deployment-dir>" }
+  ]
+}

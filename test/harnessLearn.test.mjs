@@ -27,8 +27,13 @@ const make = (over = {}) => buildProposal({
 
 test("提案の宛先は正本と台帳に限る", () => {
   // 次のセッションが必ず読む場所以外へ書いても学習にならない。
-  for (const target of Object.keys(LEARNING_TARGETS)) {
-    assert.doesNotThrow(() => make({ target }));
+  for (const [target, def] of Object.entries(loadTargets())) {
+    if (def.relativeToDeployment) {
+      // 配置先はクライアント固有なので追跡しない。未設定の環境では
+      // パスを勝手に決めず、設定を促して落ちるのが正しい。
+      continue;
+    }
+    assert.doesNotThrow(() => make({ target }), `${target} が弾かれた`);
   }
   assert.throws(() => make({ target: "skill:does-not-exist" }), /未知の target/u);
   assert.throws(() => make({ target: "README.md" }), /未知の target/u);

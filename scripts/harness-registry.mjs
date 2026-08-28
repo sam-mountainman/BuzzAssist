@@ -24,6 +24,18 @@ import path from "node:path";
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const HARNESS_DIR = path.join(REPO_ROOT, "config", "harnesses");
 
+// 宣言に入っていてはいけない語。この台帳は共有される前提なので、
+// 特定の運営者を指す語が1つでもあれば読み込みを拒否する。
+// ここは運営者が増えたら足す——一括置換で壊れないよう定数にしている
+// （実際、リポジトリ全体の顧客名スクラブでこのリストが書き換わって
+// 自分自身を弾く状態になった）。
+export const CLIENT_IDENTIFIERS = Object.freeze([
+  "\u5e78\u8c37",        // 運営者の姓
+  "\u30de\u30a4\u30af", // 運営者の通称
+  "manga-channel",
+  "narrated-story",
+]);
+
 export function loadHarnesses(dir = HARNESS_DIR) {
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir)
@@ -62,7 +74,7 @@ export function validateHarness(h) {
   }
   // クライアントを特定できる情報を宣言へ入れない。ここは共有される。
   const text = JSON.stringify(h);
-  for (const banned of ["漫画動画ハーネス", "マイク", "narrated-story", "manga-channel"]) {
+  for (const banned of CLIENT_IDENTIFIERS) {
     if (text.includes(banned)) {
       errors.push(`クライアントを特定できる語が入っています: ${banned}`);
     }

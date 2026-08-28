@@ -34,3 +34,4 @@ channel-packs/
 # 他クライアントの作業ツリー。別リポジトリなので、ここからは追跡しない。
 # gitlink であっても、公開リポジトリに案件名が残る。
 client-work/
+config/harness-deployments.json
