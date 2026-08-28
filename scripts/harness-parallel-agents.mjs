@@ -20,6 +20,31 @@ import path from "node:path";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 
+// タスクIDは結果ファイル名になる。`../` を許すと出力先の外に書けてしまう。
+const SAFE_TASK_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
+
+// CLIの標準出力・標準エラーをそのまま保存すると、ツールが吐いた鍵や
+// トークンがログに残る。保存前に形の分かるものだけでも伏せる。
+const SECRET_PATTERNS = [
+  /\bsk-[A-Za-z0-9_-]{16,}/gu,
+  /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}/gu,
+  /\bxox[abprs]-[A-Za-z0-9-]{10,}/gu,
+  /\bey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/gu,
+  /(?<=(?:api[_-]?key|token|secret|password|authorization|bearer)["'\s:=]{1,4})[A-Za-z0-9_\-.]{16,}/giu,
+];
+export function maskSecrets(text) {
+  let out = String(text ?? "");
+  for (const pattern of SECRET_PATTERNS) out = out.replace(pattern, "[redacted]");
+  return out;
+}
+
+const MAX_LOG_BYTES = 2 * 1024 * 1024;
+function clampLog(text) {
+  const masked = maskSecrets(text);
+  if (masked.length <= MAX_LOG_BYTES) return masked;
+  return `${masked.slice(0, MAX_LOG_BYTES)}\n…(${masked.length - MAX_LOG_BYTES} 文字を省略)`;
+}
+
 const ENGINES = {
   codex: {
     id: "codex",
@@ -37,16 +62,27 @@ const ENGINES = {
       // 判断だけが欲しいタスクでは不要な待ち時間になる。既定で切る。
       if (disableMcp) args.push("-c", "mcp_servers={}");
       if (task.model) args.push("-c", `model=${JSON.stringify(task.model)}`);
-      args.push("-o", outputPath, task.prompt);
+      // プロンプトは stdin から渡す。引数に置くと長いレビュー依頼が
+      // OSの引数長上限（E2BIG）に当たるうえ、ps でプロンプト全文が
+      // 他のユーザーから読めてしまう。
+      args.push("-o", outputPath, "-");
       return args;
     },
   },
   claude: {
     id: "claude",
     candidates: ["claude"],
-    buildArgs(task) {
-      const args = ["-p", task.prompt];
+    buildArgs(task, { readOnly } = {}) {
+      // claude -p もプロンプトは stdin で受ける。
+      const args = ["-p"];
       if (task.model) args.push("--model", task.model);
+      // 読み取り専用を約束できないエンジンを read-only 指定で使わない。
+      // 「指定したのに書けた」は、指定しないより危ない。
+      if (readOnly || task.readOnly) {
+        throw new Error(
+          "claude CLI は read-only を保証できません。--read-only では codex を使ってください",
+        );
+      }
       return args;
     },
     // claude -p は最終応答を標準出力に出すので、stdout をそのまま結果にする。
@@ -91,13 +127,15 @@ export async function probeEngine(engineId, { timeoutMs = 60_000 } = {}) {
     os.tmpdir(),
     `harness-agent-probe-${engineId}-${process.pid}.txt`,
   );
-  const args = engine.buildArgs(probeTask, { outputPath, disableMcp: true });
+  const args = engine.buildArgs(probeTask, { outputPath, disableMcp: true, readOnly: false });
 
   const outcome = await new Promise((resolve) => {
     let stdout = "";
     let stderr = "";
     let settled = false;
-    const child = spawn(binary, args, { cwd: REPO_ROOT, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(binary, args, { cwd: REPO_ROOT, stdio: ["pipe", "pipe", "pipe"] });
+    child.stdin.on("error", () => { /* 相手が先に終了していれば無視 */ });
+    child.stdin.end(probeTask.prompt);
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
       if (!settled) {
@@ -130,7 +168,10 @@ export async function probeEngine(engineId, { timeoutMs = 60_000 } = {}) {
         resolve({ ok: false, reason: `終了コード ${code}: ${stderr.trim().slice(0, 120)}` });
         return;
       }
-      resolve({ ok: /PROBE-OK/.test(text), reason: /PROBE-OK/.test(text) ? null : "応答が想定と違います" });
+      // 「PROBE-OK を含む」ではなく「PROBE-OK である」で判定する。
+      // 長い説明文の中にたまたま含まれただけの応答を通さない。
+      const ok = text.trim() === "PROBE-OK";
+      resolve({ ok, reason: ok ? null : "応答が想定と違います" });
     });
   });
 
@@ -138,8 +179,17 @@ export async function probeEngine(engineId, { timeoutMs = 60_000 } = {}) {
   return { engineId, binary, available: outcome.ok, reason: outcome.reason ?? null };
 }
 
+// エンジンが read-only を守れるかは、認証やインストール状態とは別の話。
+// 守れないエンジンは、明示指定であっても read-only 実行に使わせない。
+const READ_ONLY_CAPABLE = new Set(["codex"]);
+
 export async function selectEngine(requested, options = {}) {
   if (requested && requested !== "auto") {
+    if (options.readOnly && !READ_ONLY_CAPABLE.has(requested)) {
+      throw new Error(
+        `エンジン ${requested} は read-only を保証できません。--read-only では codex を使ってください`,
+      );
+    }
     const probe = await probeEngine(requested, options);
     if (!probe.available) {
       throw new Error(`エンジン ${requested} は使えません: ${probe.reason}`);
@@ -148,6 +198,11 @@ export async function selectEngine(requested, options = {}) {
   }
   const probes = [];
   for (const id of ["codex", "claude"]) {
+    // read-only を要求されているのに保証できないエンジンは候補から外す。
+    if (options.readOnly && !READ_ONLY_CAPABLE.has(id)) {
+      probes.push({ engineId: id, available: false, reason: "read-only を保証できません" });
+      continue;
+    }
     const probe = await probeEngine(id, options);
     probes.push(probe);
     if (probe.available) return probe;
@@ -169,11 +224,20 @@ async function runTask(task, { engine, binary, outDir, disableMcp, readOnly, def
     let settled = false;
     const child = spawn(binary, args, {
       cwd: path.resolve(task.cwd ?? REPO_ROOT),
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
+      // タイムアウトで孫（CLIが産むツールプロセス）まで止められるよう
+      // 独立したプロセスグループで起動する。
+      detached: process.platform !== "win32",
     });
+    child.stdin.on("error", () => { /* 相手が先に終了していれば無視 */ });
+    child.stdin.end(task.prompt);
+    let timedOut = false;
     const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      if (!settled) { settled = true; resolve({ code: null, stdout, stderr, timedOut: true }); }
+      timedOut = true;
+      if (process.platform === "win32") { child.kill("SIGKILL"); return; }
+      // 負のPIDでプロセスグループ全体。子だけ殺すと孫が走り続ける。
+      try { process.kill(-child.pid, "SIGKILL"); }
+      catch { try { child.kill("SIGKILL"); } catch { /* 既に終了 */ } }
     }, timeoutMs);
     child.stdout.on("data", (chunk) => { stdout += chunk; });
     child.stderr.on("data", (chunk) => { stderr += chunk; });
@@ -185,11 +249,15 @@ async function runTask(task, { engine, binary, outDir, disableMcp, readOnly, def
     child.on("close", (code) => {
       if (settled) return;
       settled = true; clearTimeout(timer);
-      resolve({ code, stdout, stderr });
+      resolve({ code, stdout, stderr, timedOut });
     });
   });
 
-  fs.writeFileSync(logPath, `--- stdout ---\n${outcome.stdout}\n--- stderr ---\n${outcome.stderr}\n`);
+  fs.writeFileSync(
+    logPath,
+    `--- stdout ---\n${clampLog(outcome.stdout)}\n--- stderr ---\n${clampLog(outcome.stderr)}\n`,
+    { mode: 0o600 },
+  );
 
   let result = "";
   if (engine.resultFromStdout) {
@@ -210,14 +278,20 @@ async function runTask(task, { engine, binary, outDir, disableMcp, readOnly, def
     durationMs: Date.now() - startedAt,
     resultPath: outputPath,
     logPath,
-    resultPreview: result.slice(0, 400),
+    resultPreview: maskSecrets(result.slice(0, 400)),
   };
 }
 
 export async function runAgentTasks(tasks, options = {}) {
   const engineInfo = options.engineInfo ?? (await selectEngine(options.engine ?? "auto"));
   const engine = ENGINES[engineInfo.engineId];
-  const concurrency = options.concurrency ?? 8;
+  const requested = options.concurrency ?? 8;
+  // 0 や負数を素通しすると Array.from({length: 0}) でワーカーが1体も
+  // 作られず、1件も実行しないまま「成功」で終わる。
+  if (!Number.isSafeInteger(requested) || requested < 1) {
+    throw new Error(`--concurrency は 1 以上の整数にしてください: ${options.concurrency}`);
+  }
+  const concurrency = requested;
   const outDir = options.outDir
     ?? path.join(REPO_ROOT, "canvas", "parallel-runs", `agents-${Date.now()}`);
   fs.mkdirSync(outDir, { recursive: true });
@@ -230,17 +304,28 @@ export async function runAgentTasks(tasks, options = {}) {
   const worker = async () => {
     while (queue.length > 0) {
       const task = queue.shift();
-      onProgress({ type: "started", id: task.id, title: task.title ?? null });
-      const result = await runTask(task, {
-        engine,
-        binary: engineInfo.binary,
-        outDir,
-        disableMcp: options.disableMcp ?? true,
-        readOnly: options.readOnly ?? false,
-        defaultTimeoutMs: options.timeoutMs ?? 900_000,
-      });
+      let result;
+      try {
+        onProgress({ type: "started", id: task.id, title: task.title ?? null });
+        result = await runTask(task, {
+          engine,
+          binary: engineInfo.binary,
+          outDir,
+          disableMcp: options.disableMcp ?? true,
+          readOnly: options.readOnly ?? false,
+          defaultTimeoutMs: options.timeoutMs ?? 900_000,
+        });
+      } catch (error) {
+        // 1件の失敗でキューごと止めない。止めると残りが未実行のまま
+        // 報告もされず、何が走ったのか分からなくなる。
+        result = {
+          id: task.id, title: task.title ?? null, status: "failed",
+          exitCode: null, runnerError: maskSecrets(error?.message ?? String(error)),
+          durationMs: 0,
+        };
+      }
       results.push(result);
-      onProgress({ type: "finished", id: task.id, result });
+      try { onProgress({ type: "finished", id: task.id, result }); } catch { /* 表示の失敗で落とさない */ }
     }
   };
 
@@ -266,7 +351,12 @@ export async function runAgentTasks(tasks, options = {}) {
     },
     tasks: ordered,
   };
-  summary.ok = summary.counts.failed === 0;
+  // 入力件数と結果件数が食い違ったら、取りこぼしがあったということ。
+  // 黙って少ない件数で成功にしない。
+  if (ordered.length !== tasks.length) {
+    summary.counts.missing = tasks.length - ordered.length;
+  }
+  summary.ok = summary.counts.failed === 0 && ordered.length === tasks.length;
   return summary;
 }
 
@@ -356,6 +446,10 @@ async function main() {
       process.stderr.write(`id の無いタスクがあります\n`); process.exit(2);
     }
     if (ids.has(task.id)) { process.stderr.write(`id が重複: ${task.id}\n`); process.exit(2); }
+    if (!SAFE_TASK_ID.test(task.id)) {
+      process.stderr.write(`${task.id}: id に使えるのは英数字と . _ - だけです（結果のファイル名になるため）\n`);
+      process.exit(2);
+    }
     ids.add(task.id);
     if (typeof task?.prompt !== "string" || !task.prompt.trim()) {
       process.stderr.write(`${task.id}: prompt が必要です\n`); process.exit(2);
@@ -364,7 +458,7 @@ async function main() {
 
   let engineInfo;
   try {
-    engineInfo = await selectEngine(options.engine);
+    engineInfo = await selectEngine(options.engine, { readOnly: Boolean(options.readOnly) });
   } catch (error) {
     process.stderr.write(`${error.message}\n`);
     process.exit(2);

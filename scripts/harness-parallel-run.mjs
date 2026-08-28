@@ -53,8 +53,10 @@ export function defaultConcurrency(cpuCount = os.cpus().length) {
 
 export function resolveConcurrency(raw, cpuCount = os.cpus().length) {
   if (raw === null || raw === undefined || raw === "auto") return defaultConcurrency(cpuCount);
-  const parsed = Number.parseInt(String(raw), 10);
-  if (!Number.isFinite(parsed) || parsed < 1) {
+  const text = String(raw).trim();
+  // "3junk" や "1.5" を 3 や 1 として受け取らない。
+  const parsed = /^\d+$/u.test(text) ? Number.parseInt(text, 10) : Number.NaN;
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
     throw new Error(`--concurrency は 1 以上の整数か auto を指定してください: ${raw}`);
   }
   return parsed;
@@ -99,10 +101,16 @@ export function expandPlanJobs(plan) {
       const substitute = (value) => {
         if (typeof value === "string") {
           return value.replace(/\{(\w+)\}/gu, (match, key) => {
-            if (!(key in fields)) {
+            // key in fields だと {constructor} や {toString} が継承側に
+            // 当たって関数の文字列に化ける。自分のプロパティだけを見る。
+            if (!Object.hasOwn(fields, key)) {
               throw new Error(`expand: 差し込む値 {${key}} が over の要素にありません`);
             }
-            return String(fields[key]);
+            const field = fields[key];
+            if (field === null || typeof field === "object" || typeof field === "function") {
+              throw new Error(`expand: {${key}} に差し込めるのは文字列・数値・真偽値だけです`);
+            }
+            return String(field);
           });
         }
         if (Array.isArray(value)) return value.map(substitute);
@@ -134,6 +142,22 @@ export function validatePlan(plan) {
     }
     if (seen.has(id)) errors.push(`id が重複しています: ${id}`);
     seen.add(id);
+    if (!SAFE_JOB_ID.test(id)) {
+      errors.push(`${id}: id に使えるのは英数字と . _ - だけです（ログのファイル名になるため）`);
+    }
+    if (job.timeoutMs !== undefined
+      && (typeof job.timeoutMs !== "number" || !Number.isFinite(job.timeoutMs) || job.timeoutMs <= 0)) {
+      errors.push(`${id}: timeoutMs は正の有限数にしてください`);
+    }
+    if (job.expectExitCode !== undefined && !Number.isInteger(job.expectExitCode)) {
+      errors.push(`${id}: expectExitCode は整数にしてください`);
+    }
+    if (job.env !== undefined && (typeof job.env !== "object" || job.env === null || Array.isArray(job.env))) {
+      errors.push(`${id}: env はオブジェクトにしてください`);
+    }
+    if (job.cwd !== undefined && typeof job.cwd !== "string") {
+      errors.push(`${id}: cwd は文字列にしてください`);
+    }
     if (typeof job.command !== "string" || job.command.trim() === "") {
       errors.push(`${id}: command が必要です`);
     }
@@ -179,11 +203,26 @@ export function validatePlan(plan) {
   return errors;
 }
 
-function normalizeLocks(job) {
-  // ロックは常にソートして取る。取得順を全ジョブで揃えることが、
-  // 2つのジョブが互いのロックを待ち合うデッドロックを防ぐ唯一の方法。
-  return [...new Set((job.locks ?? []).map((lock) => String(lock)))].sort();
+// ロックは「同じファイルを指す別表記」を同じキーに畳まないと意味がない。
+// state.json と ./state.json と絶対パスが別ロック扱いになると、排他を
+// 宣言したつもりのジョブが平然と同時に走る。
+export function normalizeLockKey(lock, baseDir) {
+  // ロックは必ずパスとして解決する。「/ を含むものだけパス扱い」にすると
+  // state.json と ./state.json が別の鍵になり、排他を宣言したつもりの
+  // ジョブが同時に走る。実際の計画は全てパスを渡しているので、
+  // 論理名が要るときも名前空間を持つパス表記（locks/bgm-approval）で書く。
+  return `path:${path.resolve(baseDir, String(lock))}`;
 }
+
+function normalizeLocks(job, baseDir) {
+  // 正規化したうえでソートして取る。取得順を全ジョブで揃えることが、
+  // 2つのジョブが互いのロックを待ち合うデッドロックを防ぐ唯一の方法。
+  return [...new Set((job.locks ?? []).map((lock) => normalizeLockKey(lock, baseDir)))].sort();
+}
+
+// ジョブIDはログのファイル名になる。`../../x` を許すと logDir の外に
+// 書けてしまい、`a` と `b/../a` が同じログを上書きして証跡が混ざる。
+const SAFE_JOB_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 
 async function runJob(job, { logDir, defaults, dryRun }) {
   const cwd = path.resolve(job.cwd ?? defaults.cwd ?? REPO_ROOT);
@@ -205,6 +244,7 @@ async function runJob(job, { logDir, defaults, dryRun }) {
   const stderrPath = path.join(logDir, `${job.id}.stderr.log`);
   const stdoutStream = fs.createWriteStream(stdoutPath);
   const stderrStream = fs.createWriteStream(stderrPath);
+  let timedOut = false;
 
   const result = await new Promise((resolve) => {
     let settled = false;
@@ -213,6 +253,10 @@ async function runJob(job, { logDir, defaults, dryRun }) {
       cwd,
       env: { ...process.env, ...(defaults.env ?? {}), ...(job.env ?? {}) },
       stdio: ["ignore", "pipe", "pipe"],
+      // 独立したプロセスグループで起動する。こうしないと、タイムアウトで
+      // 子だけを殺しても孫（codex exec や ffmpeg が産むもの）が生き残り、
+      // ロックを解放したあとも共有ファイルを書き続ける。
+      detached: process.platform !== "win32",
     });
     child.stdout.pipe(stdoutStream);
     child.stderr.pipe(stderrStream);
@@ -224,15 +268,31 @@ async function runJob(job, { logDir, defaults, dryRun }) {
       resolve(payload);
     };
 
+    const killTree = () => {
+      if (process.platform === "win32") {
+        child.kill("SIGKILL");
+        return;
+      }
+      try {
+        // 負のPIDはプロセスグループ全体を指す。孫までまとめて止める。
+        process.kill(-child.pid, "SIGKILL");
+      } catch {
+        try { child.kill("SIGKILL"); } catch { /* すでに終了している */ }
+      }
+    };
+
     if (job.timeoutMs) {
       timer = setTimeout(() => {
-        child.kill("SIGKILL");
-        finish({ exitCode: null, signal: "SIGKILL", timedOut: true });
+        killTree();
+        // ここでは resolve しない。close を待って初めて確定させる。
+        // 先に確定するとロックが解放され、まだ死にきっていないプロセスと
+        // 次のジョブが同じファイルを触る。
+        timedOut = true;
       }, job.timeoutMs);
     }
 
     child.on("error", (error) => finish({ exitCode: null, spawnError: error.message }));
-    child.on("close", (code, signal) => finish({ exitCode: code, signal }));
+    child.on("close", (code, signal) => finish({ exitCode: code, signal, timedOut }));
   });
 
   await new Promise((resolve) => stdoutStream.end(resolve));
@@ -250,7 +310,15 @@ async function runJob(job, { logDir, defaults, dryRun }) {
     spawnError: result.spawnError ?? null,
     durationMs: Date.now() - startedAt,
     command: `${job.command} ${args.join(" ")}`.trim(),
+    // 空白で連結した command だけでは引数の境界が復元できない。
+    // 何を流したかを後から正確に再現できるよう、構造のまま残す。
+    argv: [job.command, ...args],
     cwd,
+    needs: job.needs ?? [],
+    locks: job.locks ?? [],
+    envKeys: Object.keys(job.env ?? {}),
+    timeoutMs: job.timeoutMs ?? null,
+    expectExitCode: expected,
     stdoutPath,
     stderrPath,
   };
@@ -309,12 +377,22 @@ export async function executePlan(plan, options = {}) {
         continue;
       }
 
-      const locks = normalizeLocks(job);
+      const locks = normalizeLocks(job, path.resolve(job.cwd ?? defaults.cwd ?? REPO_ROOT));
       if (locks.some((lock) => heldLocks.has(lock))) continue;
 
       for (const lock of locks) heldLocks.add(lock);
       pending.delete(id);
       const task = runJob(job, { logDir, defaults, dryRun })
+        .catch((error) => ({
+          // spawn 前の失敗（cwd が不正など）もジョブ1件の失敗として扱う。
+          // 例外のまま投げると計画全体が落ちて証跡が残らない。
+          id,
+          title: job.title ?? null,
+          status: "failed",
+          exitCode: null,
+          runnerError: error?.message ?? String(error),
+          durationMs: 0,
+        }))
         .then((result) => {
           results.set(id, result);
           onProgress({ type: "finished", id, result });

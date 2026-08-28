@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import fsSync from "node:fs";
 import test from "node:test";
 
 import {
   defaultConcurrency,
   executePlan,
   expandPlanJobs,
+  normalizeLockKey,
   planDigest,
   resolveConcurrency,
   validatePlan,
@@ -255,4 +257,139 @@ test("expand で id が衝突すれば検証で落ちる", () => {
     expand: [{ over: ["horo"], id: "gate-{item}", command: "true" }],
   });
   assert.ok(validatePlan(plan).some((e) => /重複/u.test(e)));
+});
+
+// --- Codexレビュー(2026-08-28)で指摘された経路の回帰テスト ---
+
+test("同じファイルを指す別表記のロックは同じ鍵に畳む", () => {
+  const base = "/repo";
+  assert.equal(normalizeLockKey("state.json", base), normalizeLockKey("./state.json", base));
+  assert.equal(normalizeLockKey("a/../state.json", base), normalizeLockKey("state.json", base));
+  assert.equal(normalizeLockKey("/repo/state.json", base), normalizeLockKey("./state.json", base));
+  // 別のファイルは別の鍵のまま
+  assert.notEqual(normalizeLockKey("state.json", base), normalizeLockKey("statejson", base));
+  // baseDir が違えば別の鍵（別リポジトリの同名ファイルを混同しない）
+  assert.notEqual(normalizeLockKey("state.json", "/repo"), normalizeLockKey("state.json", "/other"));
+});
+
+test("別表記で同じファイルを宣言したジョブは重ならない", async () => {
+  const plan = {
+    planId: "lock-alias",
+    defaults: { cwd: "/tmp" },
+    jobs: [
+      { id: "w1", command: "sleep", args: ["1"], locks: ["state.json"] },
+      { id: "w2", command: "sleep", args: ["1"], locks: ["./state.json"] },
+    ],
+  };
+  const summary = await executePlan(plan, {
+    concurrency: 4,
+    logDir: `/tmp/harness-parallel-test-${process.pid}-alias`,
+  });
+  assert.equal(summary.counts.passed, 2);
+  assert.ok(summary.totalDurationMs >= 1900, `別表記が同じロックに畳まれていない: ${summary.totalDurationMs}ms`);
+});
+
+test("ログのファイル名にできない id は実行前に落とす", () => {
+  for (const bad of ["../escape", "a/b", ".hidden", "with space", "-leading"]) {
+    const errors = validatePlan({ jobs: [{ id: bad, command: "true" }] });
+    assert.ok(errors.some((e) => /id に使えるのは/u.test(e)), `${bad} が通ってしまった`);
+  }
+  assert.deepEqual(validatePlan({ jobs: [{ id: "gate-horo_1.v2", command: "true" }] }), []);
+});
+
+test("型の壊れたフィールドは実行前に落とす", () => {
+  const bad = validatePlan({
+    jobs: [
+      { id: "a", command: "true", timeoutMs: "600000" },
+      { id: "b", command: "true", timeoutMs: -1 },
+      { id: "c", command: "true", expectExitCode: 1.5 },
+      { id: "d", command: "true", env: ["X=1"] },
+      { id: "e", command: "true", cwd: 123 },
+    ],
+  });
+  for (const pattern of [/timeoutMs は正の有限数/u, /expectExitCode は整数/u, /env はオブジェクト/u, /cwd は文字列/u]) {
+    assert.ok(bad.some((e) => pattern.test(e)), `${pattern} が検出されていない`);
+  }
+});
+
+test("spawnできないジョブも計画を落とさず1件の失敗として記録する", async () => {
+  const plan = {
+    planId: "spawn-failure",
+    jobs: [
+      { id: "broken", command: "true", cwd: "/nonexistent-directory-for-test" },
+      { id: "after", command: "true", needs: ["broken"] },
+      { id: "unrelated", command: "true" },
+    ],
+  };
+  // 例外で計画全体が落ちないこと自体が検証対象。
+  const summary = await executePlan(plan, {
+    concurrency: 3,
+    logDir: `/tmp/harness-parallel-test-${process.pid}-spawnfail`,
+  });
+  const byId = new Map(summary.jobs.map((j) => [j.id, j]));
+  assert.equal(byId.get("broken").status, "failed");
+  assert.equal(byId.get("after").status, "skipped");
+  assert.equal(byId.get("unrelated").status, "passed");
+  assert.equal(summary.ok, false);
+});
+
+test("タイムアウトしたジョブは孫プロセスごと止める", async () => {
+  // sh が sleep を産む。子だけを殺すと sleep が生き残る。
+  const marker = `/tmp/harness-orphan-${process.pid}`;
+  const plan = {
+    planId: "orphan",
+    jobs: [{
+      id: "spawner",
+      command: "sh",
+      args: ["-c", `sleep 20 && touch ${marker}`],
+      timeoutMs: 500,
+    }],
+  };
+  const summary = await executePlan(plan, {
+    concurrency: 1,
+    logDir: `/tmp/harness-parallel-test-${process.pid}-orphan`,
+  });
+  assert.equal(summary.jobs[0].status, "failed");
+  assert.equal(summary.jobs[0].timedOut, true);
+  // 孫が生きていれば20秒後にマーカーを作る。ここで待って確認する。
+  await new Promise((resolve) => { setTimeout(resolve, 22_000); });
+  assert.equal(fsSync.existsSync(marker), false, "孫プロセスが生き残ってファイルを作った");
+});
+
+test("expand は継承プロパティやオブジェクト値を差し込ませない", () => {
+  assert.throws(
+    () => expandPlanJobs({ expand: [{ over: ["a"], id: "{constructor}", command: "true" }] }),
+    /\{constructor\}/u,
+  );
+  assert.throws(
+    () => expandPlanJobs({ expand: [{ over: ["a"], id: "{toString}", command: "true" }] }),
+    /\{toString\}/u,
+  );
+  assert.throws(
+    () => expandPlanJobs({ expand: [{ over: [{ item: "a", nested: { x: 1 } }], id: "{nested}", command: "true" }] }),
+    /文字列・数値・真偽値だけ/u,
+  );
+  // 数値と真偽値は許す
+  const ok = expandPlanJobs({ expand: [{ over: [{ item: "a", n: 3 }], id: "{item}{n}", command: "true" }] });
+  assert.equal(ok.jobs[0].id, "a3");
+});
+
+test("レポートは引数の境界と依存・ロックを構造のまま残す", async () => {
+  const plan = {
+    planId: "evidence2",
+    jobs: [{
+      id: "j", command: "sh", args: ["-c", "echo 'a b'"],
+      locks: ["x.json"], timeoutMs: 60_000, env: { FOO: "1" },
+    }],
+  };
+  const summary = await executePlan(plan, {
+    concurrency: 1,
+    logDir: `/tmp/harness-parallel-test-${process.pid}-evidence2`,
+  });
+  const job = summary.jobs[0];
+  assert.deepEqual(job.argv, ["sh", "-c", "echo 'a b'"]);
+  assert.deepEqual(job.locks, ["x.json"]);
+  assert.deepEqual(job.envKeys, ["FOO"]);
+  assert.equal(job.timeoutMs, 60_000);
+  assert.equal(job.expectExitCode, 0);
 });
