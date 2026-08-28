@@ -54,3 +54,4 @@ docs/koya-codex-session-handoff-*.md
 clicks.json
 cmp_*.txt
 old-*.wav
+examples/reference-scripts/*.reference.md
