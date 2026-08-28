@@ -2,6 +2,7 @@
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
+import { runKoyaCharacterAttributeGate } from "../lib/koyaCharacterAttributeAudit.mjs";
 import { auditKoyaMangaFinal, writeKoyaVisualSignoff } from "../lib/koyaMangaFinalAudit.mjs";
 import {
   adjustKoyaMangaUtteranceGap,
@@ -80,7 +81,7 @@ function usage() {
     "Koya manga video production (fail-closed)",
     "",
     "node scripts/koya-manga-video.mjs <action> [options]",
-    "actions: contract, channel-contract, character-bootstrap-status, character-roster-review-draft, character-roster-audit, cast-readiness, story-review-draft, story-audit, location-plan, location-generate, location-anchor-review-draft, location-anchor-audit, location-review-draft, location-register, thumbnail-plan-draft, thumbnail-audit, handoff-export, handoff-verify, handoff-restore, plan, images, character-review-refresh, character-candidate-migrate-blind, character-candidate-import, character-style-generate, character-style-import, character-style-review-refresh, character-style-record-failure, character-style-compose, character-style-select, character-approve, character-identity-repair, character-identity-repack, character-register, prepare, speech, adjust-gap, standard-cut, repair-onset, repair-tail, sync-contract, refresh-bubbles, render, audit, signoff, full, status",
+    "actions: contract, channel-contract, character-bootstrap-status, character-roster-review-draft, character-roster-audit, cast-readiness, story-review-draft, story-audit, location-plan, location-generate, location-anchor-review-draft, location-anchor-audit, location-review-draft, location-register, thumbnail-plan-draft, thumbnail-audit, handoff-export, handoff-verify, handoff-restore, plan, images, character-review-refresh, character-candidate-migrate-blind, character-candidate-import, character-style-generate, character-style-import, character-style-review-refresh, character-style-record-failure, character-style-compose, character-style-select, character-attribute-gate, character-approve, character-identity-repair, character-identity-repack, character-register, prepare, speech, adjust-gap, standard-cut, repair-onset, repair-tail, sync-contract, refresh-bubbles, render, audit, signoff, full, status",
     "common: --project-dir DIR --episode-id ID --script-path FILE --title TITLE --protagonist-speaker-id ID_OR_EXACT_NAME --character-bible-path JSON [--story-review-path JSON] [--source-face-review-path JSON] [--generator-host codex|claude|legacy-migration] [--generator-id ID] [--generator-context-id TASK_OR_SESSION_ID] [--retry-failed] [--image-concurrency N|auto] [--qa-concurrency N] [--image-fallback-model MODEL] [--qa-fallback-provider grok]",
     "story-audit: --script-path FILE --story-review-path JSON --protagonist-speaker-id ID_OR_EXACT_NAME (read-only; binds reversal beats and human policy checks to the exact script SHA-256)",
     "story-review-draft: --script-path FILE [--protagonist-speaker-id ID_OR_EXACT_NAME] (read-only; prints exact utterance inventory with all subjective fields unset)",
@@ -111,6 +112,7 @@ function usage() {
     "character-style-review-refresh: --workflow-id ID --cast-id ID --styling-round-id ID (rebuilds the unreviewed draft and fresh machine hair-color distance evidence without regenerating images)",
     "character-style-record-failure: --episode-id ID --workflow-id ID --cast-id ID_OR_NAME --styling-round-id ID --styling-review-path JSON (records a complete independent review that missed the minimum count, closes the round, preserves all bytes, and permits a new repair round)",
     "character-style-compose: --episode-id ID --workflow-id ID --cast-id ID_OR_NAME --styling-round-id ID --styling-review-path JSON (composes only independently reviewed passing sheets; no image model)",
+    "character-attribute-gate: --inventory-path FILE [--output-path FILE] (R192/R196 mandatory attribute gates for a character sheet set; per-asset coverage + human eye-side attestation; must pass before the setting-sheet stage)",
     "character-style-select: --episode-id ID --workflow-id ID --cast-id ID_OR_NAME --styling-round-id ID --styling-option-id ID --selection-reason WHY [--selected-by NAME] (binds one reviewed individual asset; does not register the person)",
     "character-register: --workflow-id ID --cast-id ID_OR_NAME --identity-review-path JSON (requires real turnaround + eight-view + twelve-cell SHA-bound QA)",
     "repair-onset: --utterance-id ID --source-path WAV --fade-start-seconds N --fade-milliseconds 6..8 --output-file-name NAME.wav",
@@ -527,6 +529,24 @@ switch (args.action) {
     requireEpisodeId();
     const result = await composeKoyaCharacterStylingReview({ ...common, workflowId: args.workflowId, castId: args.castId });
     print(result);
+    break;
+  }
+  case "character-attribute-gate": {
+    if (!args.inventoryPath) throw new Error("--inventory-path is required");
+    const result = await runKoyaCharacterAttributeGate({
+      projectDir,
+      inventoryPath: resolve(args.inventoryPath),
+      outputPath: args.outputPath ? resolve(args.outputPath) : "",
+    });
+    print({
+      pass: result.decision.pass,
+      castId: result.decision.castId,
+      failedCheckIds: result.decision.failedCheckIds,
+      missingCoverage: result.decision.missingCoverage,
+      missingHumanGates: result.decision.missingHumanGates,
+      decision: result.outputPath,
+    });
+    if (!result.decision.pass) exitCode = 3;
     break;
   }
   case "character-style-select": {
