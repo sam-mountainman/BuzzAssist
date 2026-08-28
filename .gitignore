@@ -43,3 +43,14 @@ config/koya-manga-source-face-reviews
 # RunReceipt の集計置き場。記録そのものは成果物側（エピソードの監査ディレクトリ）
 # に書かれる。ここは横断で見るためのローカルの集約なので追跡しない。
 docs/learning/receipts/
+config/koya-location-bible.json
+config/koya-show-bible.json
+config/koya-thumbnail-contract.json
+docs/koya-channel-requirements-ledger.md
+docs/koya-channel-governance-ja.md
+docs/koya-codex-session-handoff-*.md
+.codex-tmp/
+*.pdf
+clicks.json
+cmp_*.txt
+old-*.wav

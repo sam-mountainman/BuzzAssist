@@ -92,11 +92,11 @@ node scripts/harness-parallel-run.mjs --plan <plan.json> \
 ```json
 {
   "planId": "koya-cast-gates-2026-08-28",
-  "defaults": { "cwd": "/Users/higataiyu/Documents/Excalidraw" },
+  "defaults": { "cwd": "/Users/<home>/Documents/Excalidraw" },
   "jobs": [
     {
       "id": "gate-horo",
-      "title": "もも 属性ゲート",
+      "title": "<castId> 属性ゲート",
       "command": "node",
       "args": ["scripts/koya-manga-video.mjs", "character-attribute-gate",
                "--inventory-path", "canvas/attribute-gates/horo-r1.json"],
@@ -137,7 +137,7 @@ node scripts/harness-parallel-agents.mjs --probe   # 使えるエンジンを確
 ```
 
 ```json
-{ "tasks": [ { "id": "qa-horo-tatsu", "title": "もも×タツ 混同防止",
+{ "tasks": [ { "id": "qa-castA-castB", "title": "<castA>×<castB> 混同防止",
                "prompt": "...", "timeoutMs": 900000 } ] }
 ```
 

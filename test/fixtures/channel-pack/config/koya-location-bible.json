@@ -11,26 +11,77 @@
     "minimumWidth": 1280,
     "minimumHeight": 720,
     "requireDistinctSha256PerBoard": true,
-    "requiredChecks": ["containsPeopleFalse", "readableTextAbsent", "realBrandsAbsent", "architectureLockPass", "originalScalePass", "crossViewArchitectureContinuity"]
+    "requiredChecks": [
+      "containsPeopleFalse",
+      "readableTextAbsent",
+      "realBrandsAbsent",
+      "architectureLockPass",
+      "originalScalePass",
+      "crossViewArchitectureContinuity"
+    ]
   },
   "locations": [
     {
       "id": "yamatani",
-      "name": "小料理屋・見本",
+      "name": "小料理屋・sample-x0",
       "status": "spec-approved-image-pending",
-      "architectureLock": ["小さな店", "カウンター中心", "奥に団体客用の座敷", "店主の調理位置を固定", "ハトの定位置を承認後に固定"],
-      "materialPalette": ["温かい木", "生成りの壁", "控えめな藍色", "暖色の実用灯"],
-      "requiredBoards": ["入口からカウンター全景", "カウンター内から客席", "座敷から入口", "平面配置図"],
-      "generationRules": ["人物なしで背景ボードを生成", "文字看板なし", "実在ブランドなし", "過密な小物壁にしない", "承認前はcharacters.jsonへapproved locationとして登録しない"]
+      "architectureLock": [
+        "小さな店",
+        "見本c9c8・",
+        "見本86e4・試験",
+        "sample-1の調理位置を固定",
+        "sample-2の定位置を承認後に固定"
+      ],
+      "materialPalette": [
+        "温かい木",
+        "生成りの壁",
+        "見本9f5b",
+        "見本5be8"
+      ],
+      "requiredBoards": [
+        "見本c848・試験用の",
+        "見本4a3d・試験用",
+        "見本0b19",
+        "平面配置図"
+      ],
+      "generationRules": [
+        "見本040f・試験用の合成",
+        "見本1d08",
+        "見本7bb9・試",
+        "見本4c91・試験用",
+        "見本b97a・試験用の合成文言・試験用の合成文言・試験用の合成文言・試験用の合成文言・試験"
+      ]
     },
     {
       "id": "apparecho-night",
-      "name": "見本町・夜の飲み屋街",
+      "name": "sample-3・夜の飲み屋街",
       "status": "spec-approved-image-pending",
-      "architectureLock": ["和の下町", "狭い路地", "小規模店舗の連なり", "奥行きのある曲がり角", "山谷へつながる導線"],
-      "materialPalette": ["暖色提灯", "控えめな青紫ネオン", "濡れすぎない路面反射", "木と古いモルタル"],
-      "requiredBoards": ["山谷前の基準wide", "駅側から山谷へ向かう路地", "反対向きの帰路", "昼夜の光源対応表"],
-      "generationRules": ["人物なし", "実在地名・実在ブランド禁止", "読める架空看板も最小限", "ネオンを顔より高彩度にしない", "承認画像だけをidentitySafe=true/containsPeople=falseのenvironment参照にする"]
+      "architectureLock": [
+        "和の下町",
+        "狭い路地",
+        "見本0b13・試験",
+        "見本7499・試験用",
+        "sample-x0へつながる導線"
+      ],
+      "materialPalette": [
+        "暖色提灯",
+        "見本4eb5・試験",
+        "見本b627・試験用",
+        "見本9c9a・試"
+      ],
+      "requiredBoards": [
+        "sample-x0前の基準wide",
+        "駅側からsample-x0へ向かう路地",
+        "見本4c86・",
+        "見本e664・試"
+      ],
+      "generationRules": [
+        "人物なし",
+        "見本4eeb・試験用の合成",
+        "見本150c・試験用の",
+        "見本5a56・試験用の合成文",
+        "見本bca6・試験用の合成文言・試験用の合成文言・試験用の合成文言・試験用の合成文言・試験用の合成文言・試験用の合成文言・試"
+      ]
     }
   ]
 }

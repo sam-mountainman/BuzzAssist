@@ -171,7 +171,7 @@ node scripts/harness-receipts.mjs export --out <path>   # 返せる形だけ
 | どの入口を使わせるか | `platform:platform-craft`（正本は `lib/harnessRouting.mjs`） |
 | 証跡・指紋・記録の不変条件 | `platform:platform-craft`（正本は `lib/harnessRunReceipt.mjs`） |
 | チャンネル固有の要求・禁止事項 | `ledger:koya`（R番号を採番して追記） |
-| ナレーション物語の運営者の音声・BGMゲート | `doc:mike-audio-gates` |
+| ナレーション物語の音声・BGMゲート | `channel-pack:narrated-story` |
 
 迷ったら台帳へ。台帳は番号つきで、後からスキルへ引き上げられる。
 

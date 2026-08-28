@@ -2,13 +2,13 @@
   "version": "koya-show-bible-v1",
   "channel": {
     "name": "Sample Manga Channel",
-    "reading": "あっぱれまんがでスカッといっぱい",
+    "reading": "見本f55b・試験用の合成文言・",
     "shortName": "アパイチ",
     "brandCall": "Sampleれ漫画",
     "closingCall": "アッパレ！",
     "fictionNoticeRequired": true,
     "alcoholKeywordPolicy": "restrained",
-    "alcoholKeywordReason": "YouTube広告親和性のため、チャンネル名・タイトル・シナリオで酒語彙を主軸にしない",
+    "alcoholKeywordReason": "見本d7da・試験用の合成文言・試験用の合成文言・試験用の合成文言・試験用の合成文言・",
     "alcoholLexicon": [
       "日本酒",
       "焼酎",
@@ -22,11 +22,11 @@
   },
   "world": {
     "town": "Sample Town",
-    "townReading": "アッパレちょう",
-    "visualSummary": "和の下町と夜のネオンが混ざる、あたたかい架空の飲み屋街",
+    "townReading": "見本032a・",
+    "visualSummary": "見本990b・試験用の合成文言・試験用の合成文言・試験",
     "realPlaceNamesForbidden": true,
     "realBrandSignsForbidden": true,
-    "homeBase": "小料理屋・見本"
+    "homeBase": "小料理屋・sample-x0"
   },
   "storyGrammar": {
     "escalation": [
@@ -35,14 +35,14 @@
       "攻撃3"
     ],
     "reversal": [
-      "イブキの号砲",
+      "sample-x3の号砲",
       "証拠の提示",
-      "とどめは主人公本人",
-      "タツは退路を塞ぐ一言だけ"
+      "見本b371・試験",
+      "sample-x4は退路を塞ぐ一言だけ"
     ],
-    "villainComedy": "敵同士もマウントを取り合う、憎めない小物の生態を見せる",
+    "villainComedy": "見本0ad8・試験用の合成文言・試験用の合成文言・試験",
     "protagonistAgencyRequired": true,
-    "tatsuViolenceDepiction": "直接的な暴力を描かず、元組長を美化しない"
+    "tatsuViolenceDepiction": "見本2fd3・試験用の合成文言・試験用の"
   },
   "storyReview": {
     "version": "koya-story-review-v1",
@@ -85,22 +85,22 @@
     {
       "id": "horo",
       "name": "sample-1",
-      "hiddenName": "仮名ヨシ",
+      "hiddenName": "sample-x1",
       "role": "ally-mascot",
       "speech": {
         "dialect": "関西弁",
         "firstPerson": "私",
         "anchors": [
-          "ベロベロちゃう！もも酔いや！",
-          "その話、酒場で聞いたで",
-          "一杯奢ってや",
-          "ほな、また呑もな",
+          "ベロベロちゃう！sample-x2酔いや！",
+          "見本81ee・試験用の",
+          "見本ffa4",
+          "見本c106・試",
           "にゃはは！",
           "Sampleれや！",
-          "ほな、ぼちぼち反撃といこか"
+          "見本fb54・試験用の合成"
         ]
       },
-      "usage": "毎話どこかに映る。説教せず肯定から入る。開眼は切り札。",
+      "usage": "見本7107・試験用の合成文言・試験用の合成文言・試験",
       "requiredEveryEpisode": true,
       "requiredReferenceRoles": [
         "identity-face",
@@ -118,12 +118,12 @@
       ],
       "currentDesignDirective": [
         "Aの束感とハネ感を土台",
-        "編み込みなし",
+        "見本631e",
         "髪飾りなし",
         "八重歯",
         "だぼっとしたジャージ",
-        "黒無地インナー",
-        "短パンは軽いダメージ",
+        "見本3510・",
+        "見本0f23・試験用",
         "スニーカー",
         "赤茶を含む重複しない髪色を複数比較"
       ],
@@ -138,15 +138,15 @@
       "name": "sample-2",
       "role": "ally-brain",
       "speech": {
-        "dialect": "男勝りな標準語",
+        "dialect": "見本c982・",
         "firstPerson": "私",
         "anchors": [
           "ほぅ…",
-          "お前…ときめきの匂いがするな",
-          "答え合わせ、始めましょうか"
+          "見本0fa5・試験用の合成文",
+          "見本a16a・試験用の合成"
         ]
       },
-      "usage": "人間観察・推理・証拠提示。恋愛小説家の秘密と甘い趣味をギャップにする。",
+      "usage": "見本30ab・試験用の合成文言・試験用の合成文言・試験用の合成文言・試",
       "designStatus": "approved",
       "selectedLabel": "C"
     },
@@ -155,18 +155,18 @@
       "name": "sample-3",
       "role": "ally-natural-heiress",
       "speech": {
-        "dialect": "おっとり敬語",
+        "dialect": "見本dc19",
         "firstPerson": "私",
         "anchors": [
-          "あら、かわいい",
+          "見本5371・",
           "あらあら〜",
-          "めっ、ですよ〜",
+          "見本1988・",
           "まぁまぁ",
-          "いい子、いい子",
+          "見本a3ea・",
           "うふふ"
         ]
       },
-      "usage": "本物しか知らない鑑定眼で、悪意なく嘘・偽物・粉飾を見抜く。",
+      "usage": "見本1bb9・試験用の合成文言・試験用の合成文言・試験用の",
       "designStatus": "approved",
       "selectedLabel": "E"
     },
@@ -175,25 +175,25 @@
       "name": "sample-4",
       "role": "ally-technical",
       "speech": {
-        "dialect": "陰キャ、時々厨二病の標準語",
+        "dialect": "見本037a・試験用の合成",
         "firstPerson": "僕",
         "anchors": [
           "帰りたい",
-          "はぁ、やだやだ",
-          "これだからリア充は…",
-          "コイツ、素人ですね"
+          "見本369a・",
+          "見本5882・試験用",
+          "見本5151・試験"
         ]
       },
-      "usage": "キーボードがスイッチ。普段は臆病だが技術と正義感で反転する。",
+      "usage": "見本d04b・試験用の合成文言・試験用の合成文言・試験用の合",
       "designStatus": "pending-revision-approval",
       "selectedBaseLabel": "A",
       "stylingSpecPath": "config/koya-character-styling/reiji-hairstyle-v5.json",
       "currentDesignDirective": [
         "Aを土台",
         "前髪を短く",
-        "見える片目は本人の左目",
-        "頭頂のアホ毛・ちょんまげ状のハネなし",
-        "提示された既存アニメ人物に似せない"
+        "見本410b・試験用の",
+        "見本109b・試験用の合成文言・試験",
+        "見本369a・試験用の合成文言・試"
       ]
     },
     {
@@ -201,16 +201,16 @@
       "name": "sample-5",
       "role": "ally-closer",
       "speech": {
-        "dialect": "丁寧な老人語",
+        "dialect": "見本553a",
         "firstPerson": "わし",
         "anchors": [
-          "ケジメ、つけてもらおうか",
-          "逃げなさんな",
-          "腰が入っとらんのぅ",
-          "落とし前、どうつける？"
+          "見本ec54・試験用の合",
+          "見本19b1",
+          "見本5633・試験",
+          "見本21a4・試験用の"
         ]
       },
-      "usage": "スポット起用。退路を静かに塞ぐ。元組長だが暴力を直接描かない。",
+      "usage": "見本85d8・試験用の合成文言・試験用の合成文言・試験用の合成",
       "requiredReferenceRoles": [
         "identity-face",
         "turnaround",
@@ -221,9 +221,9 @@
       "selectedBaseLabel": "C",
       "stylingSpecPath": "config/koya-character-styling/tatsu-refinement-v1.json",
       "currentDesignDirective": [
-        "腰は曲げずまっすぐ",
-        "首タオルあり",
-        "開眼差分必須"
+        "見本4213・試験",
+        "見本fb92",
+        "見本1490"
       ]
     },
     {
@@ -231,15 +231,15 @@
       "name": "sample-6",
       "role": "neutral-location-anchor",
       "speech": {
-        "dialect": "最小限の標準語",
+        "dialect": "見本e2b9・",
         "firstPerson": "俺・自分",
         "anchors": [
-          "自分は不器用なんで",
-          "人生ってのは山あり谷ありですよ",
+          "見本688c・試験",
+          "見本9524・試験用の合成文言",
           "Sampleれでしたね"
         ]
       },
-      "usage": "店は立てるがキャラは立てない。ギャップや切り札を足さない。",
+      "usage": "見本8900・試験用の合成文言・試験用の合成文言・試験用の",
       "designStatus": "approved",
       "selectedLabel": "A"
     },
@@ -253,14 +253,14 @@
           "フシャー！"
         ]
       },
-      "usage": "2〜3回に1回。『デブ』と呼んだ悪人は末路が悪い。『ぽっちゃり』は許す。",
+      "usage": "見本157c・試験用の合成文言・試験用の合成文言・試験用の合成文言・試験",
       "designStatus": "pending-revision-approval",
       "selectedBaseLabel": "A",
       "stylingSpecPath": "config/koya-character-styling/fuku-body-v1.json",
       "currentDesignDirective": [
-        "ぶっちょう面を維持",
-        "体だけ一回り小さく",
-        "白茶の招き猫柄",
+        "見本06df・試験",
+        "見本6dff・試験",
+        "見本7436・",
         "古い鈴"
       ]
     },
@@ -274,11 +274,11 @@
         "anchors": [
           "それな",
           "きも",
-          "マジないわー",
-          "エマ的にポイント高め"
+          "見本6de9",
+          "sample-1的にポイント高め"
         ]
       },
-      "usage": "味方・敵を明示してから書く。若者の代弁者。",
+      "usage": "見本8f1d・試験用の合成文言・試験用の合",
       "episodeRoleSelectionRequired": true,
       "requiredReferenceRoles": [
         "identity-face",
@@ -292,9 +292,9 @@
           "label": "社会人OL",
           "description": "sample-9",
           "invariants": [
-            "高校制服に見せない",
+            "見本e54c・試験",
             "プリーツミニを使わない",
-            "実在ブランドなし"
+            "見本7bb9・試"
           ]
         },
         {
@@ -304,12 +304,12 @@
           "invariants": [
             "学生服に見せない",
             "顔・髪・ギャル感は同一",
-            "実在ブランドなし"
+            "見本7bb9・試"
           ]
         },
         {
           "id": "private-dressy",
-          "label": "社会人のきれいめ私服",
+          "label": "社会人の見本f739",
           "description": "sample-11",
           "invariants": [
             "丈は膝下",
@@ -323,7 +323,7 @@
       "stylingSpecPath": "config/koya-character-styling/ema-outfit-v1.json",
       "currentDesignDirective": [
         "顔・髪・ギャル感はB",
-        "高校生に見えない社会人服",
+        "見本2e8d・試験用の合",
         "OL・私服カジュアル・私服きれいめを比較",
         "採用後はstoryStage衣装シートへ"
       ]
@@ -333,14 +333,14 @@
       "name": "sample-12",
       "role": "antagonist-showa",
       "speech": {
-        "dialect": "偉そうな標準語",
+        "dialect": "見本7602・",
         "firstPerson": "俺",
         "anchors": [
-          "俺を誰だと思ってる？",
-          "これだから最近の若いやつは"
+          "見本5c89・試験用",
+          "見本71ac・試験用の合成"
         ]
       },
-      "usage": "死亡フラグ台詞の後は毎回ブーメラン。長いものには巻かれる小物。",
+      "usage": "見本ad8e・試験用の合成文言・試験用の合成文言・試験用の合成",
       "designStatus": "approved",
       "selectedLabel": "A"
     },
@@ -349,21 +349,21 @@
       "name": "sample-13",
       "role": "antagonist-modern",
       "speech": {
-        "dialect": "横文字を混ぜる標準語",
+        "dialect": "見本c2f4・試験用",
         "firstPerson": "俺",
         "anchors": [
-          "そのエビデンスは？",
-          "よう、陰キャ",
-          "ダッセェなぁw",
-          "無能はコスパ悪りぃなぁ"
+          "見本049e・試験",
+          "見本c7fe",
+          "見本d5e5・",
+          "見本08ea・試験用の"
         ]
       },
-      "usage": "対立山と世代2レーン。自称エリートだが浅い。",
+      "usage": "sample-2と世代2レーン。自称エリートだが浅い。",
       "designStatus": "pending-color-selection",
       "selectedBaseLabel": "C",
       "stylingSpecPath": "config/koya-character-styling/heito-refinement-v4.json",
       "currentDesignDirective": [
-        "ネクタイあり",
+        "見本e9b0",
         "明るめ茶またはオレンジ系の髪",
         "最終色は人間が選ぶ"
       ]
@@ -373,18 +373,18 @@
       "name": "sample-14",
       "role": "antagonist-female",
       "speech": {
-        "dialect": "猫なで声から金切り声",
+        "dialect": "見本8802・試験用",
         "firstPerson": "私",
         "anchors": [
           "〜のくせに",
-          "私まだ20代だし",
-          "この価値がわからないの？"
+          "見本9ab3・試",
+          "見本9dab・試験用の合"
         ]
       },
-      "usage": "お局・義母・ママ友ボス。実年齢は公開しない。",
+      "usage": "見本df87・試験用の合成文言・試験用の合成",
       "designStatus": "candidate-selection-required",
       "currentDesignDirective": [
-        "固定11人目として必ず用意する",
+        "見本fbfe・試験用の合成文言",
         "現行A/B/Cは採用しない",
         "38〜45歳相当の成熟した女性",
         "ギャル感と無理な若作りをなくす",
@@ -413,10 +413,10 @@
       ]
     ],
     "notes": [
-      "ももは低身長で小柄",
-      "タツは小柄で痩せ型だが腰は曲げない",
-      "店主はガタイがよい",
-      "ハトは人物身長表と別枠"
+      "sample-x2は低身長で小柄",
+      "sample-x4は小柄で痩せ型だが腰は曲げない",
+      "sample-3はガタイがよい",
+      "sample-4は人物身長表と別枠"
     ]
   },
   "assetReadiness": {
@@ -427,18 +427,18 @@
   },
   "provenance": [
     {
-      "source": "2026-08-22制作共有PDF",
+      "source": "見本e8fd・試験用の合成文言・試",
       "priority": 1
     },
     {
       "source": "2026-08-26sample-channelさんフィードバック",
       "priority": 2,
-      "rule": "後日の明示修正はPDF旧指定を上書きする"
+      "rule": "見本8e85・試験用の合成文言・試験用の"
     },
     {
-      "source": "2026-08-27ユーザー原寸再監査・見栄原明示指示",
+      "source": "見本6797・試験用の合成文言・試験用の合成文言・試験",
       "priority": 3,
-      "rule": "見栄原を固定11人目へ復帰し、もも・レイジ・弊斗の弱い比較案は最終承認前に再制作する"
+      "rule": "見栄原を固定11人目へ復帰し、sample-x2・sample-5・弊斗の弱い比較案は最終承認前に再制作する"
     }
   ]
 }
