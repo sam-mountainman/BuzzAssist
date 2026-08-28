@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   applyKoyaContractToManifest,
@@ -184,4 +187,41 @@ test("the JSON Schema closes every contract object and validates every leaf", as
   }
   assert.equal(mutations.length > 100, true);
   assert.deepEqual(mutations.filter((row) => row.pass), []);
+});
+
+test("空の作業フォルダからでも契約が読める", async () => {
+  // 契約はジャンル層のもので、それを読むコードと一緒に配布・更新される。
+  // 運営者のプロジェクトには置かれない（Channel Pack と台本と成果物だけ）。
+  // それなのに projectDir から読んでいたので、空の作業フォルダで実行すると
+  // 生の ENOENT で止まっていた——運営者が最初の1本で必ず踏む。
+  const { resolveKoyaMangaProductionContract, resolveKoyaMangaContractPath } =
+    await import("../lib/koyaMangaProductionContract.mjs");
+  const empty = await mkdtemp(join(tmpdir(), "empty-project-"));
+
+  const located = await resolveKoyaMangaContractPath({ projectDir: empty });
+  assert.equal(located.source, "runtime", "ランタイム側の契約を使うこと");
+  assert.equal(located.path.startsWith(empty), false, "空のプロジェクトを指していないこと");
+
+  const resolved = await resolveKoyaMangaProductionContract({ projectDir: empty });
+  assert.match(resolved.contract.version, /^koya-manga-production-v\d+$/u);
+  assert.equal(resolved.contractSource, "runtime", "出所が戻り値に残ること");
+  assert.equal(resolved.validation.pass, true);
+
+  // プロジェクト側に古い契約が残っていたら、黙って使わずに知らせる。
+  // 自動更新でランタイムだけが新しくなり、古い契約が居座るのが版ずれの入口。
+  const stale = await mkdtemp(join(tmpdir(), "stale-project-"));
+  await mkdir(join(stale, "config"), { recursive: true });
+  const runtime = JSON.parse(await readFile(located.path, "utf8"));
+  runtime.version = "koya-manga-production-v1-stale";
+  await writeFile(join(stale, "config/koya-manga-production-contract.json"), JSON.stringify(runtime, null, 2));
+
+  const withStale = await resolveKoyaMangaContractPath({ projectDir: stale });
+  assert.equal(withStale.source, "runtime", "古いプロジェクト側の契約を優先しないこと");
+  assert.match(withStale.divergence || "", /異なる契約が残っている/u, "食い違いを黙認しないこと");
+
+  // 明示指定はベンチマーク移行のために残す。
+  const explicit = await resolveKoyaMangaContractPath({ projectDir: stale, contractPath: join(stale, "config/koya-manga-production-contract.json") });
+  assert.equal(explicit.source, "explicit");
+
+  for (const dir of [empty, stale]) await rm(dir, { recursive: true, force: true });
 });
