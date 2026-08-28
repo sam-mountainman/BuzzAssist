@@ -40,19 +40,45 @@
     {
       "id": "character-attribute-gate",
       "what": "髪色ドリフト・微差テイク・意図外変更・装飾混入を決定論で落とす",
-      "human": "目の左右のみ人手（reviewer名必須）"
+      "human": "目の左右のみ人手（reviewer名必須）",
+      "evidenceAuditIds": [
+        "independent-rendered-face",
+        "editorial-quality",
+        "split-page-integrity"
+      ]
     },
     {
       "id": "voice-quality-gate",
-      "what": "CER・UTMOS・F0分散・モーラ速度・端無音・クリッピングでテイクを選別。全滅なら停止"
+      "what": "CER・UTMOS・F0分散・モーラ速度・端無音・クリッピングでテイクを選別。全滅なら停止",
+      "evidenceAuditIds": [
+        "stt-verification",
+        "audio-onset",
+        "audio-speaker-continuity",
+        "audio-waveform-sync",
+        "audio-click-hum-level"
+      ]
     },
     {
       "id": "camera-grammar",
-      "what": "方向移動／引き／方向後引きの3系統を強制し、全カット引きを防ぐ"
+      "what": "方向移動／引き／方向後引きの3系統を強制し、全カット引きを防ぐ",
+      "evidenceAuditIds": [
+        "rendered-camera",
+        "bubble-camera-sweep",
+        "bubble-midpoint-frames",
+        "bubble-transition-clear-frames"
+      ]
     },
     {
       "id": "final-audit",
-      "what": "レンダー済みMP4の実測監査。設定値ではなく出力を見る"
+      "what": "レンダー済みMP4の実測監査。設定値ではなく出力を見る",
+      "evidenceAuditIds": [
+        "contract-manifest",
+        "quality-harness-final",
+        "bubble-typography",
+        "thought-spotlight",
+        "agent-contact-sheet-review",
+        "full-decode"
+      ]
     }
   ],
   "entrypoint": "node scripts/koya-manga-video.mjs",
@@ -77,5 +103,6 @@
     "スカッと",
     "manga"
   ],
-  "keywordsNote": "依頼文からこのハーネスを言い当てるための短い手掛かり。日本語は空白で区切れないので、依頼文を刻むのではなくこちらの語が現れるかで見る。"
+  "keywordsNote": "依頼文からこのハーネスを言い当てるための短い手掛かり。日本語は空白で区切れないので、依頼文を刻むのではなくこちらの語が現れるかで見る。",
+  "gateEvidenceNote": "各保証は、実測監査 evidenceAuditIds が全て pass のときだけ pass にできる。対応を書かずに保証だけ並べると、1つも走っていない状態でも「全部通った」と書けてしまう。契約の requiredAudits を全て、いずれかの保証に割り当てること——どこにも紐づかない監査は、落ちても誰の保証も傷つけない。"
 }

@@ -39,3 +39,7 @@ config/harness-deployments.json
 # Channel Pack への橋渡しリンク（従来パスからの互換）。実体は channel-packs/。
 config/koya-character-styling
 config/koya-manga-source-face-reviews
+
+# RunReceipt の集計置き場。記録そのものは成果物側（エピソードの監査ディレクトリ）
+# に書かれる。ここは横断で見るためのローカルの集約なので追跡しない。
+docs/learning/receipts/
