@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { requireArtifacts, requireChannelPack } from "./helpers/requirePrerequisites.mjs";
 
 import {
   KOYA_MCP_ACTIONS,
@@ -14,7 +15,8 @@ import {
 
 const root = path.resolve(new URL("..", import.meta.url).pathname);
 
-test("Koya MCP doctor and read-only actions use the canonical CLI", async () => {
+test("Koya MCP doctor and read-only actions use the canonical CLI", async (t) => {
+  if (!requireChannelPack(t, "doctor の正本チェック")) return;
   const doctor = await doctorKoyaMcp({ projectDir: root });
   assert.equal(doctor.ok, true, JSON.stringify(doctor));
   assert.equal(doctor.contract.validation.pass, true);
@@ -79,7 +81,8 @@ test("Koya MCP mutating actions require confirmation and checkpoint background f
   }
 });
 
-test("Koya MCP doctor can verify the installed runtime before an empty recipient project restores its handoff data", async () => {
+test("Koya MCP doctor can verify the installed runtime before an empty recipient project restores its handoff data", async (t) => {
+  if (!requireChannelPack(t, "doctor の正本チェック")) return;
   const projectDir = await mkdtemp(path.join(os.tmpdir(), "buzzassist-koya-empty-project-"));
   try {
     const doctor = await doctorKoyaMcp({ projectDir });

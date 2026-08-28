@@ -22,6 +22,7 @@ import {
 } from "../lib/koyaMangaProduction.mjs";
 import { readKoyaChannelAuthority } from "../lib/koyaChannelGovernance.mjs";
 import { renderEditorialPlatePng } from "../lib/mangaScriptImagePipeline.mjs";
+import { requireArtifacts, requireChannelPack } from "./helpers/requirePrerequisites.mjs";
 
 function testRaster(seed = 1, width = 96, height = 72) {
   return Buffer.concat([renderEditorialPlatePng("white-solid", width, height), Buffer.from(`identity-seed-${seed}`)]);
@@ -191,7 +192,8 @@ test("character-bible readings become deterministic STT pronunciation aliases", 
   ]);
 });
 
-test("Koya styling rounds must follow every show-bible spec in order with immutable spec bytes", async () => {
+test("Koya styling rounds must follow every show-bible spec in order with immutable spec bytes", async (t) => {
+  if (!requireChannelPack(t, "styling round の順序検証")) return;
   const authority = await readKoyaChannelAuthority({ projectDir: process.cwd() });
   const member = authority.showBible.cast.find((entry) => entry.id === "horo");
   const expected = member.stylingSpecPaths.map((relativePath) => join(authority.root, relativePath));
