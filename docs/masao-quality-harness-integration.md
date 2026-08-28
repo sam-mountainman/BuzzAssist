@@ -217,7 +217,7 @@ npm run manga-video:preflight -- \
 | `bestofn` | 3 skill (`run-bestofn` / `-auto` / `-multi`) を `~/.claude/skills/` へ導入。bon本体へ音声再生を上流追加。ハーネス接続は`koya-open-blind-arena.mjs`と`koya-blind-review.mjs` |
 | `akapen` | skillとして `~/.claude/skills/akapen` へ導入 (MIT)。クライアント確認の3±1問フローに使用 |
 | `.fable/last-plan.md` | 制作AI／審査AI／審査基準書／人間の4部品構成と Human in/on/out の切り分けは品質契約とループ状態に反映済み |
-| `.hiroya_obsidian_work` 字幕64本 | **2026-08-28に変換実行**。`vtt_to_markdown.py` により `21.md`〜`82.md` を生成 (generated=64 / with_transcript=64 / missing=0)。参考チャンネルの知識ベースとして利用可能 |
+| `.hiroya_obsidian_work` 字幕64本 | **意図的に未変換のまま置く**。第三者チャンネルの字幕全文であり、変換すると `21.md`〜`82.md` としてまさおさん自身の記事(`1.md`〜`20.md`)と同一命名・同一ディレクトリに混在し、自作素材と他者著作物の区別がつかなくなる。2026-08-28に一度変換したが同日中に差し戻した。利用するなら別ディレクトリ・出所明記・引用の範囲で、かつ明示の指示があるときだけ行う |
 | `plugins/`・`e2e-*`・`docs/`・`scripts/` | 実体のない空ディレクトリ (CLAUDE.mdプレースホルダのみ)。導入対象なし |
 
 ## 実データ確認
