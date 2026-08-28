@@ -28,8 +28,11 @@ const ENGINES = {
       "/Applications/ChatGPT.app/Contents/Resources/codex",
       "codex",
     ],
-    buildArgs(task, { outputPath, disableMcp }) {
+    buildArgs(task, { outputPath, disableMcp, readOnly }) {
       const args = ["exec", "--skip-git-repo-check"];
+      // レビューや監査は読むだけで足りる。書き込みを止めておけば、
+      // 並列に走らせたエージェントが互いの作業ツリーを踏む事故が起きない。
+      if (readOnly || task.readOnly) args.push("-c", 'sandbox_mode="read-only"');
       // MCPサーバの読み込みは並列度が上がるとタイムアウトしやすく、
       // 判断だけが欲しいタスクでは不要な待ち時間になる。既定で切る。
       if (disableMcp) args.push("-c", "mcp_servers={}");
@@ -153,11 +156,11 @@ export async function selectEngine(requested, options = {}) {
   throw new Error(`使えるエージェントCLIがありません（${detail}）`);
 }
 
-async function runTask(task, { engine, binary, outDir, disableMcp, defaultTimeoutMs }) {
+async function runTask(task, { engine, binary, outDir, disableMcp, readOnly, defaultTimeoutMs }) {
   const startedAt = Date.now();
   const outputPath = path.join(outDir, `${task.id}.result.txt`);
   const logPath = path.join(outDir, `${task.id}.log`);
-  const args = engine.buildArgs(task, { outputPath, disableMcp });
+  const args = engine.buildArgs(task, { outputPath, disableMcp, readOnly });
   const timeoutMs = task.timeoutMs ?? defaultTimeoutMs;
 
   const outcome = await new Promise((resolve) => {
@@ -233,6 +236,7 @@ export async function runAgentTasks(tasks, options = {}) {
         binary: engineInfo.binary,
         outDir,
         disableMcp: options.disableMcp ?? true,
+        readOnly: options.readOnly ?? false,
         defaultTimeoutMs: options.timeoutMs ?? 900_000,
       });
       results.push(result);
@@ -282,6 +286,7 @@ function parseArgs(argv) {
     else if (arg === "--report") out.report = next();
     else if (arg === "--out-dir") out.outDir = next();
     else if (arg === "--with-mcp") out.mcp = true;
+    else if (arg === "--read-only") out.readOnly = true;
     else if (arg === "--probe") out.probe = true;
     else if (arg === "--help" || arg === "-h") out.help = true;
     else throw new Error(`不明な引数: ${arg}`);
@@ -301,6 +306,7 @@ function printHelp() {
   --report <path>      レポートJSONの出力先
   --out-dir <path>     各タスクの結果の出力先
   --with-mcp           MCPサーバを読み込む（既定は切る。並列時に不安定なため）
+  --read-only          エージェントにファイル変更を許さない（レビュー・監査用）
   --probe              使えるエンジンを調べて終了する
 
   タスクJSONの形:
@@ -370,6 +376,7 @@ async function main() {
     concurrency: options.concurrency ?? 8,
     outDir: options.outDir ? path.resolve(options.outDir) : undefined,
     disableMcp: !options.mcp,
+    readOnly: Boolean(options.readOnly),
     onProgress: (event) => {
       if (event.type === "started") {
         process.stdout.write(`▶ ${event.id}${event.title ? ` — ${event.title}` : ""}\n`);
