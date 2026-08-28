@@ -163,7 +163,7 @@ function appendJsonl(filePath, entry) {
 
 export function proposalId(entry) {
   return createHash("sha256")
-    .update([entry.kind, entry.target, entry.text].join(""))
+    .update([entry.kind, entry.target, entry.text].join("\u001f"))
     .digest("hex")
     .slice(0, 12);
 }
