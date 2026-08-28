@@ -32,13 +32,37 @@ const transport = new StdioClientTransport({
 });
 const client = new Client({ name: "buzzassist-update-verifier", version: "1.0.0" });
 
+// stderr: "pipe" を指定しながら読んでいなかったので、子プロセスが
+// EMFILE などで死んでも「Connection closed」としか出ず、根因が見えなかった。
+// 常時 drain して、失敗メッセージへ含める。
+const childErrors = [];
+transport.stderr?.on("data", (chunk) => {
+  const text = String(chunk);
+  childErrors.push(text);
+  // 溜め込みすぎない。原因が分かる長さがあれば足りる。
+  if (childErrors.length > 40) childErrors.shift();
+});
+
+function withChildStderr(error) {
+  const tail = childErrors.join("").trim().slice(-1200);
+  if (!tail) return error;
+  const wrapped = new Error(`${error?.message || error}\n--- MCP プロセスの stderr ---\n${tail}`);
+  wrapped.cause = error;
+  return wrapped;
+}
+
 const timeoutMs = Number(readArg("--timeout-ms", "30000"));
 const timeout = new Promise((_, reject) => {
   setTimeout(() => reject(new Error(`BuzzAssist MCP verification timed out after ${timeoutMs}ms.`)), timeoutMs).unref?.();
 });
 
 try {
-  await Promise.race([client.connect(transport), timeout]);
+  try {
+    await Promise.race([client.connect(transport), timeout]);
+  } catch (error) {
+    // 「Connection closed」だけを出さない。子の stderr が根因を持っている。
+    throw withChildStderr(error);
+  }
   const listed = await Promise.race([client.listTools(), timeout]);
   const names = new Set((listed?.tools || []).map((tool) => tool.name));
   for (const required of ["read_me", "open_buzzassist_canvas", "get_excalidraw_selection"]) {
@@ -53,6 +77,8 @@ try {
   }
   console.log(`BUZZASSIST_MCP_VERIFY=ok`);
   console.log(`BUZZASSIST_MCP_TOOL_COUNT=${names.size}`);
+} catch (error) {
+  throw withChildStderr(error);
 } finally {
   await client.close().catch(() => {});
 }
