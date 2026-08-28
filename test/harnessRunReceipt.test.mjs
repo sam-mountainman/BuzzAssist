@@ -329,3 +329,28 @@ test("実在する過去の監査レポートで、記録とレポートの判�
     assert.deepEqual(done.summary.unexpectedGates, [], `${rel}: 宣言外のゲートが出た`);
   }
 });
+
+test("どのハーネス宣言も、保証の裏づけを書くか、書けない理由を明示している", async () => {
+  // 「あとで紐づける」は忘れられる。忘れられたまま保証だけ並ぶと、
+  // 1つも走っていない状態で「全部通った」と書ける宣言が残る。
+  const { readdirSync, readFileSync } = await import("node:fs");
+  const dir = join(root, "config/harnesses");
+  const files = readdirSync(dir).filter((name) => name.endsWith(".harness.json"));
+  assert.ok(files.length > 0);
+
+  for (const file of files) {
+    const declaration = JSON.parse(readFileSync(join(dir, file), "utf8"));
+    for (const guarantee of declaration.guarantees || []) {
+      assert.ok(
+        Array.isArray(guarantee.evidenceAuditIds) && guarantee.evidenceAuditIds.length > 0,
+        `${file}: 保証 ${guarantee.id} に evidenceAuditIds が無い`,
+      );
+    }
+    // 記録に載せられないハーネスは、その理由が宣言に書かれていること。
+    if (declaration.receiptAdapter) {
+      assert.ok(declaration.receiptAdapter.reason, `${file}: receiptAdapter に reason が無い`);
+      assert.ok(declaration.receiptAdapter.requiredWork, `${file}: receiptAdapter に requiredWork が無い`);
+      assert.equal(declaration.receiptAdapter.status, "pending");
+    }
+  }
+});

@@ -43,6 +43,12 @@
       "scope": "channel-pack",
       "confidential": true,
       "relativeToDeployment": "narrated-story-video"
+    },
+    "platform:platform-craft": {
+      "mode": "auto-guidance",
+      "canonical": ".agents/skills/platform-craft/SKILL.md",
+      "overlay": ".agents/skills/platform-craft/references/learned-auto.md",
+      "scope": "platform"
     }
   },
   "scopes": {

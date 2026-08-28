@@ -44,27 +44,50 @@
   "guarantees": [
     {
       "id": "audio-loudness",
-      "what": "統合-14 LUFS ±0.5、トゥルーピーク ≤ -1.5 dBFS"
+      "what": "統合-14 LUFS ±0.5、トゥルーピーク ≤ -1.5 dBFS",
+      "evidenceAuditIds": [
+        "audio"
+      ]
     },
     {
       "id": "narration-intelligibility",
-      "what": "各発話区間で voice RMS − bed RMS ≥ 6dB。全体が合格でもナレーションが埋もれていれば落とす"
+      "what": "各発話区間で voice RMS − bed RMS ≥ 6dB。全体が合格でもナレーションが埋もれていれば落とす",
+      "evidenceAuditIds": [
+        "audio",
+        "perceptualReviewChecks"
+      ]
     },
     {
       "id": "duration-conformance",
-      "what": "ナレーション実尺が計画比±3%。超えたら画の尺を再計画する"
+      "what": "ナレーション実尺が計画比±3%。超えたら画の尺を再計画する",
+      "evidenceAuditIds": [
+        "duration"
+      ]
     },
     {
       "id": "content-addressing",
-      "what": "text/voice/model/endpoint/params の指紋でキャッシュを識別。台本を直せば必ず作り直す"
+      "what": "text/voice/model/endpoint/params の指紋でキャッシュを識別。台本を直せば必ず作り直す",
+      "evidenceAuditIds": [
+        "frozenV1AndParentHashes",
+        "parentAudioPcmPreserved"
+      ]
     },
     {
       "id": "external-visual-signoff",
-      "what": "目視サインオフは外部が書いたものだけを受け取る。finalizerは転記のみ"
+      "what": "目視サインオフは外部が書いたものだけを受け取る。finalizerは転記のみ",
+      "evidenceAuditIds": [
+        "perceptualReviewBoundToOutput",
+        "perceptualEvidenceHashes",
+        "contactSheetOriginalDetailReviewed"
+      ]
     },
     {
       "id": "camera-continuity",
-      "what": "全カットの開始/終了フレームを実測し、停止・逆走・座標飛びを落とす"
+      "what": "全カットの開始/終了フレームを実測し、停止・逆走・座標飛びを落とす",
+      "evidenceAuditIds": [
+        "pixelAudit",
+        "sceneTransitionOwnedByParent"
+      ]
     }
   ],
   "entrypoint": "npm run --prefix <deployment-dir>",
@@ -86,5 +109,11 @@
     "テロップ",
     "感動"
   ],
-  "keywordsNote": "依頼文からこのハーネスを言い当てるための短い手掛かり。日本語は空白で区切れないので、依頼文を刻むのではなくこちらの語が現れるかで見る。"
+  "keywordsNote": "依頼文からこのハーネスを言い当てるための短い手掛かり。日本語は空白で区切れないので、依頼文を刻むのではなくこちらの語が現れるかで見る。",
+  "receiptAdapter": {
+    "status": "pending",
+    "reason": "このハーネスの最終監査は steps 配列ではなく checks オブジェクトを返すため、recordGatesFromAuditSteps へそのまま渡せない。evidenceAuditIds は checks のキー名で先に書いてあるので、変換を1つ足せば RunReceipt に載る。変換が無いまま『載っている』ことにしないよう、ここで pending と明記する。",
+    "requiredWork": "checks オブジェクトを [{id, pass, detail}] へ変換するアダプタ"
+  },
+  "gateEvidenceNote": "各保証は evidenceAuditIds が全て pass のときだけ pass にできる。対応を書かずに保証だけ並べると、1つも走っていない状態でも「全部通った」と書けてしまう。"
 }

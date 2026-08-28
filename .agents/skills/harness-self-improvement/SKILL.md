@@ -117,6 +117,49 @@ node scripts/harness-learn.mjs apply --id <提案ID> \
 `--reviewer` は省略できない。誰も確認していない自動反映は証跡にならないので、
 この仕組みは意図的にそこで止まる。
 
+## 改善したかを測る（RunReceipt）
+
+提案を反映しても、**良くなったかどうかは別に測らないと分からない**。
+「気づいたこと」を書き足すだけの自己改善は、書き足した量が増えるだけで、
+落ちるところは落ち続ける。狙い先は、**何度も落ちている場所**であって、
+1セッションで目についたことではない。
+
+本番の実行は `RunReceipt` を残す。1件の記録に載るのは:
+
+- ハーネスの指紋——platform craft / genre harness / channel pack を**別々に**取る。
+  混ぜた1つのハッシュだと、どの層を直して結果が変わったのか読めない
+- overlay（`references/learned-auto.md`）の指紋も別枠。
+  「スキル本体は変えていないのに指紋が動いた」を読めるようにするため
+- 宣言された保証ごとの判定と、その裏づけになった実測監査の指紋
+- 結果と `knownRemainingIssues`
+
+記録が守っている規則は1つだけ——**走っていないゲートを「通った」と書けない**。
+
+- 宣言されたゲートに判定が1件でも欠けていれば `finalize` が失敗する
+- 判定には証拠の指紋が要る。判定だけ受け取ると、何も見ずに pass と書ける
+- 理由のない `skip` は受け取らない。理由のない skip は要件充足にされる
+- 落ちたゲートや `knownRemainingIssues` があれば、pass と申告されても pass に
+  しない。申告を信じた瞬間、記録は自己申告書になる
+
+集計はこう見る:
+
+```bash
+node scripts/harness-receipts.mjs rollup            # 版ごとのゲート失敗率
+node scripts/harness-receipts.mjs rollup --harness koya-manga-video
+node scripts/harness-receipts.mjs export --out <path>   # 返せる形だけ
+```
+
+`worstGates` の先頭が、次に直すべき場所。**ここを見ずに書いた提案は、
+思いつきと区別がつかない**。`capture` の evidence には、可能なら
+該当ゲートの失敗率を添える。
+
+版をまたいで混ぜないことに意味がある。混ぜると、直した後も古い失敗が率に
+残って、改善したことも悪化したことも見えなくなる。
+
+`export` が出すのはチャンネル固有のものを一切含まない形（ハーネスの指紋、
+ゲートごとの判定、結果だけ）。運営者の手元で回った結果をこちら側へ返す道は、
+**返せるものだけで作る**。
+
 ## 反映先の選び方
 
 | 何を学んだか | 宛先 |
@@ -124,6 +167,9 @@ node scripts/harness-learn.mjs apply --id <提案ID> \
 | 漫画動画の制作手順・品質基準 | `skill:manga-video-production` |
 | カメラ移動の文法 | `skill:manga-page-camera` |
 | 並列実行の上限・粒度 | `skill:harness-parallel-execution` |
+| 課金APIの再送規則・秘密の扱い | `platform:platform-craft`（正本は `lib/paidApiRetry.mjs`） |
+| どの入口を使わせるか | `platform:platform-craft`（正本は `lib/harnessRouting.mjs`） |
+| 証跡・指紋・記録の不変条件 | `platform:platform-craft`（正本は `lib/harnessRunReceipt.mjs`） |
 | チャンネル固有の要求・禁止事項 | `ledger:koya`（R番号を採番して追記） |
 | ナレーション物語の運営者の音声・BGMゲート | `doc:mike-audio-gates` |
 
@@ -138,3 +184,4 @@ node scripts/harness-learn.mjs apply --id <提案ID> \
 - overlay を監査や承認の根拠として引く（そこは証跡ではない）
 - `promote` を reviewer 名なしで通そうとする
 - 「ユーザーが言ったから」だけを根拠に書く。**何を観測したか**を evidence に残す
+- `rollup` を見ずに「よく落ちる」と書く。落ちている場所は測れる
