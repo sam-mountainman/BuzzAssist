@@ -27,6 +27,7 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { resolveChannelPackPath } from "../lib/channelPackResolver.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const LEARN_DIR = path.join(REPO_ROOT, "docs", "learning");
@@ -288,11 +289,33 @@ function requireTarget(rawTarget) {
     }
     rel = path.join(root, rel);
   }
-  const full = path.join(REPO_ROOT, rel);
+  // channel-pack の正本は Channel Pack 側にある。pack を持たない環境
+  // （リポジトリを clone しただけの人、CI）でも解決を試みる。
+  let full = path.join(REPO_ROOT, rel);
   if (!fs.existsSync(full)) {
-    throw new Error(`target のファイルがありません: ${rel}`);
+    const viaPack = resolveChannelPackPath(REPO_ROOT, rel);
+    if (fs.existsSync(viaPack)) full = viaPack;
   }
-  return { rel, full };
+  if (!fs.existsSync(full)) {
+    // 捕捉は「あとで判断するための記録」なので、正本が手元に無くても
+    // 受け取る。書き込む工程（sync / promote）だけが正本の実在を要求する
+    // ——ここで拒否すると、pack を持たない人は指摘を残すことすらできない。
+    return { rel, full, missing: true };
+  }
+  return { rel, full, missing: false };
+}
+
+/** 書き込む工程だけが要求する。読むだけの工程は missing を許す。 */
+function requireWritableTarget(rawTarget) {
+  const resolved = requireTarget(rawTarget);
+  if (resolved.missing) {
+    throw new Error(
+      `target の正本がこの環境にありません: ${resolved.rel}\n`
+      + "Channel Pack を配置するか BUZZASSIST_CHANNEL_PACK を指定してください"
+      + "（捕捉はできますが、書き込みは正本が要ります）",
+    );
+  }
+  return resolved;
 }
 
 export function buildProposal({ kind, target, text, evidence, session, now }) {
@@ -514,7 +537,7 @@ function main() {
       const entry = summary.find((item) => item.id === args.id);
       if (!entry) throw new Error(`提案が見つかりません: ${args.id}`);
       if (entry.applied) throw new Error(`${args.id} は既に昇格済みです`);
-      const { rel, full } = requireTarget(entry.target);
+      const { rel, full } = requireWritableTarget(entry.target);
       // overlay に載っているのは sync の当然の結果なので、それを拒否の
       // 条件にすると promote が永久に通らなくなる（実際そうなっていた）。
       // 見るべきは overlay ではなく **正本に書かれたか**。
@@ -554,7 +577,7 @@ function main() {
       const entry = summary.find((item) => item.id === args.id);
       if (!entry) throw new Error(`提案が見つかりません: ${args.id}`);
       if (entry.applied) throw new Error(`${args.id} は既に反映済みです`);
-      const { rel, full } = requireTarget(entry.target);
+      const { rel, full } = requireWritableTarget(entry.target);
       // apply も promote と同じ検証を通す。緩い経路を1つでも残すと、
       // そちらから素通りできてしまう。
       const applyNote = typeof args.note === "string" ? args.note.trim() : "";
