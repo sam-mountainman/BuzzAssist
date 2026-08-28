@@ -286,7 +286,7 @@ function normalizeLocks(job, baseDir) {
 // 書けてしまい、`a` と `b/../a` が同じログを上書きして証跡が混ざる。
 const SAFE_JOB_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 
-async function runJob(job, { logDir, defaults, dryRun }) {
+async function runJob(job, { logDir, defaults, dryRun, planStartedAt }) {
   const cwd = path.resolve(job.cwd ?? defaults.cwd ?? REPO_ROOT);
   const args = job.args ?? [];
   const startedAt = Date.now();
@@ -371,6 +371,10 @@ async function runJob(job, { logDir, defaults, dryRun }) {
     timedOut: Boolean(result.timedOut),
     spawnError: result.spawnError ?? null,
     durationMs: Date.now() - startedAt,
+    // 実行計画の可視化と、並列に走ったかの直接確認のため。総時間からの
+    // 推測は負荷が乗ると崩れる（重なっていても遅ければ直列に見える）。
+    startedAtMs: startedAt - (planStartedAt ?? startedAt),
+    endedAtMs: Date.now() - (planStartedAt ?? startedAt),
     command: `${job.command} ${args.join(" ")}`.trim(),
     // 空白で連結した command だけでは引数の境界が復元できない。
     // 何を流したかを後から正確に再現できるよう、構造のまま残す。
@@ -463,7 +467,7 @@ export async function executePlan(plan, options = {}) {
 
       for (const lock of locks) heldLocks.add(lock);
       pending.delete(id);
-      const task = runJob(job, { logDir, defaults, dryRun })
+      const task = runJob(job, { logDir, defaults, dryRun, planStartedAt: startedAt })
         .catch((error) => ({
           // spawn 前の失敗（cwd が不正など）もジョブ1件の失敗として扱う。
           // 例外のまま投げると計画全体が落ちて証跡が残らない。
