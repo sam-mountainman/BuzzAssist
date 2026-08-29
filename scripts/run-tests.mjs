@@ -26,13 +26,36 @@ const testFiles = readdirSync(testDir)
   .sort()
   .map((name) => relative(rootDir, join(testDir, name)));
 
+// ビルドを入り口に入れる。
+//
+// UI のテスト44件は App.jsx を**レンダーせず readFile + 正規表現**で
+// 判定している。必要な文字列が死んだコードとして残っているだけでも通るので、
+// import が壊れていても構文が壊れていても気づけない。
+// ビルドはその一群を捕まえる——ただし**トップレベルの throw は捕まえない**
+// （構文としては正しく、バンドルも通る）。そこは別途、実際にマウントする
+// テストが要る（未着手・要判断）。
 const commands = [
   { args: ["--test", ...testFiles], countsSkips: true },
   { args: ["scripts/test-fal-payloads.mjs"], countsSkips: false },
   { args: ["scripts/test-setup-distribution.mjs"], countsSkips: false },
 ];
 
+// ビルドは node ではなく npm 経由なので別枠。
+const buildCommand = { command: "npm", args: ["run", "build"], label: "vite build" };
+
 let skipped = [];
+
+{
+  const build = spawnSync(buildCommand.command, buildCommand.args, {
+    cwd: rootDir, env: process.env, stdio: "inherit", shell: false,
+  });
+  if (build.error) throw build.error;
+  if (build.status !== 0) {
+    process.stdout.write(`\n${buildCommand.label} が失敗しました。UI のテストは App.jsx を`
+      + "レンダーしないので、ビルドが通らない状態でも大半が緑になります。\n");
+    process.exit(build.status ?? 1);
+  }
+}
 
 for (const { args, countsSkips } of commands) {
   // skip を数える回だけ出力を捕まえる。捕まえたぶんはそのまま流し直すので、
