@@ -451,3 +451,57 @@ test("別の鍵どうしは互いを妨げない", () => {
   releaseCrossProcessLock(a);
   releaseCrossProcessLock(b);
 });
+
+test("生きている持ち主のロックは、どれだけ古くても奪わない", async () => {
+  // 以前は「30分以上古ければ持ち主が生きていても奪う」だった。本編の
+  // レンダーや30セグメントの音声生成は平気で30分を超えるので、
+  // **走っている最中に別のランナーが同じ台帳へ書ける**。
+  // 時間で判断してはいけない——見るべきは持ち主が生きているかどうか。
+  const { acquireCrossProcessLock, releaseCrossProcessLock } =
+    await import("../scripts/harness-parallel-run.mjs");
+  const { utimesSync } = await import("node:fs");
+  const { writeFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+
+  const key = `path:/tmp/lock-liveness-${process.pid}-${Math.floor(process.uptime() * 1000)}`;
+  const handle = acquireCrossProcessLock(key);
+  assert.ok(handle && handle.dir, "1本目が取れること");
+  assert.ok(handle.token, "所有トークンが付くこと");
+
+  // 2時間前に取ったことにする。持ち主（このプロセス）は生きている。
+  const old = new Date(Date.now() - 2 * 60 * 60_000);
+  utimesSync(handle.dir, old, old);
+  writeFileSync(join(handle.dir, "heartbeat"), `${Date.now()}\n`);   // 心拍は今
+
+  assert.equal(
+    acquireCrossProcessLock(key), null,
+    "生きている持ち主のロックを、古いという理由だけで奪ってはいけない",
+  );
+
+  // 心拍も止まり、PID も死んでいれば奪える（＝落ちたランナーの残骸）。
+  writeFileSync(join(handle.dir, "pid"), "999999\n");
+  const staleBeat = new Date(Date.now() - 10 * 60_000);
+  utimesSync(join(handle.dir, "heartbeat"), staleBeat, staleBeat);
+  const taken = acquireCrossProcessLock(key);
+  assert.ok(taken, "死んだ持ち主のロックは引き継げること");
+  releaseCrossProcessLock(taken);
+});
+
+test("自分のものでないロックは解放できない", async () => {
+  // 解放が無条件削除だったので、奪われた側が後から解放して、
+  // 奪った側のロックを外していた。
+  const { acquireCrossProcessLock, releaseCrossProcessLock } =
+    await import("../scripts/harness-parallel-run.mjs");
+  const key = `path:/tmp/lock-token-${process.pid}-${Math.floor(process.uptime() * 1000)}`;
+  const mine = acquireCrossProcessLock(key);
+  assert.ok(mine);
+
+  const impostor = { dir: mine.dir, token: "someone-else", timer: null };
+  assert.equal(releaseCrossProcessLock(impostor), false, "別のトークンでは外せないこと");
+  assert.equal(acquireCrossProcessLock(key), null, "まだ持たれていること");
+
+  assert.equal(releaseCrossProcessLock(mine), true, "自分のものは外せること");
+  const next = acquireCrossProcessLock(key);
+  assert.ok(next, "外れた後は取れること");
+  releaseCrossProcessLock(next);
+});

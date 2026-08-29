@@ -16,7 +16,7 @@
 //   ログのパスをレポートJSONに残す。後から「何を並列で流したか」を再現できる。
 
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -230,10 +230,52 @@ export function normalizeLockKey(lock, baseDir) {
 // それぞれランナーを起動すれば、同じ共有台帳を同時に更新できてしまう。
 // O_EXCL のディレクトリ作成で、マシン全体で1本だけが取れるようにする。
 const CROSS_PROCESS_LOCK_ROOT = path.join(os.tmpdir(), "harness-parallel-locks");
-const STALE_LOCK_MS = 30 * 60_000;
+// 心拍が止まってから、持ち主が居なくなったとみなすまでの猶予。
+// レンダーが何十分かかっても心拍は別のタイマーで打たれるので、
+// 「心拍が古い＋PIDは生きている」は PID の使い回しを意味する。
+const HEARTBEAT_INTERVAL_MS = 30_000;
+const HEARTBEAT_STALE_MS = 5 * 60_000;
+
+// 走っている子プロセスの記録。SIGINT/SIGTERM のとき、ランナーだけが終わって
+// 孫（ffmpeg や codex exec）が生き残ると、ロックの持ち主は死んだと判定される
+// のに書き込みは続く——最悪の形。木ごと止めてからロックを外す。
+const liveChildren = new Set();
+const heldLockHandles = new Set();
+let interrupted = false;
 
 function lockDirFor(key) {
   return path.join(CROSS_PROCESS_LOCK_ROOT, createHash("sha256").update(key).digest("hex"));
+}
+
+function processAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch (error) { return error.code === "EPERM"; }
+}
+
+/**
+ * 残っているロックを奪ってよいか。
+ *
+ * 以前は「30分以上古ければ、持ち主が生きていても奪う」だった。
+ * 本編のレンダーや30セグメントの音声生成は平気で30分を超えるので、
+ * **走っている最中に別のランナーが同じ台帳へ書ける**。時間で判断しては
+ * いけない——見るべきは持ち主が生きているかどうか。
+ */
+function lockIsAbandoned(dir) {
+  let pid = null;
+  try {
+    pid = Number(fs.readFileSync(path.join(dir, "pid"), "utf8").trim());
+  } catch {
+    // mkdir が成功してから pid を書くまでの隙間。取ったばかりの相手を
+    // 追い出すと両方が走る（実測で再現した）。奪わない。
+    return false;
+  }
+  if (!processAlive(pid)) return true;
+
+  // PID は生きている。ただし OS が PID を使い回した可能性がある。
+  // 心拍が止まって久しければ、その PID はもう別のプロセス。
+  let heartbeatAgeMs = Infinity;
+  try { heartbeatAgeMs = Date.now() - fs.statSync(path.join(dir, "heartbeat")).mtimeMs; } catch {}
+  return heartbeatAgeMs > HEARTBEAT_STALE_MS;
 }
 
 export function acquireCrossProcessLock(key) {
@@ -243,37 +285,40 @@ export function acquireCrossProcessLock(key) {
     fs.mkdirSync(dir);
   } catch (error) {
     if (error.code !== "EEXIST") throw error;
-    // 落ちたランナーのロックが残ることがある。ただし奪う条件は厳しくする。
-    // mkdir が成功してから pid を書くまでには隙間があり、その瞬間の
-    // ロックは「pid が読めない」状態になる。それを古いロックとみなして
-    // 奪うと、取ったばかりの相手を追い出して両方が走る（実測で再現した）。
-    let ageMs = Infinity;
-    try { ageMs = Date.now() - fs.statSync(dir).mtimeMs; } catch { return null; }
-
-    // 十分に古くなければ、持ち主が誰であれ待つ。
-    if (ageMs < STALE_LOCK_MS) {
-      let holderDead = false;
-      try {
-        const holder = Number(fs.readFileSync(path.join(dir, "pid"), "utf8").trim());
-        if (Number.isInteger(holder) && holder > 0) {
-          try { process.kill(holder, 0); } catch { holderDead = true; }
-        }
-      } catch {
-        // pid をまだ書けていないだけかもしれない。奪わない。
-        return null;
-      }
-      if (!holderDead) return null;
-    }
+    if (!lockIsAbandoned(dir)) return null;
     fs.rmSync(dir, { recursive: true, force: true });
     try { fs.mkdirSync(dir); } catch { return null; }
   }
+  // 所有トークン。解放時に照合する——無条件に消していたので、
+  // 奪われた側が後から解放して、奪った側のロックを外していた。
+  const token = randomUUID();
   fs.writeFileSync(path.join(dir, "pid"), `${process.pid}\n`);
   fs.writeFileSync(path.join(dir, "key"), `${key}\n`);
-  return dir;
+  fs.writeFileSync(path.join(dir, "token"), `${token}\n`);
+  fs.writeFileSync(path.join(dir, "heartbeat"), `${Date.now()}\n`);
+  const timer = setInterval(() => {
+    try { fs.writeFileSync(path.join(dir, "heartbeat"), `${Date.now()}\n`); } catch {}
+  }, HEARTBEAT_INTERVAL_MS);
+  timer.unref?.();
+  return { dir, token, timer };
 }
 
-export function releaseCrossProcessLock(dir) {
-  if (dir) fs.rmSync(dir, { recursive: true, force: true });
+/** 自分が持っているロックだけを外す。 */
+export function releaseCrossProcessLock(handle) {
+  if (!handle) return false;
+  // 旧形式（ディレクトリ文字列）も受ける。呼び出し側を一斉に変えられない間、
+  // 解放されないロックが残る方が危ない。
+  const dir = typeof handle === "string" ? handle : handle.dir;
+  const token = typeof handle === "string" ? null : handle.token;
+  if (typeof handle !== "string") clearInterval(handle.timer);
+  if (!dir) return false;
+  if (token) {
+    let held = null;
+    try { held = fs.readFileSync(path.join(dir, "token"), "utf8").trim(); } catch { return false; }
+    if (held !== token) return false;   // もう自分のものではない
+  }
+  fs.rmSync(dir, { recursive: true, force: true });
+  return true;
 }
 
 function normalizeLocks(job, baseDir) {
@@ -311,6 +356,10 @@ async function runJob(job, { logDir, defaults, dryRun, planStartedAt }) {
   const result = await new Promise((resolve) => {
     let settled = false;
     let timer = null;
+    if (interrupted) {
+      // 割り込み後は新しく投入しない。
+      return { id: job.id, status: "skipped", detail: "割り込みにより未実行", command: job.command, argv: args, cwd };
+    }
     const child = spawn(job.command, args, {
       cwd,
       env: { ...process.env, ...(defaults.env ?? {}), ...(job.env ?? {}) },
@@ -320,6 +369,8 @@ async function runJob(job, { logDir, defaults, dryRun, planStartedAt }) {
       // ロックを解放したあとも共有ファイルを書き続ける。
       detached: process.platform !== "win32",
     });
+    liveChildren.add(child);
+    child.once("close", () => { liveChildren.delete(child); });
     child.stdout.pipe(stdoutStream);
     child.stderr.pipe(stderrStream);
 
@@ -390,6 +441,41 @@ async function runJob(job, { logDir, defaults, dryRun, planStartedAt }) {
   };
 }
 
+
+/**
+ * 割り込み時の後始末。
+ *
+ * ランナーだけが終わって孫（ffmpeg、codex exec）が生き残ると、ロックの
+ * 持ち主は死んだと判定されるのに書き込みは続く——最悪の形。
+ * 木ごと止め、止まったのを待ってからロックを外す。
+ */
+export async function shutdownRunner(signal) {
+  if (interrupted) return;
+  interrupted = true;
+  process.stderr.write(`\n${signal} を受けました。新しいジョブは投入せず、走っている子を止めます（${liveChildren.size}件）。\n`);
+  for (const child of liveChildren) {
+    try {
+      if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGTERM");
+      else child.kill("SIGTERM");
+    } catch { /* すでに終了している */ }
+  }
+  // 止まるのを待つ。待たずにロックを外すと、まだ書いている相手が居るのに
+  // 次のランナーが取れてしまう。
+  const deadline = Date.now() + 10_000;
+  while (liveChildren.size > 0 && Date.now() < deadline) {
+    await new Promise((done) => { setTimeout(done, 100).unref?.(); });
+  }
+  for (const child of liveChildren) {
+    try {
+      if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL");
+      else child.kill("SIGKILL");
+    } catch { /* すでに終了している */ }
+  }
+  for (const handle of heldLockHandles) releaseCrossProcessLock(handle);
+  heldLockHandles.clear();
+  process.stderr.write("ロックを外しました。\n");
+}
+
 export async function executePlan(plan, options = {}) {
   const concurrency = options.concurrency ?? defaultConcurrency();
   const dryRun = Boolean(options.dryRun);
@@ -457,9 +543,10 @@ export async function executePlan(plan, options = {}) {
           const handle = acquireCrossProcessLock(lock);
           if (!handle) { blocked = true; break; }
           acquired.push(handle);
+          heldLockHandles.add(handle);
         }
         if (blocked) {
-          for (const handle of acquired) releaseCrossProcessLock(handle);
+          for (const handle of acquired) { releaseCrossProcessLock(handle); heldLockHandles.delete(handle); }
           blockedByExternalLock = true;
           continue;
         }
@@ -484,7 +571,7 @@ export async function executePlan(plan, options = {}) {
         })
         .finally(() => {
           for (const lock of locks) heldLocks.delete(lock);
-          for (const handle of acquired) releaseCrossProcessLock(handle);
+          for (const handle of acquired) { releaseCrossProcessLock(handle); heldLockHandles.delete(handle); }
           running.delete(task);
         });
       running.add(task);
@@ -638,6 +725,13 @@ async function main() {
 
 const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : null;
 if (invokedPath && invokedPath === path.resolve(new URL(import.meta.url).pathname)) {
+  // CLI として動くときだけシグナルを捕まえる。ライブラリとして import した
+  // 側のハンドラを奪わない。
+  for (const signal of ["SIGINT", "SIGTERM"]) {
+    process.on(signal, () => {
+      shutdownRunner(signal).finally(() => { process.exit(130); });
+    });
+  }
   main().catch((error) => {
     process.stderr.write(`${error?.stack ?? error}\n`);
     process.exit(1);
