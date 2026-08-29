@@ -103,3 +103,63 @@ test("npm pack に、追跡外・チャンネル固有のものが入らない",
     !tracked.has(file) && !file.startsWith("dist/") && !file.startsWith("dist-widget/") && file !== "package.json");
   assert.deepEqual(untracked, [], `追跡外のファイルが npm pack に入っています: ${untracked.join(", ")}`);
 });
+
+test("表示名だけでなく、ID の名簿と開発機の絶対パスも検出する", async () => {
+  // ここが最大の見落としだった。検査は表示名しか集めておらず、
+  // **11人分の castId が並んだ一覧と開発機の絶対パスが公開されたまま
+  // 「検出なし」と報告していた**。私はその出力を根拠に「公開面0件」と
+  // 報告した——検査が嘘をつくと、それを信じた報告も嘘になる。
+  const { collectSensitiveSignals } = await import("../scripts/audit-public-surface.mjs");
+  const { castIds } = collectSensitiveSignals(root);
+  if (castIds.length === 0) return;   // pack が無い環境
+
+  const report = auditPublicSurface();
+  assert.ok(Array.isArray(report.rosterFindings), "名簿の検査があること");
+  assert.ok(Array.isArray(report.pathLeakFindings), "絶対パスの検査があること");
+  assert.equal(report.castIdCount, castIds.length);
+
+  // 開発機の絶対パスは1件も残っていないこと。
+  assert.deepEqual(
+    report.pathLeakFindings.map((f) => f.file), [],
+    "追跡下に開発機の絶対パスが残っている",
+  );
+
+  // 検出できることを実際に確かめる。内部の整合だけを見ると、検出を
+  // 丸ごと止めても「整合している」で通る——最初に書いた版がそれで、
+  // 名簿検査を無効化する変異を捕まえられなかった。
+  //
+  // 名簿は現時点で既知の未解決（castId が識別子として共有層に残っている。
+  // 全面改名は破壊的変更なので判断待ち）。ここでは**検出できている**ことを
+  // 固定する。改名が済んだら 0 になるので、そのときはこの期待値を更新する。
+  assert.ok(
+    report.rosterFindings.length > 0,
+    "castId の名簿を検出できていない（検出器が壊れている）",
+  );
+  assert.ok(
+    report.rosterFindings.some((finding) => finding.idCount === castIds.length),
+    "全 ID が並んだファイルを検出できていない",
+  );
+  // clean は4種すべてを見ていること（片方だけ見て clean と言わない）。
+  assert.equal(report.clean, false, "未解決の名簿があるのに clean と言わないこと");
+
+  // 名簿の報告に ID そのものが出ないこと。
+  const serialized = JSON.stringify(report);
+  for (const id of castIds) {
+    const bare = new RegExp(`"${id}"`, "u");
+    assert.equal(bare.test(serialized), false, "検査の出力に castId が含まれている");
+  }
+});
+
+test("開発機の絶対パスを、数として正しく数える", async () => {
+  // 検査本体は追跡下のファイルしか見ないので、現に0件のときは検出を
+  // 丸ごと止めても結果が変わらない。判定そのものを直接見る。
+  const { countHomePathHits } = await import("../scripts/audit-public-surface.mjs");
+  const home = "/Users/example";
+  assert.equal(countHomePathHits(`cwd: ${home}/proj`, home), 1);
+  assert.equal(countHomePathHits(`${home}/a と ${home}/b`, home), 2);
+  assert.equal(countHomePathHits("相対パスだけ", home), 0);
+  assert.equal(countHomePathHits("~/proj と書けば消える", home), 0);
+  // 正規表現のメタ文字を含むホームでも壊れない。
+  assert.equal(countHomePathHits("/Users/a+b/x", "/Users/a+b"), 1);
+  assert.equal(countHomePathHits("何か", ""), 0, "homeRoot が空なら0");
+});

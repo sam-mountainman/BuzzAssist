@@ -3,7 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const projectDir = "/Users/higataiyu/Documents/Excalidraw";
+const projectDir = "<repo>";
 const manifestPath = path.join(
   projectDir,
   "canvas/manga-videos/manga-photo-homecoming-001/episode-manifest.json",

@@ -27,7 +27,7 @@ import { promisify } from "node:util";
 const execFile = promisify(execFileCallback);
 
 const BON_CLI = process.env.BON_CLI
-  || "/Users/higataiyu/まさお/bestofn-repo/bin/bon.js";
+  || "~/まさお/bestofn-repo/bin/bon.js";
 
 function usage() {
   console.error("usage: koya-blind-review.mjs <open|record> --set <spec.json> [--winner L --reviewer NAME --note TEXT]");

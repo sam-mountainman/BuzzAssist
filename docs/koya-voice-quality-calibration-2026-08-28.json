@@ -24,7 +24,7 @@
  },
  "environment": {
   "scriptSha256": "f987674ff9590fd21eead1900feb1a69c0b96d961b690d12793d6abc3518b89e",
-  "utmosSource": "/Users/higataiyu/.cache/torch/hub/tarepan_SpeechMOS_v1.2.0",
+  "utmosSource": "~/.cache/torch/hub/tarepan_SpeechMOS_v1.2.0",
   "whisperModel": "kotoba-tech/kotoba-whisper-v2.0-faster",
   "speakerBackend": "resemblyzer"
  },
@@ -52,7 +52,7 @@
     "voicedRatio": 0.865
    },
    "inputSha256": {
-    "/Users/higataiyu/Documents/Excalidraw/canvas/manga-videos/manga-v50-unseen-canary-001/.koya-dialogue-source/cut-01-take-1-d861d8a35ffe-eleven-v3-dialogue.wav": "c6b7514683b660ba23458507af3ff89a55a6d9f8e39ebf6bd1f3761b5840e093"
+    "<repo>/canvas/manga-videos/manga-v50-unseen-canary-001/.koya-dialogue-source/cut-01-take-1-d861d8a35ffe-eleven-v3-dialogue.wav": "c6b7514683b660ba23458507af3ff89a55a6d9f8e39ebf6bd1f3761b5840e093"
    },
    "checkDigest": "b89ce5f8aaeb17a630ef271f2b8aeb509d856157ba22dcde7cdd6b212ca5c374"
   },
@@ -79,7 +79,7 @@
     "voicedRatio": 0.801
    },
    "inputSha256": {
-    "/Users/higataiyu/Documents/Excalidraw/canvas/manga-videos/manga-v50-unseen-canary-001/.koya-dialogue-source/cut-01-take-2-7fc5a2dda9e4-eleven-v3-dialogue.wav": "614e4fbb323cc9409486e810a62f1894022eb44c44a0b6e5c110504ee77efb27"
+    "<repo>/canvas/manga-videos/manga-v50-unseen-canary-001/.koya-dialogue-source/cut-01-take-2-7fc5a2dda9e4-eleven-v3-dialogue.wav": "614e4fbb323cc9409486e810a62f1894022eb44c44a0b6e5c110504ee77efb27"
    },
    "checkDigest": "0cafcdbb43432ecbaa63f26d13530f0b1fb1b2a4e6c46510f3b8451face08c3a"
   },
@@ -107,7 +107,7 @@
     "voicedRatio": 0.823
    },
    "inputSha256": {
-    "/Users/higataiyu/Documents/Excalidraw/canvas/manga-videos/manga-v50-unseen-canary-001/.koya-dialogue-source/cut-02-take-1-30e414a94af9-eleven-v3-dialogue.wav": "8e61f35347ffd744d68fdc9c47f97305835e5a5d171a49f795e96edbbf451528"
+    "<repo>/canvas/manga-videos/manga-v50-unseen-canary-001/.koya-dialogue-source/cut-02-take-1-30e414a94af9-eleven-v3-dialogue.wav": "8e61f35347ffd744d68fdc9c47f97305835e5a5d171a49f795e96edbbf451528"
    },
    "checkDigest": "d06d1a287e1e325b01f936c339840ce61477dcaf4c2550f17ffb8b9deabc8166"
   },
@@ -134,7 +134,7 @@
     "voicedRatio": 0.836
    },
    "inputSha256": {
-    "/Users/higataiyu/Documents/Excalidraw/canvas/manga-videos/manga-v50-unseen-canary-001/.koya-dialogue-source/cut-02-take-2-7c1c101b0c25-eleven-v3-dialogue.wav": "60fc9b8ed755a7e729189b1078f9fa8536793fda9f251c1b64102cfa49902cf1"
+    "<repo>/canvas/manga-videos/manga-v50-unseen-canary-001/.koya-dialogue-source/cut-02-take-2-7c1c101b0c25-eleven-v3-dialogue.wav": "60fc9b8ed755a7e729189b1078f9fa8536793fda9f251c1b64102cfa49902cf1"
    },
    "checkDigest": "c8ebefbad3328bbcdc6248f7f16d18c2b958c5ec56e27e8ded51936d523e9c31"
   },
@@ -163,7 +163,7 @@
     "voicedRatio": 0.794
    },
    "inputSha256": {
-    "/Users/higataiyu/Documents/Excalidraw/canvas/manga-videos/manga-v50-unseen-canary-001/.koya-dialogue-source/cut-03-take-1-75ca44205f93-eleven-v3-dialogue.wav": "e96880e8f1619cb807b645f376784f51cdcaf884451fa943b6e8d5d6395e6eda"
+    "<repo>/canvas/manga-videos/manga-v50-unseen-canary-001/.koya-dialogue-source/cut-03-take-1-75ca44205f93-eleven-v3-dialogue.wav": "e96880e8f1619cb807b645f376784f51cdcaf884451fa943b6e8d5d6395e6eda"
    },
    "checkDigest": "7b634f643f62a21e04f22f82a286bcd0d107e5f035b01a86435d17140fa62a5f"
   },
@@ -192,7 +192,7 @@
     "voicedRatio": 0.828
    },
    "inputSha256": {
-    "/Users/higataiyu/Documents/Excalidraw/canvas/manga-videos/manga-v50-unseen-canary-001/.koya-dialogue-source/cut-03-take-2-d490b114249d-eleven-v3-dialogue.wav": "affd7934bec33e70af95027bb7c580ef96ed4ecc2f0cd87e7471f4dfd6d54718"
+    "<repo>/canvas/manga-videos/manga-v50-unseen-canary-001/.koya-dialogue-source/cut-03-take-2-d490b114249d-eleven-v3-dialogue.wav": "affd7934bec33e70af95027bb7c580ef96ed4ecc2f0cd87e7471f4dfd6d54718"
    },
    "checkDigest": "d6b99b243ea98eb6ed53ee2f137f95a83c862271e631f009bb01de3a277bdf02"
   },
