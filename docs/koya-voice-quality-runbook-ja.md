@@ -92,7 +92,7 @@ python3 scripts/audit-voice-quality.py checks.json
   ```bash
   # 1) 匿名化＋SHA拘束してアリーナを開く
   node scripts/koya-blind-review.mjs open --set canvas/blind-reviews/<name>.json
-  node /Users/higataiyu/まさお/bestofn-repo/bin/bon.js serve -d --open
+  node ~/まさお/bestofn-repo/bin/bon.js serve -d --open
   # 2) 人が選んだら、理由付きで記録（--note は必須）
   node scripts/koya-blind-review.mjs record --set canvas/blind-reviews/<name>.json \
     --winner A --reviewer taiyu --note "落ち着いたトーンがチャンネルに合う"

@@ -4,9 +4,9 @@
 
 | 系統 | セッション | 一次資料 | 読み取り結果 |
 |---|---|---|---|
-| Codex | `019fd34d-602f-7a93-b28d-b784787a22e3` | `/Users/higataiyu/.codex/sessions/2026/08/06/rollout-2026-08-06T03-01-31-019fd34d-602f-7a93-b28d-b784787a22e3.jsonl` | 18,672 events、明示 user message 48件。v7〜v27の要求・実装・検証・差し戻しを全順序で照合 |
-| Codex | `019fe044-aa46-7a83-992d-d5c095a20201` | `/Users/higataiyu/.codex/sessions/2026/08/08/rollout-2026-08-08T15-27-04-019fe044-aa46-7a83-992d-d5c095a20201.jsonl` | 7,393 events、明示 user message 21件。v28〜v35と中断時点を全順序で照合 |
-| Claude Code | Codex セッション分析と動画制作 | `/Users/higataiyu/.claude/projects/-Users-higataiyu-Documents-Excalidraw/024c09db-3b36-43ac-9a16-5f334356e7e6.jsonl` | 2,496行。v36〜v40の引継ぎ・実装・ユーザー差し戻し・レンダーを照合 |
+| Codex | `019fd34d-602f-7a93-b28d-b784787a22e3` | `~/.codex/sessions/2026/08/06/rollout-2026-08-06T03-01-31-019fd34d-602f-7a93-b28d-b784787a22e3.jsonl` | 18,672 events、明示 user message 48件。v7〜v27の要求・実装・検証・差し戻しを全順序で照合 |
+| Codex | `019fe044-aa46-7a83-992d-d5c095a20201` | `~/.codex/sessions/2026/08/08/rollout-2026-08-08T15-27-04-019fe044-aa46-7a83-992d-d5c095a20201.jsonl` | 7,393 events、明示 user message 21件。v28〜v35と中断時点を全順序で照合 |
+| Claude Code | Codex セッション分析と動画制作 | `~/.claude/projects/-Users-higataiyu-Documents-Excalidraw/024c09db-3b36-43ac-9a16-5f334356e7e6.jsonl` | 2,496行。v36〜v40の引継ぎ・実装・ユーザー差し戻し・レンダーを照合 |
 | Claude Code | セッション目的達成管理 | 同プロジェクトの `5a313d2a…jsonl` と `b3600eae…jsonl` にまたがる論理セッション | 要求台帳、独立検品、完了判定、後続委任を照合 |
 
 巨大な画像/base64イベントを本文として数えず、human-origin要求、実ファイル変更、テスト、レンダー成果物、ユーザーの視聴フィードバック、task complete宣言を別々に抽出した。結論は、履歴内に「ユーザー視聴で最終承認された完成版」は存在しない。自動監査PASS後に人間視聴で欠陥が見つかる流れが複数回あり、task completeの文言は完成証拠として扱わなかった。
@@ -94,7 +94,7 @@
 
 v42のレンダー・最終検証結果は同ディレクトリの `v42-integrated-final-evidence.json` を機械可読な一次証拠とする。
 
-- 完成MP4: `/Users/higataiyu/Documents/Excalidraw/canvas/assets/videos/manga-photo-homecoming-001-v42-integrated-final-r1.mp4`
+- 完成MP4: `<repo>/canvas/assets/videos/manga-photo-homecoming-001-v42-integrated-final-r1.mp4`
 - ffprobe: 154.156706秒、1920×1080、30fps、H.264 + AAC 48kHz stereo、34,175,608 bytes、平均1,773,551 bit/s。
 - SHA-256: `877c2f91920838e952f8a512d0ca33fa530de40c0bb96d74725a80060589d7e8`。decoded audio PCM MD5: `4c7241228b3d54edd4416a3d32572f3a`。
 - 音声: 29/29発話の波形・cut内同期PASS、最低波形相関0.999468、speech-onset gain spread 1.009736（v41は1.226922）、19/19可聴間PASS。cut-05は0.160187秒、cut-10は0.320000秒。STT 29/29、冒頭余白29/29、ナレーション韻律7/7、ハム候補0、孤立クリック0、ピーク-1.774dBFS。
@@ -102,7 +102,7 @@ v42のレンダー・最終検証結果は同ディレクトリの `v42-integrat
 - 目視: タイムライン、全吹き出し、全切替、cut-05、cameraの各コンタクトシートを確認。参考2本のコンタクトシートとも比較し、背景の色・小物密度を再検証した。波形・スペクトログラムと冒頭/cut-05/cut-10のデコード済み試聴用クリップを証拠として保存した。
 - 実行検証: finalizerが完成MP4を全編`ffmpeg -xerror`デコードし、stream/サイズ/hashを再計測。`node --test test/*.test.mjs`は383/383 PASS。render内planning/final quality harnessもfail-closedでPASS。
 - 共有app-server: production入口の実結線、24ジョブで1 app-server、クラッシュ復旧、usage-limit waiting/checkpoint/同地点再開をテスト。実機旧方式は2-jobでも180秒timeoutとなり、残留子プロセス0を確認して証拠保存した。
-- 機械可読な最終証拠: `/Users/higataiyu/Documents/Excalidraw/canvas/manga-videos/manga-photo-homecoming-001/v42-integrated-final-evidence.json`。
+- 機械可読な最終証拠: `<repo>/canvas/manga-videos/manga-photo-homecoming-001/v42-integrated-final-evidence.json`。
 - 完成動画の既知問題: 無し。Codexランタイムが音声サンプルをモデルへ返さない制約は、最終音声のデコード、STT、韻律、波形相関、onset、間、音量、クリック/ハム監査と、保持した試聴用実ファイルで補完した。
 
 ## セキュリティと保全

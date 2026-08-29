@@ -25,7 +25,13 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
+import { homedir } from "node:os";
+
 import { channelPackRootEntries, channelPackPresent } from "../lib/channelPackResolver.mjs";
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 
@@ -34,7 +40,18 @@ const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), 
  * 平文で置くと、それ自体が名簿になる。
  */
 export function collectSensitiveTerms(projectDir = REPO_ROOT) {
+  const { terms } = collectSensitiveSignals(projectDir);
+  return terms;
+}
+
+/**
+ * 表示名・ID・ホームディレクトリを別々に集める。
+ * 表示名だけを照合していたので、ID の一覧と開発機の絶対パスが
+ * 公開されたまま「検出なし」と報告していた。
+ */
+export function collectSensitiveSignals(projectDir = REPO_ROOT) {
   const terms = new Set();
+  const castIds = new Set();
   for (const entry of channelPackRootEntries(projectDir)) {
     if (entry.kind === "fixture" || !existsSync(entry.root)) continue;
     for (const relative of ["config/koya-show-bible.json", "config/koya-location-bible.json"]) {
@@ -47,6 +64,13 @@ export function collectSensitiveTerms(projectDir = REPO_ROOT) {
           if (value) terms.add(String(value));
         }
       }
+      // ID も集める。表示名だけを見ていたので、**11人分の castId が
+      // 並んだ一覧が公開されたまま検査は clean と報告していた**。
+      // ID 単体は一般語と衝突しうるので、名簿としての密度で判定する
+      // （下の rosterDensity）。
+      for (const member of parsed.cast || []) {
+        if (member.id) castIds.add(String(member.id));
+      }
       for (const location of parsed.locations || []) {
         if (location.name) terms.add(String(location.name));
       }
@@ -56,7 +80,22 @@ export function collectSensitiveTerms(projectDir = REPO_ROOT) {
     }
   }
   // 2文字未満は一般語と衝突する。
-  return [...terms].filter((term) => term.length >= 2).sort((a, b) => b.length - a.length);
+  return {
+    terms: [...terms].filter((term) => term.length >= 2).sort((a, b) => b.length - a.length),
+    castIds: [...castIds].filter((id) => id.length >= 3).sort(),
+  };
+}
+
+/**
+ * 開発機の絶対パスの出現数。
+ *
+ * 検査本体は追跡下のファイルしか見ないので、現に0件のときは検出を丸ごと
+ * 止めても結果が変わらず、変異が捕まらない。判定だけを取り出して
+ * 直接テストできるようにする。
+ */
+export function countHomePathHits(text, homeRoot) {
+  if (!homeRoot) return 0;
+  return (String(text).match(new RegExp(escapeRegExp(homeRoot), "gu")) || []).length;
 }
 
 /** 構造規則。語が引けない環境でも、これだけは常に見る。 */
@@ -76,8 +115,11 @@ function trackedFiles({ stagedOnly = false } = {}) {
   return out.toString().split("\0").filter(Boolean);
 }
 
+/** 名簿としての密度。ID 単体は一般語と衝突するので、同居数で判定する。 */
+const ROSTER_DENSITY = 3;
+
 export function auditPublicSurface({ projectDir = REPO_ROOT, stagedOnly = false } = {}) {
-  const terms = collectSensitiveTerms(projectDir);
+  const { terms, castIds } = collectSensitiveSignals(projectDir);
   const packAvailable = channelPackPresent(projectDir);
   const files = trackedFiles({ stagedOnly });
 
@@ -90,6 +132,9 @@ export function auditPublicSurface({ projectDir = REPO_ROOT, stagedOnly = false 
 
   // 検出した文字列そのものは記録しない。件数とファイルと行番号だけ。
   const termFindings = [];
+  const rosterFindings = [];
+  const pathLeakFindings = [];
+  const homeRoot = homedir();
   for (const relative of files) {
     const full = path.join(REPO_ROOT, relative);
     if (!existsSync(full)) continue;
@@ -112,6 +157,19 @@ export function auditPublicSurface({ projectDir = REPO_ROOT, stagedOnly = false 
       }
     }
     if (hits > 0) termFindings.push({ file: relative, hits, lines: lineNumbers });
+
+    // ID の名簿。表示名だけを見ていたので、11人分の castId が並んだ一覧が
+    // 公開されたまま「検出なし」と報告していた。ID 単体は一般語と衝突する
+    // ので（fuku, ema など）、**同じファイルに何個同居しているか**で見る。
+    const presentIds = castIds.filter((id) => new RegExp(`\\b${id}\\b`, "u").test(text));
+    if (presentIds.length >= ROSTER_DENSITY) {
+      rosterFindings.push({ file: relative, idCount: presentIds.length, of: castIds.length });
+    }
+
+    // 開発機の絶対パス。運営者にも配布物にも要らないうえ、
+    // ホームディレクトリ名は個人を指す。
+    const homeHits = countHomePathHits(text, homeRoot);
+    if (homeHits > 0) pathLeakFindings.push({ file: relative, hits: homeHits });
   }
 
   return {
@@ -121,9 +179,13 @@ export function auditPublicSurface({ projectDir = REPO_ROOT, stagedOnly = false 
     // 語が引けなかったことを「問題なし」と報告しない。
     termSourceAvailable: packAvailable,
     termCount: terms.length,
+    castIdCount: castIds.length,
     pathFindings,
     termFindings,
-    clean: pathFindings.length === 0 && termFindings.length === 0,
+    rosterFindings,
+    pathLeakFindings,
+    clean: pathFindings.length === 0 && termFindings.length === 0
+      && rosterFindings.length === 0 && pathLeakFindings.length === 0,
   };
 }
 
@@ -151,9 +213,21 @@ function render(report) {
     }
     lines.push("");
   }
+  if (report.rosterFindings.length > 0) {
+    lines.push("固定キャストの名簿（ID の同居数で判定・ID そのものは表示しない）:");
+    for (const finding of report.rosterFindings) {
+      lines.push(`  ${finding.file}  ${finding.idCount}/${finding.of} 個`);
+    }
+    lines.push("");
+  }
+  if (report.pathLeakFindings.length > 0) {
+    lines.push("開発機の絶対パス:");
+    for (const finding of report.pathLeakFindings) lines.push(`  ${finding.file}  ${finding.hits}件`);
+    lines.push("");
+  }
   lines.push(report.clean
     ? (report.termSourceAvailable ? "検出なし" : "構造規則の範囲では検出なし（固有名詞は未検査）")
-    : `要対応: パス ${report.pathFindings.length}件 / 語 ${report.termFindings.length}ファイル`);
+    : `要対応: パス ${report.pathFindings.length} / 語 ${report.termFindings.length} / 名簿 ${report.rosterFindings.length} / 絶対パス ${report.pathLeakFindings.length}`);
   return lines.join("\n");
 }
 

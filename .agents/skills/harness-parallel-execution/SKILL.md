@@ -92,7 +92,7 @@ node scripts/harness-parallel-run.mjs --plan <plan.json> \
 ```json
 {
   "planId": "koya-cast-gates-2026-08-28",
-  "defaults": { "cwd": "/Users/higataiyu/Documents/Excalidraw" },
+  "defaults": { "cwd": "." },
   "jobs": [
     {
       "id": "gate-horo",

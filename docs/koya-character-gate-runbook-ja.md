@@ -75,7 +75,7 @@ inventory の書き方:
 
 ```bash
 node scripts/koya-open-blind-arena.mjs --public <judge-packet.json>
-node /Users/higataiyu/まさお/bestofn-repo/bin/bon.js serve -d --open
+node ~/まさお/bestofn-repo/bin/bon.js serve -d --open
 ```
 
 **アリーナは閲覧用**。採用の記録は公式CLI（`character-approve` /

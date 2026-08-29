@@ -55,3 +55,4 @@ clicks.json
 cmp_*.txt
 old-*.wav
 examples/reference-scripts/*.reference.md
+config/parallel-plans/koya-cast-gates.json

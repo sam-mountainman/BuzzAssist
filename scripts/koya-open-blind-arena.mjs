@@ -16,7 +16,7 @@ import process from "node:process";
 import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
-const BON_CLI = process.env.BON_CLI || "/Users/higataiyu/まさお/bestofn-repo/bin/bon.js";
+const BON_CLI = process.env.BON_CLI || "~/まさお/bestofn-repo/bin/bon.js";
 
 function usage() {
   console.error("usage: koya-open-blind-arena.mjs --public <public-packet.json> [--serve] [--prompt TEXT]");
