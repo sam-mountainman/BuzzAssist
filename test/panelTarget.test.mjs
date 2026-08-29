@@ -679,7 +679,14 @@ test("prompt placement follows its frame beyond every viewport edge", async () =
 test("phone tunnel renders images via capped overlays instead of hydrating Excalidraw files", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
 
-  assert.match(source, /const CANVAS_ASSET_PLACEHOLDER_DATA_URL = 'data:image\/gif;base64,/);
+  // placeholder の定義は src/assetPlaceholders.mjs へ移した。
+  // App.jsx のソース文字列ではなく、本体を import して確かめる
+  // ——書き写した照合は、本体を変えても落ちない。
+  {
+    const { CANVAS_ASSET_PLACEHOLDER_DATA_URL } = await import("../src/assetPlaceholders.mjs");
+    assert.match(CANVAS_ASSET_PLACEHOLDER_DATA_URL, /^data:image\/gif;base64,/u);
+    assert.match(source, /from '\.\/assetPlaceholders\.mjs'/u, "App.jsx が共有モジュールを使っていること");
+  }
   assert.match(source, /const MOBILE_IMAGE_PREVIEW_OVERLAY_MAX_ITEMS = 8/);
   assert.match(source, /import \{[^}]*useMemo[^}]*\} from 'react'/s);
   assert.match(source, /function isNarrowCanvasViewport\(\)/);
@@ -926,29 +933,52 @@ test("remote scene application preserves current selection before syncing UI", a
   assert.match(applyRemote[1], /syncGeneratorUi\(nextScene\)/);
 });
 
-test("asset-backed な SVG の dataURL に、パスも別種の placeholder も入れない", async () => {
-  // 起動のたびにコンソールへ40件超のエラーが出ていた原因。
+test("placeholder は「取得済み」と判定されない（種別を問わず）", async () => {
+  // SVG の placeholder を足したとき、hydration 側の除外が **GIF の
+  // placeholder しか見ていなかった**ので、SVG の placeholder が「取得済み」と
+  // 判定され、本物の SVG が永久に読み込まれなくなった。コンソールエラーは
+  // 消えたが SVG は透明のまま——**エラーを消すために表示を壊していた**。
   //
-  // ビットマップは Excalidraw が <img src="/path"> として描くので、本体を
-  // 取ってくるまでの間 dataURL にパスを置ける。だが SVG は
-  // addMissingFiles → dataURLToString → base64ToString → atob と進み、
-  // **パスを base64 として復号しようとして必ず落ちる**。
-  //
-  // 最初の修正では GIF の placeholder を入れたが、mimeType が
-  // image/svg+xml のレコードへ GIF を渡すと今度は normalizeSVG が
-  // 「Invalid SVG」で落ちた。種別に合った中身でなければならない。
+  // このテストの最初の版は、App.jsx から値を取り出して**自前で Set を
+  // 作り直していた**。だから本体の Set から SVG を外す変異を入れても素通り
+  // した。App.jsx は JSX なので import できず、書き写すしかなかったのが原因。
+  // 判定を src/assetPlaceholders.mjs へ出して、本体と同じものを import する。
+  const {
+    CANVAS_ASSET_PLACEHOLDER_DATA_URL,
+    CANVAS_ASSET_PLACEHOLDER_SVG_DATA_URL,
+    hasRealAssetBytes,
+    isAssetPlaceholderDataURL,
+    placeholderDataURLFor,
+  } = await import("../src/assetPlaceholders.mjs");
+
+  // 両方の placeholder が placeholder と判定されること。
+  assert.equal(isAssetPlaceholderDataURL(CANVAS_ASSET_PLACEHOLDER_DATA_URL), true);
+  assert.equal(isAssetPlaceholderDataURL(CANVAS_ASSET_PLACEHOLDER_SVG_DATA_URL), true,
+    "SVG の placeholder が判定から漏れている（これが壊れていた）");
+
+  // 取得の要否。placeholder もパスも「まだ持っていない」。
+  assert.equal(hasRealAssetBytes(CANVAS_ASSET_PLACEHOLDER_DATA_URL), false);
+  assert.equal(hasRealAssetBytes(CANVAS_ASSET_PLACEHOLDER_SVG_DATA_URL), false,
+    "SVG の placeholder を「取得済み」にすると本物が永久に読み込まれない");
+  assert.equal(hasRealAssetBytes("/excalidraw-assets/a.svg"), false, "パスを取得済みにしない");
+  assert.equal(
+    hasRealAssetBytes("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxIDEiLz4="),
+    true, "本物の SVG は取得済みと判定すること");
+
+  // 書き込み側は種別で選ぶ。SVG へ GIF を渡すと normalizeSVG が落ちる。
+  assert.equal(placeholderDataURLFor({ mimeType: "image/svg+xml" }), CANVAS_ASSET_PLACEHOLDER_SVG_DATA_URL);
+  assert.equal(placeholderDataURLFor({ mimeType: "image/png" }), CANVAS_ASSET_PLACEHOLDER_DATA_URL);
+  assert.equal(placeholderDataURLFor({}), CANVAS_ASSET_PLACEHOLDER_DATA_URL, "種別不明は既定へ");
+
+  // SVG の placeholder が実際にデコードできる SVG であること。
+  const body = CANVAS_ASSET_PLACEHOLDER_SVG_DATA_URL.split(",")[1];
+  assert.match(Buffer.from(body, "base64").toString("utf8"), /^<svg[\s>]/u);
+
+  // App.jsx が自前で判定を持ち直していないこと（散らすと1箇所が取り残される）。
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
-
-  assert.match(source, /CANVAS_ASSET_PLACEHOLDER_SVG_DATA_URL\s*=\s*\n?\s*'data:image\/svg\+xml;base64,'/u,
-    "SVG 用の placeholder が無い");
-  assert.match(source, /const isSvg = String\(file\.mimeType \|\| ''\)\.toLowerCase\(\)\.includes\('svg'\)/u,
-    "SVG を分岐していない");
-  assert.match(source, /if \(isSvg\) \{\s*\n\s*next\[id\] = file\.dataURL === CANVAS_ASSET_PLACEHOLDER_SVG_DATA_URL/u,
-    "SVG に SVG 用の placeholder を使っていない");
-
-  // placeholder が本当にデコードできる SVG であること。
-  const match = source.match(/CANVAS_ASSET_PLACEHOLDER_SVG_DATA_URL\s*=\s*\n?\s*'data:image\/svg\+xml;base64,'\s*\n?\s*\+ '([A-Za-z0-9+/=]+)'/u);
-  assert.ok(match, "placeholder の中身を取り出せない");
-  const decoded = Buffer.from(match[1], "base64").toString("utf8");
-  assert.match(decoded, /^<svg[\s>]/u, `placeholder が SVG になっていない: ${decoded.slice(0, 40)}`);
+  assert.match(source, /from '\.\/assetPlaceholders\.mjs'/u, "共有モジュールを使っていない");
+  assert.equal(
+    /const CANVAS_ASSET_PLACEHOLDER_DATA_URL =/u.test(source), false,
+    "App.jsx が placeholder を再定義している",
+  );
 });

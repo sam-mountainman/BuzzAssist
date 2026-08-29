@@ -25,6 +25,13 @@ import {
   normalizeTextPreviewScrollOffset
 } from '../lib/textPreviewScroll.mjs'
 import { providerIconDataUri } from './providerIcons.js'
+import {
+  CANVAS_ASSET_PLACEHOLDER_DATA_URL,
+  CANVAS_ASSET_PLACEHOLDER_SVG_DATA_URL,
+  hasRealAssetBytes,
+  isAssetPlaceholderDataURL,
+  placeholderDataURLFor,
+} from './assetPlaceholders.mjs'
 
 const CANVAS_ENDPOINT = '/api/canvas'
 const CANVAS_EVENTS_ENDPOINT = '/api/canvas-events'
@@ -94,13 +101,6 @@ const AUDIO_REFERENCE_ACCEPT = '.aac,.flac,.m4a,.mp3,.ogg,.opus,.wav,audio/aac,a
 const HERMES_GROK_SETUP_PROMPT = 'https://github.com/sam-mountainman/grok-cli-tools\nセットアップして'
 const VIDEO_POSTER_FALLBACK_DATA_URL =
   'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjgwIDcyMCI+PHJlY3Qgd2lkdGg9IjEyODAiIGhlaWdodD0iNzIwIiBmaWxsPSIjMTExODI3Ii8+PHBhdGggZD0iTTU2MCAyNTB2MjIwbDE5MC0xMTB6IiBmaWxsPSIjZmZmIiBvcGFjaXR5PSIuOSIvPjwvc3ZnPg=='
-const CANVAS_ASSET_PLACEHOLDER_DATA_URL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=='
-// SVG 用の placeholder。mimeType が image/svg+xml のレコードへ GIF を渡すと、
-// Excalidraw が normalizeSVG で中身を SVG として解析して落ちる。
-// 種別に合った空の中身を渡す。
-const CANVAS_ASSET_PLACEHOLDER_SVG_DATA_URL =
-  'data:image/svg+xml;base64,'
-  + 'PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxIiBoZWlnaHQ9IjEiLz4='
 
 const VIDEO_POSTER_CAPTURE_MAX_WIDTH = 960
 const VIDEO_POSTER_SCORE_SAMPLE_SIZE = 48
@@ -1927,19 +1927,18 @@ function assetBackedSourceUrl(file) {
 function isHydratedAssetBackedFile(file) {
   return (
     isAssetBackedFileRecord(file) &&
-    typeof file?.dataURL === 'string' &&
-    file.dataURL.startsWith('data:') &&
-    file.dataURL !== CANVAS_ASSET_PLACEHOLDER_DATA_URL
+    hasRealAssetBytes(file?.dataURL)
   )
 }
 
 function dehydrateAssetBackedFile(file) {
   const assetUrl = persistedCanvasAssetUrl(assetBackedSourceUrl(file))
   if (!assetUrl) return file
-  if (file.dataURL === CANVAS_ASSET_PLACEHOLDER_DATA_URL && file.codexAssetUrl === assetUrl) return file
+  const placeholder = placeholderDataURLFor(file)
+  if (file.dataURL === placeholder && file.codexAssetUrl === assetUrl) return file
   return {
     ...file,
-    dataURL: CANVAS_ASSET_PLACEHOLDER_DATA_URL,
+    dataURL: placeholder,
     codexAssetUrl: assetUrl,
     codexAssetBacked: true
   }
@@ -6463,9 +6462,7 @@ export default function App() {
     // (clearImageShapeCache + addNewImagesToImageCache).
     const storeFiles = api.getFiles?.() ?? latestSceneRef.current.files ?? {}
     const storeRecordHasBytes = (record) =>
-      typeof record?.dataURL === 'string' &&
-      record.dataURL.startsWith('data:') &&
-      record.dataURL !== CANVAS_ASSET_PLACEHOLDER_DATA_URL
+      hasRealAssetBytes(record?.dataURL)
     const applicableFiles = bufferedFiles.filter((file) => !storeRecordHasBytes(storeFiles[file.id]))
     if (applicableFiles.length === 0) return
 
