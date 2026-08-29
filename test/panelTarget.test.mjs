@@ -1,3 +1,17 @@
+// このファイルの44件は App.jsx を**レンダーせず readFile + 正規表現**で
+// 判定している。必要な文字列が死んだコードとして残っているだけでも通るので、
+// 挙動については何も保証しない。
+//
+// 実測（2026-08-29）: この44件が全て緑のまま、開発サーバーでアプリを起動すると
+// コンソールに40件以上のランタイムエラーが出ていた
+// （Excalidraw 内部の atob 失敗と、React の key 重複）。
+// つまり「緑」は「アプリが正しく動く」を意味していない。
+//
+// 入口にビルドを足したので、import と構文の破壊は捕まる（実測で確認）。
+// だが**トップレベルの throw は捕まらない**——構文としては正しく、
+// バンドルも通る。そこは実際にマウントするテストが要る。
+// 判断待ち: jsdom か playwright を devDependency に入れるか。
+
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
