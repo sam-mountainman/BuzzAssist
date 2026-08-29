@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { createReadStream, createWriteStream } from "node:fs";
-import { chmod, rename, rm, stat } from "node:fs/promises";
+import { chmod, readdir, rename, rm, stat } from "node:fs/promises";
 import { once } from "node:events";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 
 const RULES = [
@@ -136,17 +136,71 @@ async function sanitizeFile(filePath, apply) {
   };
 }
 
+/**
+ * 既定で走査するログの置き場。
+ *
+ * npm スクリプトはパスを渡さずにこの検査器を呼んでおり、検査器はパスを
+ * 1件以上必須にしていた。つまり `npm run security:session-logs` は
+ * **1ファイルも検査せずに Usage エラーで終わっていた**。
+ * 標準コマンドが何も見ないのに「秘密ログ検査」という名前だけがある状態で、
+ * これは「検査したことになっている」型そのもの。
+ */
+export const DEFAULT_LOG_ROOTS = Object.freeze([
+  "canvas/parallel-runs",          // 決定論ランナーの stdout/stderr とレポート
+  "canvas/koya-mcp-jobs",          // バックグラウンドジョブのログ
+  "canvas/parallel-agents",        // LLM 扇形展開の .log と .result.txt
+  "docs/learning/receipts",        // RunReceipt
+]);
+
+const SCANNED_EXTENSIONS = new Set([".log", ".jsonl", ".json", ".txt"]);
+
+async function collectDefaultPaths(repoRoot) {
+  const found = [];
+  const walk = async (dir) => {
+    let entries = [];
+    try { entries = await readdir(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) await walk(full);
+      else if (SCANNED_EXTENSIONS.has(extname(entry.name))) found.push(full);
+    }
+  };
+  for (const relative of DEFAULT_LOG_ROOTS) await walk(join(repoRoot, relative));
+  return found.sort();
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
-  if (options.paths.length === 0) {
-    throw new Error("Usage: node scripts/sanitize-agent-session-secrets.mjs [--apply] [--fail-on-findings] /absolute/session.jsonl ...");
+  const repoRoot = resolve(dirname(new URL(import.meta.url).pathname), "..");
+  let paths = options.paths;
+  let source = "explicit";
+  if (paths.length === 0) {
+    // 明示指定が無ければ既知のログ置き場を走査する。
+    paths = await collectDefaultPaths(repoRoot);
+    source = "default-roots";
+  }
+  if (paths.length === 0) {
+    // 走査対象0件は「安全」ではない。設定の問題として報告する。
+    process.stdout.write(`${JSON.stringify({
+      version: "agent-session-secret-sanitizer-v1",
+      mode: "dry-run",
+      fileCount: 0,
+      matchCount: 0,
+      source,
+      error: "検査対象が1件も見つかりませんでした。ログがまだ無いか、"
+        + `既定の置き場（${DEFAULT_LOG_ROOTS.join(", ")}）が違います。`
+        + "対象0件は「秘密が無い」ことを意味しません。",
+    }, null, 2)}\n`);
+    process.exitCode = 3;
+    return;
   }
   const files = [];
-  for (const filePath of options.paths) files.push(await sanitizeFile(filePath, options.apply));
+  for (const filePath of paths) files.push(await sanitizeFile(filePath, options.apply));
   const matchCount = files.reduce((sum, row) => sum + row.matchCount, 0);
   process.stdout.write(`${JSON.stringify({
     version: "agent-session-secret-sanitizer-v1",
     mode: options.apply ? "apply" : "dry-run",
+    source,
     fileCount: files.length,
     matchCount,
     files,
