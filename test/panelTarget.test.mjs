@@ -925,3 +925,30 @@ test("remote scene application preserves current selection before syncing UI", a
   assert.match(applyRemote[1], /const nextScene = \{[\s\S]*?\.\.\.normalized,[\s\S]*?appState: nextAppState\s*\}/);
   assert.match(applyRemote[1], /syncGeneratorUi\(nextScene\)/);
 });
+
+test("asset-backed な SVG の dataURL に、パスも別種の placeholder も入れない", async () => {
+  // 起動のたびにコンソールへ40件超のエラーが出ていた原因。
+  //
+  // ビットマップは Excalidraw が <img src="/path"> として描くので、本体を
+  // 取ってくるまでの間 dataURL にパスを置ける。だが SVG は
+  // addMissingFiles → dataURLToString → base64ToString → atob と進み、
+  // **パスを base64 として復号しようとして必ず落ちる**。
+  //
+  // 最初の修正では GIF の placeholder を入れたが、mimeType が
+  // image/svg+xml のレコードへ GIF を渡すと今度は normalizeSVG が
+  // 「Invalid SVG」で落ちた。種別に合った中身でなければならない。
+  const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+
+  assert.match(source, /CANVAS_ASSET_PLACEHOLDER_SVG_DATA_URL\s*=\s*\n?\s*'data:image\/svg\+xml;base64,'/u,
+    "SVG 用の placeholder が無い");
+  assert.match(source, /const isSvg = String\(file\.mimeType \|\| ''\)\.toLowerCase\(\)\.includes\('svg'\)/u,
+    "SVG を分岐していない");
+  assert.match(source, /if \(isSvg\) \{\s*\n\s*next\[id\] = file\.dataURL === CANVAS_ASSET_PLACEHOLDER_SVG_DATA_URL/u,
+    "SVG に SVG 用の placeholder を使っていない");
+
+  // placeholder が本当にデコードできる SVG であること。
+  const match = source.match(/CANVAS_ASSET_PLACEHOLDER_SVG_DATA_URL\s*=\s*\n?\s*'data:image\/svg\+xml;base64,'\s*\n?\s*\+ '([A-Za-z0-9+/=]+)'/u);
+  assert.ok(match, "placeholder の中身を取り出せない");
+  const decoded = Buffer.from(match[1], "base64").toString("utf8");
+  assert.match(decoded, /^<svg[\s>]/u, `placeholder が SVG になっていない: ${decoded.slice(0, 40)}`);
+});

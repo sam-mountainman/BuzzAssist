@@ -95,6 +95,13 @@ const HERMES_GROK_SETUP_PROMPT = 'https://github.com/sam-mountainman/grok-cli-to
 const VIDEO_POSTER_FALLBACK_DATA_URL =
   'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjgwIDcyMCI+PHJlY3Qgd2lkdGg9IjEyODAiIGhlaWdodD0iNzIwIiBmaWxsPSIjMTExODI3Ii8+PHBhdGggZD0iTTU2MCAyNTB2MjIwbDE5MC0xMTB6IiBmaWxsPSIjZmZmIiBvcGFjaXR5PSIuOSIvPjwvc3ZnPg=='
 const CANVAS_ASSET_PLACEHOLDER_DATA_URL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=='
+// SVG 用の placeholder。mimeType が image/svg+xml のレコードへ GIF を渡すと、
+// Excalidraw が normalizeSVG で中身を SVG として解析して落ちる。
+// 種別に合った空の中身を渡す。
+const CANVAS_ASSET_PLACEHOLDER_SVG_DATA_URL =
+  'data:image/svg+xml;base64,'
+  + 'PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxIiBoZWlnaHQ9IjEiLz4='
+
 const VIDEO_POSTER_CAPTURE_MAX_WIDTH = 960
 const VIDEO_POSTER_SCORE_SAMPLE_SIZE = 48
 const VIDEO_POSTER_GOOD_SCORE = 42
@@ -1854,7 +1861,21 @@ function withRuntimeAssetBackedFiles(files) {
       continue
     }
     const runtimeUrl = runtimeCanvasAssetUrl(file.dataURL || file.codexAssetUrl)
-    if (runtimeUrl && runtimeUrl !== file.dataURL) {
+    // SVG だけは dataURL にパスを置けない。
+    //
+    // ビットマップは Excalidraw が <img src="/path"> として描くので、
+    // 本体を取ってくるまでの間パスを入れておける。だが SVG は
+    // addMissingFiles → dataURLToString → base64ToString → atob と進み、
+    // **パスを base64 として復号しようとして必ず落ちる**。
+    // 起動のたびにコンソールへ40件超のエラーが出ていたのはこれ。
+    // 取ってくるまでは placeholder のままにする（描画は hydration が担う）。
+    const isSvg = String(file.mimeType || '').toLowerCase().includes('svg')
+    if (isSvg) {
+      next[id] = file.dataURL === CANVAS_ASSET_PLACEHOLDER_SVG_DATA_URL
+        ? file
+        : { ...file, dataURL: CANVAS_ASSET_PLACEHOLDER_SVG_DATA_URL }
+      if (next[id] !== file) changed = true
+    } else if (runtimeUrl && runtimeUrl !== file.dataURL) {
       next[id] = { ...file, dataURL: runtimeUrl }
       changed = true
     } else {
