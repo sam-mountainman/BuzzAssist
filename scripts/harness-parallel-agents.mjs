@@ -41,6 +41,18 @@ export function maskSecrets(text) {
   return out;
 }
 
+export function classifyProbeOutcome({code, text = "", stderr = ""}) {
+  const combined = `${text}\n${stderr}`;
+  if (code !== 0 && /not logged in|please run \/login|unauthorized|401/i.test(combined)) {
+    return {ok: false, reason: "未ログイン（認証が必要）"};
+  }
+  if (code !== 0) {
+    return {ok: false, reason: `終了コード ${code}: ${String(stderr).trim().slice(0, 120)}`};
+  }
+  const ok = String(text).trim() === "PROBE-OK";
+  return {ok, reason: ok ? null : "応答が想定と違います"};
+}
+
 const MAX_LOG_BYTES = 2 * 1024 * 1024;
 function clampLog(text) {
   const masked = maskSecrets(text);
@@ -162,19 +174,7 @@ export async function probeEngine(engineId, { timeoutMs = 60_000 } = {}) {
       if (!engine.resultFromStdout) {
         try { text = fs.readFileSync(outputPath, "utf8"); } catch { /* 出力なし */ }
       }
-      const combined = `${text}\n${stderr}`;
-      if (/not logged in|please run \/login|unauthorized|401/i.test(combined)) {
-        resolve({ ok: false, reason: "未ログイン（認証が必要）" });
-        return;
-      }
-      if (code !== 0) {
-        resolve({ ok: false, reason: `終了コード ${code}: ${stderr.trim().slice(0, 120)}` });
-        return;
-      }
-      // 「PROBE-OK を含む」ではなく「PROBE-OK である」で判定する。
-      // 長い説明文の中にたまたま含まれただけの応答を通さない。
-      const ok = text.trim() === "PROBE-OK";
-      resolve({ ok, reason: ok ? null : "応答が想定と違います" });
+      resolve(classifyProbeOutcome({code, text, stderr}));
     });
   });
 

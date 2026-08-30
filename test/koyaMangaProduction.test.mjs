@@ -7,14 +7,18 @@ import { test } from "node:test";
 
 import {
   dialogueShotRequiresAnchoredPullout,
+  buildKoyaIdentityPackJobInput,
   generateKoyaIdentityPackAssets,
   groupPagesForPacing,
   koyaCameraModeForShot,
   koyaCameraModeForMissingFamily,
   koyaSpeechPronunciationsFromCharacterBible,
   planKoyaMangaProduction,
+  prepareKoyaIdentityGenerationImport,
   recommendedKoyaRenderConcurrency,
   recoverKoyaApprovedAudioFromAlignments,
+  reconcileKoyaRegisteredCharacterShowBibleStatus,
+  registeredIdentityReviewBinding,
   reuseKoyaApprovedAudio,
   assertKoyaStylingSequence,
   runSourceFacePlacement,
@@ -124,6 +128,149 @@ test("identity-pack generation checkpoints each paid image and resumes without d
       ...common,
       generateImage: async () => ({ buffer: testRaster(100) }),
     }), /checkpoint digest mismatch/u);
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("registered identity refresh reads finalized review evidence from the workflow top level and registry approval", () => {
+  const reviewPath = "/project/canvas/character-reviews/workflow/cast/identity-pack/identity-pack-review.json";
+  assert.deepEqual(registeredIdentityReviewBinding({
+    status: "ready",
+    identityReviewPath: reviewPath,
+    approval: { approvedBy: "human" },
+  }, {
+    status: "approved",
+    approval: { identityReviewPath: reviewPath, identityReviewSha256: "a".repeat(64) },
+  }), { path: reviewPath, sha256: "a".repeat(64) });
+  assert.equal(registeredIdentityReviewBinding({ identityReviewPath: reviewPath }, {
+    approval: { identityReviewPath: `${reviewPath}.other`, identityReviewSha256: "a".repeat(64) },
+  }), null);
+});
+
+test("registered character reconciliation promotes only a ready SHA-bound client-approved show member", async () => {
+  const projectDir = await mkdtemp(join(tmpdir(), "koya-registration-reconcile-"));
+  try {
+    assert.equal(await installChannelPack(projectDir), true);
+    const canvasDir = join(projectDir, "canvas");
+    const reviewPath = join(canvasDir, "character-reviews", "reiji-review.json");
+    await mkdir(join(canvasDir, "character-reviews"), { recursive: true });
+    await writeFile(reviewPath, "approved identity review\n");
+    const reviewSha256 = createHash("sha256").update(await readFile(reviewPath)).digest("hex");
+    await writeFile(join(canvasDir, "character-workflows.json"), `${JSON.stringify({
+      version: 1,
+      workflows: [{
+        id: "workflow-reiji",
+        episodeId: "appare-fixed-cast",
+        cast: [{
+          id: "appare-fixed-cast-character-4",
+          name: "裏腹レイジ",
+          aliases: ["レイジ"],
+          role: "fixed",
+          status: "ready",
+          identityReviewPath: reviewPath,
+        }],
+      }],
+    }, null, 2)}\n`);
+    await writeFile(join(canvasDir, "characters.json"), `${JSON.stringify({
+      version: 1,
+      characters: [{
+        id: "appare-fixed-cast-character-4",
+        name: "裏腹レイジ",
+        status: "approved",
+        approval: { identityReviewPath: reviewPath, identityReviewSha256: reviewSha256 },
+      }],
+    }, null, 2)}\n`);
+    const showBiblePath = join(projectDir, "channel-packs", "koya", "config", "koya-show-bible.json");
+    const showBible = JSON.parse(await readFile(showBiblePath, "utf8"));
+    showBible.cast = showBible.cast.map((member) => member.id === "reiji"
+      ? { ...member, designStatus: "client-approved-awaiting-official-import" }
+      : member);
+    await writeFile(showBiblePath, `${JSON.stringify(showBible, null, 2)}\n`);
+
+    const first = await reconcileKoyaRegisteredCharacterShowBibleStatus({
+      projectDir,
+      workflowId: "workflow-reiji",
+      castId: "appare-fixed-cast-character-4",
+    });
+    assert.equal(first.updated, true);
+    assert.equal(first.previousDesignStatus, "client-approved-awaiting-official-import");
+    assert.equal(first.designStatus, "approved");
+    const updatedShowBible = JSON.parse(await readFile(showBiblePath, "utf8"));
+    assert.equal(updatedShowBible.cast.find((member) => member.id === "reiji").designStatus, "approved");
+
+    const second = await reconcileKoyaRegisteredCharacterShowBibleStatus({
+      projectDir,
+      workflowId: "workflow-reiji",
+      castId: "appare-fixed-cast-character-4",
+    });
+    assert.equal(second.updated, false);
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("identity generation import binds exact official input and generated source bytes", async () => {
+  const projectDir = await mkdtemp(join(tmpdir(), "koya-identity-import-"));
+  try {
+    const canvasDir = join(projectDir, "canvas");
+    const referencePath = join(canvasDir, "assets/reference.png");
+    const sourcePath = join(canvasDir, "assets/imported-turnaround.png");
+    await mkdir(join(canvasDir, "assets"), { recursive: true });
+    await writeFile(referencePath, testRaster(71));
+    await writeFile(sourcePath, testRaster(72));
+    const candidateSha256 = createHash("sha256").update(await readFile(referencePath)).digest("hex");
+    const sourceSha256 = createHash("sha256").update(await readFile(sourcePath)).digest("hex");
+    const generator = { host: "codex", id: "codex-imagegen-tool", contextId: "identity-import-test" };
+    const job = {
+      prompt: "Exact approved turnaround",
+      model: "gpt-image-test",
+      aspectRatio: "16:9",
+      imageSize: "2K",
+      quality: "high",
+      referenceImagePaths: [referencePath],
+      fileName: "turnaround.png",
+      pipeline: { identityRole: "turnaround", storyStage: "" },
+    };
+    const binding = await buildKoyaIdentityPackJobInput({
+      workflowId: "workflow-1",
+      castId: "cast-1",
+      candidateSha256,
+      generator,
+      job,
+    });
+    const importMapPath = join(canvasDir, "identity-import.json");
+    await writeFile(importMapPath, JSON.stringify({
+      version: "koya-identity-generation-import-v1",
+      workflowId: "workflow-1",
+      castId: "cast-1",
+      candidateSha256,
+      generator,
+      generationScopeId: "refresh:test",
+      entries: [{ key: "turnaround:", sourceFile: sourcePath, sourceSha256, inputSha256: binding.inputSha256 }],
+    }));
+    const imported = await prepareKoyaIdentityGenerationImport({
+      canvasDir,
+      importMapPath,
+      workflowId: "workflow-1",
+      castId: "cast-1",
+      candidateSha256,
+      generator,
+      generationScopeId: "refresh:test",
+      jobs: [job],
+    });
+    assert.deepEqual((await imported.generateImage(job)).buffer, await readFile(sourcePath));
+    job.prompt = "Changed after generation";
+    await assert.rejects(() => prepareKoyaIdentityGenerationImport({
+      canvasDir,
+      importMapPath,
+      workflowId: "workflow-1",
+      castId: "cast-1",
+      candidateSha256,
+      generator,
+      generationScopeId: "refresh:test",
+      jobs: [job],
+    }), /input SHA-256 mismatch/u);
   } finally {
     await rm(projectDir, { recursive: true, force: true });
   }

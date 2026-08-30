@@ -28,6 +28,7 @@ test("Koya MCP doctor and read-only actions use the canonical CLI", async (t) =>
   assert.ok(doctor.checks.filter((check) => check.path.endsWith(".json")).every((check) => check.ok && check.version));
   assert.ok(KOYA_MCP_ACTIONS.includes("character-style-generate"));
   assert.ok(KOYA_MCP_ACTIONS.includes("character-style-import"));
+  assert.ok(KOYA_MCP_ACTIONS.includes("character-identity-refresh"));
   assert.ok(KOYA_MCP_ACTIONS.includes("character-style-record-failure"));
   assert.ok(KOYA_MCP_ACTIONS.includes("character-bootstrap-status"));
   assert.ok(KOYA_MCP_ACTIONS.includes("character-style-compose"));

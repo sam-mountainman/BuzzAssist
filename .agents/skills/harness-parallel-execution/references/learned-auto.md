@@ -11,5 +11,8 @@
 - **Codexのネイティブ子スレッドは同時3本で、4本目は agent thread limit reached**
   - 根拠: Codexレビューでの実測（0.150.0-alpha.8）
   - 種別: fact / 初回: 2026-08-28 / id: `af895bf4ea2c`
+- **Codex CLIのprobeは終了コード0かつ期待応答一致なら、無関係なMCPの401/unauthorized警告をCodex本体の未ログインとして扱わない。認証エラー判定は非0終了時に限定する**
+  - 根拠: scripts/harness-parallel-agents.mjs:166-168。2026-08-30実測: codex execはstatus 0でPROBE-OKを返したが、別MCPのAuthRequired/401警告を含むためselectEngineが未ログインと誤判定した
+  - 種別: correction / 初回: 2026-08-29 / id: `c0f0c7b1ec69`
 
-_最終更新: 2026-08-28T22:52:09.132Z_
+_最終更新: 2026-08-30T17:09:04.222Z_

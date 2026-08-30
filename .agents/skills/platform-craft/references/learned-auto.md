@@ -17,5 +17,11 @@
 - **契約は版で増減するので、記録は効力のあった契約で測る。当時存在しなかった監査を「未実施」と数えると過去の成果物が後から一斉に不合格になる。ただし契約から保証の裏づけが全部消えた場合は pass ではなく skip——契約が縮んで保証が黙って無効になるのが穴の入口**
   - 根拠: v50のエピソードを現行v51の契約で測り、その版に存在しない audio-speaker-continuity のぶんだけ過去作3件が落ちた
   - 種別: fact / 初回: 2026-08-28 / id: `a1f682fa6c05`
+- **既存のversioned成果物ディレクトリへ書く前に存在と監査SHAを確認し、既存版へ新成果物を混在・上書きしない。衝突時は次の新versionを作り、誤書込みは正本SHAへ復元して記録する。**
+  - 根拠: 2026-08-30 Mike image-harness-v10が既存なのを作成後に検知。scene-plan-v10 SHAとimage-harness-v10-style-benchmark/cleaned-finalから7枚を元SHAへ復元し、新修正はv11へ分離。
+  - 種別: correction / 初回: 2026-08-29 / id: `6fc1a6d87bdd`
+- **最終化は現在のハーネス版の実MP4・plan・自動監査・contact sheet・外部review notesをSHA拘束し、旧版auditを代替証拠として受理しない。自動監査は独立目視signoffを生成せず awaiting-independent-signoff で停止する**
+  - 根拠: client-work/mike-san/yamaaritaniari-v1/reports/v18-integration-independent-code-review.md V18-001/V18-006; production/finalize-review-v18.mjs; production/finalize-complete-video.mjs
+  - 種別: correction / 初回: 2026-08-29 / id: `85c4ff144509`
 
-_最終更新: 2026-08-28T22:52:09.132Z_
+_最終更新: 2026-08-30T17:09:04.222Z_

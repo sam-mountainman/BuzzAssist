@@ -16,8 +16,10 @@ import {
   koyaEpisodePaths,
   planKoyaMangaProduction,
   readKoyaProductionState,
+  reconcileKoyaRegisteredCharacterShowBibleStatus,
   recordKoyaCharacterStylingReviewFailure,
   registerKoyaCharacterIdentity,
+  refreshKoyaRegisteredCharacterIdentityPack,
   repairKoyaCharacterIdentityPack,
   repackKoyaCharacterIdentityPack,
   repairKoyaMangaAudioOnset,
@@ -82,12 +84,13 @@ function usage() {
     "Koya manga video production (fail-closed)",
     "",
     "node scripts/koya-manga-video.mjs <action> [options]",
-    "actions: contract, channel-contract, character-bootstrap-status, character-roster-review-draft, character-roster-audit, cast-readiness, story-review-draft, story-audit, location-plan, location-generate, location-anchor-review-draft, location-anchor-audit, location-review-draft, location-register, thumbnail-plan-draft, thumbnail-audit, handoff-export, handoff-verify, handoff-restore, plan, images, character-review-refresh, character-candidate-migrate-blind, character-candidate-import, character-style-generate, character-style-import, character-style-review-refresh, character-style-record-failure, character-style-compose, character-style-select, character-attribute-gate, character-approve, character-identity-repair, character-identity-repack, character-register, prepare, speech, adjust-gap, standard-cut, repair-onset, repair-tail, sync-contract, refresh-bubbles, render, audit, signoff, full, status",
+    "actions: contract, channel-contract, character-bootstrap-status, character-registration-reconcile, character-roster-review-draft, character-roster-audit, cast-readiness, story-review-draft, story-audit, location-plan, location-generate, location-anchor-review-draft, location-anchor-audit, location-review-draft, location-register, thumbnail-plan-draft, thumbnail-audit, handoff-export, handoff-verify, handoff-restore, plan, images, character-review-refresh, character-candidate-migrate-blind, character-candidate-import, character-style-generate, character-style-import, character-style-review-refresh, character-style-record-failure, character-style-compose, character-style-select, character-attribute-gate, character-approve, character-identity-refresh, character-identity-repair, character-identity-repack, character-register, prepare, speech, adjust-gap, standard-cut, repair-onset, repair-tail, sync-contract, refresh-bubbles, render, audit, signoff, full, status",
     "common: --project-dir DIR --episode-id ID --script-path FILE --title TITLE --protagonist-speaker-id ID_OR_EXACT_NAME --character-bible-path JSON [--story-review-path JSON] [--source-face-review-path JSON] [--generator-host codex|claude|legacy-migration] [--generator-id ID] [--generator-context-id TASK_OR_SESSION_ID] [--retry-failed] [--image-concurrency N|auto] [--qa-concurrency N] [--image-fallback-model MODEL] [--qa-fallback-provider grok]",
     "story-audit: --script-path FILE --story-review-path JSON --protagonist-speaker-id ID_OR_EXACT_NAME (read-only; binds reversal beats and human policy checks to the exact script SHA-256)",
     "story-review-draft: --script-path FILE [--protagonist-speaker-id ID_OR_EXACT_NAME] (read-only; prints exact utterance inventory with all subjective fields unset)",
     "cast-readiness: --script-path FILE [--character-bible-path JSON] (read-only; blocks episode-local replacements for unregistered Koya fixed cast and checks required identity roles)",
     "character-bootstrap-status: read-only fixed-cast progress report across the show bible, workflows, candidate reviews, styling rounds, registry assets, and next legal action",
+    "character-registration-reconcile: --workflow-id ID --cast-id ID_OR_NAME (promotes only an already registered, SHA-bound client-approved cast member to show-bible approved)",
     "character-roster-review-draft: --generator-host codex|claude --generator-id ID --generator-context-id TASK_OR_SESSION (writes the 11-member/55-pair review draft only after all members are individually registered)",
     "character-roster-audit: [--roster-review-path JSON] (validates current identity-face/review SHA evidence and all 55 independent pair checks)",
     "location-plan: --location-id yamatani|apparecho-night [--output-dir DIR] (read-only; four independent architecture-board jobs)",
@@ -100,8 +103,9 @@ function usage() {
     "thumbnail-plan-draft: [--layout twoPanel|threePanel] (read-only; prints a fail-closed plan template)",
     "source region fallback: inspect the exact source image and pass a koya-source-region-review-v2 JSON whose annotations bind normalized face/hand/prop/evidence/text bounds to the source SHA-256 (legacy koya-source-face-review-v1 remains accepted)",
     "audit: --video-path MP4 [--quick] [--dry-run]",
-    "character-approve: --workflow-id ID --cast-id ID_OR_NAME --candidate-label A..E --approval-reason WHY --candidate-review-path JSON --generator-context-id TASK_OR_SESSION [--approved-by NAME] (generates a pending identity pack; does not register)",
-    "character-identity-repair: --episode-id ID --workflow-id ID --cast-id ID_OR_NAME --identity-review-path FAILED_REVIEW_JSON --identity-repair-id UNIQUE_ID --generator-host codex|claude --generator-id ID --generator-context-id TASK_OR_SESSION (revalidates the failed SHA/cell evidence, regenerates only failed roles under a new checkpoint, preserves passed paid assets, and restages fresh independent QA)",
+    "character-approve: --workflow-id ID --cast-id ID_OR_NAME --candidate-label A..E --approval-reason WHY --candidate-review-path JSON --generator-context-id TASK_OR_SESSION [--approved-by NAME] [--identity-generation-import-map-path JSON] (generates or imports a SHA/input-bound pending identity pack; does not register)",
+    "character-identity-repair: --episode-id ID --workflow-id ID --cast-id ID_OR_NAME (--identity-review-path FAILED_REVIEW_JSON | --identity-findings-path FINDINGS_JSON --identity-repair-plan-path REPAIR_PLAN_JSON) --identity-repair-id UNIQUE_ID --generator-host codex|claude --generator-id ID --generator-context-id TASK_OR_SESSION [--identity-generation-import-map-path JSON] (revalidates failed evidence; findings mode applies findingId/ROI repair and SHA-bound import while preserving protected pixels)",
+    "character-identity-refresh: --episode-id ID --workflow-id ID --cast-id ID_OR_NAME --identity-refresh-id UNIQUE_ID --generator-host codex|claude --generator-id ID --generator-context-id TASK_OR_SESSION [--identity-generation-import-map-path JSON] (keeps the already registered identity-face SHA frozen, regenerates or SHA/input-bound imports only turnaround/expression, and stages fresh QA without face reapproval)",
     "character-identity-repack: --episode-id ID --workflow-id ID --cast-id ID_OR_NAME --identity-review-path FAILED_REVIEW_JSON --identity-repair-id UNIQUE_ID --generator-context-id TASK_OR_SESSION (for turnaround/expression boundary failures: archives the failed review, redraws nothing, extracts existing views from actual white gutters, and contains them in exact 4x2/4x3 cells with 8% clearance before fresh QA)",
     "character-review-refresh: --workflow-id ID [--cast-id ID_OR_NAME] --generator-host legacy-migration --generator-context-id MIGRATION_ID (rebuilds v2 review drafts from existing anonymous artifacts; no paid generation and no auto-approval)",
     "character-candidate-migrate-blind: --workflow-id ID --cast-id ID --candidate-labels A,B,C[,D,E] [--retired-candidate-labels F] --migration-reason WHY --generator-host legacy-migration --generator-id ID --generator-context-id ID (rebuilds a published-label A-E packet from existing canvas assets, retires explicitly excluded legacy extras, and never auto-approves)",
@@ -175,7 +179,11 @@ const common = {
   selectionReason: args.selectionReason,
   selectedBy: args.selectedBy,
   identityReviewPath: args.identityReviewPath ? resolve(args.identityReviewPath) : "",
+  identityGenerationImportMapPath: args.identityGenerationImportMapPath ? resolve(args.identityGenerationImportMapPath) : "",
+  identityFindingsPath: args.identityFindingsPath ? resolve(args.identityFindingsPath) : "",
+  identityRepairPlanPath: args.identityRepairPlanPath ? resolve(args.identityRepairPlanPath) : "",
   identityRepairId: args.identityRepairId,
+  identityRefreshId: args.identityRefreshId,
 };
 
 function requireEpisodeId() {
@@ -248,6 +256,15 @@ switch (args.action) {
     const result = await auditKoyaCharacterBootstrap({ showBible: authority.showBible, registry, workflowStore });
     print(result);
     if (!result.pass) exitCode = 2;
+    break;
+  }
+  case "character-registration-reconcile": {
+    const result = await reconcileKoyaRegisteredCharacterShowBibleStatus({
+      projectDir,
+      workflowId: args.workflowId,
+      castId: args.castId,
+    });
+    print(result);
     break;
   }
   case "character-roster-review-draft": {
@@ -541,6 +558,7 @@ switch (args.action) {
     });
     print({
       pass: result.decision.pass,
+      machinePass: result.decision.machinePass,
       castId: result.decision.castId,
       failedCheckIds: result.decision.failedCheckIds,
       missingCoverage: result.decision.missingCoverage,
@@ -579,7 +597,17 @@ switch (args.action) {
       castId: args.castId,
       identityReviewPath: args.identityReviewPath ? resolve(args.identityReviewPath) : "",
     });
-    print({ episodeId: result.episodeId, character: result.finalized.character, state: result.state });
+    print({ episodeId: result.episodeId, character: result.finalized.character, showBibleSync: result.showBibleSync, state: result.state });
+    break;
+  }
+  case "character-identity-refresh": {
+    requireEpisodeId();
+    const result = await refreshKoyaRegisteredCharacterIdentityPack({
+      ...common,
+      workflowId: args.workflowId,
+      castId: args.castId,
+    });
+    print(result);
     break;
   }
   case "character-identity-repair": {
