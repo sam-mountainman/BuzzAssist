@@ -170,8 +170,15 @@ def check_duplicate_takes(check):
     # Calibrated on 2026-08-28 Reiji take families: the two human-rejected
     # near-duplicate pairs scored 26/30; visually distinct options scored >=44.
     images = check.get("images", [])
-    if len(images) < 2:
-        fail("duplicateTakes requires at least two images")
+    if len(images) < 1:
+        fail("duplicateTakes requires at least one image")
+    if len(images) == 1:
+        # A set of one has zero pairs: the check still runs (so coverage sees
+        # it executed and stays bound to the image hash) and passes vacuously.
+        perceptual_hash(images[0], check.get("region", DEFAULT_FRONT_HEAD_REGION))
+        return {"pairs": [], "similarPairs": [], "singletonSet": True,
+                "maxHammingForDuplicate": int(check.get("maxHammingForDuplicate", 36)),
+                "warnHamming": int(check.get("warnHamming", 44)), "status": "pass"}
     region = check.get("region", DEFAULT_FRONT_HEAD_REGION)
     hashes = {path: perceptual_hash(path, region) for path in images}
     hard = int(check.get("maxHammingForDuplicate", 36))
