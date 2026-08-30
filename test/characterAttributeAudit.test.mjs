@@ -55,6 +55,27 @@ test("coverage is per asset: another asset's check cannot satisfy a missing one"
   assert.equal(assetGateCoverage(inventory, full).complete, true);
 });
 
+test("a single-asset set still emits the duplicate check so coverage is satisfiable", () => {
+  const solo = {
+    castId: "tatsu",
+    reference: "/ref.png",
+    assets: [{ id: "only", file: "/only.png", base: "/only-base.png", cleanReference: "/clean.png" }],
+  };
+  const checks = buildAttributeChecksFromInventory(solo, "/base");
+  const dup = checks.find((check) => check.id === "set:duplicateTakes");
+  assert.ok(dup, "1資産のセットで set:duplicateTakes が発行されていない（被覆が充足不可能になる）");
+  assert.equal(dup.images.length, 1);
+  const report = {
+    checks: [
+      { id: "only:hairColorDelta", type: "hairColorDelta", status: "pass" },
+      { id: "only:unintendedChange", type: "unintendedChange", status: "pass" },
+      { id: "only:neckOrnament", type: "neckOrnament", status: "pass" },
+      { id: "set:duplicateTakes", type: "duplicateTakes", status: "pass" },
+    ],
+  };
+  assert.equal(assetGateCoverage(solo, report).complete, true);
+});
+
 test("an inventory without a colour reference or base is reported, not skipped", () => {
   const thin = { castId: "reiji", assets: [{ id: "solo", file: "/solo.png" }] };
   const report = {
