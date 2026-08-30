@@ -383,7 +383,11 @@ export class CodexAppServerClient {
 
     this.child.on("close", (code, signal) => {
       this.closed = true;
-      const error = new Error(`Codex app-server exited unexpectedly (code: ${code ?? "unknown"}, signal: ${signal ?? "none"}).`);
+      const stderr = this.stderr.trim();
+      const error = new Error([
+        `Codex app-server exited unexpectedly (code: ${code ?? "unknown"}, signal: ${signal ?? "none"}).`,
+        stderr ? `app-server stderr:\n${stderr}` : "",
+      ].filter(Boolean).join("\n"));
       for (const pending of this.pending.values()) pending.reject(error);
       this.pending.clear();
     });

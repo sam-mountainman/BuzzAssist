@@ -384,6 +384,46 @@ test("characters with multiple story-stage outfits receive dedicated routed shee
   }
 });
 
+test("story-stage outfit sheets carry the exact SHA-bound approved outfit authority as an identity reference", async () => {
+  const projectDir = await mkdtemp(path.join(os.tmpdir(), "buzzassist-character-outfit-authority-"));
+  try {
+    const workflow = await prepareCharacterWorkflow({
+      projectDir,
+      scriptText: "田中：着替えよう。",
+      episodeId: "episode-outfit-authority",
+      cast: [{
+        name: "田中",
+        description: "会社員",
+        outfitStages: [
+          {
+            id: "office",
+            description: "紺色スーツ",
+            invariants: ["白シャツ"],
+            referenceAssetFile: "/tmp/office-approved.png",
+            referenceAssetSha256: "a".repeat(64),
+          },
+          {
+            id: "home",
+            description: "灰色の部屋着",
+            invariants: ["丸首"],
+            referenceAssetFile: "/tmp/home-approved.png",
+            referenceAssetSha256: "b".repeat(64),
+          },
+        ],
+      }],
+    });
+    const cast = workflow.cast[0];
+    const jobs = buildApprovedIdentityPackJobs(workflow, cast, { id: "selected", assetFile: "/tmp/office-approved.png" });
+    const outfitJobs = jobs.filter((job) => job.pipeline.identityRole === "outfit");
+    assert.deepEqual(outfitJobs[0].referenceImagePaths, ["/tmp/office-approved.png"]);
+    assert.deepEqual(outfitJobs[1].referenceImagePaths, ["/tmp/office-approved.png", "/tmp/home-approved.png"]);
+    assert.equal(outfitJobs[1].pipeline.outfitAuthoritySha256, "b".repeat(64));
+    assert.match(outfitJobs[1].prompt, /SHA-bound APPROVED OUTFIT AUTHORITY/u);
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});
+
 test("a weak anonymous candidate can be regenerated without replacing passing candidates", async () => {
   const projectDir = await mkdtemp(path.join(os.tmpdir(), "buzzassist-character-regenerate-one-"));
   try {

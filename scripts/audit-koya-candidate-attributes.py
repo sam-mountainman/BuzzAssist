@@ -29,6 +29,10 @@ Config JSON:
      "region": [0.56, 0.42, 0.22, 0.26],
      "ratioLimit": 1.5, "absoluteMargin": 150, "standaloneLimit": 500},
 
+    {"id": "...", "type": "whiteBackground",
+     "image": "sheet.png", "region": [0, 0.667, 1, 0.333],
+     "minimumWhiteRatio": 0.90, "whiteThreshold": 245},
+
     {"id": "...", "type": "wd14Tags",          // ML screening (models/wd14/README.md)
      "image": "a.png", "region": [0.55, 0.05, 0.42, 0.60],
      "requireTags": {"fang": 0.2},             // fail when absent
@@ -218,6 +222,30 @@ def check_neck_ornament(check):
     return {"goldPixels": count, "limit": limit, "status": "warn" if count > limit else "pass"}
 
 
+def check_white_background(check):
+    crop = crop_region(load_bgr(check["image"]), check.get("region", [0, 0, 1, 1]))
+    height, width = crop.shape[:2]
+    border = max(2, round(min(height, width) * float(check.get("borderFraction", 0.06))))
+    border_mask = np.zeros((height, width), dtype=bool)
+    border_mask[:border, :] = True
+    border_mask[-border:, :] = True
+    border_mask[:, :border] = True
+    border_mask[:, -border:] = True
+    threshold = int(check.get("whiteThreshold", 245))
+    minimum = float(check.get("minimumWhiteRatio", 0.90))
+    pixels = crop[border_mask]
+    white = np.all(pixels >= threshold, axis=1)
+    ratio = float(white.mean()) if len(white) else 0.0
+    return {
+        "whiteBorderPixels": int(white.sum()),
+        "auditedBorderPixels": int(len(white)),
+        "whiteRatio": round(ratio, 5),
+        "minimumWhiteRatio": minimum,
+        "whiteThreshold": threshold,
+        "status": "pass" if ratio >= minimum else "fail",
+    }
+
+
 _WD14_SESSIONS = {}
 
 
@@ -299,6 +327,7 @@ HANDLERS = {
     "unintendedChange": check_unintended_change,
     "duplicateTakes": check_duplicate_takes,
     "neckOrnament": check_neck_ornament,
+    "whiteBackground": check_white_background,
     "wd14Tags": check_wd14_tags,
 }
 

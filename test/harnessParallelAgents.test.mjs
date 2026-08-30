@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { maskSecrets, probeEngine, runAgentTasks, selectEngine } from "../scripts/harness-parallel-agents.mjs";
+import { classifyProbeOutcome, maskSecrets, probeEngine, runAgentTasks, selectEngine } from "../scripts/harness-parallel-agents.mjs";
 
 // 認証されていないCLIを「入っているから使える」と判断すると、全タスクが
 // 同じエラーで落ちてから気づくことになる。存在ではなく実際に応答するかで選ぶ。
@@ -27,6 +27,20 @@ test("実行ファイルが無いエンジンは理由つきで落とす", async
   } else {
     assert.ok(probe.binary);
   }
+});
+
+test("成功したCodex probeは無関係なMCPの401警告で未ログイン扱いにしない", () => {
+  const result = classifyProbeOutcome({
+    code: 0,
+    text: "PROBE-OK\n",
+    stderr: "optional MCP startup returned 401 unauthorized",
+  });
+  assert.deepEqual(result, {ok: true, reason: null});
+});
+
+test("非0終了の認証エラーは未ログインとして分類する", () => {
+  const result = classifyProbeOutcome({code: 1, text: "", stderr: "401 unauthorized"});
+  assert.deepEqual(result, {ok: false, reason: "未ログイン（認証が必要）"});
 });
 
 // --- Codexレビュー(2026-08-28)で指摘された経路の回帰テスト ---

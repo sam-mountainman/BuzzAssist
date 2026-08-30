@@ -88,6 +88,15 @@
         "pixelAudit",
         "sceneTransitionOwnedByParent"
       ]
+    },
+    {
+      "id": "bookend-audio-breath",
+      "what": "OP→本編／本編→感想では映像トランジション中に次の声を重ねず、字幕なしlead-in後に字幕と次ナレーションを同時開始する。完成MP4で無音秒数・最大レベル・発話重複ゼロ・AV終端同期を測る",
+      "evidenceAuditIds": [
+        "audioBoundaryBreathV16",
+        "noWholeProgramAcrossfade",
+        "avEndSync"
+      ]
     }
   ],
   "entrypoint": "npm run --prefix <deployment-dir>",

@@ -38,8 +38,8 @@
     },
     "channel-pack:narrated-story": {
       "mode": "review-only",
-      "canonical": "docs/AUDIO-BGM-GATES.md",
-      "reason": "ゲートの合否基準そのもの。機械が緩める余地を作らない パスは deployment 相対。配置先は config/harness-deployments.json（追跡しない）が持つ。",
+      "canonical": "docs/requirements-ledger.md",
+      "reason": "要求台帳は承認と監査の記録そのもの。機械が書き足すと、何を人が決めたのかが分からなくなる。音声ゲートの数値基準は docs/AUDIO-BGM-GATES.md（台帳から参照）。パスは deployment 相対。配置先は config/harness-deployments.json（追跡しない）が持つ。",
       "scope": "channel-pack",
       "confidential": true,
       "relativeToDeployment": "narrated-story-video"
