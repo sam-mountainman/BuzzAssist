@@ -1,4 +1,12 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+import { resolveChannelPackPath } from "../lib/channelPackResolver.mjs";
+
+const require = createRequire(import.meta.url);
+const requireResolver = () => ({ resolveChannelPackPath });
+// 表示名は中立な仮名。実キャスト名を直書きすると、運営者の実名を消しても
+// キャスト名からチャンネルが特定できる（公開リポジトリなので）。
+// ここで見ているのは「同じ名前が照合されるか」なので、名前の中身は問わない。
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -6,6 +14,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import {
+  applyKoyaValidationCanaryVoiceProfiles,
   dialogueShotRequiresAnchoredPullout,
   buildKoyaIdentityPackJobInput,
   generateKoyaIdentityPackAssets,
@@ -46,6 +55,67 @@ async function installChannelPack(projectDir) {
   await cp(source, join(projectDir, "channel-packs"), { recursive: true });
   return true;
 }
+
+
+/**
+ * pack の show bible から表示名を引く。テストへ実キャスト名を直書きしないため
+ * ——直書きすると、運営者の実名を消してもキャスト名からチャンネルが特定できる。
+ * JSON へ埋める値なので同期で読む。
+ */
+function showBibleNameFor(castId) {
+  const { readFileSync, existsSync } = require("node:fs");
+  const { resolveChannelPackPath } = requireResolver();
+  const file = resolveChannelPackPath(process.cwd(), "config/koya-show-bible.json");
+  if (!existsSync(file)) return castId;
+  const bible = JSON.parse(readFileSync(file, "utf8"));
+  const member = (bible.cast || []).find((entry) => entry.id === castId);
+  return member?.hiddenName || member?.name || castId;
+}
+
+test("validation canary assigns provisional voices without mutating the fixed character registry", () => {
+  const registry = {
+    characters: [
+      { id: "registry-reiji", name: "検証用キャストB", aliases: ["レイジ"], voiceId: "" },
+      { id: "registry-ibuki", name: "検証用キャストA", aliases: ["イブキ"], voiceId: "" },
+    ],
+    voices: [
+      { id: "voice-reiji", name: "Reiji preview", providerVoiceId: "provider-reiji", modelId: "eleven_v3", status: "approved" },
+      { id: "voice-ibuki", name: "Ibuki preview", providerVoiceId: "provider-ibuki", modelId: "eleven_v3", status: "approved-native-japanese" },
+    ],
+  };
+  const manifest = {
+    utterances: [
+      { id: "u1", speakerId: "registry-reiji", speakerName: "検証用キャストB", text: "僕が確認する" },
+      { id: "u2", speakerId: "registry-ibuki", speakerName: "検証用キャストA", text: "答え合わせだ" },
+      { id: "u3", speakerId: "narration", speakerName: "ナレーション", preset: "narration", text: "その時だった" },
+    ],
+  };
+  const canary = {
+    version: "koya-validation-canary-v1",
+    active: true,
+    pass: true,
+    episodeId: "manga-approved-eight-canary-001",
+    scope: "one-off-non-public-quality-preview",
+    publicationEligible: false,
+    reason: "one-off preview",
+    provisionalVoiceProfileByCastId: { reiji: "voice-reiji", ibuki: "voice-ibuki" },
+  };
+  const showBible = { cast: [
+    { id: "reiji", name: "検証用キャストB" },
+    { id: "ibuki", name: "検証用キャストA" },
+  ] };
+  const output = applyKoyaValidationCanaryVoiceProfiles(manifest, canary, registry, showBible);
+  assert.equal(output.utterances[0].voiceId, "provider-reiji");
+  assert.equal(output.utterances[1].voiceId, "provider-ibuki");
+  assert.equal(output.utterances[2].voiceId, undefined);
+  assert.equal(output.production.validationCanary.publicationEligible, false);
+  assert.equal(registry.characters[0].voiceId, "");
+
+  assert.throws(() => applyKoyaValidationCanaryVoiceProfiles(manifest, {
+    ...canary,
+    provisionalVoiceProfileByCastId: { reiji: "voice-reiji", ibuki: "voice-reiji" },
+  }, registry, showBible), /cannot reuse provider voice/iu);
+});
 
 
 test("identity-pack generation checkpoints each paid image and resumes without duplicate calls", async () => {
@@ -164,7 +234,10 @@ test("registered character reconciliation promotes only a ready SHA-bound client
         episodeId: "appare-fixed-cast",
         cast: [{
           id: "appare-fixed-cast-character-4",
-          name: "裏腹レイジ",
+          // show bible と照合される箇所だけは pack から名前を引く。
+          // 仮名を書くと「宣言されていない」で落ちる——実データとの対応を
+          // 見ているテストなので、名前の中身が問われる。
+          name: showBibleNameFor("reiji"),
           aliases: ["レイジ"],
           role: "fixed",
           status: "ready",
@@ -176,7 +249,7 @@ test("registered character reconciliation promotes only a ready SHA-bound client
       version: 1,
       characters: [{
         id: "appare-fixed-cast-character-4",
-        name: "裏腹レイジ",
+        name: "検証用キャストB",
         status: "approved",
         approval: { identityReviewPath: reviewPath, identityReviewSha256: reviewSha256 },
       }],

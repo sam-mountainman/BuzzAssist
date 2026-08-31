@@ -84,8 +84,14 @@ def to_katakana_reading(text):
             (word.feature.kana if getattr(word.feature, "kana", None) else word.surface)
             for word in tagger()(text)
         )
-    except ImportError:
-        pass
+    except ImportError as error:
+        # A raw-text fallback silently drops every kanji from the mora count,
+        # making normal Japanese narration look artificially slow.  Speech
+        # rate is a hard gate, so the tokenizer must be a hard dependency too.
+        raise RuntimeError(
+            "Japanese reading audit requires fugashi and a UniDic dictionary; "
+            "refusing to compute a partial mora count"
+        ) from error
     return fold_kana(text)
 
 
@@ -322,17 +328,20 @@ def check_voice_quality(check):
     if original_peak >= 0.999:
         problems.append("clipping at full scale (original samples)")
 
-    try:
-        score = utmos_score(audio, sr)
-        metrics["utmos"] = round(score, 3)
-        short_clip = duration < float(check.get("minUtmosDuration", 2.0))
-        if score < float(check.get("minUtmos", 2.7)):
-            (warnings if short_clip else problems).append(
-                f"utmos {score:.2f} < {check.get('minUtmos', 2.7)}" + (" (short clip)" if short_clip else ""))
-        elif score < float(check.get("warnUtmos", 0.0)):
-            warnings.append(f"utmos {score:.2f} below warn threshold")
-    except Exception as error:  # noqa: BLE001
-        unavailable.append(f"utmos: {str(error)[:120]}")
+    if check.get("computeUtmos", True):
+        try:
+            score = utmos_score(audio, sr)
+            metrics["utmos"] = round(score, 3)
+            short_clip = duration < float(check.get("minUtmosDuration", 2.0))
+            if score < float(check.get("minUtmos", 2.7)):
+                (warnings if short_clip else problems).append(
+                    f"utmos {score:.2f} < {check.get('minUtmos', 2.7)}" + (" (short clip)" if short_clip else ""))
+            elif score < float(check.get("warnUtmos", 0.0)):
+                warnings.append(f"utmos {score:.2f} below warn threshold")
+        except Exception as error:  # noqa: BLE001
+            unavailable.append(f"utmos: {str(error)[:120]}")
+    else:
+        metrics["utmos"] = "not-computed-by-config"
 
     spans = speech_spans(audio, sr)
     if spans:

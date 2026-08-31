@@ -24,4 +24,4 @@
   - 根拠: client-work/mike-san/yamaaritaniari-v1/reports/v18-integration-independent-code-review.md V18-001/V18-006; production/finalize-review-v18.mjs; production/finalize-complete-video.mjs
   - 種別: correction / 初回: 2026-08-29 / id: `85c4ff144509`
 
-_最終更新: 2026-08-30T17:09:04.222Z_
+_最終更新: 2026-08-31T09:47:39.893Z_

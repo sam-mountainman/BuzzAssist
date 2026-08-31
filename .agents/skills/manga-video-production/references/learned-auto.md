@@ -15,4 +15,4 @@
   - 根拠: canvas/character-reviews/setting-sheet-human-qa-findings-2026-08-30.json のfindings 6件（ema-outfit-office-wrong-garment-and-background / nodoka-expressions-background-contamination / ema-turnaround-duplicate-34-direction ほか）
   - 種別: fact / 初回: 2026-08-30 / id: `bfccffc4ae54`
 
-_最終更新: 2026-08-30T17:09:04.222Z_
+_最終更新: 2026-08-31T09:47:39.893Z_

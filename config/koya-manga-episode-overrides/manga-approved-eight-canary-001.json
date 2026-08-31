@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "episodeId": "manga-approved-eight-canary-001",
+  "contractVersion": "koya-manga-production-v51",
+  "reason": "User requested one non-public approximately three-minute video solely to inspect current output quality before the remaining three fixed characters and final voices are approved.",
+  "validationCanary": {
+    "version": "koya-validation-canary-v1",
+    "enabled": true,
+    "episodeId": "manga-approved-eight-canary-001",
+    "scope": "one-off-non-public-quality-preview",
+    "publicationEligible": false,
+    "requireExactAllowedCast": true,
+    "allowIncompleteRosterReview": true,
+    "allowedCastIds": ["ibuki", "nodoka", "reiji", "tatsu", "taisho", "fuku", "ema", "ibariyama"],
+    "omittedRequiredEveryEpisodeIds": ["horo"],
+    "provisionalVoiceProfileByCastId": {
+      "reiji": "tanaka-young-default",
+      "ibariyama": "kurokawa-manager-default",
+      "ibuki": "photo-mio-jp-v15",
+      "tatsu": "sato-wise-default"
+    },
+    "reason": "One-off non-public quality preview. The eight visual identities are approved; four previously approved Japanese voice profiles are assigned provisionally without mutating fixed-cast voice approvals. The artifact must never be treated as publication-ready."
+  },
+  "override": {}
+}

@@ -1,0 +1,81 @@
+{
+  "version": "koya-character-bible-v1",
+  "episodeId": "manga-approved-eight-canary-001",
+  "purpose": "One-off non-public quality canary using only the eight currently approved fixed characters.",
+  "cast": [
+    {
+      "id": "ibuki",
+      "name": "千石イブキ",
+      "role": "fixed",
+      "description": "長い濃紺から紫の高いポニーテール、細いフレーム眼鏡、鋭いつり目、白いオフィスシャツと濃色ベストの成人女性。冷静な参謀役。",
+      "invariants": ["承認済みidentity-face・turnaround・expressionだけを本人参照にする", "眼鏡を外さない", "高いポニーテールと鋭いつり目を維持", "実在人物や参考動画の人物へ似せない"],
+      "negativePrompt": "short hair, glasses missing, casual streetwear, identity drift"
+    },
+    {
+      "id": "nodoka",
+      "name": "白鳥ノドカ",
+      "role": "fixed",
+      "description": "長くゆるく波打つ銀髪を下ろし、頭頂に小さなアホ毛、明確なたれ目、上品なワンピースの成人女性。",
+      "invariants": ["承認済みidentity-face・turnaround・expressionだけを本人参照にする", "銀髪を結ばない", "たれ目と柔らかな表情を維持", "イブキと顔・髪・服を混同しない"],
+      "negativePrompt": "tied hair, sharp eyes, glasses, gyaru makeup, identity drift"
+    },
+    {
+      "id": "reiji",
+      "name": "裏腹レイジ",
+      "role": "fixed",
+      "description": "黒い乱れ髪の長い前髪が片目を覆い、本人の左目だけが見える、細身で少し猫背の20代男性。暗いカーディガン系の私服。今回の主人公。",
+      "invariants": ["承認済みidentity-face・turnaround・expressionだけを本人参照にする", "見える目は本人左目", "頭頂の一本アホ毛を作らない", "自信満々の英雄体型へ変えない"],
+      "negativePrompt": "both eyes fully exposed, top ahoge, muscular build, glasses, confident hero styling"
+    },
+    {
+      "id": "tatsu",
+      "name": "天堂タツ",
+      "role": "fixed",
+      "description": "白髪を後ろへ流し、白い眉と整えた白ひげ、細身の70代男性。紺の作業着、首タオル、腰はまっすぐ。普段は細い目で、決着の一言だけ承認済み開眼差分を使う。",
+      "invariants": ["承認済みidentity-face・turnaround・expression・eye-openだけを本人参照にする", "紺の作業着と首タオル", "腰を曲げない", "武器・刺青・暴力表現を見せない"],
+      "negativePrompt": "stooped back, suit, bald head, weapon, visible tattoo, muscular body"
+    },
+    {
+      "id": "taisho",
+      "name": "大将",
+      "role": "fixed",
+      "description": "白髪混じりの短い刈り上げ、太い眉、濃紺の作務衣と前掛け、ねじった綿の手ぬぐい鉢巻、肩幅のある50代男性。無言の補助役。",
+      "invariants": ["承認済みidentity-face・turnaround・expressionだけを本人参照にする", "鉢巻は縄ではなく綿の手ぬぐい", "ひげなし", "濃紺の作務衣と前掛けを維持"],
+      "negativePrompt": "rope headband, beard, chef hat, western chef coat, glasses"
+    },
+    {
+      "id": "fuku",
+      "name": "フク",
+      "role": "fixed",
+      "description": "白地に茶色の招き猫柄、丸く太めだが一回り小さい成猫。古い小さな鈴、半目のぶっちょう面。四足の猫のまま描く。",
+      "invariants": ["承認済みidentity-face・turnaround・expressionだけを本人参照にする", "白茶の招き猫柄と古い鈴", "半目のぶっちょう面", "人間化・二足歩行をさせない"],
+      "negativePrompt": "anthropomorphic cat, bipedal pose, slim cat, realistic fur, text on collar"
+    },
+    {
+      "id": "ema",
+      "name": "宇佐美エマ",
+      "role": "fixed",
+      "episodeRole": "ally",
+      "outfitStage": "office",
+      "description": "金髪のふわっとしたセミロングに明るいピンクのインナーカラー、本人左側頭部の髪留め、大きな目とギャルメイクの成人女性。今回は承認済み社会人OL衣装。",
+      "invariants": ["承認済みidentity-face・turnaround・expression・office outfitだけを本人参照にする", "髪留めは本人左側頭部", "高校制服に見せない", "金髪とピンクのインナーカラーを維持"],
+      "negativePrompt": "school uniform, minor, black hair, glasses, mature severe office lady, identity drift"
+    },
+    {
+      "id": "ibariyama",
+      "name": "威張山",
+      "role": "fixed",
+      "description": "黒い短い会社員髪、太い眉、小さな目と尊大な表情、普通体型の50代男性。濃い灰色のスーツ、派手なネクタイ、大きな偽物風の金色腕時計。今回の敵役。",
+      "invariants": ["承認済みidentity-face・turnaround・expressionだけを本人参照にする", "金色の大きな腕時計", "濃灰スーツと派手なネクタイ", "太らせず普通の中年体型を維持"],
+      "negativePrompt": "obese body, double chin, huge belly, beard, bald head, glasses, handsome hero"
+    }
+  ],
+  "pronunciations": [
+    {"from": "裏腹レイジ", "to": "うらはら れいじ"},
+    {"from": "千石イブキ", "to": "せんごく いぶき"},
+    {"from": "白鳥ノドカ", "to": "しらとり のどか"},
+    {"from": "天堂タツ", "to": "てんどう たつ"},
+    {"from": "威張山", "to": "いばりやま"},
+    {"from": "宇佐美エマ", "to": "うさみ えま"}
+  ]
+}

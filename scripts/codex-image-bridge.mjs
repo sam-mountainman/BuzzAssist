@@ -544,7 +544,10 @@ export async function generateOnClient(client, payload, { cwd, model, timeoutMs 
           }
           if (params.turn?.error?.message) {
             finish(friendlyCodexError(new Error(params.turn.error.message), client.command));
+            return;
           }
+          const status = nonEmptyString(params.turn?.status) || "completed";
+          finish(new Error(`Codex image generation turn ended without an image payload (status: ${status}).`));
         }
       });
     });
