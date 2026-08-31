@@ -92,7 +92,10 @@
     "test:setup": "node scripts/test-setup-distribution.mjs",
     "test:project-routing": "node scripts/test-active-project-routing.mjs",
     "prepack": "npm run build",
-    "postinstall": "node scripts/patch-excalidraw.mjs"
+    "postinstall": "node scripts/patch-excalidraw.mjs",
+    "public-surface": "node scripts/audit-public-surface.mjs",
+    "doctor": "node scripts/harness-doctor.mjs",
+    "hooks:install": "git config core.hooksPath .githooks"
   },
   "engines": {
     "node": ">=20"

@@ -35,10 +35,11 @@ test("generated image prompt binds camera to visible story action and forbids co
   assert.match(prompt, /exact evidence or recording medium/i);
   assert.match(prompt, /Do not copy their camera position or pose/);
   assert.match(prompt, /No speech bubble/);
+  assert.match(prompt, /public venue, workplace, street, or event hall by itself does not authorize invented bystanders/u);
   assert.match(prompt, /1920x1080/);
 });
 
-test("spoken evidence dialogue never uses a face-hiding overhead setup", () => {
+test("spoken evidence dialogue never uses a face-hiding overhead or extreme-macro setup", () => {
   const manifest = {
     id: "spoken-evidence-face",
     cuts: [{ id: "cut-01", utteranceIds: ["cut-01-u01", "cut-01-u02"] }],
@@ -50,6 +51,7 @@ test("spoken evidence dialogue never uses a face-hiding overhead setup", () => {
   const plan = planMangaSceneCompositions({ manifest });
   const dialogue = plan.beats[1];
   assert.notEqual(dialogue.setup.id, "overhead-workbench");
+  assert.notEqual(dialogue.setup.id, "macro-hands");
   assert.match(buildMangaSceneImagePrompt(dialogue), /Spoken-dialogue face contract/u);
 });
 
@@ -84,6 +86,43 @@ test("a location word in the cut title establishes only the opening and does not
   assert.notEqual(plan.beats[1].intent, "scene-establishing");
   assert.notEqual(plan.beats[2].intent, "scene-establishing");
   assert.ok(plan.beats.slice(1).every((beat) => !["establishing-deep", "exterior-through-glass"].includes(beat.setup.id)));
+});
+
+test("same-location cut boundaries preserve the scripted physical action instead of resetting to an establishing shot", () => {
+  const plan = planMangaSceneCompositions({
+    manifest: {
+      id: "same-location-action-test",
+      cuts: [
+        { id: "c1", description: "小さな地域催事場", locationId: "event-hall", utteranceIds: ["u1"] },
+        { id: "c2", description: "同じ受付でテスト話者Aが動く", locationId: "event-hall", utteranceIds: ["u2"] },
+      ],
+      utterances: [
+        { id: "u1", cutId: "c1", speakerId: "narration", preset: "narration", text: "開場前の受付は静かだった。" },
+        { id: "u2", cutId: "c2", speakerId: "narration", preset: "narration", text: "テスト話者Aは箱の上から前足で偽パスを床へ落とした。" },
+      ],
+    },
+  });
+  assert.equal(plan.beats[0].intent, "scene-establishing");
+  assert.equal(plan.beats[1].intent, "object-action");
+  assert.match(plan.beats[1].purpose, /required destination/u);
+  assert.match(plan.beats[1].visibleAction, /direction of travel/u);
+});
+
+test("a real location change still establishes the new scene", () => {
+  const plan = planMangaSceneCompositions({
+    manifest: {
+      id: "new-location-establishing-test",
+      cuts: [
+        { id: "c1", description: "店内", locationId: "shop", utteranceIds: ["u1"] },
+        { id: "c2", description: "駅前", locationId: "station", utteranceIds: ["u2"] },
+      ],
+      utterances: [
+        { id: "u1", cutId: "c1", speakerId: "narration", preset: "narration", text: "店を出た。" },
+        { id: "u2", cutId: "c2", speakerId: "narration", preset: "narration", text: "駅前で時計を見た。" },
+      ],
+    },
+  });
+  assert.equal(plan.beats[1].intent, "scene-establishing");
 });
 
 test("season transitions and education choices avoid generic overhead workbench narration", () => {

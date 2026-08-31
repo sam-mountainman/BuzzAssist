@@ -97,6 +97,145 @@ test("narration jobs carry the approved protagonist identity into first-person v
   assert.match(narrationJob.prompt, /荒野 is the story protagonist/u);
 });
 
+test("each dialogue image and blind QA bind the exact utterance speaker instead of the cut's first cast member", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-active-speaker-"));
+  const registry = {
+    characters: [
+      { id: "speaker-a", name: "テスト話者B", kind: "character", status: "approved", referenceImagePaths: [] },
+      { id: "speaker-b", name: "テスト話者A", kind: "character", status: "approved", referenceImagePaths: [] },
+    ],
+  };
+  const plan = createMangaScriptImagePlan({
+    scriptText: "【カット1：受付で対決】\nテスト話者B：俺の席はどこだ！\nテスト話者A：記録を確認します。",
+    episodeId: "active-speaker-test",
+    registry,
+    canvasDir: root,
+    assetDir: join(root, "assets"),
+  });
+  const secondLine = plan.jobs.find((entry) => entry.id === "image:cut-01-u02");
+  assert.ok(secondLine);
+  assert.deepEqual(secondLine.castNames, ["テスト話者B", "テスト話者A"]);
+  assert.equal(secondLine.activeSpeakerId, "speaker-b");
+  assert.equal(secondLine.activeSpeakerName, "テスト話者A");
+  assert.match(secondLine.prompt, /BINDING ACTIVE SPEAKER: テスト話者A delivers this exact line/u);
+  const qaPrompt = mangaImageQaVisualPrompt({ job: secondLine });
+  assert.match(qaPrompt, /Active spoken-dialogue speaker: テスト話者A/u);
+  assert.doesNotMatch(qaPrompt, /Active spoken-dialogue speaker: テスト話者B/u);
+  assert.match(qaPrompt, /another expected cast member looks like the sole or primary speaker/u);
+  assert.match(qaPrompt, /Extra people, cloned approved characters, or repeated copies of the same identity are hard failures/u);
+});
+
+test("public venues bind an exact named-figure count unless the exact beat explicitly requires a crowd", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-exact-figure-count-"));
+  const registry = {
+    characters: [
+      { id: "speaker-a", name: "話者A", kind: "character", status: "approved", referenceImagePaths: [] },
+      { id: "speaker-b", name: "話者B", kind: "character", status: "approved", referenceImagePaths: [] },
+      { id: "speaker-c", name: "話者C", kind: "character", status: "approved", referenceImagePaths: [] },
+    ],
+  };
+  const plan = createMangaScriptImagePlan({
+    scriptText: "【カット1：小さな地域催事場の受付】\n話者A：話者Bと話者C、この札を確認して。\n話者B：三人で照合しましょう。",
+    episodeId: "exact-figure-count-test",
+    registry,
+    canvasDir: root,
+    assetDir: join(root, "assets"),
+  });
+  const job = plan.jobs.find((entry) => entry.kind === "scene-image" || entry.kind === "split-panel");
+  assert.ok(job);
+  assert.equal(job.allowUnnamedBackgroundPeople, false);
+  assert.equal(job.expectedVisibleCastCount, 3);
+  assert.match(job.prompt, /EXACT FIGURE COUNT: show exactly 3 distinct named story figures total/u);
+  assert.match(job.prompt, /staff, workers, attendees, distant silhouettes, reflections, and poster figures/u);
+  const qaPrompt = mangaImageQaVisualPrompt({ job });
+  assert.match(qaPrompt, /exactly 3 distinct named story figures total/u);
+  assert.match(qaPrompt, /tiny or blurred staff, workers, attendees/u);
+  assert.match(qaPrompt, /Any total other than 3, or any unnamed figure, is a hard failure/u);
+  const threeCastJobs = plan.jobs.filter((entry) => ["scene-image", "split-panel"].includes(entry.kind));
+  assert.ok(threeCastJobs.every((entry) => !/(?:two-shot|single|listener-reaction|hands-insert|object-led)/u.test(entry.composition.setup.arrangement)));
+});
+
+test("four required cast never inherit a single-person, two-shot, or hands-only camera contract", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-four-cast-composition-"));
+  const registry = {
+    characters: ["人物A", "人物B", "人物C", "人物D"].map((name, index) => ({
+      id: `person-${index + 1}`,
+      name,
+      kind: "character",
+      status: "approved",
+      referenceImagePaths: [`${name}-face.png`],
+    })),
+  };
+  const plan = createMangaScriptImagePlan({
+    scriptText: "【カット1：受付で四人が証拠を確認する】\n人物A：人物B、人物C、人物D、この記録を見て。\n人物B：全員で確認します。\n人物C：証拠は揃っています。",
+    episodeId: "four-cast-composition-test",
+    registry,
+    canvasDir: root,
+    assetDir: join(root, "assets"),
+  });
+  const jobs = plan.jobs.filter((entry) => ["scene-image", "split-panel"].includes(entry.kind));
+  const groupSafeIds = new Set([
+    "establishing-deep",
+    "exterior-through-glass",
+    "triangular-confrontation",
+    "doorway-low-intrusion",
+    "staircase-diagonal",
+    "floor-level-memory",
+    "birdseye-memory",
+    "staggered-four-character-depth",
+  ]);
+  assert.ok(jobs.length >= 3);
+  assert.ok(jobs.every((entry) => entry.expectedVisibleCastCount === 4));
+  assert.ok(jobs.every((entry) => !/(?:two-shot|single|listener-reaction|hands-insert|object-led)/u.test(entry.composition.setup.arrangement)));
+  assert.ok(jobs.every((entry) => groupSafeIds.has(entry.composition.setup.id)));
+});
+
+test("an explicitly described audience is the only per-beat exception to the exact figure count", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-explicit-crowd-"));
+  const registry = {
+    characters: [
+      { id: "speaker-a", name: "話者A", kind: "character", status: "approved", referenceImagePaths: [] },
+    ],
+  };
+  const plan = createMangaScriptImagePlan({
+    scriptText: "【カット1：観客たちが見守る舞台】\n話者A：皆さん、始めます。",
+    episodeId: "explicit-crowd-test",
+    registry,
+    canvasDir: root,
+    assetDir: join(root, "assets"),
+  });
+  const job = plan.jobs.find((entry) => entry.kind === "scene-image" || entry.kind === "split-panel");
+  assert.ok(job);
+  assert.equal(job.allowUnnamedBackgroundPeople, true);
+  assert.match(job.prompt, /Unnamed background people are permitted only because this exact beat explicitly requires them/u);
+  assert.doesNotMatch(job.prompt, /EXACT FIGURE COUNT/u);
+  assert.match(mangaImageQaVisualPrompt({ job }), /This exact beat explicitly permits unnamed background people/u);
+});
+
+test("same-location physical narration binds the completed action in generation and blind QA", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-physical-action-"));
+  const registry = {
+    characters: [
+      { id: "hero", name: "主人公", kind: "character", status: "approved", referenceImagePaths: [] },
+      { id: "cat", name: "テスト話者A", kind: "character", status: "approved", referenceImagePaths: [] },
+    ],
+  };
+  const plan = createMangaScriptImagePlan({
+    scriptText: "【カット1：小さな地域催事場】\n主人公：受付を始めます。\n主人公：箱も確認しました。\n【カット2：同じ受付でテスト話者Aが動く】\nナレーション：テスト話者Aは箱の上から前足で偽パスを床へ落とした。",
+    episodeId: "physical-action-test",
+    registry,
+    canvasDir: root,
+    assetDir: join(root, "assets"),
+    protagonistSpeakerName: "主人公",
+  });
+  const actionJob = plan.jobs.find((entry) => entry.id === "image:cut-02-u01" || entry.id.startsWith("panel:cut-02-u01"));
+  assert.ok(actionJob);
+  assert.equal(actionJob.composition.intent, "object-action");
+  assert.match(actionJob.prompt, /named physical cause-and-effect action exactly as written/u);
+  assert.match(actionJob.prompt, /偽パスを床へ落とした/u);
+  assert.match(mangaImageQaVisualPrompt({ job: actionJob }), /leaving the prop at the wrong destination, is a hard failure/u);
+});
+
 test("multi-character jobs give every visible cast member an identity anchor before secondary references", async () => {
   const root = await mkdtemp(join(tmpdir(), "buzzassist-balanced-character-refs-"));
   const characters = ["人物A", "人物B", "人物C", "人物D"].map((name, index) => ({
@@ -200,6 +339,32 @@ test("environment atlases explicitly require black gutters and montage locations
   assert.equal(environment.location.multiScene, true);
   assert.match(environment.prompt, /solid, clearly visible black gutters/u);
   assert.match(environment.prompt, /do not blend the separate places into one impossible room/u);
+});
+
+test("script-derived venue scale binds generation and blind QA for every scene", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-setting-fidelity-"));
+  const plan = createMangaScriptImagePlan({
+    scriptText: `タイトル：小さな催事
+【カット1：架空町の小さな催事場、開場前】
+ナレーション：商店会の小さな催事で、受付端末と席札を準備した。
+【カット2：受付まわりで確認する】
+玲司：封印箱と予約席を確認します。`,
+    episodeId: "setting-fidelity-test",
+    registry: { characters: [] },
+    canvasDir: root,
+    assetDir: join(root, "assets"),
+  });
+  const environment = plan.jobs.find((entry) => entry.kind === "environment-sheet");
+  const scenes = plan.jobs.filter((entry) => ["scene-image", "split-panel"].includes(entry.kind));
+  assert.ok(environment);
+  assert.ok(scenes.length > 0);
+  assert.match(environment.prompt, /modest Japanese neighborhood merchants' association multipurpose event hall/u);
+  assert.match(environment.prompt, /rows of simple folding chairs/u);
+  assert.match(environment.prompt, /not a hotel, corporate reception lobby/u);
+  assert.ok(scenes.every((entry) => /BINDING LOCATION EVIDENCE/u.test(entry.prompt)));
+  assert.ok(scenes.every((entry) => /Never upscale/u.test(entry.prompt)));
+  assert.match(mangaImageQaVisualPrompt({ job: environment }), /different social or architectural world is a hard failure/u);
+  assert.match(mangaImageQaVisualPrompt({ job: scenes[0] }), /luxury hotel/u);
 });
 
 test("education and career props are forced blank so generated pseudo-text cannot enter artwork", async () => {

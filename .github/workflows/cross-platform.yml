@@ -30,6 +30,15 @@ jobs:
         run: python3 -m pip install --user opencv-python-headless numpy
       - name: Run tests including isolated Codex and Claude Code setup
         run: npm test
+      # 公開面の検査。このリポジトリは PUBLIC なので、新しいファイルが1つ
+      # 増えるたびに運営者名・キャスト名・開発機の絶対パスが紛れ込む余地が
+      # できる。手で叩いたときしか働かない検査は実質無いのと同じなので、
+      # 第三者が踏む線の上に載せる。
+      # 既知の未解決は config/public-surface-allowlist.json に理由つきで
+      # 記録されていて、一覧に無い検出が出たときだけ落ちる。
+      - name: Audit public surface
+        run: npm run public-surface
+
       - name: Build canvas
         run: npm run build
       - name: Verify npm distribution contents

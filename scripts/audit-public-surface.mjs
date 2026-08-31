@@ -95,7 +95,22 @@ export function collectSensitiveSignals(projectDir = REPO_ROOT) {
  */
 export function countHomePathHits(text, homeRoot) {
   if (!homeRoot) return 0;
-  return (String(text).match(new RegExp(escapeRegExp(homeRoot), "gu")) || []).length;
+  // スラッシュ形（/Users/name/proj）だけを見ていたので、**平坦化された形が
+  // 素通りしていた**。エージェントのセッションディレクトリ名は
+  // /Users/x/Documents/y → -Users-x-Documents-y の形で、ログや監査記録を
+  // そのまま貼ると公開面へ入る。実際 docs/ の監査記録に1件残っていて、
+  // 検査は「絶対パス 0件」と報告していた。
+  const source = String(text);
+  let hits = (source.match(new RegExp(escapeRegExp(homeRoot), "gu")) || []).length;
+
+  // 平坦化形は境界を要求する。素の部分文字列照合にしていたので、
+  // HOME=/root のとき一般的な `project-root` が漏洩1件として数えられた。
+  // 先頭の `-` を含む形（-Users-name-…）でのみ数える。
+  const flattened = String(homeRoot).replace(/\//gu, "-");
+  if (flattened.length >= 6 && flattened.startsWith("-")) {
+    hits += (source.match(new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(flattened)}(?![A-Za-z0-9])`, "gu")) || []).length;
+  }
+  return hits;
 }
 
 /** 構造規則。語が引けない環境でも、これだけは常に見る。 */
@@ -109,19 +124,154 @@ const FORBIDDEN_PATHS = Object.freeze([
   { pattern: /^docs\/koya-channel-(requirements-ledger|governance-ja)\.md$/u, why: "要求台帳と番組ガバナンスは Channel Pack 側" },
 ]);
 
-function trackedFiles({ stagedOnly = false } = {}) {
-  const args = stagedOnly ? ["diff", "--cached", "--name-only", "-z"] : ["ls-files", "-z"];
-  const out = execFileSync("git", args, { cwd: REPO_ROOT, maxBuffer: 64 * 1024 * 1024 });
+function gitList(args, cwd) {
+  const out = execFileSync("git", args, { cwd, maxBuffer: 64 * 1024 * 1024 });
   return out.toString().split("\0").filter(Boolean);
 }
+
+/**
+ * 検査する範囲。
+ *
+ * 追跡下だけを見ていたので、**まだ追跡されていないファイルは検査に写らなかった**。
+ * これは机上の穴ではない: 実話数の character-bible が未追跡のまま置かれていて、
+ * 検査は「語 0件・検出なし」と報告し、その直後の `git add -A` で
+ * 実キャストの表示名が公開リポジトリへ入った。**検査が clean と言った後に
+ * 漏れた**——「見ていない」を「無い」として報告する型そのもの。
+ *
+ * なので既定では、`git add -A` が拾うもの（追跡下＋未追跡かつ ignore 外）を
+ * 全部見る。ignore されているものは commit されないので対象外でよい。
+ */
+export function filesInScope({ stagedOnly = false, projectDir = REPO_ROOT } = {}) {
+  const cwd = path.resolve(projectDir);
+  if (stagedOnly) return gitList(["diff", "--cached", "--name-only", "-z"], cwd);
+  return [
+    ...gitList(["ls-files", "-z"], cwd),
+    ...gitList(["ls-files", "--others", "--exclude-standard", "-z"], cwd),
+  ];
+}
+
+/**
+ * 検査する中身。
+ *
+ * `--staged` はファイル名を index から取りながら、**中身は作業ツリーから**
+ * 読んでいた。秘密入りの版を stage した後で作業ツリーだけ直すと、検査は
+ * 直った方を読み、commit には秘密入りの版が入る。差分の検査を名乗るなら
+ * 差分の中身を読むこと。
+ */
+function readCandidate(relative, { stagedOnly, projectDir }) {
+  const cwd = path.resolve(projectDir);
+  if (stagedOnly) {
+    try {
+      const out = execFileSync("git", ["show", `:${relative}`], { cwd, maxBuffer: 64 * 1024 * 1024 });
+      return { text: out.toString("utf8"), bytes: out.length };
+    } catch {
+      // index から消えた（削除の stage）。中身は無いので検査対象にならない。
+      return { text: null, bytes: 0, absent: true };
+    }
+  }
+  const full = path.join(cwd, relative);
+  if (!existsSync(full)) return { text: null, bytes: 0, absent: true };
+  let bytes = 0;
+  try { bytes = statSync(full).size; } catch { return { text: null, bytes: 0, unreadable: true }; }
+  if (bytes > MAX_SCAN_BYTES) return { text: null, bytes, tooLarge: true };
+  try { return { text: readFileSync(full, "utf8"), bytes }; } catch { return { text: null, bytes, unreadable: true }; }
+}
+
+/**
+ * 大きすぎるものを黙って飛ばさない。
+ *
+ * 4MiB 超・読取失敗・巨大な単一行を `continue` で捨てていた。捨てたことは
+ * どこにも出ず、`gateOk` にも反映されない——「検出できない＝免除」。
+ * dist-widget のバンドルは約 7.7MiB あって、まさにこの条件に当たっていた。
+ * バンドルは src/ を丸ごと含むので、漏れがあればここにも写る。
+ * 飛ばしたぶんは `scanIncomplete` に残し、ゲートを閉じる。
+ */
+const MAX_SCAN_BYTES = 32 * 1024 * 1024;
 
 /** 名簿としての密度。ID 単体は一般語と衝突するので、同居数で判定する。 */
 const ROSTER_DENSITY = 3;
 
+/**
+ * 既知の未解決を、理由つきで明示する場所。
+ *
+ * なぜ要るか: 検査は常に exit 2 を返す状態で、**CI にも pre-commit にも
+ * 載せられなかった**。載らない検査は、誰かが手で叩いたときにしか働かない。
+ * さらにテスト側が「未解決が存在すること」を assert していたので、
+ * **実際に直すとテストが落ちる**——漏れが仕様として固定されていた。
+ *
+ * 許容一覧にすると、両方が解ける:
+ *   - 一覧に無い検出が1件でも出れば落ちる（＝新しい漏れは止まる）
+ *   - 一覧にあるのに検出されなくなったら落ちる（＝直したら一覧から消せと言う）
+ * 「まだ直っていない」と「見なかったことにする」の差は、理由が書いてあるか。
+ */
+const ALLOWLIST_FILE = "config/public-surface-allowlist.json";
+
+export function readAllowlist(projectDir = REPO_ROOT) {
+  const file = path.join(projectDir, ALLOWLIST_FILE);
+  if (!existsSync(file)) return { roster: [], term: [], path: [], pathLeak: [] };
+  const parsed = JSON.parse(readFileSync(file, "utf8"));
+  return {
+    roster: parsed.roster || [],
+    term: parsed.term || [],
+    path: parsed.path || [],
+    pathLeak: parsed.pathLeak || [],
+  };
+}
+
+/**
+ * その検出の「大きさ」。許容一覧をこれに束縛する。
+ *
+ * ファイル名だけで一致を見ていたので、**同じファイルの中で漏れが増えても
+ * 許容されたまま**だった。3個の ID を理由に許した名簿へ残り8個を足しても
+ * 新しい漏洩として出てこない。一覧は「このファイルは見なかったことにする」
+ * ではなく「このファイルにこれだけ、という状態を承知している」であるべき。
+ */
+function findingSize(finding) {
+  if (typeof finding.idCount === "number") return finding.idCount;
+  if (typeof finding.hits === "number") return finding.hits;
+  return 1;
+}
+
+function splitByAllowlist(findings, allowed) {
+  const byFile = new Map(allowed.map((entry) => [entry.file, entry]));
+  const unresolved = [];
+  const accepted = [];
+  for (const finding of findings) {
+    const entry = byFile.get(finding.file);
+    if (!entry) { unresolved.push(finding); continue; }
+    const size = findingSize(finding);
+    // 件数を書いていない一覧は、書いた時点の件数を承知したとみなせない。
+    if (typeof entry.count !== "number") {
+      unresolved.push({ ...finding, whyUnresolved: "許容一覧に count が無い（承知した件数を書くこと）" });
+      continue;
+    }
+    if (size > entry.count) {
+      unresolved.push({
+        ...finding,
+        whyUnresolved: `許容した ${entry.count} 件から ${size} 件へ増えている`,
+      });
+      continue;
+    }
+    accepted.push({ ...finding, why: entry.why, count: entry.count, current: size });
+  }
+  // 一覧にあるのに検出されないものは、直った証拠。一覧から消させる。
+  const stale = allowed.filter((entry) => !findings.some((f) => f.file === entry.file));
+  return { unresolved, accepted, stale };
+}
+
 export function auditPublicSurface({ projectDir = REPO_ROOT, stagedOnly = false } = {}) {
-  const { terms, castIds } = collectSensitiveSignals(projectDir);
-  const packAvailable = channelPackPresent(projectDir);
-  const files = trackedFiles({ stagedOnly });
+  const root = path.resolve(projectDir);
+  const { terms, castIds } = collectSensitiveSignals(root);
+  const packAvailable = channelPackPresent(root);
+  let files = [];
+  let enumerationError = "";
+  try {
+    files = filesInScope({ stagedOnly, projectDir: root });
+  } catch (error) {
+    // git 作業ツリーでない場所を渡された。例外で落とすと呼び出し側は
+    // 結果を得られず、「検査した」とも「していない」とも言えなくなる。
+    enumerationError = `ファイルを列挙できなかった（git 作業ツリーではない）: ${String(error?.code || error?.message || error)}`;
+  }
 
   const pathFindings = [];
   for (const relative of files) {
@@ -134,16 +284,24 @@ export function auditPublicSurface({ projectDir = REPO_ROOT, stagedOnly = false 
   const termFindings = [];
   const rosterFindings = [];
   const pathLeakFindings = [];
+  const scanIncomplete = [];
   const homeRoot = homedir();
   for (const relative of files) {
-    const full = path.join(REPO_ROOT, relative);
-    if (!existsSync(full)) continue;
-    try {
-      if (statSync(full).size > 4 * 1024 * 1024) continue;
-    } catch { continue; }
-    let text;
-    try { text = readFileSync(full, "utf8"); } catch { continue; }
-    if (!text.includes("\n") && text.length > 1_000_000) continue;
+    const candidate = readCandidate(relative, { stagedOnly, projectDir: root });
+    if (candidate.absent) continue;
+    if (candidate.tooLarge) {
+      scanIncomplete.push({ file: relative, why: `${Math.round(candidate.bytes / 1024)}KiB は上限超で未検査`, bytes: candidate.bytes });
+      continue;
+    }
+    if (candidate.unreadable || candidate.text === null) {
+      scanIncomplete.push({ file: relative, why: "読み取れないので未検査" });
+      continue;
+    }
+    const text = candidate.text;
+    if (!text.includes("\n") && text.length > 1_000_000) {
+      scanIncomplete.push({ file: relative, why: "改行の無い巨大な1行で未検査" });
+      continue;
+    }
     const lines = text.split("\n");
     let hits = 0;
     const lineNumbers = [];
@@ -158,10 +316,10 @@ export function auditPublicSurface({ projectDir = REPO_ROOT, stagedOnly = false 
     }
     if (hits > 0) termFindings.push({ file: relative, hits, lines: lineNumbers });
 
-    // ID の名簿。表示名だけを見ていたので、11人分の castId が並んだ一覧が
+    // ID の名簿。表示名だけを見ていたので、castId が並んだ一覧が
     // 公開されたまま「検出なし」と報告していた。ID 単体は一般語と衝突する
-    // ので（fuku, ema など）、**同じファイルに何個同居しているか**で見る。
-    const presentIds = castIds.filter((id) => new RegExp(`\\b${id}\\b`, "u").test(text));
+    // ので、**同じファイルに何個同居しているか**で見る。
+    const presentIds = castIds.filter((id) => new RegExp(`\\b${escapeRegExp(id)}\\b`, "u").test(text));
     if (presentIds.length >= ROSTER_DENSITY) {
       rosterFindings.push({ file: relative, idCount: presentIds.length, of: castIds.length });
     }
@@ -172,9 +330,54 @@ export function auditPublicSurface({ projectDir = REPO_ROOT, stagedOnly = false 
     if (homeHits > 0) pathLeakFindings.push({ file: relative, hits: homeHits });
   }
 
+  const allowlist = readAllowlist(root);
+  const roster = splitByAllowlist(rosterFindings, allowlist.roster);
+  const term = splitByAllowlist(termFindings, allowlist.term);
+  const pathLeak = splitByAllowlist(pathLeakFindings, allowlist.pathLeak);
+  const pathRule = splitByAllowlist(pathFindings, allowlist.path);
+
+  // 検査源が無い区分の stale を「直った」と読まない。
+  //
+  // これを分けていなかったので、**pack を持たない環境（CI・新しい運営者の
+  // クローン）では許容一覧の全件が「もう検出されない＝直った」と判定され、
+  // ゲートが必ず落ちた**。同時に検査本体は「構造規則の範囲では検出なし」で
+  // exit 0 を返していた——落ちる理由と通す理由が食い違っていた。
+  // 見ていない区分は、合格でも不合格でもなく「未検査」。
+  const signalDependent = { roster: packAvailable, term: packAvailable, path: true, pathLeak: true };
+  const stale = [
+    ...(signalDependent.roster ? roster.stale : []),
+    ...(signalDependent.term ? term.stale : []),
+    ...pathLeak.stale,
+    ...pathRule.stale,
+  ];
+  const unchecked = [];
+  if (enumerationError) unchecked.push(enumerationError);
+  if (!packAvailable) unchecked.push("チャンネル固有語と固定キャストの名簿（Channel Pack が無い）");
+  if (scanIncomplete.length > 0) unchecked.push(`${scanIncomplete.length} ファイルの中身（上限超・読み取り不可）`);
+
+  const unresolved = {
+    path: pathRule.unresolved, term: term.unresolved,
+    roster: roster.unresolved, pathLeak: pathLeak.unresolved,
+  };
+  const unresolvedCount = unresolved.path.length + unresolved.term.length
+    + unresolved.roster.length + unresolved.pathLeak.length;
+
+  // 判定は1つにする。clean と gateOk を別条件で同居させていたので、
+  // どちらを「公開してよい」と呼ぶかが未定義だった。
+  //   clean          … 検出も未検査も無い
+  //   accepted-risk  … 検出はあるが全て理由つきで一覧にある
+  //   incomplete     … 見ていない区分がある（合格ではない）
+  //   failed         … 一覧に無い検出、または直ったのに一覧へ残っている
+  let status;
+  if (unresolvedCount > 0 || stale.length > 0) status = "failed";
+  else if (unchecked.length > 0) status = "incomplete";
+  else if (pathFindings.length + termFindings.length + rosterFindings.length + pathLeakFindings.length > 0) status = "accepted-risk";
+  else status = "clean";
+
   return {
-    version: "public-surface-audit-v1",
-    scope: stagedOnly ? "staged" : "tracked",
+    version: "public-surface-audit-v3",
+    scope: stagedOnly ? "staged" : "tracked+untracked",
+    projectDir: root,
     fileCount: files.length,
     // 語が引けなかったことを「問題なし」と報告しない。
     termSourceAvailable: packAvailable,
@@ -184,17 +387,39 @@ export function auditPublicSurface({ projectDir = REPO_ROOT, stagedOnly = false 
     termFindings,
     rosterFindings,
     pathLeakFindings,
-    clean: pathFindings.length === 0 && termFindings.length === 0
-      && rosterFindings.length === 0 && pathLeakFindings.length === 0,
+    scanIncomplete,
+    unchecked,
+    // clean は status から導く。別条件で同居させていたので、
+    // **見られなかったファイルがあっても clean が true になった**。
+    // どちらを「公開してよい」と呼ぶかが未定義のまま2つある状態を無くす。
+    clean: status === "clean",
+    unresolved,
+    accepted: {
+      path: pathRule.accepted, term: term.accepted,
+      roster: roster.accepted, pathLeak: pathLeak.accepted,
+    },
+    staleAllowlist: stale,
+    status,
+    // ゲートは failed のときだけ閉じる。未検査で止めると、pack を持たない
+    // CI が永久に赤になり、検査ごと外される——それが一番まずい。
+    // 未検査であることは status と出力に必ず出す。
+    gateOk: status !== "failed",
   };
 }
+
+const STATUS_LABEL = {
+  clean: "clean — 検出も未検査も無い",
+  "accepted-risk": "accepted-risk — 検出はあるが全て理由つきで一覧にある",
+  incomplete: "incomplete — 見ていない区分がある（合格ではない）",
+  failed: "failed — 一覧に無い検出、または直ったのに一覧へ残っている",
+};
 
 function render(report) {
   const lines = [];
   lines.push(`公開面の検査（${report.scope}・${report.fileCount}ファイル）`);
   if (!report.termSourceAvailable) {
     lines.push("");
-    lines.push("  ⚠ Channel Pack が無いので、固有名詞の検査はできていない。");
+    lines.push("  ⚠ Channel Pack が無いので、固有名詞と名簿の検査はできていない。");
     lines.push("    構造規則だけを見た結果であり、「問題なし」ではない。");
   } else {
     lines.push(`  Channel Pack から ${report.termCount} 語を引いて照合した`);
@@ -225,16 +450,62 @@ function render(report) {
     for (const finding of report.pathLeakFindings) lines.push(`  ${finding.file}  ${finding.hits}件`);
     lines.push("");
   }
-  lines.push(report.clean
-    ? (report.termSourceAvailable ? "検出なし" : "構造規則の範囲では検出なし（固有名詞は未検査）")
-    : `要対応: パス ${report.pathFindings.length} / 語 ${report.termFindings.length} / 名簿 ${report.rosterFindings.length} / 絶対パス ${report.pathLeakFindings.length}`);
+  if (report.scanIncomplete.length > 0) {
+    lines.push("中身を見られなかったファイル（未検査として数える。飛ばしたことを黙らない）:");
+    for (const entry of report.scanIncomplete.slice(0, 20)) lines.push(`  ${entry.file}  — ${entry.why}`);
+    if (report.scanIncomplete.length > 20) lines.push(`  …ほか ${report.scanIncomplete.length - 20} 件`);
+    lines.push("");
+  }
+  if (report.staleAllowlist.length > 0) {
+    lines.push("許容一覧に載っているが、もう検出されないもの（直ったので消すこと）:");
+    for (const entry of report.staleAllowlist) lines.push(`  ${entry.file}`);
+    lines.push("");
+  }
+  const u = report.unresolved;
+  const unresolvedCount = u.path.length + u.term.length + u.roster.length + u.pathLeak.length;
+  if (unresolvedCount > 0) {
+    lines.push("一覧に無い、または一覧より増えている検出:");
+    for (const finding of [...u.path, ...u.term, ...u.roster, ...u.pathLeak]) {
+      lines.push(`  ${finding.file}${finding.whyUnresolved ? `  — ${finding.whyUnresolved}` : ""}`);
+    }
+    lines.push("");
+  }
+  const acceptedCount = report.accepted.path.length + report.accepted.term.length
+    + report.accepted.roster.length + report.accepted.pathLeak.length;
+  if (acceptedCount > 0) {
+    lines.push(`理由つきで一覧に記録された未解決 ${acceptedCount} 件:`);
+    for (const finding of [...report.accepted.path, ...report.accepted.term,
+      ...report.accepted.roster, ...report.accepted.pathLeak]) {
+      lines.push(`  ${finding.file}  ${finding.current}/${finding.count} — ${finding.why}`);
+    }
+    lines.push("");
+  }
+  if (report.unchecked.length > 0) {
+    lines.push("見ていない区分:");
+    for (const why of report.unchecked) lines.push(`  ${why}`);
+    lines.push("");
+  }
+  lines.push(STATUS_LABEL[report.status] || report.status);
+  if (report.status === "incomplete") {
+    lines.push("  ゲートは通すが、これは合格ではない。固有名詞まで見るには");
+    lines.push("  Channel Pack のある環境で走らせること（--require-signals で強制できる）。");
+  }
   return lines.join("\n");
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const asJson = process.argv.includes("--json");
   const stagedOnly = process.argv.includes("--staged");
+  const requireSignals = process.argv.includes("--require-signals");
   const report = auditPublicSurface({ stagedOnly });
   process.stdout.write(asJson ? `${JSON.stringify(report, null, 2)}\n` : `${render(report)}\n`);
-  if (!report.clean) process.exitCode = 2;
+  // ゲートは「一覧に無い新しい検出」で判定する。常に 2 を返す検査は
+  // CI にも pre-commit にも載せられず、手で叩いたときしか働かない。
+  if (!report.gateOk) process.exitCode = 2;
+  // 配布直前や pre-push では「未検査」も通さない。CI（pack 無し）と
+  // 手元（pack あり）で要求を変えられるようにする。
+  if (requireSignals && report.status !== "clean" && report.status !== "accepted-risk") {
+    process.stdout.write("\n--require-signals: 未検査の区分があるので通しません。\n");
+    process.exitCode = 3;
+  }
 }

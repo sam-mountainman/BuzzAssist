@@ -35,6 +35,28 @@ const LEARN_DIR = path.join(REPO_ROOT, "docs", "learning");
 const PROPOSALS_PATH = path.join(LEARN_DIR, "proposals.jsonl");
 const APPLIED_PATH = path.join(LEARN_DIR, "applied.jsonl");
 
+/**
+ * その提案をどの台帳へ書くか。
+ *
+ * capture は宛先に関わらず共有台帳（公開リポジトリで追跡）へ書いていた。
+ * `channelTermsInSharedEntry` は「共有層宛の提案に固有語が入っていないか」
+ * しか見ないので、**宛先が channel-pack: なら固有語ごと通り、そのまま
+ * 公開側の台帳に溜まった**。層を分けたつもりが、分けていたのは宛先の
+ * ラベルだけで、書き先は1つだった。
+ *
+ * 実害として、別セッションが捕捉するたびに公開面の検査が赤くなり、
+ * こちらが手で pack 側へ移す、を繰り返していた。手で移す運用は、
+ * 移す人がいない回に漏れる。
+ */
+export function ledgerPathFor(target, kind = "proposals") {
+  const name = `${kind}.jsonl`;
+  if (String(target || "").startsWith("channel-pack:")) {
+    const packPath = resolveChannelPackPath(REPO_ROOT, path.join("docs", "learning", name));
+    if (packPath) return packPath;
+  }
+  return path.join(LEARN_DIR, name);
+}
+
 // 提案が向かう先。ここに無いものは apply できない。
 // 正本スキルと台帳だけを対象にするのは、次のセッションが必ず読む場所が
 // この2つだからで、それ以外へ書いても学習として効かない。
@@ -180,6 +202,15 @@ export function isActuallyApplied(record, readCanonical, hashCanonical = null) {
   if (!record?.id) return false;
   // 昇格記録には、何をどこへ書いたかが要る。
   if (!record.reviewer || !String(record.reviewer).trim()) return false;
+  // **人の確認が無いものを「反映済み」として数えない。**
+  //
+  // ここが実効の中心だった。reviewer が空でないことしか見ていなかったので、
+  // agent-self-attested も unverified-agent-typed も attestedBy 欠落も、
+  // 人の確認とまったく同じ効力で applied になっていた。しかも
+  // summarizeProposals が applied を未反映一覧から消すので、**後から人が
+  // 昇格しようとすると「既に反映済み」で拒まれる**——機械の自己申告が、
+  // 人の確認を締め出していた。
+  if (record.attestedBy !== HUMAN_VERIFIED) return false;
   if (!record.targetPath) return false;
   const text = readCanonical(record.targetPath);
   if (text === null) return false;
@@ -329,6 +360,84 @@ function requireWritableTarget(rawTarget) {
  *
  * 検出した語そのものは返さない。呼び出し側のエラー文もログに残る。
  */
+/**
+ * 人が確認したことを、機械が名乗れないようにする。
+ *
+ * このスキルの大原則は「promote には reviewer 名が要る。『機械が書いた』と
+ * 『人が確認した』の差がこの一手で、この差が無くなると自己改善が自己認証に変わる」。
+ *
+ * だが reviewer をコマンドライン引数で受けていたので、**エージェントが
+ * ユーザーの名前を打ち込めば通った**。実際そうなった——台帳に残る17件の
+ * `reviewer` は、人が確認したのではなくエージェントが打ったものだった。
+ * ガードを書いた本人が、そのガードを迂回していた。
+ *
+ * 最初の修正は TTY の有無で区別した。**これは証明にならない。** Codex の
+ * レビューで実測された: `script -q /dev/null node ...` を通せば
+ * `process.stdin.isTTY` は true になり、エージェントは人を名乗れる。
+ * しかも当時は TTY を先に見ていたので、**PTY 経由で --agent-attested を
+ * 付けても「人の確認」として記録された**。
+ *
+ * シェルを持つエージェントが同じ機械にいる以上、人の確認を機械的に
+ * 強制することはできない。できるのは3つだけで、ここはそれをやる:
+ *
+ *   1. 既定を拒否にする（黙って人を名乗れる状態を無くす）
+ *   2. 詐称に明示的な一手を要求し、何を名乗ったかを記録に残す
+ *   3. **人の確認が無いものを「反映済み」として数えない**
+ *
+ * 3が実効の中心。ここを見ていなかったので、`agent-self-attested` も
+ * `unverified-agent-typed` も、人の確認と同じ効力で applied になっていた。
+ *
+ * 本当の関門は、この台帳が git で追跡されていること——commit を人が読む
+ * ところにある。ここで作るのは関門ではなく、**読める証跡**。
+ */
+
+/** 人の確認として数える印。これ以外は記録に残るが「反映済み」にはならない。 */
+export const HUMAN_VERIFIED = "human-verified";
+
+export function attestationFor({ reviewer, isInteractive, agentAttested, humanVerified }) {
+  const name = String(reviewer || "").trim();
+  if (!name) {
+    return { ok: false, message: "reviewer 名が要ります（--reviewer <名前>）。" };
+  }
+  // 明示が推測に勝つ。TTY より --agent-attested を先に見る。
+  // 逆順だったので、PTY 経由の機械が人として記録されていた。
+  if (agentAttested) {
+    return {
+      ok: true,
+      attestation: { reviewer: "agent", attestedBy: "agent-self-attested", claimedReviewer: name },
+    };
+  }
+  if (humanVerified) {
+    if (!isInteractive) {
+      return {
+        ok: false,
+        message:
+          "--human-verified は対話端末からのみ受け付けます。"
+          + "機械の判断として残すなら --agent-attested を付けてください。",
+      };
+    }
+    // 二手を要求する。TTY だけでは足りない（PTY で作れる）。
+    // これは詐称を止める仕掛けではなく、詐称を「既定の経路」から外して
+    // 記録に残す仕掛け。止めるのは commit を読む人。
+    return { ok: true, attestation: { reviewer: name, attestedBy: HUMAN_VERIFIED } };
+  }
+  if (isInteractive) {
+    // 対話端末だったという事実だけ。人が読んだ証拠ではない。
+    return {
+      ok: true,
+      attestation: { reviewer: name, attestedBy: "cli-interactive-claimed" },
+    };
+  }
+  return {
+    ok: false,
+    message:
+      "人の確認として記録しようとしていますが、その裏づけがありません。"
+      + "人が確認したのなら、その人自身の端末から --human-verified を付けて実行してください。"
+      + "機械の判断として残すなら --agent-attested を付けてください"
+      + "（reviewer は 'agent' として記録され、人の確認とは区別されます）。",
+  };
+}
+
 export function channelTermsInSharedEntry(entry, signals) {
   const target = String(entry?.target || "");
   const isShared = !(target.startsWith("channel-pack:") || target.startsWith("ledger:") || target.startsWith("doc:"));
@@ -455,7 +564,9 @@ function main() {
         const verdict = channelTermsInSharedEntry(entry, collectSensitiveSignals(REPO_ROOT));
         if (!verdict.ok) throw new Error(verdict.message);
       }
-      appendJsonl(PROPOSALS_PATH, entry);
+      // 宛先の層に合った台帳へ書く。共有台帳は公開されているので、
+      // チャンネル宛のものをそこへ溜めない。
+      appendJsonl(ledgerPathFor(entry.target, "proposals"), entry);
       const repeats = proposals.filter((p) => (p.id ?? proposalId(p)) === entry.id).length;
       process.stdout.write(`記録しました: ${entry.id}\n`);
       if (repeats > 0) {
@@ -571,6 +682,13 @@ function main() {
       // 「機械が書いた」と「人が確認した」の差がこの一手で、
       // この差が無くなると自己改善が自己認証に変わる。
       if (!args.id) throw new Error("--id が必要です");
+      const attested = attestationFor({
+        reviewer: args.reviewer,
+        isInteractive: Boolean(process.stdin.isTTY),
+        agentAttested: args["agent-attested"] === true || args.agentAttested === true,
+        humanVerified: args["human-verified"] === true || args.humanVerified === true,
+      });
+      if (!attested.ok) throw new Error(attested.message);
       if (typeof args.reviewer !== "string" || args.reviewer.trim() === "") {
         throw new Error(
           "--reviewer <名前> が必要です。機械区画から人の規則へ上げるのは人の判断です",
@@ -601,7 +719,9 @@ function main() {
         targetPath: rel,
         targetSha256: createHash("sha256").update(fs.readFileSync(full)).digest("hex"),
         text: entry.text,
-        reviewer: args.reviewer.trim(),
+        reviewer: attested.attestation.reviewer,
+        attestedBy: attested.attestation.attestedBy,
+        claimedReviewer: attested.attestation.claimedReviewer ?? undefined,
         note: typeof args.note === "string" ? args.note.trim() : "",
         promotedAt: now,
       });
@@ -611,6 +731,13 @@ function main() {
 
     case "apply": {
       if (!args.id) throw new Error("--id が必要です（status か review で確認）");
+      const attested = attestationFor({
+        reviewer: args.reviewer,
+        isInteractive: Boolean(process.stdin.isTTY),
+        agentAttested: args["agent-attested"] === true || args.agentAttested === true,
+        humanVerified: args["human-verified"] === true || args.humanVerified === true,
+      });
+      if (!attested.ok) throw new Error(attested.message);
       if (typeof args.reviewer !== "string" || args.reviewer.trim() === "") {
         throw new Error(
           "--reviewer <名前> が必要です。誰が反映を確認したか記録しない自動反映は証跡になりません",
@@ -637,7 +764,9 @@ function main() {
         targetPath: rel,
         targetSha256: createHash("sha256").update(fs.readFileSync(full)).digest("hex"),
         text: entry.text,
-        reviewer: args.reviewer.trim(),
+        reviewer: attested.attestation.reviewer,
+        attestedBy: attested.attestation.attestedBy,
+        claimedReviewer: attested.attestation.claimedReviewer ?? undefined,
         note: applyNote,
         appliedAt: now,
       });

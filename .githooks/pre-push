@@ -1,0 +1,19 @@
+#!/bin/sh
+# 公開面の検査を push の手前に置く。
+#
+# なぜ CI では足りないか: GitHub Actions は push / PR の**後**に走る。
+# このリポジトリは PUBLIC なので、CI が検出した時点で内容はもう公開されている。
+# 消しても履歴とキャッシュに残る。止められる最後の地点が push の手前。
+#
+# 手元には Channel Pack があるので、CI では見られない固有名詞まで見られる。
+# --require-signals は「見ていない区分がある」状態も通さない。
+#
+# 入れ方: npm run hooks:install
+# 一度だけ迂回したいとき: git push --no-verify（記録は残らないので、使ったら理由を残すこと）
+set -e
+if ! node scripts/audit-public-surface.mjs --require-signals; then
+  echo ""
+  echo "公開面の検査が通らないので push を止めました。"
+  echo "PUBLIC なリポジトリなので、push した後に消しても履歴には残ります。"
+  exit 1
+fi

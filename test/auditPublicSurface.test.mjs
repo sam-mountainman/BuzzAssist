@@ -6,6 +6,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
+
+
 import { auditPublicSurface, collectSensitiveTerms } from "../scripts/audit-public-surface.mjs";
 import { channelPackPresent } from "../lib/channelPackResolver.mjs";
 
@@ -104,49 +106,81 @@ test("npm pack に、追跡外・チャンネル固有のものが入らない",
   assert.deepEqual(untracked, [], `追跡外のファイルが npm pack に入っています: ${untracked.join(", ")}`);
 });
 
-test("表示名だけでなく、ID の名簿と開発機の絶対パスも検出する", async () => {
-  // ここが最大の見落としだった。検査は表示名しか集めておらず、
-  // **11人分の castId が並んだ一覧と開発機の絶対パスが公開されたまま
-  // 「検出なし」と報告していた**。私はその出力を根拠に「公開面0件」と
-  // 報告した——検査が嘘をつくと、それを信じた報告も嘘になる。
+test("検出器は、実 pack が無い環境でも動くことを合成 pack で確かめる", async () => {
+  // ここが最大の見落としだった。検査は表示名しか集めておらず、11人分の
+  // castId が並んだ一覧と開発機の絶対パスが公開されたまま「検出なし」と
+  // 報告していた。私はその出力を根拠に「公開面0件」と報告した。
+  //
+  // その修正の検証も穴だった。実 pack が無ければ `return` で抜けていたので、
+  // **CI と新しい運営者のクローンでは、この検査は何も assert せずに緑**に
+  // なる。しかも `t.skip()` ですらないので run-tests.mjs の skip 集計にも
+  // 出ない——「走らなかった」ことが誰にも見えない。
+  // 前提を待つのではなく、前提を自分で作る。
+  const { collectSensitiveSignals } = await import("../scripts/audit-public-surface.mjs");
+  const { mkdtemp, mkdir, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  const projectDir = await mkdtemp(join(tmpdir(), "public-surface-probe-"));
+  const packConfig = join(projectDir, "channel-packs", "probe", "config");
+  await mkdir(packConfig, { recursive: true });
+  await writeFile(join(packConfig, "koya-show-bible.json"), JSON.stringify({
+    channel: { name: "架空チャンネル", town: "架空町" },
+    cast: [
+      { id: "probe-alpha", name: "架空アルファ", aliases: ["アルファ君"] },
+      { id: "probe-bravo", name: "架空ブラボー" },
+      { id: "probe-charlie", name: "架空チャーリー" },
+    ],
+    locations: [{ name: "架空広場" }],
+  }));
+
+  const signals = collectSensitiveSignals(projectDir);
+  assert.ok(signals.terms.includes("架空アルファ"), "表示名を集めること");
+  assert.ok(signals.terms.includes("アルファ君"), "別名も集めること");
+  assert.ok(signals.terms.includes("架空広場"), "地名も集めること");
+  assert.ok(signals.terms.includes("架空チャンネル"), "チャンネル名も集めること");
+  assert.deepEqual(
+    [...signals.castIds].sort(), ["probe-alpha", "probe-bravo", "probe-charlie"],
+    "ID も別立てで集めること（表示名だけを見ていたのが元の穴）",
+  );
+});
+
+test("いま公開面に残っている未解決は、理由つきで一覧に載っているものだけ", async () => {
+  // 以前ここは「未解決が存在すること」を assert していた。つまり
+  // **実際に直すとテストが落ちる**——漏れが仕様として固定されていた。
+  // しかも CLI は恒常的に exit 2 で、CI にも pre-commit にも載らなかった。
+  //
+  // 許容一覧に変えると両方が解ける。一覧に無い検出が出れば落ち（新しい漏れが
+  // 止まる）、一覧にあるのに検出されなくなっても落ちる（直したら消せと言う）。
+  const report = auditPublicSurface();
+  const u = report.unresolved;
+  assert.deepEqual(u.term.map((f) => f.file), [], "チャンネル固有語は1件も許容しない");
+  assert.deepEqual(u.path.map((f) => f.file), [], "配布してはいけないパスは1件も許容しない");
+  assert.deepEqual(u.pathLeak.map((f) => f.file), [], "開発機の絶対パスは1件も許容しない");
+  assert.deepEqual(
+    u.roster.map((f) => f.file), [],
+    "一覧に無い名簿の検出がある。直すか、理由を config/public-surface-allowlist.json へ",
+  );
+  assert.deepEqual(
+    report.staleAllowlist.map((e) => e.file), [],
+    "もう検出されないものが一覧に残っている。直ったなら一覧から消すこと",
+  );
+  assert.equal(report.gateOk, true, "ゲートとして使える状態であること");
+
+  // 許容した未解決には、必ず理由が書かれていること。
+  for (const finding of report.accepted.roster) {
+    assert.ok(finding.why && finding.why.length > 20, `${finding.file}: 理由が書かれていない`);
+  }
+
+  // 報告に ID そのものが出ないこと（検査の出力自体が名簿になっては本末転倒）。
+  // 実 pack があるときだけ、ID が伏字になっているかを確かめられる。
+  // 無い環境では確かめる対象そのものが存在しない。
   const { collectSensitiveSignals } = await import("../scripts/audit-public-surface.mjs");
   const { castIds } = collectSensitiveSignals(root);
-  if (castIds.length === 0) return;   // pack が無い環境
-
-  const report = auditPublicSurface();
-  assert.ok(Array.isArray(report.rosterFindings), "名簿の検査があること");
-  assert.ok(Array.isArray(report.pathLeakFindings), "絶対パスの検査があること");
-  assert.equal(report.castIdCount, castIds.length);
-
-  // 開発機の絶対パスは1件も残っていないこと。
-  assert.deepEqual(
-    report.pathLeakFindings.map((f) => f.file), [],
-    "追跡下に開発機の絶対パスが残っている",
-  );
-
-  // 検出できることを実際に確かめる。内部の整合だけを見ると、検出を
-  // 丸ごと止めても「整合している」で通る——最初に書いた版がそれで、
-  // 名簿検査を無効化する変異を捕まえられなかった。
-  //
-  // 名簿は現時点で既知の未解決（castId が識別子として共有層に残っている。
-  // 全面改名は破壊的変更なので判断待ち）。ここでは**検出できている**ことを
-  // 固定する。改名が済んだら 0 になるので、そのときはこの期待値を更新する。
-  assert.ok(
-    report.rosterFindings.length > 0,
-    "castId の名簿を検出できていない（検出器が壊れている）",
-  );
-  assert.ok(
-    report.rosterFindings.some((finding) => finding.idCount === castIds.length),
-    "全 ID が並んだファイルを検出できていない",
-  );
-  // clean は4種すべてを見ていること（片方だけ見て clean と言わない）。
-  assert.equal(report.clean, false, "未解決の名簿があるのに clean と言わないこと");
-
-  // 名簿の報告に ID そのものが出ないこと。
   const serialized = JSON.stringify(report);
   for (const id of castIds) {
-    const bare = new RegExp(`"${id}"`, "u");
-    assert.equal(bare.test(serialized), false, "検査の出力に castId が含まれている");
+    assert.equal(new RegExp(`"${id}"`, "u").test(serialized), false,
+      "検査の出力に castId が含まれている");
   }
 });
 
@@ -162,6 +196,18 @@ test("開発機の絶対パスを、数として正しく数える", async () =>
   // 正規表現のメタ文字を含むホームでも壊れない。
   assert.equal(countHomePathHits("/Users/a+b/x", "/Users/a+b"), 1);
   assert.equal(countHomePathHits("何か", ""), 0, "homeRoot が空なら0");
+
+  // 平坦化された形。エージェントのセッションディレクトリ名は
+  // /Users/x/Documents/y → -Users-x-Documents-y になり、ログや監査記録を
+  // そのまま貼ると公開面へ入る。実際 docs/ の監査記録に1件残っていて、
+  // スラッシュ形しか見ていなかった検査は「絶対パス 0件」と報告していた。
+  assert.equal(countHomePathHits("~/.claude/projects/-Users-example/x.jsonl", "/Users/example"), 1,
+    "平坦化された形も数えること");
+  assert.equal(countHomePathHits("-Users-example-Documents-Proj", "/Users/example"), 1);
+  // 両方の形が混ざっていれば両方数える。
+  assert.equal(countHomePathHits("/Users/example/a と -Users-example-b", "/Users/example"), 2);
+  // 短すぎるホームで誤検出しないこと。
+  assert.equal(countHomePathHits("無関係な文字列", "/a"), 0, "4文字未満の形は使わない");
 });
 
 test("共有層の学習台帳に、チャンネル固有語を書けない", async () => {
@@ -171,9 +217,9 @@ test("共有層の学習台帳に、チャンネル固有語を書けない", as
   // commit されていた。宛先の層と、書かれる中身の層は別物。
   const { channelTermsInSharedEntry } = await import("../scripts/harness-learn.mjs");
   const { collectSensitiveSignals } = await import("../scripts/audit-public-surface.mjs");
-  const signals = collectSensitiveSignals(root);
-  if (signals.terms.length === 0) return;   // pack が無い環境
-
+  // 実 pack を待たない。待つと、pack を持たない環境（CI・新しい運営者の
+  // クローン）ではこの検査が丸ごと消える。
+  const signals = { terms: ["架空アルファ", "架空広場"], castIds: ["probe-alpha"] };
   const term = signals.terms[0];
 
   // 共有層宛に固有語 → 拒否
@@ -210,4 +256,168 @@ test("追跡下の学習台帳に、チャンネル宛の提案が溜まって�
       `${rel} にチャンネル宛の提案が残っている（Channel Pack 側へ置くこと）`,
     );
   }
+});
+
+test("検査の範囲に、まだ追跡されていないファイルも入る", async (t) => {
+  // 追跡下だけを見ていたので、未追跡のファイルは検査に写らなかった。
+  // 実話数の character-bible が未追跡のまま置かれていて、検査は
+  // 「語 0件・検出なし」と報告し、その直後の `git add -A` で
+  // 実キャストの表示名が公開リポジトリへ入った。
+  // **検査が clean と言った後に漏れた**——「見ていない」を「無い」として
+  // 報告する型そのもの。
+  const { filesInScope } = await import("../scripts/audit-public-surface.mjs");
+  const { mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const root = new URL("..", import.meta.url).pathname;
+  const probeDir = join(root, ".audit-scope-probe");
+
+  mkdirSync(probeDir, { recursive: true });
+  try {
+    writeFileSync(join(probeDir, "x.txt"), "probe");
+    const scope = filesInScope();
+    assert.ok(
+      scope.some((file) => file.startsWith(".audit-scope-probe/")),
+      "git add -A が拾うファイルは、検査にも写ること",
+    );
+    // staged だけを見る呼び方では写らない（そちらは差分の検査なので正しい）。
+    assert.equal(
+      filesInScope({ stagedOnly: true }).some((file) => file.startsWith(".audit-scope-probe/")),
+      false,
+      "--staged は index の差分だけを見ること",
+    );
+  } finally {
+    rmSync(probeDir, { recursive: true, force: true });
+  }
+});
+
+/** 検査を端から端まで通すための、使い捨ての git リポジトリ。 */
+async function scratchRepo() {
+  const { mkdtemp, mkdir, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { execFileSync } = await import("node:child_process");
+  const dir = await mkdtemp(join(tmpdir(), "public-surface-e2e-"));
+  const git = (...args) => execFileSync("git", args, { cwd: dir, stdio: "pipe" });
+  git("init", "-q");
+  git("config", "user.email", "t@example.invalid");
+  git("config", "user.name", "t");
+  const write = async (rel, text) => {
+    await mkdir(join(dir, rel, ".."), { recursive: true });
+    await writeFile(join(dir, rel), text);
+  };
+  await mkdir(join(dir, "channel-packs", "probe", "config"), { recursive: true });
+  await writeFile(join(dir, "channel-packs", "probe", "config", "koya-show-bible.json"), JSON.stringify({
+    channel: { name: "架空チャンネル" },
+    cast: [
+      { id: "probe-alpha", name: "架空アルファ" },
+      { id: "probe-bravo", name: "架空ブラボー" },
+      { id: "probe-charlie", name: "架空チャーリー" },
+      { id: "probe-delta", name: "架空デルタ" },
+    ],
+  }));
+  await writeFile(join(dir, ".gitignore"), "channel-packs/\n");
+  return { dir, git, write };
+}
+
+test("検出器を、実物のリポジトリで端から端まで通す", async () => {
+  // ここまでのテストは exported helper の戻り値しか見ていなかったので、
+  // 件数束縛・未検査の記録・staged の読み口・pack 不在の扱いを外す変異が
+  // **4つとも素通りした**。helper が正しいことと、検査が働くことは別物。
+  const { dir, git, write } = await scratchRepo();
+
+  await write("roster.md", "probe-alpha probe-bravo probe-charlie を並べた一覧");
+  await write("clean.md", "何も入っていない");
+  git("add", "-A");
+
+  const report = auditPublicSurface({ projectDir: dir });
+  assert.equal(report.termSourceAvailable, true, "合成 pack から語を引けること");
+  assert.deepEqual(report.rosterFindings.map((f) => f.file), ["roster.md"], "名簿を検出すること");
+  assert.equal(report.rosterFindings[0].idCount, 3);
+  assert.equal(report.status, "failed", "一覧に無い検出があるので failed");
+  assert.equal(report.gateOk, false);
+  // 検出した ID そのものは出さない。
+  assert.equal(JSON.stringify(report).includes("probe-alpha"), false);
+});
+
+test("許容一覧は件数に束縛され、同じファイルで漏れが増えたら落ちる", async () => {
+  // ファイル名だけで一致を見ていたので、3個の ID を理由に許したファイルへ
+  // 残りを足しても新しい漏洩として出てこなかった。
+  const { dir, git, write } = await scratchRepo();
+  await write("roster.md", "probe-alpha probe-bravo probe-charlie");
+  await write("config/public-surface-allowlist.json", JSON.stringify({
+    roster: [{ file: "roster.md", count: 3, why: "承知している既知の未解決（理由は十分な長さで書く）" }],
+  }));
+  git("add", "-A");
+
+  const accepted = auditPublicSurface({ projectDir: dir });
+  assert.equal(accepted.status, "accepted-risk", "件数どおりなら通ること");
+  assert.equal(accepted.accepted.roster[0].current, 3);
+
+  // 同じファイルで1人増やす。
+  await write("roster.md", "probe-alpha probe-bravo probe-charlie probe-delta");
+  git("add", "-A");
+  const grown = auditPublicSurface({ projectDir: dir });
+  assert.equal(grown.status, "failed", "許容した件数から増えたら落ちること");
+  assert.match(grown.unresolved.roster[0].whyUnresolved, /3 件から 4 件へ増えている/u);
+
+  // count を書いていない一覧は、承知した件数が無いので通さない。
+  await write("config/public-surface-allowlist.json", JSON.stringify({
+    roster: [{ file: "roster.md", why: "件数を書いていない" }],
+  }));
+  git("add", "-A");
+  assert.equal(auditPublicSurface({ projectDir: dir }).status, "failed", "count 無しを通さないこと");
+});
+
+test("中身を見られなかったファイルを、黙って合格にしない", async () => {
+  // 4MiB超・読取失敗・巨大な単一行を continue で捨てていた。捨てたことは
+  // どこにも出ず gateOk にも反映されなかった——「検出できない＝免除」。
+  const { dir, git, write } = await scratchRepo();
+  await write("huge.txt", "x".repeat(33 * 1024 * 1024));
+  git("add", "-A");
+
+  const report = auditPublicSurface({ projectDir: dir });
+  assert.deepEqual(report.scanIncomplete.map((e) => e.file), ["huge.txt"], "飛ばしたことを記録すること");
+  assert.equal(report.status, "incomplete", "未検査があるなら合格と呼ばないこと");
+  assert.equal(report.clean, false, "見ていないものを clean に数えないこと");
+  assert.ok(report.unchecked.some((why) => /未検査|読み取り/u.test(why)), "何を見ていないかを述べること");
+});
+
+test("--staged は、作業ツリーではなく index の中身を読む", async () => {
+  // 名前だけ index から取って中身を作業ツリーから読んでいたので、秘密入りの
+  // 版を stage した後に作業ツリーだけ直すと、検査は直った方を読み、
+  // commit には秘密入りの版が入った。
+  const { dir, git, write } = await scratchRepo();
+  await write("leak.md", "probe-alpha probe-bravo probe-charlie");
+  git("add", "-A");
+  // 作業ツリーだけ直す。index には漏洩版が残っている。
+  await write("leak.md", "何も入っていない");
+
+  const staged = auditPublicSurface({ projectDir: dir, stagedOnly: true });
+  assert.deepEqual(
+    staged.rosterFindings.map((f) => f.file), ["leak.md"],
+    "index に残っている漏洩を検出すること（作業ツリーを読んではいけない）",
+  );
+});
+
+test("Channel Pack が無い環境で、許容一覧を「直った」と誤読しない", async () => {
+  // pack を持たない環境（CI・新しい運営者のクローン）では検出が0件になる
+  // ので、許容一覧の全件が stale＝直ったと判定され、ゲートが必ず落ちた。
+  // 同時に検査本体は「検出なし」で exit 0 を返していた——落ちる理由と
+  // 通す理由が食い違っていた。見ていない区分は、合格でも不合格でもない。
+  const { dir, git, write } = await scratchRepo();
+  const { rm } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  await write("roster.md", "probe-alpha probe-bravo probe-charlie");
+  await write("config/public-surface-allowlist.json", JSON.stringify({
+    roster: [{ file: "roster.md", count: 3, why: "承知している既知の未解決（理由は十分な長さで書く）" }],
+  }));
+  git("add", "-A");
+  await rm(join(dir, "channel-packs"), { recursive: true, force: true });
+
+  const report = auditPublicSurface({ projectDir: dir });
+  assert.equal(report.termSourceAvailable, false);
+  assert.deepEqual(report.staleAllowlist, [], "検査源が無い区分の一覧を stale にしないこと");
+  assert.equal(report.status, "incomplete", "見ていないことを合格とも不合格とも呼ばない");
+  assert.equal(report.gateOk, true, "pack を持たない CI を永久に赤にしない");
+  assert.ok(report.unchecked.some((why) => /Channel Pack/u.test(why)), "何を見ていないかを述べること");
 });
