@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import {
+  applyKoyaCharacterBibleSpeechDirectives,
   applyKoyaValidationCanaryVoiceProfiles,
   dialogueShotRequiresAnchoredPullout,
   buildKoyaIdentityPackJobInput,
@@ -412,6 +413,10 @@ const script = `# 契約テスト\n\n## CUT 1: 教室\nナレーション: 放�
 
 test("character-bible readings become deterministic STT pronunciation aliases", () => {
   assert.deepEqual(koyaSpeechPronunciationsFromCharacterBible({
+    pronunciations: [
+      { from: "複合人物名", to: "ふくごう じんぶつめい" },
+      { from: "屋号", to: "やごう" },
+    ],
     cast: [
       { name: "荒野", pronunciation: "あらの", pronunciationMap: { 荒野: "あらの" } },
       {
@@ -421,11 +426,36 @@ test("character-bible readings become deterministic STT pronunciation aliases", 
       },
     ],
   }), [
+    { from: "複合人物名", to: "ふくごう じんぶつめい" },
     { from: "上沢天音", to: "かんざわあまね" },
+    { from: "屋号", to: "やごう" },
     { from: "荒野", to: "あらの" },
     { from: "上沢", to: "かんざわ" },
     { from: "天音", to: "あまね" },
   ]);
+});
+
+test("character-bible speech directions can explicitly remove an over-strong provider tag", () => {
+  const manifest = {
+    utterances: [
+      { id: "cut-04-u01", text: "確認などいらん！", performancePrompt: "[angry]" },
+      { id: "cut-04-u02", text: "記録を確認します。" },
+    ],
+  };
+  const directed = applyKoyaCharacterBibleSpeechDirectives(manifest, {
+    cast: [],
+    speechDirections: [{ utteranceId: "cut-04-u01", performancePrompt: "" }],
+  });
+  assert.equal(directed.utterances[0].performancePrompt, "");
+  assert.equal(directed.utterances[1].performancePrompt, undefined);
+  assert.equal(manifest.utterances[0].performancePrompt, "[angry]", "input manifest stays immutable");
+  assert.throws(
+    () => applyKoyaCharacterBibleSpeechDirectives(manifest, {
+      cast: [],
+      speechDirections: [{ utteranceId: "missing", performancePrompt: "" }],
+    }),
+    /Unknown character-bible speech direction/u,
+  );
 });
 
 test("Koya styling rounds must follow every show-bible spec in order with immutable spec bytes", async (t) => {

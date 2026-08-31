@@ -236,6 +236,32 @@ test("same-location physical narration binds the completed action in generation 
   assert.match(mangaImageQaVisualPrompt({ job: actionJob }), /leaving the prop at the wrong destination, is a hard failure/u);
 });
 
+test("multi-action closing narration uses tableau QA instead of a single-action destination hard fail", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-resolution-tableau-"));
+  const registry = {
+    characters: [
+      { id: "hero", name: "主人公", kind: "character", status: "approved", referenceImagePaths: [] },
+      { id: "villain", name: "テスト話者X", kind: "character", status: "approved", referenceImagePaths: [] },
+      { id: "owner", name: "テスト話者Y", kind: "character", status: "approved", referenceImagePaths: [] },
+    ],
+  };
+  const plan = createMangaScriptImagePlan({
+    scriptText: "【カット1：小さな地域催事場】\n主人公：受付を始めます。\n主人公：記録も確認しました。\n【カット2：同じ会場の出口での締め】\nナレーション：テスト話者Xは出口で固まり、腕時計を袖で隠した。テスト話者Yは小さくうなずき、主人公は静かに受付へ戻った。\n主人公：これで終わりです。",
+    episodeId: "resolution-tableau-test",
+    registry,
+    canvasDir: root,
+    assetDir: join(root, "assets"),
+    protagonistSpeakerName: "主人公",
+  });
+  const actionJob = plan.jobs.find((entry) => entry.id === "image:cut-02-u01" || entry.id.startsWith("panel:cut-02-u01"));
+  assert.ok(actionJob);
+  assert.equal(actionJob.composition.intent, "resolution-montage");
+  assert.match(actionJob.prompt, /Closing-tableau contract/u);
+  const qaPrompt = mangaImageQaVisualPrompt({ job: actionJob });
+  assert.match(qaPrompt, /Closing-tableau evaluation/u);
+  assert.doesNotMatch(qaPrompt, /leaving the prop at the wrong destination, is a hard failure/u);
+});
+
 test("multi-character jobs give every visible cast member an identity anchor before secondary references", async () => {
   const root = await mkdtemp(join(tmpdir(), "buzzassist-balanced-character-refs-"));
   const characters = ["人物A", "人物B", "人物C", "人物D"].map((name, index) => ({
@@ -365,6 +391,8 @@ test("script-derived venue scale binds generation and blind QA for every scene",
   assert.ok(scenes.every((entry) => /Never upscale/u.test(entry.prompt)));
   assert.match(mangaImageQaVisualPrompt({ job: environment }), /different social or architectural world is a hard failure/u);
   assert.match(mangaImageQaVisualPrompt({ job: scenes[0] }), /luxury hotel/u);
+  assert.match(mangaImageQaVisualPrompt({ job: scenes[0] }), /do not require every recurring venue prop to be visible/u);
+  assert.match(mangaImageQaVisualPrompt({ job: scenes[0] }), /do not force a wider camera/u);
 });
 
 test("education and career props are forced blank so generated pseudo-text cannot enter artwork", async () => {
@@ -517,9 +545,11 @@ test("executor can explicitly retry only persistent failed jobs without regenera
   let failSecond = true;
   const generationCounts = new Map();
   const generationPrompts = new Map();
-  const generateImage = async ({ fileName, prompt }) => {
+  const generationReferences = new Map();
+  const generateImage = async ({ fileName, prompt, referenceImagePaths }) => {
     generationCounts.set(fileName, (generationCounts.get(fileName) || 0) + 1);
     generationPrompts.set(fileName, [...(generationPrompts.get(fileName) || []), prompt]);
+    generationReferences.set(fileName, [...(generationReferences.get(fileName) || []), referenceImagePaths]);
     return { buffer, fileName, mimeType: "image/png" };
   };
   const visualQa = async ({ job }) => job.id === "image:2" && failSecond
@@ -534,7 +564,9 @@ test("executor can explicitly retry only persistent failed jobs without regenera
   assert.equal(generationCounts.get("image-1.png"), 1);
   assert.equal(generationCounts.get("image-2.png"), 2);
   assert.equal(generationPrompts.get("image-2.png")[0], "scene 2");
-  assert.match(generationPrompts.get("image-2.png")[1], /CORRECTION PASS: Fix these failures: repair me/);
+  assert.match(generationPrompts.get("image-2.png")[1], /CORRECTION PASS:.*Fix these failures: repair me/u);
+  assert.match(generationPrompts.get("image-2.png")[1], /FIRST reference image is the immediately previous candidate/u);
+  assert.equal(generationReferences.get("image-2.png")[1][0], jobs[1].outputPath);
 });
 
 test("semantic replanning does not apply QA feedback from an obsolete input hash", async () => {
