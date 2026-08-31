@@ -39,7 +39,7 @@ test("必須と任意を混ぜない", async () => {
   );
 });
 
-test("足りないものには必ず直し方が付く（全部欠けた環境で確かめる）", async () => {
+test("足りないものには必ず直し方が付く（全部欠けた環境で確かめる）", async (t) => {
   // 「ffmpeg がありません」だけでは、非エンジニアの運営者は次に何を
   // すればいいのか分からない。分からない指摘は無いのと同じ。
   //
@@ -50,10 +50,24 @@ test("足りないものには必ず直し方が付く（全部欠けた環境�
   const { promisify } = await import("node:util");
   const run = promisify(execFile);
 
+  const { mkdtemp } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join: joinPath } = await import("node:path");
+  // HOME を実在しないパスにしていたので、子プロセスの中には
+  // **リポジトリ直下からの相対として解決して生成物を落とすもの**があった
+  // （nonexistent-home-for-doctor-test/Library/Caches/... が実際に出来ていた）。
+  // .gitignore にも入っていないので、`git add -A` が拾いうる。
+  // 検査のために作業ツリーを汚さない。
+  const throwawayHome = await mkdtemp(joinPath(tmpdir(), "doctor-empty-home-"));
+  t.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(throwawayHome, { recursive: true, force: true });
+  });
+
   const stripped = {
     // PATH を空にすれば ffmpeg も python3 も見つからない。
     PATH: "",
-    HOME: "/nonexistent-home-for-doctor-test",
+    HOME: throwawayHome,
     ELEVENLABS_API_KEY: "",
     XI_API_KEY: "",
     LOVART_ACCESS_KEY: "",

@@ -6,7 +6,7 @@
 |---|---|---|---|
 | Codex | `019fd34d-602f-7a93-b28d-b784787a22e3` | `~/.codex/sessions/2026/08/06/rollout-2026-08-06T03-01-31-019fd34d-602f-7a93-b28d-b784787a22e3.jsonl` | 18,672 events、明示 user message 48件。v7〜v27の要求・実装・検証・差し戻しを全順序で照合 |
 | Codex | `019fe044-aa46-7a83-992d-d5c095a20201` | `~/.codex/sessions/2026/08/08/rollout-2026-08-08T15-27-04-019fe044-aa46-7a83-992d-d5c095a20201.jsonl` | 7,393 events、明示 user message 21件。v28〜v35と中断時点を全順序で照合 |
-| Claude Code | Codex セッション分析と動画制作 | `~/.claude/projects/-Users-higataiyu-Documents-Excalidraw/024c09db-3b36-43ac-9a16-5f334356e7e6.jsonl` | 2,496行。v36〜v40の引継ぎ・実装・ユーザー差し戻し・レンダーを照合 |
+| Claude Code | Codex セッション分析と動画制作 | `~/.claude/projects/<プロジェクトのセッションディレクトリ>/024c09db-3b36-43ac-9a16-5f334356e7e6.jsonl` | 2,496行。v36〜v40の引継ぎ・実装・ユーザー差し戻し・レンダーを照合 |
 | Claude Code | セッション目的達成管理 | 同プロジェクトの `5a313d2a…jsonl` と `b3600eae…jsonl` にまたがる論理セッション | 要求台帳、独立検品、完了判定、後続委任を照合 |
 
 巨大な画像/base64イベントを本文として数えず、human-origin要求、実ファイル変更、テスト、レンダー成果物、ユーザーの視聴フィードバック、task complete宣言を別々に抽出した。結論は、履歴内に「ユーザー視聴で最終承認された完成版」は存在しない。自動監査PASS後に人間視聴で欠陥が見つかる流れが複数回あり、task completeの文言は完成証拠として扱わなかった。

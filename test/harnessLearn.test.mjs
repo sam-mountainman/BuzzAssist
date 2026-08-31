@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { HUMAN_VERIFIED } from "../scripts/harness-learn.mjs";
+
 import {
   LEARNING_TARGETS,
   PROPOSAL_KINDS,
@@ -180,24 +182,24 @@ test("記録があるだけでは反映済みにならない（正本に実在�
   assert.equal(isActuallyApplied({ id: "a" }, read), false, "id だけで通った");
   assert.equal(isActuallyApplied({ id: "a", reviewer: "x" }, read), false, "targetPath 無しで通った");
   assert.equal(
-    isActuallyApplied({ id: "a", reviewer: "x", targetPath: "docs/x.md", note: "存在しない文言" }, read),
+    isActuallyApplied({ id: "a", reviewer: "x", attestedBy: HUMAN_VERIFIED, targetPath: "docs/x.md", note: "存在しない文言" }, read),
     false,
     "正本に無い記述で通った",
   );
   assert.equal(
-    isActuallyApplied({ id: "a", reviewer: "x", targetPath: "docs/x.md", note: "ここに規則が書いてある" }, read),
+    isActuallyApplied({ id: "a", reviewer: "x", attestedBy: HUMAN_VERIFIED, targetPath: "docs/x.md", note: "ここに規則が書いてある" }, read),
     true,
   );
   // 正本が後から差し戻されたら、反映済みではなくなる
   assert.equal(
-    isActuallyApplied({ id: "a", reviewer: "x", targetPath: "docs/gone.md", note: "何か" }, read),
+    isActuallyApplied({ id: "a", reviewer: "x", attestedBy: HUMAN_VERIFIED, targetPath: "docs/gone.md", note: "何か" }, read),
     false,
   );
 });
 
 test("反映が取り消されたら status に戻る", () => {
   const entry = make();
-  const record = { id: entry.id, reviewer: "taiyu", targetPath: "docs/x.md", note: "書いた規則" };
+  const record = { id: entry.id, reviewer: "taiyu", attestedBy: HUMAN_VERIFIED, targetPath: "docs/x.md", note: "書いた規則" };
   const withRule = summarizeProposals([entry], [record], () => "書いた規則がある正本");
   assert.equal(withRule[0].applied, true);
   // 正本から消えたら未反映へ戻る
@@ -265,7 +267,7 @@ test("名前を変えても過去の記録が孤児にならない", () => {
 });
 
 test("保存した digest は照合に使う（保存するだけにしない）", () => {
-  const record = { id: "a", reviewer: "x", targetPath: "docs/x.md", note: "書いた規則", targetSha256: "aaa" };
+  const record = { id: "a", reviewer: "x", attestedBy: HUMAN_VERIFIED, targetPath: "docs/x.md", note: "書いた規則", targetSha256: "aaa" };
   const read = () => "書いた規則がある正本";
   // digest が一致すれば反映済み
   assert.equal(isActuallyApplied(record, read, () => "aaa"), true);
@@ -273,4 +275,107 @@ test("保存した digest は照合に使う（保存するだけにしない）
   assert.equal(isActuallyApplied(record, read, () => "bbb"), false);
   // 照合手段が無いときは文言だけで判断（後方互換）
   assert.equal(isActuallyApplied(record, read), true);
+});
+
+test("TTY は人の証明ではない、という前提で組まれている", async () => {
+  // 最初の修正は TTY の有無で人と機械を分けた。Codex のレビューで
+  // `script -q /dev/null node ...` を通せば isTTY が true になることが
+  // 実測され、しかも当時は TTY を先に見ていたので **PTY 経由で
+  // --agent-attested を付けても「人の確認」として記録された**。
+  const { attestationFor, HUMAN_VERIFIED } = await import("../scripts/harness-learn.mjs");
+
+  // 明示が推測に勝つこと。ここが逆順だったのが穴。
+  const spoofed = attestationFor({ reviewer: "someone", isInteractive: true, agentAttested: true });
+  assert.equal(spoofed.attestation.reviewer, "agent", "PTY を割り当てても機械は機械として記録すること");
+  assert.equal(spoofed.attestation.attestedBy, "agent-self-attested");
+  assert.equal(spoofed.attestation.claimedReviewer, "someone", "何を名乗ろうとしたかは残すこと");
+
+  // TTY だけでは人の確認にならない。記録は残るが印は弱い方。
+  const tty = attestationFor({ reviewer: "someone", isInteractive: true });
+  assert.equal(tty.ok, true);
+  assert.equal(tty.attestation.attestedBy, "cli-interactive-claimed",
+    "対話端末だったという事実であって、人が読んだ証拠ではない");
+  assert.notEqual(tty.attestation.attestedBy, HUMAN_VERIFIED);
+
+  // 人の確認は、対話端末＋明示の二手を要る。
+  assert.equal(
+    attestationFor({ reviewer: "someone", isInteractive: true, humanVerified: true })
+      .attestation.attestedBy, HUMAN_VERIFIED,
+  );
+  assert.equal(
+    attestationFor({ reviewer: "someone", isInteractive: false, humanVerified: true }).ok, false,
+    "非対話から --human-verified を通してはいけない",
+  );
+
+  // 裏づけが何も無い経路は既定で拒否。
+  const bare = attestationFor({ reviewer: "someone", isInteractive: false });
+  assert.equal(bare.ok, false);
+  assert.match(bare.message, /--agent-attested/u, "どうすればよいかを示すこと");
+  assert.equal(attestationFor({ reviewer: "", isInteractive: true }).ok, false, "名前が空なら拒否");
+});
+
+test("人の確認が無い記録は「反映済み」として数えない", async () => {
+  // ここが実効の中心だった。isActuallyApplied は reviewer が空でないこと
+  // しか見ていなかったので、agent-self-attested も unverified-agent-typed も
+  // attestedBy 欠落も、人の確認と同じ効力で applied になっていた。
+  // しかも applied は未反映一覧から消えるので、**後から人が昇格しようと
+  // すると「既に反映済み」で拒まれる**——機械の自己申告が人の確認を
+  // 締め出す向きに働いていた。
+  const { isActuallyApplied, summarizeProposals, HUMAN_VERIFIED } =
+    await import("../scripts/harness-learn.mjs");
+  const readCanonical = () => "正本にこの一節がある";
+  const base = { id: "p1", reviewer: "someone", targetPath: "t.md", note: "正本にこの一節がある" };
+
+  for (const attestedBy of ["agent-self-attested", "unverified-agent-typed", "cli-interactive-claimed", undefined, "", "でたらめ"]) {
+    assert.equal(
+      isActuallyApplied({ ...base, attestedBy }, readCanonical), false,
+      `attestedBy=${String(attestedBy)} を反映済みとして数えてはいけない`,
+    );
+  }
+  assert.equal(isActuallyApplied({ ...base, attestedBy: HUMAN_VERIFIED }, readCanonical), true);
+
+  // 未確認の記録が、未反映一覧から提案を消さないこと。
+  const proposals = [{ id: "p1", text: "何か" }];
+  const machine = summarizeProposals(proposals, [{ ...base, attestedBy: "agent-self-attested" }], readCanonical);
+  assert.equal(
+    JSON.stringify(machine).includes("p1"), true,
+    "機械の自己申告で提案が一覧から消えてはいけない",
+  );
+});
+
+test("既存の記録に、人の確認が取れていないことが残っている", async () => {
+  // 消さない（スキルの原則）。ただし「人が確認した」と読めないようにする。
+  const { readFileSync, existsSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const root = new URL("..", import.meta.url).pathname;
+  const file = join(root, "docs/learning/applied.jsonl");
+  if (!existsSync(file)) return;
+  const rows = readFileSync(file, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  for (const row of rows) {
+    assert.ok(row.attestedBy, `${row.id}: 誰が名乗ったかが記録されていない`);
+    assert.notEqual(row.attestedBy, "human-interactive",
+      "TTY だけを根拠にした古い印が残っている（人の証明ではない）");
+    if (row.attestedBy === "unverified-agent-typed") {
+      assert.equal(row.reviewer, "agent", "未確認の記録に人の名前を残さない");
+      assert.ok(row.attestationNote, "なぜ未確認なのかを残すこと");
+    }
+  }
+});
+
+test("チャンネル宛の捕捉は、公開側の台帳へ書かれない", async () => {
+  // capture は宛先に関わらず共有台帳（公開リポジトリで追跡）へ書いていた。
+  // 固有語の検査は「共有層宛の提案に固有語が入っていないか」しか見ないので、
+  // 宛先が channel-pack: なら固有語ごと通り、そのまま公開側へ溜まった。
+  // 層を分けたつもりが、分けていたのは宛先のラベルだけで書き先は1つだった。
+  // 実害: 別セッションが捕捉するたび公開面の検査が赤くなり、手で移していた。
+  const { ledgerPathFor } = await import("../scripts/harness-learn.mjs");
+  const shared = ledgerPathFor("genre:manga-video-production");
+  const channel = ledgerPathFor("channel-pack:koya");
+  assert.notEqual(channel, shared, "チャンネル宛と共有層で書き先が違うこと");
+  assert.ok(channel.includes("channel-packs"), "チャンネル宛は pack 側へ書くこと");
+  assert.ok(!shared.includes("channel-packs"), "共有層は共有台帳へ書くこと");
+  assert.equal(ledgerPathFor("platform:craft"), shared, "platform も共有台帳");
+  assert.equal(ledgerPathFor(""), shared, "宛先不明は共有台帳（既定は変えない）");
+  // applied 側も同じ規則で分かれること。
+  assert.ok(ledgerPathFor("channel-pack:koya", "applied").includes("channel-packs"));
 });

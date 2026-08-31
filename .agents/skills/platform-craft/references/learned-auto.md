@@ -21,7 +21,7 @@
   - 根拠: 2026-08-30 Mike image-harness-v10が既存なのを作成後に検知。scene-plan-v10 SHAとimage-harness-v10-style-benchmark/cleaned-finalから7枚を元SHAへ復元し、新修正はv11へ分離。
   - 種別: correction / 初回: 2026-08-29 / id: `6fc1a6d87bdd`
 - **最終化は現在のハーネス版の実MP4・plan・自動監査・contact sheet・外部review notesをSHA拘束し、旧版auditを代替証拠として受理しない。自動監査は独立目視signoffを生成せず awaiting-independent-signoff で停止する**
-  - 根拠: client-work/mike-san/yamaaritaniari-v1/reports/v18-integration-independent-code-review.md V18-001/V18-006; production/finalize-review-v18.mjs; production/finalize-complete-video.mjs
+  - 根拠: client-work/<private-term>/<private-term>-v1/reports/v18-integration-independent-code-review.md V18-001/V18-006; production/finalize-review-v18.mjs; production/finalize-complete-video.mjs
   - 種別: correction / 初回: 2026-08-29 / id: `85c4ff144509`
 
 _最終更新: 2026-08-31T09:47:39.893Z_
