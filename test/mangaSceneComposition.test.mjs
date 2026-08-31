@@ -108,6 +108,42 @@ test("same-location cut boundaries preserve the scripted physical action instead
   assert.match(plan.beats[1].visibleAction, /direction of travel/u);
 });
 
+test("multi-action narration in the final cut becomes a coherent resolution tableau", () => {
+  const plan = planMangaSceneCompositions({
+    manifest: {
+      id: "closing-resolution-test",
+      cuts: [
+        { id: "c1", description: "受付での対決", locationId: "event-hall", utteranceIds: ["u1"] },
+        { id: "c2", description: "同じ会場での締め", locationId: "event-hall", utteranceIds: ["u2", "u3"] },
+      ],
+      utterances: [
+        { id: "u1", cutId: "c1", speakerId: "hero", speakerName: "主人公", preset: "dialogue", text: "証拠は残っています。" },
+        { id: "u2", cutId: "c2", speakerId: "narration", preset: "narration", text: "悪役は出口で固まり、時計を袖で隠した。店主はうなずき、主人公は静かに受付へ戻った。" },
+        { id: "u3", cutId: "c2", speakerId: "hero", speakerName: "主人公", preset: "dialogue", text: "終わりました。" },
+      ],
+    },
+  });
+  const resolution = plan.beats.find((beat) => beat.utteranceId === "u2");
+  assert.equal(resolution.intent, "resolution-montage");
+  assert.match(resolution.purpose, /simultaneous closing outcomes/u);
+  assert.match(resolution.visibleAction, /closing tableau/u);
+  assert.match(buildMangaSceneImagePrompt(resolution, { cast: ["悪役", "店主", "主人公"] }), /do not contort anatomy/u);
+});
+
+test("abstract closing narration is not mistaken for a multi-character physical tableau", () => {
+  const plan = planMangaSceneCompositions({
+    manifest: {
+      id: "closing-principle-test",
+      cuts: [{ id: "c1", description: "締め", locationId: "event-hall", utteranceIds: ["u1", "u2"] }],
+      utterances: [
+        { id: "u1", cutId: "c1", speakerId: "hero", speakerName: "主人公", preset: "dialogue", text: "終わりました。" },
+        { id: "u2", cutId: "c1", speakerId: "narration", preset: "narration", text: "消された席は元に戻り、催事は予定通り始まった。仕組みは事実を残す。その事実を使うのは人間の役目だ。" },
+      ],
+    },
+  });
+  assert.equal(plan.beats[1].intent, "narration");
+});
+
 test("a real location change still establishes the new scene", () => {
   const plan = planMangaSceneCompositions({
     manifest: {

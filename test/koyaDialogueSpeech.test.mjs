@@ -9,6 +9,7 @@ import {
   koyaPerformanceTag,
   prepareKoyaDialogueCut,
   quietestBoundarySeconds,
+  splitKoyaProviderSpeechText,
   spectralEnvelope,
   scoreKoyaDialogueTake,
   selectKoyaDialogueTake,
@@ -33,6 +34,32 @@ test("generic Koya dialogue planning keeps narration plain and tags dialogue", (
   assert.equal(request.model_id, "eleven_v3");
   assert.equal(request.inputs.length, 2);
   assert.equal(request.seed, 440011);
+});
+
+test("long narration is split into ordered provider inputs without changing the logical utterance", () => {
+  const speechText = [
+    "朝の商店街では、受付係が予約表を丁寧に確認していた。",
+    "その横では、席札を並べ直しながら来客の名前を一人ずつ読み上げていた。",
+    "店の奥では、記録係が時刻と受け渡しの順番を静かに照合していた。",
+    "全員が持ち場を守り、開店前の準備は滞りなく進んでいた。",
+  ].join("");
+  const parts = splitKoyaProviderSpeechText(speechText, { preset: "narration" });
+  assert.ok(parts.length > 1);
+  assert.equal(parts.join(""), speechText);
+  assert.ok(parts.every((part) => [...part].length <= 50));
+  assert.deepEqual(splitKoyaProviderSpeechText(speechText, { preset: "dialogue" }), [speechText]);
+
+  const longManifest = {
+    utterances: [
+      { id: "cut-02-u01", text: speechText, speechText, speakerId: "lead", voiceId: "voice-a", preset: "narration" },
+    ],
+  };
+  const plan = prepareKoyaDialogueCut(longManifest, { id: "cut-02", utteranceIds: ["cut-02-u01"] });
+  assert.equal(plan.inputs.length, 1);
+  assert.equal(plan.providerInputs.length, parts.length);
+  assert.deepEqual(plan.inputs[0].providerInputIndices, parts.map((_part, index) => index));
+  assert.equal(buildKoyaDialogueRequest(plan, 0).inputs.length, parts.length);
+  assert.deepEqual(plan.providerInputs.map((entry) => entry.parentUtteranceId), parts.map(() => "cut-02-u01"));
 });
 
 test("performance tags are deterministic and do not tag narration", () => {
