@@ -21,6 +21,7 @@ import {
   generateKoyaLocationBoards,
   readKoyaChannelAuthority,
   registerApprovedKoyaLocation,
+  resolveKoyaValidationCanary,
   koyaThumbnailCopySha256,
 } from "../lib/koyaChannelGovernance.mjs";
 import { renderEditorialPlatePng } from "../lib/mangaScriptImagePipeline.mjs";
@@ -200,6 +201,102 @@ test("Koya character bootstrap status reports the next legal action without inve
   assert.equal(empty.rows.find((row) => row.id === "miehara").stage, "workflow-missing");
   assert.equal(empty.rows.find((row) => row.id === "horo").selectedBaseLabel, "A");
   assert.equal(empty.rows.find((row) => row.id === "horo").stage, "workflow-missing");
+});
+
+test("one-off validation canary admits only the exact approved cast without weakening normal roster production", async () => {
+  const authority = await readKoyaChannelAuthority({ allowFixture: true, projectDir: root });
+  const approvedMembers = authority.showBible.cast.filter((member) => member.designStatus === "approved");
+  assert.equal(approvedMembers.length, 8);
+  const policy = resolveKoyaValidationCanary({
+    episodeId: "manga-approved-eight-canary-001",
+    showBible: authority.showBible,
+    policy: {
+      version: "koya-validation-canary-v1",
+      enabled: true,
+      episodeId: "manga-approved-eight-canary-001",
+      scope: "one-off-non-public-quality-preview",
+      publicationEligible: false,
+      requireExactAllowedCast: true,
+      allowIncompleteRosterReview: true,
+      allowedCastIds: approvedMembers.map((member) => member.id),
+      omittedRequiredEveryEpisodeIds: ["horo"],
+      provisionalVoiceProfileByCastId: { reiji: "fixture-reiji-voice" },
+      reason: "One-off user-requested video quality preview.",
+    },
+  });
+  assert.equal(policy.pass, true, JSON.stringify(policy));
+  assert.equal(policy.publicationEligible, false);
+
+  const registry = {
+    characters: approvedMembers.map((member) => ({
+      id: `registry-${member.id}`,
+      name: member.name,
+      kind: "character",
+      role: "fixed",
+      status: "approved",
+      aliases: [member.hiddenName].filter(Boolean),
+      referenceAssets: [...new Set(member.requiredReferenceRoles?.length
+        ? member.requiredReferenceRoles
+        : ["identity-face", "turnaround", "expression"])].map((role, index) => ({
+        id: `${member.id}-${role}`,
+        role,
+        path: `${member.id}-${role}.png`,
+        sha256: String(index + 1).repeat(64).slice(0, 64),
+      })),
+      approval: { identityReviewPath: `${member.id}-review.json`, identityReviewSha256: "a".repeat(64) },
+    })),
+  };
+  const protagonist = approvedMembers.find((member) => member.id === "reiji");
+  const parsed = parseMangaScript(`${protagonist.name}: 僕が証拠を示す`);
+  const characterBible = {
+    cast: approvedMembers.map((member) => ({
+      id: member.id,
+      name: member.name,
+      ...(member.id === "ema" ? { episodeRole: "ally" } : {}),
+    })),
+  };
+  const canaryResult = auditKoyaFixedCastReadiness({
+    showBible: authority.showBible,
+    registry,
+    parsed,
+    characterBible,
+    enforce: true,
+    rosterReviewAudit: { pass: false, failures: ["11-member review incomplete"] },
+    validationCanary: policy,
+  });
+  assert.equal(canaryResult.pass, true, JSON.stringify(canaryResult));
+  assert.equal(canaryResult.activeCastIds.length, 8);
+  assert.equal(canaryResult.validationCanary.publicationEligible, false);
+
+  const normalResult = auditKoyaFixedCastReadiness({
+    showBible: authority.showBible,
+    registry,
+    parsed,
+    characterBible,
+    enforce: true,
+    rosterReviewAudit: { pass: false, failures: ["11-member review incomplete"] },
+  });
+  assert.equal(normalResult.pass, false);
+  assert.match(normalResult.failures.join("\n"), /roster review|must be declared/iu);
+
+  const invalidPending = resolveKoyaValidationCanary({
+    episodeId: "manga-approved-eight-canary-001",
+    showBible: authority.showBible,
+    policy: {
+      version: "koya-validation-canary-v1",
+      enabled: true,
+      episodeId: "manga-approved-eight-canary-001",
+      scope: "one-off-non-public-quality-preview",
+      publicationEligible: false,
+      requireExactAllowedCast: true,
+      allowIncompleteRosterReview: true,
+      allowedCastIds: [...approvedMembers.map((member) => member.id), "heito"],
+      omittedRequiredEveryEpisodeIds: ["horo"],
+      reason: "Must fail because a pending character was admitted.",
+    },
+  });
+  assert.equal(invalidPending.pass, false);
+  assert.match(invalidPending.failures.join("\n"), /unapproved cast member/iu);
 });
 
 test("Koya roster gate binds all 11 identity faces and requires 55 independent original/thumbnail-scale pair checks", async () => {

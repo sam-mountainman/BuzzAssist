@@ -97,6 +97,49 @@ test("narration jobs carry the approved protagonist identity into first-person v
   assert.match(narrationJob.prompt, /荒野 is the story protagonist/u);
 });
 
+test("multi-character jobs give every visible cast member an identity anchor before secondary references", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-balanced-character-refs-"));
+  const characters = ["人物A", "人物B", "人物C", "人物D"].map((name, index) => ({
+    id: `person-${index + 1}`,
+    name,
+    kind: "character",
+    status: "approved",
+    referenceImagePaths: [`${name}-face.png`, `${name}-turnaround.png`, `${name}-expressions.png`],
+  }));
+  const plan = createMangaScriptImagePlan({
+    scriptText: "【カット1：受付で四人が向き合う】\n人物A：人物B、人物C、人物Dと一緒に証拠を確認する！",
+    episodeId: "balanced-character-refs-test",
+    registry: { characters },
+    canvasDir: root,
+    assetDir: join(root, "assets"),
+  });
+  const job = plan.jobs.find((entry) => entry.kind === "scene-image" || entry.kind === "split-panel");
+  assert.ok(job);
+  assert.equal(job.referenceImagePaths.length <= 5, true);
+  for (const name of ["人物A", "人物B", "人物C", "人物D"]) {
+    assert.ok(job.referenceImagePaths.some((path) => path.endsWith(`${name}-face.png`)), `${name} identity anchor is present`);
+  }
+  assert.ok(job.referenceImagePaths.some((path) => /reference-environment/u.test(path)), "location anchor is reserved");
+});
+
+test("planner blocks a scene whose cast cannot fit beside the required location reference", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-overfull-character-refs-"));
+  const characters = ["人物A", "人物B", "人物C", "人物D", "人物E"].map((name, index) => ({
+    id: `person-${index + 1}`,
+    name,
+    kind: "character",
+    status: "approved",
+    referenceImagePaths: [`${name}-face.png`],
+  }));
+  assert.throws(() => createMangaScriptImagePlan({
+    scriptText: "【カット1：受付に五人】\n人物A：人物B、人物C、人物D、人物Eと確認する！",
+    episodeId: "overfull-character-refs-test",
+    registry: { characters },
+    canvasDir: root,
+    assetDir: join(root, "assets"),
+  }), /image provider can bind only 4 character anchors/u);
+});
+
 test("third-person narration uses the explicitly named character instead of replacing them with the protagonist", async () => {
   const root = await mkdtemp(join(tmpdir(), "buzzassist-third-person-narration-"));
   const registry = {

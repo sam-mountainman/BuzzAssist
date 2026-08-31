@@ -163,3 +163,51 @@ test("開発機の絶対パスを、数として正しく数える", async () =>
   assert.equal(countHomePathHits("/Users/a+b/x", "/Users/a+b"), 1);
   assert.equal(countHomePathHits("何か", ""), 0, "homeRoot が空なら0");
 });
+
+test("共有層の学習台帳に、チャンネル固有語を書けない", async () => {
+  // 自己改善ループが書く docs/learning/proposals.jsonl は公開リポジトリで
+  // 追跡されている。**宛先が共有層でも evidence にキャスト名が入りうる**——
+  // 実際そうなり、ジャンル層の提案の根拠に固定キャスト3人の名前が入って
+  // commit されていた。宛先の層と、書かれる中身の層は別物。
+  const { channelTermsInSharedEntry } = await import("../scripts/harness-learn.mjs");
+  const { collectSensitiveSignals } = await import("../scripts/audit-public-surface.mjs");
+  const signals = collectSensitiveSignals(root);
+  if (signals.terms.length === 0) return;   // pack が無い環境
+
+  const term = signals.terms[0];
+
+  // 共有層宛に固有語 → 拒否
+  const rejected = channelTermsInSharedEntry(
+    { target: "genre:manga-video-production", text: "一般的な話", evidence: `実測: ${term} の参照が0枚` },
+    signals,
+  );
+  assert.equal(rejected.ok, false, "共有層の根拠に固有語が入るのを通してはいけない");
+  assert.equal(rejected.message.includes(term), false, "拒否メッセージに固有語を出さない");
+  assert.match(rejected.message, /channel-pack:/u, "どう直すかを示すこと");
+
+  // チャンネル宛なら通る（pack 側へ書かれる想定）
+  assert.equal(
+    channelTermsInSharedEntry({ target: "channel-pack:koya", evidence: term }, signals).ok, true,
+  );
+  // 共有層でも固有語が無ければ通る
+  assert.equal(
+    channelTermsInSharedEntry({ target: "platform:platform-craft", text: "課金の再送規則", evidence: "4実装で規則が違った" }, signals).ok,
+    true,
+  );
+});
+
+test("追跡下の学習台帳に、チャンネル宛の提案が溜まっていない", async () => {
+  // 3層分離は台帳にも効く。channel-pack: / ledger: / doc: 宛の提案は
+  // 運営者のフィードバックを逐語で持つので、公開側に置かない。
+  const { readFileSync, existsSync } = await import("node:fs");
+  for (const rel of ["docs/learning/proposals.jsonl", "docs/learning/applied.jsonl"]) {
+    const file = join(root, rel);
+    if (!existsSync(file)) continue;
+    const rows = readFileSync(file, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    const scoped = rows.filter((r) => /^(channel-pack:|ledger:|doc:)/u.test(String(r.target || "")));
+    assert.deepEqual(
+      scoped.map((r) => r.target), [],
+      `${rel} にチャンネル宛の提案が残っている（Channel Pack 側へ置くこと）`,
+    );
+  }
+});

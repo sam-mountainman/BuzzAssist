@@ -61,6 +61,7 @@ import {
   generateKoyaLocationBoards,
   readKoyaChannelAuthority,
   registerApprovedKoyaLocation,
+  resolveKoyaValidationCanary,
 } from "../lib/koyaChannelGovernance.mjs";
 import { parseMangaScript } from "../lib/mangaVideoPipeline.mjs";
 import { readCharacterRegistry } from "../lib/characterRegistry.mjs";
@@ -296,9 +297,20 @@ switch (args.action) {
     const scriptText = await readFile(common.scriptPath, "utf8");
     const registry = await readCharacterRegistry({ projectDir });
     const rosterReviewAudit = await auditKoyaCharacterRosterReview({ projectDir, showBible: authority.showBible, registry, reviewPath: common.rosterReviewPath });
+    const resolved = args.episodeId ? await resolveKoyaMangaProductionContract({
+      projectDir,
+      episodeId: args.episodeId,
+      contractPath: common.contractPath || undefined,
+      overridePath: common.overridePath || undefined,
+    }) : null;
+    const validationCanary = resolveKoyaValidationCanary({
+      episodeId: args.episodeId,
+      policy: resolved?.episodeOverride?.validationCanary,
+      showBible: authority.showBible,
+    });
     const parsed = parseMangaScript(scriptText, { title: args.title, registry });
     const characterBible = common.characterBiblePath ? JSON.parse(await readFile(common.characterBiblePath, "utf8")) : null;
-    const result = auditKoyaFixedCastReadiness({ showBible: authority.showBible, registry, parsed, characterBible, enforce: authority.source === "project", rosterReviewAudit });
+    const result = auditKoyaFixedCastReadiness({ showBible: authority.showBible, registry, parsed, characterBible, enforce: authority.source === "project", rosterReviewAudit, validationCanary });
     print(result);
     if (!result.pass) exitCode = 2;
     break;

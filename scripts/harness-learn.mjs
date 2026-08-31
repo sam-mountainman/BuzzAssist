@@ -28,6 +28,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveChannelPackPath } from "../lib/channelPackResolver.mjs";
+import { collectSensitiveSignals } from "./audit-public-surface.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const LEARN_DIR = path.join(REPO_ROOT, "docs", "learning");
@@ -318,6 +319,34 @@ function requireWritableTarget(rawTarget) {
   return resolved;
 }
 
+/**
+ * 共有層へ書く提案に、チャンネル固有語が混ざっていないか。
+ *
+ * 宛先が共有層（platform / genre / skill）でも、evidence にキャスト名や
+ * 番組名が入りうる。実際そうなった——ジャンル層の提案の根拠に
+ * 固定キャスト3人の名前が書かれ、**公開リポジトリへ commit された**。
+ * 宛先の層と、書かれる中身の層は別物。
+ *
+ * 検出した語そのものは返さない。呼び出し側のエラー文もログに残る。
+ */
+export function channelTermsInSharedEntry(entry, signals) {
+  const target = String(entry?.target || "");
+  const isShared = !(target.startsWith("channel-pack:") || target.startsWith("ledger:") || target.startsWith("doc:"));
+  if (!isShared) return { ok: true, hits: 0 };
+  const body = `${entry?.text || ""}\u001f${entry?.evidence || ""}`;
+  const terms = (signals?.terms || []).filter((term) => body.includes(term));
+  const ids = (signals?.castIds || []).filter((id) => new RegExp(`\\b${id}\\b`, "u").test(body));
+  const hits = terms.length + ids.length;
+  return {
+    ok: hits === 0,
+    hits,
+    message: hits === 0 ? "" :
+      `共有層（${target}）の提案に、チャンネル固有の語が ${hits} 箇所ある。`
+      + "宛先が共有層でも、根拠にキャスト名や番組名を書くと公開リポジトリへ入る。"
+      + "根拠を一般的な言い方へ書き換えるか、宛先を channel-pack: へ変えること。",
+  };
+}
+
 export function buildProposal({ kind, target, text, evidence, session, now }) {
   if (!PROPOSAL_KINDS.has(kind)) {
     throw new Error(`kind は ${[...PROPOSAL_KINDS].join(" / ")} のいずれかにしてください: ${kind}`);
@@ -421,6 +450,11 @@ function main() {
         session: args.session,
         now,
       });
+      {
+        // 共有層の台帳は公開リポジトリで追跡されている。書く前に見る。
+        const verdict = channelTermsInSharedEntry(entry, collectSensitiveSignals(REPO_ROOT));
+        if (!verdict.ok) throw new Error(verdict.message);
+      }
       appendJsonl(PROPOSALS_PATH, entry);
       const repeats = proposals.filter((p) => (p.id ?? proposalId(p)) === entry.id).length;
       process.stdout.write(`記録しました: ${entry.id}\n`);

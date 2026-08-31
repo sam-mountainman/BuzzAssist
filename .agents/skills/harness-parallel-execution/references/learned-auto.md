@@ -15,4 +15,4 @@
   - 根拠: scripts/harness-parallel-agents.mjs:166-168。2026-08-30実測: codex execはstatus 0でPROBE-OKを返したが、別MCPのAuthRequired/401警告を含むためselectEngineが未ログインと誤判定した
   - 種別: correction / 初回: 2026-08-29 / id: `c0f0c7b1ec69`
 
-_最終更新: 2026-08-30T17:09:04.222Z_
+_最終更新: 2026-08-31T09:47:39.893Z_

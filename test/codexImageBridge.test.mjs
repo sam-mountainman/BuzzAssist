@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { SharedCodexImageBridge } from "../scripts/codex-image-bridge.mjs";
+import { generateOnClient, SharedCodexImageBridge } from "../scripts/codex-image-bridge.mjs";
 
 function fakeClientFactory(state) {
   return async () => {
@@ -52,4 +52,35 @@ test("shared Codex bridge restarts once and reconnects an unfinished job after a
   assert.equal(bridge.stats.restarts, 1);
   assert.equal(bridge.stats.completed, 1);
   bridge.dispose();
+});
+
+test("Codex bridge fails immediately when a turn ends without an image payload", async () => {
+  let listener;
+  const client = {
+    command: "fake-codex",
+    async request(method) {
+      if (method === "thread/start") return { thread: { id: "thread-1" } };
+      if (method === "turn/start") {
+        queueMicrotask(() => listener?.({
+          method: "turn/completed",
+          params: {
+            threadId: "thread-1",
+            turn: { id: "turn-1", status: "interrupted", items: [] },
+          },
+        }));
+        return { turn: { id: "turn-1", items: [] } };
+      }
+      if (method === "thread/archive") return {};
+      throw new Error(`Unexpected request: ${method}`);
+    },
+    onNotification(next) {
+      listener = next;
+      return () => { listener = undefined; };
+    },
+  };
+
+  await assert.rejects(
+    generateOnClient(client, { prompt: "test" }, { cwd: process.cwd(), model: "", timeoutMs: 1000 }),
+    /ended without an image payload \(status: interrupted\)/,
+  );
 });
