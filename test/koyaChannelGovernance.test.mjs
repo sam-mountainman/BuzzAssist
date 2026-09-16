@@ -347,7 +347,7 @@ test("declared eye-open variants must each be registered once before a fixed mem
   assert.equal(await bootstrapStage([eyeOpen("open-calm"), eyeOpen("open-angry")]), "approved");
 });
 
-test("eye-open beats are drafted from the script, reviewed per member and variant, and required for the every-episode member", async () => {
+test("eye-open beats are drafted from the script, reviewed per member and variant, optional per episode, and warned when overused", async () => {
   const authority = await readKoyaChannelAuthority({ allowFixture: true, projectDir: root });
   const showBible = structuredClone(authority.showBible);
   // Members are picked by rule so no cast name enters the public test.
@@ -415,11 +415,26 @@ ${nameOf(recurring)}: ほな、いこか。`;
   assert.match(eyeOpenFailures([{ utteranceId: u02, castId: recurring.id }, { utteranceId: u01, castId: plainMember.id }]).join("\n"), /castId must be a show-bible member that requires an eye-open sheet/u);
   assert.match(eyeOpenFailures([{ utteranceId: "cut-09-u01", castId: recurring.id }]).join("\n"), /must name a real utterance ID/u);
   assert.match(eyeOpenFailures([{ utteranceId: u02, castId: recurring.id }, { utteranceId: u02, castId: recurring.id }]).join("\n"), /repeats/u);
-  assert.match(
-    eyeOpenFailures([{ utteranceId: u01, castId: occasional.id, variant: "open-angry" }]).join("\n"),
-    new RegExp(`at least one eye-open beat for the every-episode eye-open member ${recurring.id}`, "u"),
-  );
+  // Appearing in every episode does not mean opening the eyes in every episode.
+  assert.deepEqual(eyeOpenFailures([{ utteranceId: u01, castId: occasional.id, variant: "open-angry" }]), []);
+  assert.deepEqual(eyeOpenFailures([]), [], "an episode without any eye-open scene is normal");
+  assert.equal(auditKoyaStory({ scriptText, parsed, showBible, storyReview: review([]), enforce: true }).failures.some((message) => /eye-open/u.test(message)), false);
   assert.match(eyeOpenFailures("all").join("\n"), /must be an array/u);
+
+  // Eye-open is a rare trump card: more than two scenes for one member is a warning, never a stop.
+  const busyScript = `タイトル: 開眼の多い回\n${[1, 2, 3].map((index) => `【カット${index}：場面${index}】\nナレーション: ${nameOf(recurring)}の糸目が開いた。\n${nameOf(recurring)}: ほな。`).join("\n")}`;
+  const busyParsed = parseMangaScript(busyScript);
+  const busyDraft = createKoyaStoryReviewDraft({ showBible, scriptText: busyScript, parsed: busyParsed });
+  assert.match(busyDraft.eyeOpenBeatWarnings.join("\n"), new RegExp(`${recurring.id} opens their eyes in 3 scenes \\(cut-01, cut-02, cut-03\\)`, "u"));
+  assert.deepEqual(draft.eyeOpenBeatWarnings, []);
+  const busyReview = (eyeOpenBeats) => ({ ...review(eyeOpenBeats), scriptSha256: hash(busyScript) });
+  const busyAudit = (eyeOpenBeats) => auditKoyaStory({ scriptText: busyScript, parsed: busyParsed, showBible, storyReview: busyReview(eyeOpenBeats), enforce: true });
+  const busyIds = busyParsed.utterances.filter((entry) => entry.speakerId === "narration").map((entry) => entry.id);
+  const threeScenes = busyAudit(busyIds.map((utteranceId) => ({ utteranceId, castId: recurring.id })));
+  assert.match(threeScenes.warnings.join("\n"), /opens their eyes in 3 scenes.*rare trump card/u);
+  assert.equal(threeScenes.failures.some((message) => /eye-open|eyeOpenBeats/u.test(message)), false, "overuse warns but does not fail");
+  assert.doesNotMatch(busyAudit(busyIds.slice(0, 2).map((utteranceId) => ({ utteranceId, castId: recurring.id }))).warnings.join("\n"), /opens their eyes/u);
+  assert.match(busyAudit(undefined).warnings.join("\n"), /opens their eyes in 3 scenes/u, "without reviewed beats the script cues are counted");
 
   const registry = { characters: [{ id: "registered-occasional", name: nameOf(occasional), kind: "character", status: "approved", aliases: [] }] };
   const policy = buildKoyaEyeOpenPolicy({ showBible, registry, storyReview: review([{ utteranceId: u01, castId: occasional.id, variant: "open-angry" }]) });
@@ -427,19 +442,16 @@ ${nameOf(recurring)}: ほな、いこか。`;
   assert.equal(occasionalCandidate.characterId, "registered-occasional");
   assert.deepEqual(occasionalCandidate.variants.map((entry) => [entry.id, entry.cues]), [["open-calm", ["ありがとう"]], ["open-angry", ["逃げ"]]]);
   assert.deepEqual(policy.reviewedBeats, [{ utteranceId: u01, characterId: "registered-occasional", variant: "open-angry", reason: "" }]);
-  assert.equal(policy.recurringMemberId, recurring.id);
   assert.equal(buildKoyaEyeOpenPolicy({ showBible, registry }).reviewedBeats, null);
 
-  const missing = auditKoyaEyeOpenPlan({ policy, eyeOpenPlan: { source: "review", boundImages: [] }, activeCastIds: [recurring.id] });
-  assert.equal(missing.pass, false);
-  assert.match(missing.failures[0], new RegExp(`${recurring.id} must open their eyes in every episode`, "u"));
-  assert.equal(auditKoyaEyeOpenPlan({ policy, eyeOpenPlan: { boundImages: [] }, activeCastIds: [occasional.id] }).pass, true, "only an active every-episode member is required");
-  const bound = auditKoyaEyeOpenPlan({
+  const none = auditKoyaEyeOpenPlan({ policy, eyeOpenPlan: { source: "review", beats: [], boundImages: [] } });
+  assert.deepEqual(none, { source: "review", beatCount: 0, boundImageCount: 0, warnings: [] }, "zero eye-open images is a normal plan");
+  const boundIn = (cutIds) => auditKoyaEyeOpenPlan({
     policy,
-    eyeOpenPlan: { source: "script-cue", boundImages: [{ utteranceId: u02, characterId: policy.recurringCharacterId }] },
-    activeCastIds: [recurring.id],
+    eyeOpenPlan: { source: "script-cue", beats: [], boundImages: cutIds.map((cutId) => ({ cutId, characterId: "registered-occasional" })) },
   });
-  assert.deepEqual([bound.pass, bound.recurringImageCount], [true, 1]);
+  assert.deepEqual(boundIn(["cut-01", "cut-01", "cut-02"]).warnings, [], "two scenes are fine even with several images each");
+  assert.match(boundIn(["cut-01", "cut-02", "cut-03"]).warnings[0], new RegExp(`^${occasional.id} opens their eyes in 3 scenes`, "u"));
 });
 
 test("one-off validation canary admits only the exact approved cast without weakening normal roster production", async () => {
