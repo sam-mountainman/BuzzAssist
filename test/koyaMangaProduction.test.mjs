@@ -8,12 +8,14 @@ const requireResolver = () => ({ resolveChannelPackPath });
 // キャスト名からチャンネルが特定できる（公開リポジトリなので）。
 // ここで見ているのは「同じ名前が照合されるか」なので、名前の中身は問わない。
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
+import { deflateSync } from "node:zlib";
 
 import {
+  approveKoyaCharacterCandidate,
   applyKoyaCharacterBibleSpeechDirectives,
   applyKoyaValidationCanaryVoiceProfiles,
   assertKoyaFullPreflight,
@@ -50,6 +52,17 @@ import {
   createVideoHarnessExecutionIdentityDigest,
   resolvedProductionContractSha256,
 } from "../lib/videoHarnessExecutionIdentity.mjs";
+import {
+  buildApprovedIdentityPackJobs,
+  buildCharacterCandidateJobs,
+  effectiveCharacterIdentityCandidate,
+  findWorkflowCandidate,
+  getCharacterWorkflow,
+  markCharacterCandidatesGenerating,
+  prepareCharacterWorkflow,
+  readCharacterWorkflowStore,
+  recordCharacterCandidateResults,
+} from "../lib/characterPipeline.mjs";
 import { renderEditorialPlatePng } from "../lib/mangaScriptImagePipeline.mjs";
 import { requireArtifacts, requireChannelPack } from "./helpers/requirePrerequisites.mjs";
 
@@ -1405,4 +1418,192 @@ test("Koya planning stops before paid generation when a narrated multi-character
     episodeId: "koya-protagonist-required",
     contractPath: join(process.cwd(), "config/koya-manga-production-contract.json"),
   }), /protagonist is ambiguous/u);
+});
+
+function patternedPng(seedNumber, width = 400, height = 300) {
+  const seed = createHash("sha256").update(`pattern-${seedNumber}`).digest();
+  const crcTable = Array.from({ length: 256 }, (_, n) => {
+    let c = n;
+    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    return c >>> 0;
+  });
+  const crc32 = (bytes) => {
+    let crc = 0xffffffff;
+    for (const byte of bytes) crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+    return (crc ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type, data = Buffer.alloc(0)) => {
+    const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    const checksum = Buffer.alloc(4);
+    checksum.writeUInt32BE(crc32(body));
+    return Buffer.concat([length, body, checksum]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8;
+  header[9] = 2;
+  const raw = Buffer.alloc(height * (1 + width * 3));
+  for (let y = 0; y < height; y += 1) {
+    const row = y * (1 + width * 3);
+    for (let x = 0; x < width; x += 1) {
+      const offset = row + 1 + x * 3;
+      raw[offset] = (seed[0] + x * (seed[3] % 11 + 1) + y * 3) % 256;
+      raw[offset + 1] = (seed[1] + y * (seed[4] % 13 + 1) + x * 2) % 256;
+      raw[offset + 2] = (seed[2] + (x + y) * (seed[5] % 17 + 1)) % 256;
+    }
+  }
+  return Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), chunk("IHDR", header), chunk("IDAT", deflateSync(raw)), chunk("IEND")]);
+}
+
+async function passAnonymousCandidateReview(pathname) {
+  const review = JSON.parse(await readFile(pathname, "utf8"));
+  review.generatorContextId = "candidate-generator-session";
+  review.reviewer = { host: "codex", id: "candidate-reviewer", contextId: "candidate-review-session", reviewedAt: new Date().toISOString() };
+  review.originalScaleInspected = true;
+  for (const candidate of review.candidates) {
+    candidate.faceRegionReviewed = true;
+    candidate.manualFaceRegion = [0, 0, candidate.width, candidate.height];
+  }
+  for (const pair of review.pairChecks) {
+    Object.assign(pair.visualAxes, { faceShapeDistinct: true, hairSilhouetteDistinct: true });
+    Object.assign(pair, { pass: true, note: "原寸で顔型と髪シルエットの差を確認" });
+  }
+  Object.assign(review, { pass: true, notes: "候補は別設計として識別できる" });
+  await writeFile(pathname, `${JSON.stringify(review, null, 2)}\n`);
+}
+
+test("character-approve with a full-role import map stages every declared eye-open variant", async () => {
+  // The project authority must be the one written below, never a pack the
+  // developer machine exposes through the environment.
+  const savedPack = process.env.BUZZASSIST_CHANNEL_PACK;
+  delete process.env.BUZZASSIST_CHANNEL_PACK;
+  const projectDir = await mkdtemp(join(tmpdir(), "koya-eye-open-approve-"));
+  try {
+    const canvasDir = join(projectDir, "canvas");
+    await cp(new URL("./fixtures/channel-pack/config", import.meta.url).pathname, join(projectDir, "config"), { recursive: true });
+    const showPath = join(projectDir, "config/koya-show-bible.json");
+    const showBible = JSON.parse(await readFile(showPath, "utf8"));
+    // Pick the member by rule so no cast name enters the public test.
+    const member = showBible.cast.find((entry) => entry.requiredEveryEpisode !== true && entry.requiredReferenceRoles?.includes("eye-open"));
+    assert.ok(member, "fixture needs an occasional member with a required eye-open sheet");
+    delete member.stylingSpecPath;
+    delete member.stylingSpecPaths;
+    const memberName = member.hiddenName || member.name;
+    const authorityPath = join(canvasDir, "approved/open-angry-front.png");
+    await mkdir(join(canvasDir, "approved"), { recursive: true });
+    await writeFile(authorityPath, patternedPng(90, 128, 128));
+    const authoritySha256 = createHash("sha256").update(await readFile(authorityPath)).digest("hex");
+    member.eyeOpenVariants = [
+      { id: "open-calm", label: "穏やか", description: "gently open eyes with soft lines", cues: ["ありがとう"] },
+      {
+        id: "open-angry",
+        label: "怒り",
+        description: "wide open eyes with a hard glare",
+        cues: ["逃げ"],
+        referenceAssets: [{ path: "canvas/approved/open-angry-front.png", sha256: authoritySha256 }],
+      },
+    ];
+    await writeFile(showPath, `${JSON.stringify(showBible, null, 2)}\n`);
+
+    const episodeId = "manga-eye-open-approve";
+    const workflow = await prepareCharacterWorkflow({
+      projectDir,
+      scriptText: `${memberName}：逃げなさんな。`,
+      episodeId,
+      candidateCount: 3,
+      cast: [{ id: member.id, name: memberName, role: "fixed", description: "普段は糸目の老人。", invariants: ["白髪"] }],
+    });
+    const candidateJobs = await buildCharacterCandidateJobs(workflow);
+    await markCharacterCandidatesGenerating({ projectDir }, workflow.id, candidateJobs);
+    const candidateResults = [];
+    for (const [index] of candidateJobs.entries()) {
+      const assetFile = join(canvasDir, "assets", `candidate-${index + 1}.png`);
+      await mkdir(join(canvasDir, "assets"), { recursive: true });
+      await writeFile(assetFile, patternedPng(index + 1, 96, 72));
+      candidateResults.push({ elementId: `candidate-${index + 1}`, assetFile });
+    }
+    const awaiting = await recordCharacterCandidateResults({ projectDir, generatorContextId: "candidate-generator-session" }, workflow.id, candidateJobs, candidateResults);
+    const reviewCast = awaiting.cast[0];
+    await passAnonymousCandidateReview(reviewCast.candidateReviewDraftPath);
+    const selected = reviewCast.candidates[1];
+    assert.ok(selected.blindLabel && selected.blindPublicPacketPath, "the official candidate route writes the anonymous packet");
+    const candidateSha256 = createHash("sha256").update(await readFile(selected.assetFile)).digest("hex");
+    const generator = { host: "claude", id: "identity-import-tool", contextId: "identity-import-session" };
+    const importMapPath = join(canvasDir, "identity-import/eye-open-variants.json");
+    await mkdir(join(canvasDir, "identity-import"), { recursive: true });
+    const writeImportMap = (entries) => writeFile(importMapPath, `${JSON.stringify({
+      version: "koya-identity-generation-import-v1",
+      workflowId: workflow.id,
+      castId: reviewCast.id,
+      candidateSha256,
+      generator,
+      generationScopeId: `approval:${generator.contextId}`,
+      entries,
+    }, null, 2)}\n`);
+    const approve = () => approveKoyaCharacterCandidate({
+      projectDir,
+      episodeId,
+      workflowId: workflow.id,
+      castId: reviewCast.id,
+      candidateLabel: selected.blindLabel,
+      approvalReason: "承認済み候補ラベルのまま開眼差分を追加する",
+      approvedBy: "test-human",
+      candidateReviewPath: reviewCast.candidateReviewDraftPath,
+      generatorHost: generator.host,
+      generatorId: generator.id,
+      generatorContextId: generator.contextId,
+      identityGenerationImportMapPath: importMapPath,
+    });
+
+    // An incomplete map stops before any image call, after the show-bible
+    // declaration has been copied onto the workflow cast.
+    await writeImportMap([]);
+    await assert.rejects(approve, /map every official job exactly once/u);
+    const store = await readCharacterWorkflowStore({ projectDir });
+    const storedWorkflow = getCharacterWorkflow(store, workflow.id);
+    const storedCast = storedWorkflow.cast[0];
+    assert.deepEqual(storedCast.eyeOpenVariants.map((variant) => variant.id), ["open-calm", "open-angry"]);
+    assert.deepEqual(storedCast.eyeOpenVariants[1].referenceAssets, [{ path: authorityPath, sha256: authoritySha256 }]);
+
+    const identityCandidate = effectiveCharacterIdentityCandidate(storedCast, findWorkflowCandidate(storedCast, selected.id));
+    const jobs = buildApprovedIdentityPackJobs(storedWorkflow, storedCast, identityCandidate, { fileNameSuffix: generator.contextId });
+    const keys = jobs.map((job) => `${job.pipeline.identityRole}:${job.pipeline.storyStage || ""}`);
+    assert.deepEqual(keys, ["turnaround:", "expression:", "eye-open:open-calm", "eye-open:open-angry"]);
+    const entries = [];
+    for (const [index, job] of jobs.entries()) {
+      const sourceFile = join(canvasDir, "identity-import", `source-${index + 1}.png`);
+      await writeFile(sourceFile, patternedPng(40 + index, 400, index === 0 ? 200 : 300));
+      const { inputSha256 } = await buildKoyaIdentityPackJobInput({ workflowId: workflow.id, castId: reviewCast.id, candidateSha256, generator, job });
+      entries.push({
+        key: keys[index],
+        sourceFile,
+        sourceSha256: createHash("sha256").update(await readFile(sourceFile)).digest("hex"),
+        inputSha256,
+      });
+    }
+    await writeImportMap(entries);
+
+    await writeFile(authorityPath, patternedPng(91, 128, 128));
+    await assert.rejects(approve, /eye-open authority open-angry path\/SHA-256 changed/u);
+    await writeFile(authorityPath, patternedPng(90, 128, 128));
+
+    const approved = await approve();
+    const pack = approved.staged.cast.identityPack;
+    assert.equal(approved.staged.cast.status, "awaiting-identity-qa");
+    assert.deepEqual(pack.eyeOpenSheets.map((sheet) => sheet.storyStage), ["open-calm", "open-angry"]);
+    assert.deepEqual(
+      pack.eyeOpenSheets.map((sheet) => sheet.sha256),
+      [entries[2].sourceSha256, entries[3].sourceSha256],
+      "each variant stages exactly the imported bytes for its key",
+    );
+    const draft = JSON.parse(await readFile(approved.staged.identityReviewDraftPath, "utf8"));
+    assert.deepEqual(draft.extraSheets.map((sheet) => sheet.storyStage), ["open-calm", "open-angry"]);
+  } finally {
+    if (savedPack === undefined) delete process.env.BUZZASSIST_CHANNEL_PACK;
+    else process.env.BUZZASSIST_CHANNEL_PACK = savedPack;
+    await rm(projectDir, { recursive: true, force: true });
+  }
 });

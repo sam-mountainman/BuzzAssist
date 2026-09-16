@@ -2,13 +2,14 @@ import test from "node:test";
 import { resolveChannelPackPath } from "../lib/channelPackResolver.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { deflateSync } from "node:zlib";
 
 import {
   buildApprovedIdentityPackJobs,
+  buildApprovedIdentityPackRepairJobs,
   buildCharacterCandidateJobs,
   buildCharacterCandidateRegenerationJobs,
   buildCharacterStoryboardJobs,
@@ -27,8 +28,13 @@ import {
   validateStoryboardCharacterBindings,
   writeCharacterWorkflowStore,
 } from "../lib/characterPipeline.mjs";
-import { normalizeSideLockedFeatures } from "../lib/characterIdentityReview.mjs";
-import { readCharacterRegistry, writeCharacterRegistry } from "../lib/characterRegistry.mjs";
+import { normalizeSideLockedFeatures, validateFailedIdentityPackReview } from "../lib/characterIdentityReview.mjs";
+import {
+  optimizeCharacterBindingsForGeneration,
+  readCharacterRegistry,
+  resolveCharacterBindings,
+  writeCharacterRegistry,
+} from "../lib/characterRegistry.mjs";
 import { auditKoyaCharacterBootstrap } from "../lib/koyaChannelGovernance.mjs";
 
 const SAMPLE_SCRIPT = `
@@ -872,6 +878,263 @@ test("approval stages real sheets and registers only after eight-view and twelve
   }
 });
 
+async function prepareApprovableCast(projectDir, castEntry) {
+  const workflow = await prepareCharacterWorkflow({
+    projectDir,
+    scriptText: `${castEntry.name}：これはテストです。`,
+    episodeId: "episode-eye-open",
+    candidateCount: 3,
+    cast: [castEntry],
+  });
+  const jobs = await buildCharacterCandidateJobs(workflow);
+  await markCharacterCandidatesGenerating({ projectDir }, workflow.id, jobs);
+  const canvasAssets = path.join(projectDir, "canvas", "assets");
+  await mkdir(canvasAssets, { recursive: true });
+  const results = [];
+  for (const [index] of jobs.entries()) {
+    const assetFile = path.join(canvasAssets, `candidate-${index + 1}.png`);
+    await writeFile(assetFile, testRaster(index + 1));
+    results.push({ elementId: `candidate-element-${index + 1}`, assetFile, assetUrl: `/excalidraw-assets/candidate-${index + 1}.png` });
+  }
+  const awaitingApproval = await recordCharacterCandidateResults({ projectDir, generatorContextId: "candidate-generator-session" }, workflow.id, jobs, results);
+  const cast = awaitingApproval.cast[0];
+  await passCandidateReview(cast.candidateReviewDraftPath);
+  return { workflow: awaitingApproval, cast, selected: cast.candidates[1], canvasAssets };
+}
+
+async function stageIdentityPack(projectDir, prepared, jobs, results) {
+  return stageApprovedCharacterIdentityPack({
+    projectDir,
+    workflowId: prepared.workflow.id,
+    castId: prepared.cast.id,
+    candidateId: prepared.selected.id,
+    approvalReason: "原寸比較で役柄に最も合うと判断した",
+    approvedBy: "test-human",
+    candidateReviewPath: prepared.cast.candidateReviewDraftPath,
+    generatorContextId: "identity-generator-session",
+    jobs,
+    results,
+  });
+}
+
+async function rewriteJson(pathname, mutate) {
+  const value = JSON.parse(await readFile(pathname, "utf8"));
+  mutate(value);
+  await writeFile(pathname, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+test("declared eye-open variants are each generated, reviewed, and registered under their own key", async () => {
+  const projectDir = await mkdtemp(path.join(os.tmpdir(), "buzzassist-eye-open-variants-"));
+  try {
+    const canvasAssets = path.join(projectDir, "canvas", "assets");
+    await mkdir(canvasAssets, { recursive: true });
+    const authorityFile = path.join(canvasAssets, "approved-open-angry.png");
+    const authorityBytes = testRaster(31, 120, 120);
+    await writeFile(authorityFile, authorityBytes);
+    const authoritySha256 = createHash("sha256").update(authorityBytes).digest("hex");
+    const prepared = await prepareApprovableCast(projectDir, {
+      name: "田中",
+      role: "fixed",
+      description: "60代の清掃員。",
+      invariants: ["白髪"],
+      eyeOpenVariants: [
+        { id: "open-calm", label: "穏やかな開眼", description: "gently open eyes with soft lines and a kind gaze" },
+        {
+          id: "open-angry",
+          label: "怒りの開眼",
+          description: "wide open eyes with a hard, angry glare and tense brows",
+          referenceAssets: [{ path: authorityFile, sha256: authoritySha256 }],
+        },
+      ],
+    });
+    const { selected } = prepared;
+    assert.deepEqual(prepared.cast.eyeOpenVariants.map((variant) => variant.id), ["open-calm", "open-angry"]);
+
+    const jobs = buildApprovedIdentityPackJobs(prepared.workflow, prepared.cast, selected);
+    assert.deepEqual(jobs.map((job) => job.pipeline.identityRole), ["turnaround", "expression", "eye-open", "eye-open"]);
+    const [, , calmJob, angryJob] = jobs;
+    assert.deepEqual([calmJob.pipeline.storyStage, angryJob.pipeline.storyStage], ["open-calm", "open-angry"]);
+    assert.notEqual(calmJob.fileName, angryJob.fileName);
+    assert.deepEqual(calmJob.referenceImagePaths, [selected.assetFile]);
+    assert.deepEqual(angryJob.referenceImagePaths, [selected.assetFile, authorityFile]);
+    assert.match(calmJob.prompt, /soft lines and a kind gaze/u);
+    assert.doesNotMatch(calmJob.prompt, /frightening/u);
+    assert.match(angryJob.prompt, /Reference image 2 is the exact SHA-bound APPROVED EYES-OPEN AUTHORITY/u);
+    assert.equal(angryJob.customData.buzzassistCharacterEyeOpenVariant, "open-angry");
+
+    const writeSheet = async (name, seed, width = 400, height = 300) => {
+      const file = path.join(canvasAssets, name);
+      await writeFile(file, testRaster(seed, width, height));
+      return { assetFile: file, assetUrl: `/excalidraw-assets/${name}` };
+    };
+    const turnaround = await writeSheet("turnaround.png", 11, 400, 200);
+    const expression = await writeSheet("expression.png", 12);
+    const calm = await writeSheet("eyes-open-calm.png", 13);
+    const angry = await writeSheet("eyes-open-angry.png", 14);
+
+    await assert.rejects(
+      () => stageIdentityPack(projectDir, prepared, jobs.slice(0, 3), [turnaround, expression, calm]),
+      /Missing required eyes-open differential sheets for variant: open-angry/u,
+    );
+    await writeFile(authorityFile, testRaster(32, 120, 120));
+    await assert.rejects(
+      () => stageIdentityPack(projectDir, prepared, jobs, [turnaround, expression, calm, angry]),
+      /authority reference bytes changed/u,
+    );
+    await writeFile(authorityFile, authorityBytes);
+
+    const staged = await stageIdentityPack(projectDir, prepared, jobs, [turnaround, expression, calm, angry]);
+    const stagedPack = staged.cast.identityPack;
+    assert.deepEqual(stagedPack.eyeOpenSheets.map((sheet) => [sheet.storyStage, sheet.assetFile]), [
+      ["open-calm", calm.assetFile],
+      ["open-angry", angry.assetFile],
+    ]);
+    assert.equal(stagedPack.eyeOpen.assetFile, calm.assetFile, "eyeOpen keeps the default sheet for older readers");
+
+    const draft = JSON.parse(await readFile(staged.identityReviewDraftPath, "utf8"));
+    assert.deepEqual(draft.extraSheets.map((sheet) => [sheet.role, sheet.storyStage, sheet.path]), [
+      ["eye-open", "open-calm", await realpath(calm.assetFile)],
+      ["eye-open", "open-angry", await realpath(angry.assetFile)],
+    ]);
+    const cellPaths = draft.extraSheets.flatMap((sheet) => sheet.cells.map((cell) => cell.path));
+    assert.equal(new Set(cellPaths).size, 8, "each variant keeps its own cell crops");
+
+    // One failed cell in one variant fails registration and marks only that variant for repair.
+    await passIdentityReview(staged.identityReviewDraftPath);
+    await rewriteJson(staged.identityReviewDraftPath, (review) => {
+      const angrySheet = review.extraSheets.find((sheet) => sheet.storyStage === "open-angry");
+      const cell = angrySheet.cells.find((entry) => entry.id === "open-front");
+      Object.assign(cell, { sameIdentity: false, stateMatchesSpecification: false, pass: false });
+      angrySheet.pass = false;
+      review.pass = false;
+    });
+    await assert.rejects(
+      () => finalizeApprovedCharacter({ projectDir, workflowId: prepared.workflow.id, castId: prepared.cast.id, identityReviewPath: staged.identityReviewDraftPath }),
+      /extraSheets\.eye-open:open-angry\.cells\.open-front\.sameIdentity must be true/u,
+    );
+    const failed = await validateFailedIdentityPackReview({
+      reviewPath: staged.identityReviewDraftPath,
+      workflow: staged.workflow,
+      cast: staged.cast,
+      identityPack: stagedPack,
+    });
+    assert.deepEqual(failed.failedRoles, ["eye-open:open-angry"]);
+    const repairJobs = buildApprovedIdentityPackRepairJobs(staged.workflow, staged.cast, selected, failed.failedRoles, { repairId: "angry-1" });
+    assert.deepEqual(repairJobs.map((job) => [job.pipeline.identityRole, job.pipeline.storyStage]), [["eye-open", "open-angry"]]);
+    assert.match(repairJobs[0].fileName, /eyes-open-open-angry-repair-angry-1\.png$/u);
+
+    // Reviewing the calm sheet under the angry key (the classic mix-up) cannot pass.
+    await passIdentityReview(staged.identityReviewDraftPath);
+    const passedReview = await readFile(staged.identityReviewDraftPath, "utf8");
+    await rewriteJson(staged.identityReviewDraftPath, (review) => {
+      const [first, second] = review.extraSheets;
+      [first.storyStage, second.storyStage] = [second.storyStage, first.storyStage];
+    });
+    await assert.rejects(
+      () => finalizeApprovedCharacter({ projectDir, workflowId: prepared.workflow.id, castId: prepared.cast.id, identityReviewPath: staged.identityReviewDraftPath }),
+      /extraSheets\.eye-open:open-calm\.path must bind the exact generated asset/u,
+    );
+    await rewriteJson(staged.identityReviewDraftPath, (review) => {
+      delete review.extraSheets[1].storyStage;
+    });
+    await assert.rejects(
+      () => finalizeApprovedCharacter({ projectDir, workflowId: prepared.workflow.id, castId: prepared.cast.id, identityReviewPath: staged.identityReviewDraftPath }),
+      /unexpected identity differential: eye-open\./u,
+    );
+    await writeFile(staged.identityReviewDraftPath, passedReview);
+
+    const finalized = await finalizeApprovedCharacter({
+      projectDir,
+      workflowId: prepared.workflow.id,
+      castId: prepared.cast.id,
+      identityReviewPath: staged.identityReviewDraftPath,
+    });
+    const eyeOpenAssets = finalized.character.referenceAssets.filter((asset) => asset.role === "eye-open");
+    assert.deepEqual(eyeOpenAssets.map((asset) => [asset.id, asset.storyStage]), [
+      ["eye-open-open-calm", "open-calm"],
+      ["eye-open-open-angry", "open-angry"],
+    ]);
+    assert.ok(finalized.character.referenceAssets.every((asset) => asset.sourceReviewPath === finalized.character.approval.identityReviewPath));
+    assert.equal(new Set(eyeOpenAssets.map((asset) => asset.path)).size, 2);
+    for (const [asset, source] of [[eyeOpenAssets[0], calm], [eyeOpenAssets[1], angry]]) {
+      assert.deepEqual(await readFile(path.join(projectDir, "canvas", asset.path)), await readFile(source.assetFile));
+      assert.equal(asset.sha256, createHash("sha256").update(await readFile(source.assetFile)).digest("hex"));
+    }
+    assert.deepEqual(finalized.workflow.cast[0].eyeOpenSheets.map((sheet) => sheet.storyStage), ["open-calm", "open-angry"]);
+
+    const registry = await readCharacterRegistry({ projectDir });
+    const bindings = resolveCharacterBindings(registry, [prepared.cast.id], { projectDir });
+    const angryRoute = optimizeCharacterBindingsForGeneration(bindings, { eyeOpenVariant: "open-angry" })[0];
+    assert.deepEqual(angryRoute.referenceAssets.map((asset) => asset.role), ["identity-face", "eye-open"]);
+    assert.equal(angryRoute.referenceAssets[1].storyStage, "open-angry");
+    assert.throws(() => optimizeCharacterBindingsForGeneration(bindings, { referenceIntent: "eye-open" }), /2 eye-open sheets \(open-calm, open-angry\)/u);
+    assert.throws(() => optimizeCharacterBindingsForGeneration(bindings, { eyeOpenVariant: "open-sad" }), /no approved eye-open sheet/u);
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("a single unkeyed eye-open sheet keeps the pre-variant pack, review, and registry shape", async () => {
+  const projectDir = await mkdtemp(path.join(os.tmpdir(), "buzzassist-eye-open-legacy-"));
+  try {
+    const prepared = await prepareApprovableCast(projectDir, {
+      name: "佐藤",
+      role: "fixed",
+      description: "普段は糸目の老人。",
+      invariants: ["白髪"],
+    });
+    const jobs = buildApprovedIdentityPackJobs(prepared.workflow, prepared.cast, prepared.selected);
+    assert.deepEqual(jobs.map((job) => job.pipeline.identityRole), ["turnaround", "expression", "eye-open"]);
+    assert.equal(jobs[2].pipeline.storyStage, undefined);
+    assert.match(jobs[2].fileName, /-eyes-open\.png$/u);
+    const files = [];
+    for (const [index, [name, width, height]] of [["turnaround.png", 400, 200], ["expression.png", 400, 300], ["eyes-open.png", 400, 300]].entries()) {
+      const assetFile = path.join(prepared.canvasAssets, name);
+      await writeFile(assetFile, testRaster(41 + index, width, height));
+      files.push({ assetFile });
+    }
+
+    const keyedJob = { ...jobs[2], pipeline: { identityRole: "eye-open", storyStage: "open-x" } };
+    await assert.rejects(
+      () => stageIdentityPack(projectDir, prepared, [jobs[0], jobs[1], keyedJob], files),
+      /require eyeOpenVariants declared/u,
+    );
+
+    const staged = await stageIdentityPack(projectDir, prepared, jobs, files);
+    const draft = JSON.parse(await readFile(staged.identityReviewDraftPath, "utf8"));
+    assert.equal(draft.extraSheets.length, 1);
+    assert.equal(Object.hasOwn(draft.extraSheets[0], "storyStage"), false, "unkeyed drafts keep the historical shape");
+    assert.match(draft.extraSheets[0].cells[0].path, /\/eye-open-default-front\.png$/u);
+
+    // A workflow staged before variants existed has only identityPack.eyeOpen.
+    await updateCharacterWorkflow({ projectDir }, prepared.workflow.id, (current) => {
+      delete current.cast[0].identityPack.eyeOpenSheets;
+      return current;
+    });
+    const legacyCast = getCharacterWorkflow(await readCharacterWorkflowStore({ projectDir }), prepared.workflow.id).cast[0];
+    assert.deepEqual(legacyCast.identityPack.eyeOpenSheets, []);
+    assert.equal(legacyCast.identityPack.eyeOpen.assetFile, files[2].assetFile);
+
+    await passIdentityReview(staged.identityReviewDraftPath);
+    const finalized = await finalizeApprovedCharacter({
+      projectDir,
+      workflowId: prepared.workflow.id,
+      castId: prepared.cast.id,
+      identityReviewPath: staged.identityReviewDraftPath,
+    });
+    const eyeOpenAssets = finalized.character.referenceAssets.filter((asset) => asset.role === "eye-open");
+    assert.deepEqual(eyeOpenAssets.map((asset) => [asset.id, asset.storyStage]), [["eye-open", ""]]);
+    assert.match(eyeOpenAssets[0].path, /-eyes-open\.png$/u);
+    assert.equal(finalized.workflow.cast[0].eyeOpenSheet.assetFile, path.join(projectDir, "canvas", eyeOpenAssets[0].path));
+
+    const bindings = resolveCharacterBindings(await readCharacterRegistry({ projectDir }), [prepared.cast.id], { projectDir });
+    assert.equal(optimizeCharacterBindingsForGeneration(bindings, { referenceIntent: "eye-open" })[0].referenceAssets[1].id, "eye-open");
+    assert.throws(() => optimizeCharacterBindingsForGeneration(bindings, { eyeOpenVariant: "open-calm" }), /no approved eye-open sheet for variant 'open-calm'/u);
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});
+
 test("storyboard resolves character names to ids and flags multi-character identity mixing risk", async () => {
   const projectDir = await mkdtemp(path.join(os.tmpdir(), "buzzassist-character-storyboard-"));
   try {
@@ -897,6 +1160,13 @@ test("storyboard resolves character names to ids and flags multi-character ident
     const validation = validateStoryboardCharacterBindings(readyWorkflow, jobs);
     assert.equal(validation.ok, false);
     assert.match(validation.warnings.join("\n"), /multi-character identity-mixing risk/);
+    assert.equal(Object.hasOwn(jobs[1], "eyeOpenVariant"), false);
+    const [eyeOpenJob] = buildCharacterStoryboardJobs(readyWorkflow, [
+      { prompt: "田中が目を見開く。", characters: ["田中"], eyeOpenVariant: "open-angry" },
+    ]);
+    assert.equal(eyeOpenJob.referenceIntent, "eye-open");
+    assert.equal(eyeOpenJob.eyeOpenVariant, "open-angry");
+    assert.equal(eyeOpenJob.customData.buzzassistCharacterEyeOpenVariant, "open-angry");
   } finally {
     await rm(projectDir, { recursive: true, force: true });
   }

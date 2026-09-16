@@ -48,7 +48,7 @@ async function copyConfig(sourceProject, targetProject, relativePath) {
   await copyFile(source, target);
 }
 
-async function prepareProject(root, withData = true) {
+async function prepareProject(root, withData = true, mutateShowBible = null) {
   const configFiles = [
     "config/koya-show-bible.json",
     "config/koya-location-bible.json",
@@ -61,6 +61,12 @@ async function prepareProject(root, withData = true) {
   const stylingDirectory = resolveChannelPackPath(repoRoot, "config/koya-character-styling");
   for (const name of (await readdir(stylingDirectory)).filter((entry) => entry.endsWith(".json")).sort()) {
     await copyConfig(repoRoot, root, path.join("config", "koya-character-styling", name));
+  }
+  if (mutateShowBible) {
+    const showBiblePath = path.join(root, "config", "koya-show-bible.json");
+    const showBible = JSON.parse(await readFile(showBiblePath, "utf8"));
+    mutateShowBible(showBible);
+    await writeJson(showBiblePath, showBible);
   }
   const canvas = path.join(root, "canvas");
   await mkdir(path.join(canvas, "assets"), { recursive: true });
@@ -182,6 +188,61 @@ test("Koya handoff exports only approved scoped data, verifies every file, and r
     await writeFile(evidencePath, "tampered");
     await assert.rejects(() => verifyKoyaHandoffBundle({ bundleDir }), /SHA-256 mismatch|size mismatch/u);
   } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Koya handoff carries every declared eye-open variant under one identity review and refuses a missing one", async () => {
+  // The variant declaration lives in the temporary project's show bible, so a
+  // developer pack exposed through the environment must not shadow it.
+  const savedPack = process.env.BUZZASSIST_CHANNEL_PACK;
+  delete process.env.BUZZASSIST_CHANNEL_PACK;
+  const root = await mkdtemp(path.join(os.tmpdir(), "koya-handoff-eye-open-"));
+  const sourceProject = path.join(root, "source");
+  const targetProject = path.join(root, "target");
+  let memberId = "";
+  // The member is picked by rule (an occasional eye-open member), never by name.
+  const declareVariants = (showBible) => {
+    const recurringId = showBible.storyGrammar?.castSemantics?.recurringEyeOpen?.castId;
+    const member = showBible.cast.find((entry) => entry.id !== recurringId && entry.requiredReferenceRoles?.includes("eye-open"));
+    assert.ok(member, "fixture needs an occasional member with a required eye-open sheet");
+    memberId = member.id;
+    member.eyeOpenVariants = [
+      { id: "open-calm", label: "calm", description: "gently open eyes" },
+      { id: "open-angry", label: "angry", description: "hard glare" },
+    ];
+  };
+  try {
+    await prepareProject(sourceProject, true, declareVariants);
+    await prepareProject(targetProject, false);
+    const bundleDir = path.join(root, "bundle");
+    await exportKoyaHandoffBundle({ projectDir: sourceProject, outputDir: bundleDir, bundleId: "handoff-eye-open" });
+    assert.equal((await verifyKoyaHandoffBundle({ bundleDir })).ok, true);
+    await restoreKoyaHandoffBundle({ projectDir: targetProject, bundleDir });
+    const targetRegistry = JSON.parse(await readFile(path.join(targetProject, "canvas", "characters.json"), "utf8"));
+    const restored = targetRegistry.characters.find((entry) => entry.id === memberId);
+    const eyeOpenAssets = restored.referenceAssets.filter((asset) => asset.role === "eye-open");
+    assert.deepEqual(eyeOpenAssets.map((asset) => asset.storyStage), ["open-calm", "open-angry"]);
+    assert.equal(new Set(eyeOpenAssets.map((asset) => asset.path)).size, 2);
+    for (const asset of eyeOpenAssets) {
+      assert.equal(sha256(await readFile(path.join(targetProject, "canvas", asset.path))), asset.sha256);
+      assert.equal(asset.sourceReviewPath, restored.approval.identityReviewPath);
+    }
+
+    // A registry that lost one declared variant is not exportable.
+    const sourceRegistryPath = path.join(sourceProject, "canvas", "characters.json");
+    const sourceRegistry = JSON.parse(await readFile(sourceRegistryPath, "utf8"));
+    const character = sourceRegistry.characters.find((entry) => entry.id === memberId);
+    character.referenceAssets = character.referenceAssets.filter((asset) => asset.storyStage !== "open-angry");
+    await writeJson(sourceRegistryPath, sourceRegistry);
+    await assert.rejects(
+      () => exportKoyaHandoffBundle({ projectDir: sourceProject, outputDir: path.join(root, "bundle-missing"), bundleId: "handoff-eye-open-missing" }),
+      (error) => /missing declared eye-open variant\(s\): open-angry/u.test(error.message)
+        && /extraSheets must exactly cover every distinct registered eye-open variant/u.test(error.message),
+    );
+  } finally {
+    if (savedPack === undefined) delete process.env.BUZZASSIST_CHANNEL_PACK;
+    else process.env.BUZZASSIST_CHANNEL_PACK = savedPack;
     await rm(root, { recursive: true, force: true });
   }
 });
