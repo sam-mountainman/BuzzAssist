@@ -407,6 +407,8 @@ test("Koya adapter passes an exact parent-Job preflight binding to the internal 
     assert.equal(flag("--upstream-job-revision"), "12");
     assert.match(flag("--upstream-preflight-binding"), /^[a-f0-9]{64}$/u);
     assert.equal(flag("--speech-concurrency"), "1");
+    assert.equal(invokedArgs.includes("--confirm-paid-video-generation"), false, "動画差し替えの課金は Job で明示しない限り子へ渡さない");
+    assert.equal(invokedArgs.includes("--retry-failed-video"), false);
     assert.equal(invokedArgs.includes("--reviewer-trust-path"), false, "照合済み path が無ければ子には渡さず env に委ねる");
     assert.equal(outcome.status, "awaiting-human-review");
 
@@ -419,6 +421,16 @@ test("Koya adapter passes an exact parent-Job preflight binding to the internal 
     });
     assert.equal(flag("--reviewer-trust-path"), "/etc/buzzassist/reviewer-trust.json");
     assert.ok(!invokedArgs.some((value) => /BEGIN|"reviewers"/u.test(value)), "鍵や信頼リストの中身は argv に載らない");
+
+    // 選択カットの動画差し替え: Job 作成時に明示した場合だけ、別課金の確認と再送を子へ渡す。
+    await executeVideoHarnessAdapter({
+      job: { ...job, options: { ...job.options, confirmPaidVideoGeneration: true, retryFailedVideo: true } },
+      prepareResult: { executionProjectDir: root },
+      runChild,
+    });
+    assert.ok(invokedArgs.includes("--confirm-paid-video-generation"));
+    assert.ok(invokedArgs.includes("--retry-failed-video"));
+    assert.equal(invokedArgs.includes("--retry-failed"), false, "画像の再試行とは別の指定");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

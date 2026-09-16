@@ -152,6 +152,29 @@ node scripts/koya-blind-review.mjs record --set <spec.json> --winner A --reviewe
 10. `manga-page-camera`の3系統を意味に合わせて混在させ、レンダーする。3倍oversampleの長尺レンダーは公式CLIのメモリ連動並列数を使い、16GiB級端末で4並列を強制しない。明示overrideがない限り、1ジョブ約6GiBとして物理メモリとCPUの小さい方へ制限し、swap増加時は同時実行数を下げる。部分修復は`render --cut-ids cut-XX`を使うが、これは再構築する最小集合の指定であって、入力が変わった選択外cutを古いMP4のまま残す許可ではない。選択外cutも、前回の`complete` checkpoint、現在と一致するimage/audio/overlay/camera入力hash、ffprobe実decodeの3条件を満たす場合だけ再利用する。prepareや`refresh-bubbles`が選択外のSVG・配置・cameraを更新した場合は、そのcutも安全に再構築集合へ追加する。旧MP4を現在入力へ再bindingしてはならない。
 11. 実MP4から全必須監査と知覚レビューを行う。不合格なら該当範囲だけ修復し、最終監査をやり直す。
 
+## 選択カットの動画差し替え（任意・1話2カットまで）
+
+冒頭やクライマックスなど、印を付けたカットだけを短い image-to-video クリップへ置き換えられる。既定はオフ。置き換わるのはそのカットの映像だけで、音声・吹き出し・尺・前後のタイムラインは変えない。口パクとレイヤー分解のアニメーションはしない。実装は`lib/mangaCutVideoSubstitution.mjs`、実測は`scripts/audit-manga-video-substitution.py`。
+
+- **印の付け方**: エピソード例外`config/koya-manga-episode-overrides/<episode-id>.json`の`override.videoSubstitution`へ、`model`（契約の`allowedModels`から1つ）と`cuts[{cutId, motionPrompt, reason}]`を書く。件数の上限は契約の`maximumCutsPerEpisode`で、スキーマが2を天井にしている。印を変えると契約digestが変わり、以前の監査・署名は無効になる。
+- **motionPrompt は「何がどう動くか」だけ**を書く。同一性の維持・文字禁止・口パク禁止・カメラ固定は工程が固定文で付ける。口パクや文字を求める指示は、生成側の禁止文と矛盾してどちらが効くかがモデル次第になるので、契約検証で落ちる。
+- **対象外**: 分割ページ（黒ガターとページ全体の単一カメラを保てない）、心の声（明部は元画像へ焼き込む規則）、複数の元画像を持つカット、モデルの最長尺より長いカット。尺の不足を引き伸ばし・ループ・静止の水増しで埋めない。
+- **実行位置**: 音声の後・レンダーの前（カット尺が確定してから）。`full`も同じ位置で呼ぶ。開始フレームは承認済み静止画をカメラ設計の t=0 で切った1枚（吹き出し無し）で、見る人が静止画版で最初に見る画と揃う。
+
+```bash
+# 開始フレームと費用計画だけを作る（有料APIは呼ばない。終了コード3）
+node scripts/koya-manga-video.mjs video-substitute --episode-id <episode-id>
+# 費用を確認した後だけ生成する（full では --confirm-paid-video-generation）
+node scripts/koya-manga-video.mjs video-substitute --episode-id <episode-id> --confirm-paid-generation
+```
+
+- **課金の扱い**: 生成層（`generateVideoMedia`）の例外は課金済みかを区別できないので、この工程は自動で再送しない。呼ぶ前に`video-substitution/ledger.json`へ送信済みを書くので、途中で落ちても「課金状態不明」の試行として残る。失敗・送信のまま止まった試行・検査不合格・完了済みクリップの消失は checkpoint で止まり、再送は`--retry-failed`（`full`では`--retry-failed-video`）を明示したときだけ。試行はカットごとに`maximumGenerationAttemptsPerCut`まで、成功・失敗を問わず数える。完了済みクリップは再開時に再利用し、二度払わない。
+- **生成直後の検査**: 全デコード、縦横比、尺、開始フレームとのSSIM（`minimumStartFrameSimilarity`）、要求モデルとの一致。落ちたクリップは課金済みなので保存したまま採用しない。
+- **静止画へ戻すのは運営者の判断だけ**: `--allow-still-fallback --still-fallback-cut-ids cut-XX --still-fallback-reason <理由> --still-fallback-decided-by <名前>`。判断は台帳に残り、最終監査で報告される。失敗したカットを黙って静止画で出さない。
+- **レンダー前の拘束**: 印の付いたカットは、台帳の完了試行とクリップSHA・開始フレーム仕様・指示内容・モデルが一致する結び付けか、台帳に記録された静止画判断が無ければ止まる。manifestを手で書き換えて出所の無いクリップを結び付ける道もここで塞いでいる。画像・カメラ開始点・指示・モデルを変えたらクリップは作り直しになる。
+- **最終監査`video-substitution`**: 実MP4の差し替え区間をデコードし、そのクリップが実際にその区間にあること（吹き出し外で一致）、動きがあり静止の水増しが無いこと、開始フレームとの一致、色の大崩れが無いこと、吹き出し表示中は密サンプルで検出顔と開始時の保護領域（光学フローで追跡）がどちらも0pxであること、文字混入が無いこと（tesseract必須。測れなければ不合格）、フレーム数が一致することを確かめる。`rendered-camera`は差し替えカットを除いた静止カットだけで3系統を測るので、3系統は静止カット側で揃える。
+- **人物の同一性は機械で判定しない**。画素指標は本人性を見分けない。署名するレビュー記録の`representativeFramesReviewed.frames`へ、差し替えカットごとに前・中・後の3区間の実フレームを入れ、`characterContinuity`・`bubblePlacement`・`generatedTextArtifacts`を見たと記録する。無ければ`signoff`と`agent-contact-sheet-review`が落ちる。
+
 ## 絶対条件
 
 - 表示文は縦書き明朝、通常ウェイト、最大3列、自然な文節改行、末尾`。`なし。長文は意味の切れ目で分割し、同時表示せず1個ずつ切り替える。文字数だけで切らず、固有名詞・複合語・活用語の途中、助詞・助動詞の直前では分割しない。空白だけのtimed segmentを作らない。音声・台本の原文は改変せず、表示用文字列では**全文末尾の句点だけ**を除く。読点、疑問符、感嘆符、文中の`。`は各timed segmentにも保持し、セグメント単位の末尾処理で消さない。通常の1列配置を先に試し、顔0px回避または組版hard gateに失敗した場合だけ、同時表示の自然な2〜3列へ退避する。複数列化を全セグメントへ先回り適用しない。`bubble-typography.json.terminalPunctuation.pass=true`、`naturalSegmentation.pass=true`、全行`terminalPeriodFound=false`を必ず確認する。

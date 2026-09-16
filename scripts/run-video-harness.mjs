@@ -39,7 +39,8 @@ function usage() {
     "cancel --job-id ID --project-dir DIR",
     "list   --project-dir DIR",
     "",
-    "Koya (koya-manga-video) options: --episode-id ID --protagonist-speaker-id ID --character-bible-path FILE --story-review-path FILE [--contract-path FILE] [--override-path FILE]",
+    "Koya (koya-manga-video) options: --episode-id ID --protagonist-speaker-id ID --character-bible-path FILE --story-review-path FILE [--contract-path FILE] [--override-path FILE] [--confirm-paid-video-generation] [--retry-failed-video]",
+    "  --confirm-paid-video-generation: エピソード例外で印を付けたカットの動画クリップ生成（別課金）を許可する。無ければ開始フレームと費用計画だけ作って止まる",
     "Narrated (narrated-story-video) options: --episode-id ID",
     "Common: --want TEXT --title TEXT --options-json FILE",
     "",
@@ -79,6 +80,8 @@ async function optionsFrom(args) {
   ];
   for (const [key, value] of mappings) if (value !== undefined && value !== "") options[key] = value;
   if (args.retryFailed === true) options.retryFailed = true;
+  if (args.confirmPaidVideoGeneration === true) options.confirmPaidVideoGeneration = true;
+  if (args.retryFailedVideo === true) options.retryFailedVideo = true;
   return options;
 }
 

@@ -102,6 +102,10 @@ node --test test/mangaPageCameraGrammar.test.mjs test/mangaVideoPipeline.test.mj
 マニフェスト単体を文法・mode面から見るだけなら、このスキル同梱の
 `scripts/audit-manifest.mjs <manifest.json> [projectDir]`も使える。
 
+`manga-video-production`の任意工程で動画クリップに差し替えたカットは、カメラ設計を
+開始フレームの切り出しにだけ使い、実MP4のoptical-flow測定（`rendered-camera`）からは
+除外する。クリップ内の動きはカメラではないため。3系統はそれ以外の静止カットで揃える。
+
 3系統の件数、移動量、reveal量、push-in/down/reset/reversal/hold/repeat/clamp違反
 0件、分割ページIDと静止パネル証拠、ページごとにページ級カメラが1台であること、
 テスト結果、実MP4のoptical-flow測定、全デコードを報告する。

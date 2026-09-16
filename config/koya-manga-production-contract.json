@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "koya-manga-production-v51",
+  "version": "koya-manga-production-v52",
   "channelId": "koya-manga",
   "description": "Fail-closed production contract for Koya-channel manga videos.",
   "sourceOfTruth": {
@@ -125,6 +125,31 @@
     "requireAac": true,
     "requireFullDecode": true
   },
+  "videoSubstitution": {
+    "version": "manga-cut-video-substitution-v1",
+    "maximumCutsPerEpisode": 2,
+    "maximumGenerationAttemptsPerCut": 2,
+    "model": "",
+    "allowedModels": [
+      "grok-imagine-video-hermes",
+      "grok-imagine-video-api",
+      "seedance-2",
+      "seedance-2-fast",
+      "kling-v3",
+      "kling-o3",
+      "kling-v2-6"
+    ],
+    "resolution": "720p",
+    "aspectRatio": "16:9",
+    "startFrame": "approved-still-camera-start-v1",
+    "requireOperatorPaidConfirmation": true,
+    "forbidGeneratedAudio": true,
+    "forbidLipSync": true,
+    "maximumClipShortfallFrames": 1,
+    "minimumStartFrameSimilarity": 0.85,
+    "denseFaceSamplesPerSecond": 6,
+    "cuts": []
+  },
   "editorial": {
     "preserveFullScript": true,
     "forbidContextlessLeadInImages": true,
@@ -245,6 +270,7 @@
     "bubble-typography",
     "thought-spotlight",
     "split-page-integrity",
+    "video-substitution",
     "stt-verification",
     "audio-onset",
   "audio-speaker-continuity",

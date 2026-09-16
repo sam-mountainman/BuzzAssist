@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "manifestVersion": "1.2.0",
+  "manifestVersion": "1.3.0",
   "namespace": "buzzassist",
   "classifications": [
     "installed",
@@ -108,8 +108,8 @@
     {
       "id": "buzzassist:manga-video-production",
       "name": "manga-video-production",
-      "version": "1.2.2",
-      "contentSha256": "sha256:c9f54c51d038dced9519d43e6fcc3eed386358da6baed3435a4789a549247d4f",
+      "version": "1.3.0",
+      "contentSha256": "sha256:6aafe02413dc4c70a7031b0035c0a4e4d1cfb01967da5c1643548b07eb5ee1e7",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",
@@ -140,8 +140,8 @@
     {
       "id": "buzzassist:manga-page-camera",
       "name": "manga-page-camera",
-      "version": "1.0.0",
-      "contentSha256": "sha256:94fce9c90e029256c16a5117c075991d18be42be0cb8e2079bfebd18374407cb",
+      "version": "1.0.1",
+      "contentSha256": "sha256:ee956794fe0c67481452e7c2248f1043d9670b49f665f1b7ff628e50bfdcd0f2",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",

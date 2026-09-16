@@ -15,6 +15,7 @@
     "bubbles",
     "camera",
     "video",
+    "videoSubstitution",
     "editorial",
     "qualityReview",
     "qualityLoop",
@@ -230,6 +231,56 @@
         "requireFullDecode": { "const": true }
       }
     },
+    "videoSubstitution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version", "maximumCutsPerEpisode", "maximumGenerationAttemptsPerCut", "model", "allowedModels",
+        "resolution", "aspectRatio", "startFrame", "requireOperatorPaidConfirmation", "forbidGeneratedAudio",
+        "forbidLipSync", "maximumClipShortfallFrames", "minimumStartFrameSimilarity",
+        "denseFaceSamplesPerSecond", "cuts"
+      ],
+      "properties": {
+        "version": { "const": "manga-cut-video-substitution-v1" },
+        "maximumCutsPerEpisode": { "type": "integer", "minimum": 0, "maximum": 2 },
+        "maximumGenerationAttemptsPerCut": { "type": "integer", "minimum": 1, "maximum": 3 },
+        "model": { "type": "string" },
+        "allowedModels": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "grok-imagine-video-hermes", "grok-imagine-video-api", "seedance-2", "seedance-2-fast",
+              "kling-v3", "kling-o3", "kling-v2-6"
+            ]
+          }
+        },
+        "resolution": { "enum": ["480p", "720p"] },
+        "aspectRatio": { "const": "16:9" },
+        "startFrame": { "const": "approved-still-camera-start-v1" },
+        "requireOperatorPaidConfirmation": { "const": true },
+        "forbidGeneratedAudio": { "const": true },
+        "forbidLipSync": { "const": true },
+        "maximumClipShortfallFrames": { "type": "integer", "minimum": 0, "maximum": 2 },
+        "minimumStartFrameSimilarity": { "type": "number", "minimum": 0.7, "maximum": 1 },
+        "denseFaceSamplesPerSecond": { "type": "integer", "minimum": 4, "maximum": 30 },
+        "cuts": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["cutId", "motionPrompt", "reason"],
+            "properties": {
+              "cutId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$" },
+              "motionPrompt": { "type": "string", "minLength": 8, "maxLength": 600 },
+              "reason": { "type": "string", "minLength": 4, "maxLength": 300 }
+            }
+          }
+        }
+      }
+    },
     "editorial": {
       "type": "object",
       "additionalProperties": false,
@@ -400,7 +451,7 @@
         "contract-manifest", "editorial-quality", "quality-harness-final", "rendered-camera",
         "bubble-midpoint-frames", "bubble-transition-clear-frames", "bubble-camera-sweep",
         "independent-rendered-face", "bubble-typography", "thought-spotlight", "split-page-integrity",
-        "stt-verification", "audio-onset", "audio-speaker-continuity", "audio-waveform-sync", "audio-click-hum-level",
+        "video-substitution", "stt-verification", "audio-onset", "audio-speaker-continuity", "audio-waveform-sync", "audio-click-hum-level",
         "agent-contact-sheet-review", "full-decode"
       ]
     },
