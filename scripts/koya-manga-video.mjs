@@ -36,6 +36,7 @@ import {
   runKoyaMangaFullProduction,
   refreshKoyaMangaBubbles,
   standardizeKoyaMangaCut,
+  substituteKoyaMangaCutVideos,
   syncKoyaMangaContract,
   selectKoyaCharacterStylingVariation,
 } from "../lib/koyaMangaProduction.mjs";
@@ -121,7 +122,7 @@ function usage() {
     "Koya manga video production (fail-closed)",
     "",
     "node scripts/koya-manga-video.mjs <action> [options]",
-    "actions: contract, channel-contract, character-bootstrap-status, character-registration-reconcile, character-roster-review-draft, character-roster-audit, cast-readiness, story-review-draft, story-audit, location-plan, location-generate, location-anchor-review-draft, location-anchor-audit, location-review-draft, location-register, thumbnail-plan-draft, thumbnail-audit, handoff-export, handoff-verify, handoff-restore, plan, images, character-review-refresh, character-candidate-migrate-blind, character-candidate-import, character-style-generate, character-style-import, character-style-review-refresh, character-style-record-failure, character-style-compose, character-style-select, character-attribute-gate, character-approve, character-identity-refresh, character-identity-repair, character-identity-repack, character-register, prepare, speech, adjust-gap, standard-cut, repair-onset, repair-tail, sync-contract, refresh-bubbles, render, audit, reviewer-key-create, signoff, full, status",
+    "actions: contract, channel-contract, character-bootstrap-status, character-registration-reconcile, character-roster-review-draft, character-roster-audit, cast-readiness, story-review-draft, story-audit, location-plan, location-generate, location-anchor-review-draft, location-anchor-audit, location-review-draft, location-register, thumbnail-plan-draft, thumbnail-audit, handoff-export, handoff-verify, handoff-restore, plan, images, character-review-refresh, character-candidate-migrate-blind, character-candidate-import, character-style-generate, character-style-import, character-style-review-refresh, character-style-record-failure, character-style-compose, character-style-select, character-attribute-gate, character-approve, character-identity-refresh, character-identity-repair, character-identity-repack, character-register, prepare, speech, video-substitute, adjust-gap, standard-cut, repair-onset, repair-tail, sync-contract, refresh-bubbles, render, audit, reviewer-key-create, signoff, full, status",
     "common: --project-dir DIR --episode-id ID --script-path FILE --title TITLE --protagonist-speaker-id ID_OR_EXACT_NAME --character-bible-path JSON [--story-review-path JSON] [--source-face-review-path JSON] [--generator-host codex|claude|legacy-migration] [--generator-id ID] [--generator-context-id TASK_OR_SESSION_ID] [--retry-failed] [--image-concurrency N|auto] [--qa-concurrency N] [--speech-concurrency N|auto] [--image-fallback-model MODEL] [--qa-fallback-provider grok]",
     "story-audit: --script-path FILE --story-review-path JSON --protagonist-speaker-id ID_OR_EXACT_NAME (read-only; binds reversal beats and human policy checks to the exact script SHA-256)",
     "story-review-draft: --script-path FILE [--protagonist-speaker-id ID_OR_EXACT_NAME] (read-only; prints exact utterance inventory with all subjective fields unset and machine-suggested eyeOpenBeats to confirm)",
@@ -163,6 +164,7 @@ function usage() {
     "standard-cut: --cut-id ID --plan-path JSON [--reason TEXT] (remove split layout and apply validated ordinary single-image shots)",
     "sync-contract: update manifest contract metadata without changing media, then require a fresh audit",
     "refresh-bubbles: rebuild every SVG under the resolved punctuation/placement contract, then require a fresh render and audit",
+    "video-substitute: opt-in per-cut clip substitution for cuts marked in config/koya-manga-episode-overrides/<episode-id>.json (override.videoSubstitution.model + cuts[{cutId,motionPrompt,reason}], at most 2); runs after speech and before render. Without --confirm-paid-generation it only builds the start frames and prints the paid plan (exit 3). [--cut-ids cut-01] [--retry-failed] (re-submits a failed or charge-unknown attempt within the contract attempt cap) [--allow-still-fallback --still-fallback-cut-ids cut-01 --still-fallback-reason WHY --still-fallback-decided-by NAME] (renders that marked cut as the still; recorded and audited). full uses the same stage and needs --confirm-paid-video-generation to spend (--retry-failed-video re-submits there).",
     "render: [--cut-ids cut-01,cut-02] rerenders at least the named cuts; unselected cuts are reused only when their completed input hash still matches and the MP4 decodes",
     `full: --episode-id ID --script-path FILE [--reviewer-trust-path JSON] (paid production runner; stops before any paid generation unless the operator's reviewer trust list from ${REVIEWER_TRUST_ENV_GUIDANCE} is configured, readable, and holds at least one active key — reviewer-trust-unconfigured / reviewer-trust-invalid; an explicit --reviewer-trust-path is only cross-checked against it — reviewer-trust-conflict)`,
     `signoff: --reviewer claude|codex [--reviewer-id ID] [--reviewer-context-id TASK_OR_SESSION_ID] --review-notes-path /absolute/review.json --reviewer-key-path /absolute/reviewer-ed25519.pem [--reviewer-trust-path JSON] --pass (the evaluator task/session must differ from the generator; the private key is read from the file, never from argv, and must be listed as active in the operator's trust list from ${REVIEWER_TRUST_ENV_GUIDANCE}; --reviewer-trust-path only cross-checks that list and never replaces it)`,
@@ -239,6 +241,42 @@ function requireEpisodeId() {
 
 function print(payload) {
   process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+}
+
+// full reuses --retry-failed for images; re-sending a paid clip must be its own
+// explicit decision there, so full reads --retry-failed-video instead. The
+// stage option has its own key so it never changes the image retry flag.
+function videoSubstitutionOptions({ confirmFlag, retryFlag }) {
+  const allowStillFallback = args.allowStillFallback === true;
+  if (!allowStillFallback && (args.stillFallbackCutIds || args.stillFallbackReason || args.stillFallbackDecidedBy)) {
+    throw new Error("--still-fallback-* options require --allow-still-fallback.");
+  }
+  return {
+    confirmPaidVideoGeneration: args[confirmFlag] === true,
+    retryFailedVideo: args[retryFlag] === true,
+    // full processes every marked cut; --cut-ids there limits the render only.
+    videoSubstitutionCutIds: args.action === "video-substitute" ? args.cutIds || "" : "",
+    stillFallback: allowStillFallback
+      ? {
+        cutIds: String(args.stillFallbackCutIds || "").split(",").map((value) => value.trim()).filter(Boolean),
+        reason: args.stillFallbackReason || "",
+        decidedBy: args.stillFallbackDecidedBy || "",
+      }
+      : null,
+  };
+}
+
+function videoSubstitutionPayload(result) {
+  return {
+    episodeId: result.episodeId,
+    status: result.status,
+    model: result.model,
+    rows: result.rows,
+    blocked: result.blockedCuts,
+    stageReportPath: result.stageReportPath,
+    ledgerPath: result.ledgerPath,
+    checkpoint: result.paths.statePath,
+  };
 }
 
 async function scriptPathForResume() {
@@ -745,6 +783,16 @@ switch (args.action) {
     if (result.waiting || result.partial || result.cancelled) exitCode = 3;
     break;
   }
+  case "video-substitute": {
+    requireEpisodeId();
+    const result = await substituteKoyaMangaCutVideos({
+      ...common,
+      ...videoSubstitutionOptions({ confirmFlag: "confirmPaidGeneration", retryFlag: "retryFailed" }),
+    });
+    print(videoSubstitutionPayload(result));
+    if (result.waiting || result.blocked) exitCode = 3;
+    break;
+  }
   case "repair-onset": {
     requireEpisodeId();
     const result = await repairKoyaMangaAudioOnset({
@@ -941,7 +989,12 @@ switch (args.action) {
     if (!trustPreflight.ok) {
       throw new Error(`${trustPreflight.code}: Koya full stopped before paid generation. ${trustPreflight.detail}`);
     }
-    const result = await runKoyaMangaFullProduction({ ...common, scriptPath, reviewerTrustPath });
+    const result = await runKoyaMangaFullProduction({
+      ...common,
+      scriptPath,
+      reviewerTrustPath,
+      ...videoSubstitutionOptions({ confirmFlag: "confirmPaidVideoGeneration", retryFlag: "retryFailedVideo" }),
+    });
     print(result.payload);
     exitCode = result.exitCode;
     break;

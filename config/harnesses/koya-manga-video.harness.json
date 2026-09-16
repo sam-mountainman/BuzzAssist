@@ -69,6 +69,14 @@
       ]
     },
     {
+      "id": "cut-video-substitution",
+      "what": "印を付けたカット（1話2つまで）だけを開始フレーム固定の短い動画に差し替え、音声・吹き出し・尺は変えない。実MP4で差し替え区間を測り、顔と吹き出しの重なり0px・文字混入なし・尺一致を確かめる",
+      "human": "人物の同一性は、差し替え区間の前・中・後の実フレームを人が見て判断する",
+      "evidenceAuditIds": [
+        "video-substitution"
+      ]
+    },
+    {
       "id": "final-audit",
       "what": "レンダー済みMP4の実測監査。設定値ではなく出力を見る",
       "evidenceAuditIds": [

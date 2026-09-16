@@ -123,6 +123,8 @@
 
 最低3枚の代表フレームと、冒頭・中盤・終端を含む最低3区間の音声確認が必要である。全編確認区間は0秒から実尺終端までを覆う。`signoff`と再監査は、レビュー記録ファイル自体のSHA-256と正規化内容digestも検証する。
 
+動画差し替えカットがある回は、差し替えカットごとに区間の前・中・後それぞれ1枚以上の実フレーム（`timestampSeconds`がそのカットの区間内）を代表フレームへ加え、`checkIds`に`characterContinuity`・`bubblePlacement`・`generatedTextArtifacts`を含める。生成クリップの人物が静止画と同じ人物か、吹き出しが動いた顔に掛かっていないか、疑似文字が出ていないかは機械指標では決められないため、ここが唯一の判定になる。欠けていれば`signoff`は拒否され、`agent-contact-sheet-review`も落ちる。
+
 問題が1件でもあれば署名せず、`knownRemainingIssues`へ時刻、対象、症状を書く。ユーザー指摘と機械結果が矛盾したらユーザー指摘を不合格根拠にする。
 
 吹き出し末尾句点を除く契約では、原寸フレームの目視だけでなく`bubble-typography.json`の`terminalPunctuation`を確認する。全SVGの`data-text`を機械検査し、`pass=true`かつ`terminalPeriodFound=false`でなければ署名しない。旧episodeの修復は公式`refresh-bubbles`→`render --force`→`audit`の順で行い、音声・台本本文は変更しない。
