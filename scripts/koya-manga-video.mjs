@@ -384,6 +384,7 @@ switch (args.action) {
     const parsed = parseMangaScript(scriptText, { title: args.title, registry });
     const result = auditKoyaStory({
       showBible: authority.showBible,
+      registry,
       scriptText,
       title: parsed.title,
       parsed,
