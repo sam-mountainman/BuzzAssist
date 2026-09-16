@@ -272,9 +272,14 @@ test("Koya character bootstrap status reports the next legal action without inve
   assert.equal(empty.rows.find((row) => row.id === "horo").stage, "workflow-missing");
 });
 
+// Eye-open tests read the synthetic fixture directly so an operator's Channel
+// Pack (for example newly declared eye-open variants) cannot change them.
+async function fixtureShowBible() {
+  return JSON.parse(await readFile(new URL("./fixtures/channel-pack/config/koya-show-bible.json", import.meta.url), "utf8"));
+}
+
 test("declared eye-open variants must each be registered once before a fixed member is ready", async () => {
-  const authority = await readKoyaChannelAuthority({ allowFixture: true, projectDir: root });
-  const showBible = structuredClone(authority.showBible);
+  const showBible = await fixtureShowBible();
   // Pick the member by rule rather than by name so no cast name enters the test.
   const member = showBible.cast.find((entry) => entry.requiredEveryEpisode === true && entry.requiredReferenceRoles?.includes("eye-open"));
   assert.ok(member, "fixture needs an every-episode member with a required eye-open sheet");
@@ -348,8 +353,7 @@ test("declared eye-open variants must each be registered once before a fixed mem
 });
 
 test("eye-open beats are drafted from the script, reviewed per member and variant, optional per episode, and warned when overused", async () => {
-  const authority = await readKoyaChannelAuthority({ allowFixture: true, projectDir: root });
-  const showBible = structuredClone(authority.showBible);
+  const showBible = await fixtureShowBible();
   // Members are picked by rule so no cast name enters the public test.
   const semantics = showBible.storyGrammar.castSemantics;
   const semanticIds = new Set(Object.values(semantics).map((entry) => entry.castId));
@@ -452,6 +456,40 @@ ${nameOf(recurring)}: ほな、いこか。`;
   });
   assert.deepEqual(boundIn(["cut-01", "cut-01", "cut-02"]).warnings, [], "two scenes are fine even with several images each");
   assert.match(boundIn(["cut-01", "cut-02", "cut-03"]).warnings[0], new RegExp(`^${occasional.id} opens their eyes in 3 scenes`, "u"));
+});
+
+test("the overuse warning counts eye-open cues that name a member only by a registered alias", async () => {
+  const showBible = await fixtureShowBible();
+  const recurringId = showBible.storyGrammar.castSemantics.recurringEyeOpen.castId;
+  const member = showBible.cast.find((entry) => entry.id !== recurringId && entry.requiredReferenceRoles?.includes("eye-open"));
+  assert.ok(member, "fixture needs an occasional member with a required eye-open sheet");
+  const alias = "別名さん";
+  assert.ok(![member.id, member.name, member.hiddenName, ...(member.aliases || [])].some((value) => value && (value.includes(alias) || alias.includes(value))));
+  const registry = {
+    characters: [{ id: "registered-occasional", name: member.hiddenName || member.name, kind: "character", status: "approved", aliases: [alias] }],
+  };
+  // A weak cue ("eyes wide open") counts only when the sentence names the member.
+  const scriptText = `タイトル: 別名の開眼\n${[1, 2, 3].map((index) => `【カット${index}：場面${index}】\nナレーション: ${alias}が目を見開いた。\n${alias}: そうか。`).join("\n")}`;
+  const parsed = parseMangaScript(scriptText);
+  const legacyReview = {
+    version: "koya-story-review-v1",
+    scriptSha256: hash(scriptText),
+    reviewer: { host: "codex", id: "reviewer-1", contextId: "review-task-1" },
+    reviewedAt: "2026-09-16T00:00:00.000Z",
+    protagonistSpeakerId: alias,
+    beats: {},
+    checks: {},
+  };
+  const audit = (options) => auditKoyaStory({ scriptText, parsed, showBible, storyReview: legacyReview, enforce: true, ...options });
+  const withoutRegistry = audit({});
+  const withRegistry = audit({ registry });
+  assert.doesNotMatch(withoutRegistry.warnings.join("\n"), /opens their eyes/u, "the show bible alone does not know the alias");
+  assert.match(withRegistry.warnings.join("\n"), new RegExp(`${member.id} opens their eyes in 3 scenes \\(cut-01, cut-02, cut-03\\)`, "u"));
+  assert.deepEqual(
+    withRegistry.failures.filter((message) => !withoutRegistry.failures.includes(message)),
+    [],
+    "the registry only adds warnings, never new stop conditions",
+  );
 });
 
 test("one-off validation canary admits only the exact approved cast without weakening normal roster production", async () => {
