@@ -186,6 +186,23 @@ test("MCP character pipeline runs candidates, approval packs, and a multi-charac
     assert.equal(storyboard.structuredContent.succeeded, 2);
     assert.match(storyboard.structuredContent.validation.warnings.join("\n"), /identity-mixing risk/);
 
+    const missingVariant = await client.callTool({
+      name: "generate_character_storyboard",
+      arguments: {
+        projectDir,
+        canvasDir,
+        workflowId,
+        scenes: [{ prompt: "高品質な青年漫画。田中が目を見開く。", characters: ["田中"], eyeOpenVariant: "open-angry" }],
+        model: "gpt-image-2-codex",
+        aspectRatio: "16:9",
+        imageSize: "2K",
+        quality: "high",
+        confirmedSettings: true,
+      },
+    });
+    assert.equal(missingVariant.isError, true, JSON.stringify(missingVariant));
+    assert.match(missingVariant.content[0].text, /no approved eye-open sheet for variant 'open-angry'/u);
+
     const registry = JSON.parse(await readFile(path.join(canvasDir, "characters.json"), "utf8"));
     assert.equal(registry.characters.length, 2);
     assert.ok(registry.characters.every((character) => character.referenceImagePaths.length === 3));

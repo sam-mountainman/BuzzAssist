@@ -59,9 +59,20 @@ export async function prepareCompleteKoyaHandoffEvidence({ projectDir, canvasDir
       identityOutfits.push({ ...outfit, assetFile: outfit.path, storyStage });
     }
     const needsEyeOpen = (member.requiredReferenceRoles || []).includes("eye-open");
-    const eyeOpen = needsEyeOpen
-      ? await writeFixtureAsset(join(characterRoot, "eye-open.png"), `${member.id}:eye-open`, 200, 200)
-      : null;
+    // One sheet per declared eye-open variant (storyStage = variant id); a
+    // member without a declaration keeps the single unkeyed sheet.
+    const declaredEyeOpenVariants = (Array.isArray(member.eyeOpenVariants) ? member.eyeOpenVariants : [])
+      .map((variant) => variant?.id)
+      .filter(Boolean);
+    const eyeOpenSheets = [];
+    if (needsEyeOpen) {
+      for (const [variantIndex, variant] of (declaredEyeOpenVariants.length > 0 ? declaredEyeOpenVariants : [""]).entries()) {
+        const fileName = variant ? `eye-open-${variant}.png` : "eye-open.png";
+        const sheet = await writeFixtureAsset(join(characterRoot, fileName), `${member.id}:eye-open:${variant}`, 200 + variantIndex * 2, 200);
+        eyeOpenSheets.push({ ...sheet, fileName, storyStage: variant });
+      }
+    }
+    const eyeOpen = eyeOpenSheets[0] || null;
     const workflowId = `identity-workflow-${member.id}`;
     const generatorContextId = `identity-generator-context-${member.id}`;
     const identityPack = {
@@ -69,6 +80,9 @@ export async function prepareCompleteKoyaHandoffEvidence({ projectDir, canvasDir
       turnaround: { assetFile: turnaround.path, sha256: turnaround.sha256 },
       expression: { assetFile: expression.path, sha256: expression.sha256 },
       eyeOpen: eyeOpen ? { assetFile: eyeOpen.path, sha256: eyeOpen.sha256 } : null,
+      ...(declaredEyeOpenVariants.length > 0 ? {
+        eyeOpenSheets: eyeOpenSheets.map((sheet) => ({ assetFile: sheet.path, sha256: sheet.sha256, storyStage: sheet.storyStage })),
+      } : {}),
       outfitSheets: identityOutfits.map(({ assetFile, sha256: digest, storyStage }) => ({ assetFile, sha256: digest, storyStage })),
       generatorContextId,
     };
@@ -127,13 +141,14 @@ export async function prepareCompleteKoyaHandoffEvidence({ projectDir, canvasDir
       storyStage,
       sourceReviewPath: reviewRelativePath,
     }));
-    const eyeOpenAsset = eyeOpen ? {
-      id: `${member.id}-eye-open`,
+    const eyeOpenAssets = eyeOpenSheets.map((sheet) => ({
+      id: sheet.storyStage ? `${member.id}-eye-open-${sheet.storyStage}` : `${member.id}-eye-open`,
       role: "eye-open",
-      path: `assets/${member.id}/eye-open.png`,
-      sha256: eyeOpen.sha256,
+      path: `assets/${member.id}/${sheet.fileName}`,
+      sha256: sheet.sha256,
+      ...(sheet.storyStage ? { storyStage: sheet.storyStage } : {}),
       sourceReviewPath: reviewRelativePath,
-    } : null;
+    }));
     characters.push({
       id: member.id,
       name: member.name,
@@ -148,7 +163,7 @@ export async function prepareCompleteKoyaHandoffEvidence({ projectDir, canvasDir
         { id: `${member.id}-turnaround`, role: "turnaround", path: `assets/${member.id}/turnaround.png`, sha256: turnaround.sha256, sourceReviewPath: reviewRelativePath },
         { id: `${member.id}-expression`, role: "expression", path: `assets/${member.id}/expression.png`, sha256: expression.sha256, sourceReviewPath: reviewRelativePath },
         ...outfitAssets,
-        ...(eyeOpenAsset ? [eyeOpenAsset] : []),
+        ...eyeOpenAssets,
       ],
       approval: {
         route: "anonymous-candidate-selection",

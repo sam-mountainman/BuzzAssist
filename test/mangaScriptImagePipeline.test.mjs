@@ -1159,3 +1159,186 @@ test("one-call pipeline finishes all image jobs for approved cast without interm
   assert.ok(result.plan.jobs.some((entry) => entry.kind === "scene-image"));
   assert.equal(generated, 2);
 });
+
+function eyeOpenRegistry() {
+  const asset = (role, file, storyStage = "") => ({ id: `${role}-${file}`, role, path: `assets/${file}`, sha256: "a".repeat(64), storyStage });
+  return {
+    characters: [
+      {
+        id: "elder",
+        name: "長老",
+        kind: "character",
+        role: "fixed",
+        status: "approved",
+        referenceAssets: [
+          asset("identity-face", "elder-face.png"),
+          asset("turnaround", "elder-turnaround.png"),
+          asset("expression", "elder-expressions.png"),
+          asset("eye-open", "elder-eyes-calm.png", "open-calm"),
+          asset("eye-open", "elder-eyes-angry.png", "open-angry"),
+        ],
+      },
+      {
+        id: "youth",
+        name: "若者",
+        kind: "character",
+        role: "fixed",
+        status: "approved",
+        referenceAssets: [asset("identity-face", "youth-face.png"), asset("turnaround", "youth-turnaround.png")],
+      },
+      {
+        id: "girl",
+        name: "少女",
+        kind: "character",
+        role: "fixed",
+        status: "approved",
+        referenceAssets: [asset("identity-face", "girl-face.png")],
+      },
+    ],
+  };
+}
+
+const ELDER_POLICY = {
+  candidates: [
+    {
+      characterId: "elder",
+      variants: [
+        { id: "open-calm", label: "穏やか", cues: ["ありがとう"] },
+        { id: "open-angry", label: "怒り", cues: ["逃げ"] },
+      ],
+    },
+    { characterId: "girl" },
+  ],
+};
+
+function imageJobsFor(plan, utteranceId) {
+  return plan.jobs.filter((job) => job.id === `image:${utteranceId}` || job.id.startsWith(`panel:${utteranceId}:`));
+}
+
+test("eye-open beats bind the variant chosen from the lines and keep other images on default eyes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-eye-open-plan-"));
+  const scriptText = `タイトル：開眼テスト
+【カット1：店先】
+若者：長老、目を開けてよく見てください。
+長老：ええ天気やな。
+【カット2：対決】
+長老：ほう。
+ナレーション：長老の糸目が、すっと開いた。
+長老：見本19b1。
+【カット3：見送り】
+ナレーション：長老は目を見開き、笑った。
+長老：ありがとうな。`;
+  const plan = createMangaScriptImagePlan({
+    scriptText,
+    episodeId: "eye-open-plan-test",
+    registry: eyeOpenRegistry(),
+    canvasDir: root,
+    assetDir: join(root, "assets"),
+    eyeOpen: ELDER_POLICY,
+  });
+  assert.equal(plan.eyeOpen.active, true);
+  assert.equal(plan.eyeOpen.source, "script-cue");
+  assert.deepEqual(
+    [...new Set(plan.eyeOpen.beats.map((beat) => `${beat.utteranceId}:${beat.variant}`))],
+    ["cut-02-u02:open-angry", "cut-02-u03:open-angry", "cut-03-u01:open-calm", "cut-03-u02:open-calm"],
+    "a dialogue line is never a cue, and the eyes open from the cue line onward",
+  );
+
+  const eyeSheets = /elder-eyes-(?:calm|angry)\.png$/u;
+  for (const utteranceId of ["cut-01-u01", "cut-01-u02", "cut-02-u01"]) {
+    for (const job of imageJobsFor(plan, utteranceId)) {
+      assert.equal(job.referenceImagePaths.some((path) => eyeSheets.test(path)), false, `${utteranceId} must not receive an eyes-open sheet`);
+      assert.deepEqual(job.eyeOpen, []);
+      assert.match(job.prompt, /DEFAULT EYES: 長老 keep their usual default eyes/u);
+    }
+  }
+
+  const [angryJob] = imageJobsFor(plan, "cut-02-u03");
+  assert.ok(angryJob);
+  assert.deepEqual(angryJob.eyeOpen.map((entry) => [entry.characterId, entry.variant, entry.variantLabel, entry.source]), [["elder", "open-angry", "怒り", "script-cue"]]);
+  assert.match(angryJob.referenceImagePaths[0], /elder-face\.png$/u);
+  assert.match(angryJob.referenceImagePaths[1], /elder-eyes-angry\.png$/u, "the selected sheet follows the identity face");
+  assert.equal(angryJob.referenceImagePaths.some((path) => path.endsWith("elder-eyes-calm.png")), false);
+  assert.ok(angryJob.fallbackReferenceImagePaths.some((path) => path.endsWith("elder-eyes-angry.png")));
+  assert.match(angryJob.prompt, /EYES-OPEN BEAT \(開眼\): 長老 has both eyes open in this image, in the approved '怒り' state/u);
+  assert.doesNotMatch(angryJob.prompt, /DEFAULT EYES/u);
+  const qaPrompt = mangaImageQaVisualPrompt({ job: angryJob });
+  assert.match(qaPrompt, /Eyes-open beat contract: 長老 must visibly have both eyes open in the approved '怒り' state/u);
+  assert.match(qaPrompt, /長老 approved eyes-open sheet \(怒り\), right column = open eyes/u);
+
+  const [calmJob] = imageJobsFor(plan, "cut-03-u02");
+  assert.deepEqual(calmJob.eyeOpen.map((entry) => entry.variant), ["open-calm"]);
+  assert.ok(calmJob.referenceImagePaths.some((path) => path.endsWith("elder-eyes-calm.png")));
+  assert.ok(plan.eyeOpen.boundImages.some((entry) => entry.utteranceId === "cut-03-u02" && entry.characterId === "elder"));
+
+  // Without a policy the plan is unchanged: registry order, no eye-open fields.
+  const legacy = createMangaScriptImagePlan({
+    scriptText,
+    episodeId: "eye-open-plan-test",
+    registry: eyeOpenRegistry(),
+    canvasDir: root,
+    assetDir: join(root, "assets"),
+  });
+  assert.deepEqual(legacy.eyeOpen, { active: false });
+  const [legacyJob] = imageJobsFor(legacy, "cut-01-u02");
+  assert.equal(Object.hasOwn(legacyJob, "eyeOpen"), false);
+  assert.doesNotMatch(legacyJob.prompt, /DEFAULT EYES|EYES-OPEN BEAT/u);
+});
+
+test("eye-open planning stops instead of guessing a subject, a variant, or a missing sheet", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-eye-open-stop-"));
+  const plan = (scriptText, eyeOpen = ELDER_POLICY, registry = eyeOpenRegistry()) => createMangaScriptImagePlan({
+    scriptText: `タイトル：停止テスト\n${scriptText}`,
+    episodeId: "eye-open-stop-test",
+    registry,
+    canvasDir: root,
+    assetDir: join(root, "assets"),
+    eyeOpen,
+  });
+  assert.throws(
+    () => plan("【カット1：対面】\nナレーション：長老の糸目が開いた。\n長老：さて。"),
+    /cut-01-u01: elder opens their eyes but the lines do not select one of open-calm\/open-angry/u,
+  );
+  assert.throws(
+    () => plan("【カット1：対面】\n長老：さて。\n少女：はい。\nナレーション：そして、開眼した。"),
+    /does not say which of elder\/girl opens their eyes/u,
+  );
+  assert.throws(
+    () => plan("【カット1：対面】\nナレーション：少女は目を見開いた。\n少女：うそ。"),
+    /requires an approved eyes-open sheet for 少女/u,
+  );
+  const crowded = eyeOpenRegistry();
+  crowded.characters.push({
+    id: "guest",
+    name: "客人",
+    kind: "character",
+    role: "fixed",
+    status: "approved",
+    referenceAssets: [{ id: "guest-face", role: "identity-face", path: "assets/guest-face.png", sha256: "b".repeat(64) }],
+  });
+  assert.throws(
+    () => plan("【カット1：全員】\nナレーション：長老の糸目が開いた。長老と若者と少女と客人が並ぶ。\n長老：見本19b1。", ELDER_POLICY, crowded),
+    /cannot bind 長老's eyes-open sheet within the 5-reference budget/u,
+  );
+
+  // A reviewed binding replaces detection completely.
+  const reviewed = plan("【カット1：対面】\n長老：さて。\nナレーション：長老の糸目が開いた。\n長老：見本19b1。", {
+    ...ELDER_POLICY,
+    reviewedBeats: [{ utteranceId: "cut-01-u01", characterId: "elder", variant: "open-angry" }],
+  });
+  assert.equal(reviewed.eyeOpen.source, "review");
+  assert.deepEqual(imageJobsFor(reviewed, "cut-01-u01")[0].eyeOpen.map((entry) => entry.variant), ["open-angry"]);
+  assert.deepEqual(imageJobsFor(reviewed, "cut-01-u03")[0].eyeOpen, []);
+  assert.throws(
+    () => plan("【カット1：対面】\n長老：さて。", { ...ELDER_POLICY, reviewedBeats: [{ utteranceId: "cut-01-u01", characterId: "elder" }] }),
+    /長老 \(elder\) has 2 eye-open sheets \(open-calm, open-angry\); request one with eyeOpenVariant/u,
+  );
+  assert.throws(
+    () => plan("【カット1：対面】\n若者：こんにちは。", { ...ELDER_POLICY, reviewedBeats: [{ utteranceId: "cut-01-u01", characterId: "elder", variant: "open-calm" }] }),
+    /needs elder on screen/u,
+  );
+  assert.throws(
+    () => plan("【カット1：対面】\n長老：さて。", { ...ELDER_POLICY, reviewedBeats: [{ utteranceId: "cut-09-u01", characterId: "elder", variant: "open-calm" }] }),
+    /unknown utterance: cut-09-u01/u,
+  );
+});

@@ -6,11 +6,13 @@ import path from "node:path";
 
 import {
   buildCharacterIdentityPrompt,
+  eyeOpenVariantId,
   normalizeCharacterRegistry,
   optimizeCharacterBindingsForGeneration,
   readCharacterRegistry,
   resolveCharacterBindings,
   resolveCharacterReferencePaths,
+  selectEyeOpenReferenceAsset,
   writeCharacterRegistry,
 } from "../lib/characterRegistry.mjs";
 import { nextBatchChunkOrigin } from "../lib/mediaGeneration.mjs";
@@ -150,6 +152,82 @@ test("single-character references route by scene role and story stage", () => {
   assert.throws(
     () => optimizeCharacterBindingsForGeneration([binding], { referenceIntent: "closeup", providerReferenceLimit: 1 }),
     /require 2 images.*accepts 1/u,
+  );
+});
+
+test("eye-open references route by requested variant and fail closed", () => {
+  const legacy = {
+    id: "legacy",
+    referenceImagePaths: ["/legacy-face.png", "/legacy-eyes.png"],
+    referenceAssets: [
+      { role: "identity-face", path: "/legacy-face.png" },
+      { role: "eye-open", path: "/legacy-eyes.png", storyStage: "" },
+    ],
+  };
+  const route = (binding, options) => optimizeCharacterBindingsForGeneration([binding], options)[0].referenceImagePaths;
+  // A single unkeyed sheet keeps working exactly as before.
+  assert.deepEqual(route(legacy, { referenceIntent: "eye-open" }), ["/legacy-face.png", "/legacy-eyes.png"]);
+  assert.throws(() => route(legacy, { eyeOpenVariant: "open-calm" }), /no approved eye-open sheet for variant 'open-calm'.*No keyed eye-open variant/u);
+
+  const keyed = {
+    id: "keyed",
+    referenceImagePaths: ["/face.png", "/calm.png", "/angry.png", "/expressions.png"],
+    referenceAssets: [
+      { role: "identity-face", path: "/face.png" },
+      { role: "eye-open", path: "/calm.png", storyStage: "open-calm" },
+      { role: "eye-open", path: "/angry.png", storyStage: "open-angry" },
+      { role: "expression", path: "/expressions.png" },
+    ],
+  };
+  assert.throws(
+    () => route(keyed, { referenceIntent: "eye-open" }),
+    /Character keyed has 2 eye-open sheets \(open-calm, open-angry\); request one with eyeOpenVariant/u,
+    "two or more variants never fall back to a default",
+  );
+  assert.deepEqual(route(keyed, { referenceIntent: "eye-open", eyeOpenVariant: "open-calm" }), ["/face.png", "/calm.png"]);
+  assert.deepEqual(route(keyed, { referenceIntent: "eye-open", eyeOpenVariant: "open-angry" }), ["/face.png", "/angry.png"]);
+  assert.deepEqual(route(keyed, { eyeOpenVariant: "open-angry" }), ["/face.png", "/angry.png"], "a variant implies the eye-open intent");
+  assert.throws(() => route(keyed, { eyeOpenVariant: "open-sad" }), /variant 'open-sad'.*Registered variants: open-calm, open-angry/u);
+  assert.throws(() => route(keyed, { referenceIntent: "closeup", eyeOpenVariant: "open-angry" }), /referenceIntent is 'closeup'/u);
+  assert.throws(() => route(keyed, { storyStage: "winter", eyeOpenVariant: "open-angry" }), /select different sheets/u);
+  assert.throws(
+    () => optimizeCharacterBindingsForGeneration([keyed, legacy], { eyeOpenVariant: "open-angry" }),
+    /exactly one character, but this generation binds 2/u,
+  );
+  assert.throws(() => optimizeCharacterBindingsForGeneration([], { eyeOpenVariant: "open-angry" }), /binds 0/u);
+
+  const mixed = {
+    ...keyed,
+    referenceAssets: [...keyed.referenceAssets, { role: "eye-open", path: "/unkeyed.png" }],
+  };
+  assert.throws(() => route(mixed, { referenceIntent: "eye-open" }), /3 eye-open sheets \(open-calm, open-angry, \(unkeyed\)\)/u);
+
+  const singleKeyed = {
+    id: "single",
+    referenceImagePaths: ["/single-face.png", "/single-calm.png"],
+    referenceAssets: [
+      { role: "identity-face", path: "/single-face.png" },
+      { role: "eye-open", path: "/single-calm.png", storyStage: "open-calm" },
+    ],
+  };
+  assert.deepEqual(route(singleKeyed, { referenceIntent: "eye-open" }), ["/single-face.png", "/single-calm.png"], "one keyed sheet is still the default");
+
+  const duplicated = {
+    ...keyed,
+    referenceAssets: [...keyed.referenceAssets, { role: "eye-open", path: "/angry-2.png", storyStage: "open-angry" }],
+  };
+  assert.throws(() => route(duplicated, { eyeOpenVariant: "open-angry" }), /Character keyed registers eye-open variant 'open-angry' 2 times/u);
+
+  assert.equal(selectEyeOpenReferenceAsset(keyed.referenceAssets, "open-calm").path, "/calm.png");
+  assert.equal(selectEyeOpenReferenceAsset([], ""), null);
+  assert.throws(() => selectEyeOpenReferenceAsset(keyed.referenceAssets, ""), /This character has 2 eye-open sheets/u);
+  assert.equal(eyeOpenVariantId({ role: "outfit", storyStage: "winter" }), "", "outfit stages are not eye-open variants");
+
+  // The variant key survives registry normalization (older normalizers keep storyStage too).
+  const normalized = normalizeCharacterRegistry({ characters: [{ id: "keyed", referenceAssets: keyed.referenceAssets }] });
+  assert.deepEqual(
+    normalized.characters[0].referenceAssets.filter((asset) => asset.role === "eye-open").map((asset) => asset.storyStage),
+    ["open-calm", "open-angry"],
   );
 });
 

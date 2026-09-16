@@ -124,7 +124,7 @@ function usage() {
     "actions: contract, channel-contract, character-bootstrap-status, character-registration-reconcile, character-roster-review-draft, character-roster-audit, cast-readiness, story-review-draft, story-audit, location-plan, location-generate, location-anchor-review-draft, location-anchor-audit, location-review-draft, location-register, thumbnail-plan-draft, thumbnail-audit, handoff-export, handoff-verify, handoff-restore, plan, images, character-review-refresh, character-candidate-migrate-blind, character-candidate-import, character-style-generate, character-style-import, character-style-review-refresh, character-style-record-failure, character-style-compose, character-style-select, character-attribute-gate, character-approve, character-identity-refresh, character-identity-repair, character-identity-repack, character-register, prepare, speech, adjust-gap, standard-cut, repair-onset, repair-tail, sync-contract, refresh-bubbles, render, audit, reviewer-key-create, signoff, full, status",
     "common: --project-dir DIR --episode-id ID --script-path FILE --title TITLE --protagonist-speaker-id ID_OR_EXACT_NAME --character-bible-path JSON [--story-review-path JSON] [--source-face-review-path JSON] [--generator-host codex|claude|legacy-migration] [--generator-id ID] [--generator-context-id TASK_OR_SESSION_ID] [--retry-failed] [--image-concurrency N|auto] [--qa-concurrency N] [--speech-concurrency N|auto] [--image-fallback-model MODEL] [--qa-fallback-provider grok]",
     "story-audit: --script-path FILE --story-review-path JSON --protagonist-speaker-id ID_OR_EXACT_NAME (read-only; binds reversal beats and human policy checks to the exact script SHA-256)",
-    "story-review-draft: --script-path FILE [--protagonist-speaker-id ID_OR_EXACT_NAME] (read-only; prints exact utterance inventory with all subjective fields unset)",
+    "story-review-draft: --script-path FILE [--protagonist-speaker-id ID_OR_EXACT_NAME] (read-only; prints exact utterance inventory with all subjective fields unset and machine-suggested eyeOpenBeats to confirm)",
     "cast-readiness: --script-path FILE [--character-bible-path JSON] (read-only; blocks episode-local replacements for unregistered Koya fixed cast and checks required identity roles)",
     "character-bootstrap-status: read-only fixed-cast progress report across the show bible, workflows, candidate reviews, styling rounds, registry assets, and next legal action",
     "character-registration-reconcile: --workflow-id ID --cast-id ID_OR_NAME (promotes only an already registered, SHA-bound client-approved cast member to show-bible approved)",
@@ -401,7 +401,7 @@ switch (args.action) {
     const scriptText = await readFile(common.scriptPath, "utf8");
     const registry = await readCharacterRegistry({ projectDir });
     const parsed = parseMangaScript(scriptText, { title: args.title, registry });
-    print(createKoyaStoryReviewDraft({ showBible: authority.showBible, scriptText, parsed, protagonistSpeakerId: args.protagonistSpeakerId }));
+    print(createKoyaStoryReviewDraft({ showBible: authority.showBible, scriptText, parsed, registry, protagonistSpeakerId: args.protagonistSpeakerId }));
     break;
   }
   case "location-plan": {

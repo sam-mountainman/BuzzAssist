@@ -108,8 +108,8 @@
     {
       "id": "buzzassist:manga-video-production",
       "name": "manga-video-production",
-      "version": "1.2.1",
-      "contentSha256": "sha256:fdc639a0dde6bc06318a537225f4c533027b0a842688897f8f0a3978cff6ccc9",
+      "version": "1.2.2",
+      "contentSha256": "sha256:53a81ec4b846c4b95470dc1f04274889369398f43147c5e31bc44ad9fe45a793",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",

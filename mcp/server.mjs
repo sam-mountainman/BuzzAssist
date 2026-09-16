@@ -1568,6 +1568,7 @@ async function generateExcalidrawImagesBatch(args = {}) {
       productionReferenceIndexPath: job.productionReferenceIndexPath ?? job.production_reference_index_path ?? job.customData?.buzzassistProductionReferenceIndexPath ?? args.productionReferenceIndexPath,
       projectDir: args.projectDir,
       storyStage: nonEmptyString(job.storyStage ?? job.story_stage ?? job.customData?.buzzassistCharacterStoryStage),
+      eyeOpenVariant: nonEmptyString(job.eyeOpenVariant ?? job.eye_open_variant ?? job.customData?.buzzassistCharacterEyeOpenVariant),
       providerReferenceLimit: providerReferenceLimitForJob(job),
     });
   };
@@ -2598,6 +2599,7 @@ function toolDefinitions() {
                 referenceIntent: { type: "string", enum: ["default", "closeup", "expression", "full-body", "profile", "eye-open", "outfit", "comical-A", "comical-B"], description: "Routes selected-face plus the task-specific sheet. Comical A/B requires a SHA-verified supplemental production reference index." },
                 productionReferenceIndexPath: { type: "string", description: "Explicit supplemental index path for comical-A/B, resolved from projectDir; required for comical intent." },
                 storyStage: { type: "string", description: "Approved outfit stage id; fails if the character has no matching outfit sheet." },
+                eyeOpenVariant: { type: "string", description: "Approved eye-open variant id for a single-character eye-open scene (implies referenceIntent eye-open); fails if the character has no matching eye-open sheet. Required when the character has two or more eye-open sheets." },
                 styleTags: { type: "array", items: { type: "string" }, description: "Visual-reference selectors such as interior, exterior, day, night, closeup, wide, dialogue, or action." },
                 shotType: { type: "string", description: "Shot language, for example eye-level medium two-shot or reaction close-up." },
                 camera: { type: "string" },

@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import cv2
@@ -217,19 +218,32 @@ def identity_review(spec: dict, output: Path) -> dict:
             "pass": False, "note": "",
         })
     extras = []
+    seen_extra_keys = set()
     for item in spec.get("extraSheets", []):
         record, sheet_image, _ = asset_record(item, cascade)
         role = item.get("role", "")
         if role != "eye-open":
             raise RuntimeError(f"Unsupported identity differential role: {role}")
-        split = split_grid(sheet_image, 2, 2, EYE_OPEN_CELLS, cells_dir, role, cascade)
+        # An eye-open variant id rides in storyStage. The unkeyed sheet keeps
+        # the historical crop prefix; each variant gets its own prefix so two
+        # sheets never overwrite each other's cell crops.
+        variant = str(item.get("storyStage") or "").strip()
+        if variant and not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,47}", variant):
+            raise RuntimeError(f"Unsupported eye-open variant id: {variant!r}")
+        key = f"{role}:{variant}" if variant else role
+        if key in seen_extra_keys:
+            raise RuntimeError(f"Duplicate identity differential: {key}")
+        seen_extra_keys.add(key)
+        prefix = f"{role}-{variant}" if variant else role
+        split = split_grid(sheet_image, 2, 2, EYE_OPEN_CELLS, cells_dir, prefix, cascade)
         for cell in split["cells"]:
             cell_image = load_image(Path(cell["path"]))
             cell_face = crop_box(cell_image, cell["faceDetection"]["bbox"] or None)
             cell["machineFaceCropLumaDistanceToSelected"] = mean_luma_distance(selected_face, cell_face)
             cell["stateMatchesSpecification"] = False
         extras.append({
-            **record, "role": role, "sameIdentity": False, "grid": split["grid"],
+            **record, "role": role, **({"storyStage": variant} if variant else {}),
+            "sameIdentity": False, "grid": split["grid"],
             "cells": split["cells"], "pass": False, "note": "",
         })
     return {

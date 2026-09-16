@@ -8,11 +8,13 @@ import test from "node:test";
 
 import {
   auditKoyaCharacterBootstrap,
+  auditKoyaEyeOpenPlan,
   auditKoyaFixedCastReadiness,
   auditKoyaLocationAnchorReview,
   auditKoyaLocationReview,
   auditKoyaStory,
   auditKoyaThumbnailPlan,
+  buildKoyaEyeOpenPolicy,
   buildKoyaLocationBoardPlan,
   createKoyaLocationAnchorReviewDraft,
   createKoyaLocationReviewDraft,
@@ -268,6 +270,176 @@ test("Koya character bootstrap status reports the next legal action without inve
   assert.equal(empty.rows.find((row) => row.id === "miehara").stage, "workflow-missing");
   assert.equal(empty.rows.find((row) => row.id === "horo").selectedBaseLabel, "A");
   assert.equal(empty.rows.find((row) => row.id === "horo").stage, "workflow-missing");
+});
+
+test("declared eye-open variants must each be registered once before a fixed member is ready", async () => {
+  const authority = await readKoyaChannelAuthority({ allowFixture: true, projectDir: root });
+  const showBible = structuredClone(authority.showBible);
+  // Pick the member by rule rather than by name so no cast name enters the test.
+  const member = showBible.cast.find((entry) => entry.requiredEveryEpisode === true && entry.requiredReferenceRoles?.includes("eye-open"));
+  assert.ok(member, "fixture needs an every-episode member with a required eye-open sheet");
+  const memberName = member.hiddenName || member.name;
+  member.eyeOpenVariants = [
+    { id: "open-calm", label: "穏やか", description: "gently open eyes" },
+    { id: "open-angry", label: "怒り", description: "hard angry glare", referenceAssets: [{ path: "canvas/approved/open-angry.png", sha256: "d".repeat(64) }] },
+  ];
+  validateKoyaShowBible(showBible);
+
+  const rejects = (mutate, pattern) => {
+    const copy = structuredClone(showBible);
+    mutate(copy.cast.find((entry) => entry.id === member.id));
+    assert.throws(() => validateKoyaShowBible(copy), pattern);
+  };
+  rejects((entry) => { entry.eyeOpenVariants[1].id = "open-calm"; }, /eyeOpenVariants require unique lowercase slug ids/u);
+  rejects((entry) => { entry.eyeOpenVariants[1].id = "Open Angry"; }, /eyeOpenVariants require unique lowercase slug ids/u);
+  rejects((entry) => { delete entry.eyeOpenVariants[0].description; }, /labels, and descriptions/u);
+  rejects((entry) => { entry.eyeOpenVariants = []; }, /must list 1-8 variants/u);
+  rejects((entry) => { entry.requiredReferenceRoles = entry.requiredReferenceRoles.filter((role) => role !== "eye-open"); }, /requires requiredReferenceRoles to include eye-open/u);
+  rejects((entry) => { entry.eyeOpenVariants[1].referenceAssets[0].sha256 = "not-a-sha"; }, /lowercase SHA-256/u);
+
+  const baseAssets = ["identity-face", "turnaround", "expression"].map((role) => ({ id: role, role, path: `${role}.png`, sha256: "a".repeat(64) }));
+  const character = (eyeOpenAssets) => ({
+    id: member.id,
+    name: memberName,
+    kind: "character",
+    role: "fixed",
+    status: "approved",
+    aliases: [],
+    referenceAssets: [...baseAssets, ...eyeOpenAssets],
+    approval: { identityReviewPath: "review.json", identityReviewSha256: "b".repeat(64) },
+  });
+  const eyeOpen = (storyStage, suffix = "") => ({ id: `eye-open${storyStage ? `-${storyStage}` : ""}${suffix}`, role: "eye-open", path: `eye-${storyStage || "legacy"}${suffix}.png`, sha256: "c".repeat(64), storyStage });
+  const readiness = (eyeOpenAssets) => auditKoyaFixedCastReadiness({
+    showBible,
+    registry: { characters: [character(eyeOpenAssets)] },
+    parsed: parseMangaScript(`${memberName}: テスト`),
+    characterBible: { cast: [{ id: member.id, name: memberName }] },
+    enforce: true,
+    rosterReviewAudit: { pass: true, failures: [] },
+  });
+
+  const legacyOnly = readiness([eyeOpen("")]);
+  assert.equal(legacyOnly.pass, false);
+  assert.match(legacyOnly.failures.join("\n"), /missing required approved eye-open variant 'open-calm'/u);
+  assert.match(legacyOnly.failures.join("\n"), /missing required approved eye-open variant 'open-angry'/u);
+
+  const oneMissing = readiness([eyeOpen("open-calm")]);
+  assert.equal(oneMissing.pass, false);
+  assert.doesNotMatch(oneMissing.failures.join("\n"), /'open-calm'/u);
+  assert.match(oneMissing.failures.join("\n"), /missing required approved eye-open variant 'open-angry'/u);
+
+  const duplicated = readiness([eyeOpen("open-calm"), eyeOpen("open-angry"), eyeOpen("open-angry", "-2")]);
+  assert.equal(duplicated.pass, false);
+  assert.match(duplicated.failures.join("\n"), /registers eye-open variant 'open-angry' 2 times/u);
+
+  const complete = readiness([eyeOpen("open-calm"), eyeOpen("open-angry")]);
+  assert.equal(complete.pass, true, JSON.stringify(complete.failures));
+  const row = complete.rows.find((entry) => entry.id === member.id);
+  assert.deepEqual(row.requiredEyeOpenVariants, ["open-calm", "open-angry"]);
+  assert.deepEqual(row.availableEyeOpenVariants, ["open-calm", "open-angry"]);
+
+  const bootstrapStage = async (eyeOpenAssets) => (await auditKoyaCharacterBootstrap({
+    showBible,
+    registry: { characters: [character(eyeOpenAssets)] },
+    workflowStore: { workflows: [] },
+  })).rows.find((entry) => entry.id === member.id).stage;
+  assert.equal(await bootstrapStage([eyeOpen("")]), "registered-evidence-incomplete");
+  assert.equal(await bootstrapStage([eyeOpen("open-calm"), eyeOpen("open-angry")]), "approved");
+});
+
+test("eye-open beats are drafted from the script, reviewed per member and variant, and required for the every-episode member", async () => {
+  const authority = await readKoyaChannelAuthority({ allowFixture: true, projectDir: root });
+  const showBible = structuredClone(authority.showBible);
+  // Members are picked by rule so no cast name enters the public test.
+  const semantics = showBible.storyGrammar.castSemantics;
+  const semanticIds = new Set(Object.values(semantics).map((entry) => entry.castId));
+  const recurring = showBible.cast.find((entry) => entry.id === semantics.recurringEyeOpen.castId);
+  const occasional = showBible.cast.find((entry) => entry.id !== recurring?.id && entry.requiredReferenceRoles?.includes("eye-open"));
+  const plainMember = showBible.cast.find((entry) => !semanticIds.has(entry.id) && !entry.requiredReferenceRoles?.includes("eye-open"));
+  assert.ok(recurring && occasional && plainMember, "fixture needs every-episode, occasional, and plain members");
+  occasional.eyeOpenVariants = [
+    { id: "open-calm", label: "穏やか", description: "gently open eyes", cues: ["ありがとう"] },
+    { id: "open-angry", label: "怒り", description: "hard angry glare", cues: ["逃げ"] },
+  ];
+  validateKoyaShowBible(showBible);
+  const broken = (mutate, pattern) => {
+    const copy = structuredClone(showBible);
+    mutate(copy);
+    assert.throws(() => validateKoyaShowBible(copy), pattern);
+  };
+  broken((copy) => { copy.storyGrammar.castSemantics.recurringEyeOpen.castId = plainMember.id; }, /recurringEyeOpen cast member must be required every episode and provide an eye-open asset/u);
+  broken((copy) => { copy.cast.find((entry) => entry.id === occasional.id).eyeOpenVariants[0].cues = [""]; }, /cues must be non-empty strings/u);
+
+  const nameOf = (member) => member.hiddenName || member.name;
+  const scriptText = `タイトル: 開眼の確認
+【カット1：対面】
+${nameOf(occasional)}: 見本19b1。
+ナレーション: ${nameOf(recurring)}の糸目が、すっと開いた。
+${nameOf(recurring)}: ほな、いこか。`;
+  const parsed = parseMangaScript(scriptText);
+  const [u01, u02, u03] = parsed.utterances.map((entry) => entry.id);
+
+  const draft = createKoyaStoryReviewDraft({ showBible, scriptText, parsed });
+  assert.deepEqual(draft.eyeOpenBeats.map((entry) => [entry.utteranceId, entry.castId, entry.variant]), [
+    [u02, recurring.id, ""],
+    [u03, recurring.id, ""],
+  ]);
+  assert.match(draft.eyeOpenBeats[0].reason, /script cue: .*糸目/u);
+  assert.deepEqual(draft.eyeOpenBeatFindings, []);
+  const ambiguousScript = `タイトル: 開眼の確認\n【カット1：対面】\nナレーション: ${nameOf(occasional)}の糸目が開いた。\n${nameOf(occasional)}: さて。`;
+  const ambiguousDraft = createKoyaStoryReviewDraft({ showBible, scriptText: ambiguousScript, parsed: parseMangaScript(ambiguousScript) });
+  assert.deepEqual(ambiguousDraft.eyeOpenBeats.map((entry) => entry.variant), ["", ""], "the draft leaves an undecided variant for the reviewer");
+  assert.deepEqual(ambiguousDraft.eyeOpenBeatFindings.map((entry) => [entry.kind, entry.castId]), [["variant", occasional.id]]);
+
+  const review = (eyeOpenBeats) => ({
+    version: "koya-story-review-v1",
+    scriptSha256: hash(scriptText),
+    reviewer: { host: "codex", id: "reviewer-1", contextId: "review-task-1" },
+    reviewedAt: "2026-09-16T00:00:00.000Z",
+    protagonistSpeakerId: nameOf(recurring),
+    beats: {},
+    checks: {},
+    ...(eyeOpenBeats === undefined ? {} : { eyeOpenBeats }),
+  });
+  const eyeOpenFailures = (eyeOpenBeats) => auditKoyaStory({ scriptText, parsed, showBible, storyReview: review(eyeOpenBeats), enforce: true })
+    .failures.filter((message) => /eyeOpenBeats/u.test(message));
+  assert.deepEqual(eyeOpenFailures([
+    { utteranceId: u01, castId: occasional.id, variant: "open-angry" },
+    { utteranceId: u02, castId: recurring.id },
+  ]), []);
+  assert.equal(auditKoyaStory({ scriptText, parsed, showBible, storyReview: review([]), enforce: true }).eyeOpenBeatSource, "review");
+  assert.equal(auditKoyaStory({ scriptText, parsed, showBible, storyReview: review(undefined), enforce: true }).eyeOpenBeatSource, "script-cue");
+  assert.deepEqual(eyeOpenFailures(undefined), [], "older reviews without the field fall back to script detection");
+  assert.match(eyeOpenFailures([{ utteranceId: u02, castId: recurring.id }, { utteranceId: u01, castId: occasional.id }]).join("\n"), /variant must be one of open-calm, open-angry/u);
+  assert.match(eyeOpenFailures([{ utteranceId: u02, castId: recurring.id, variant: "open-calm" }]).join("\n"), /variant 'open-calm' is not declared/u);
+  assert.match(eyeOpenFailures([{ utteranceId: u02, castId: recurring.id }, { utteranceId: u01, castId: plainMember.id }]).join("\n"), /castId must be a show-bible member that requires an eye-open sheet/u);
+  assert.match(eyeOpenFailures([{ utteranceId: "cut-09-u01", castId: recurring.id }]).join("\n"), /must name a real utterance ID/u);
+  assert.match(eyeOpenFailures([{ utteranceId: u02, castId: recurring.id }, { utteranceId: u02, castId: recurring.id }]).join("\n"), /repeats/u);
+  assert.match(
+    eyeOpenFailures([{ utteranceId: u01, castId: occasional.id, variant: "open-angry" }]).join("\n"),
+    new RegExp(`at least one eye-open beat for the every-episode eye-open member ${recurring.id}`, "u"),
+  );
+  assert.match(eyeOpenFailures("all").join("\n"), /must be an array/u);
+
+  const registry = { characters: [{ id: "registered-occasional", name: nameOf(occasional), kind: "character", status: "approved", aliases: [] }] };
+  const policy = buildKoyaEyeOpenPolicy({ showBible, registry, storyReview: review([{ utteranceId: u01, castId: occasional.id, variant: "open-angry" }]) });
+  const occasionalCandidate = policy.candidates.find((entry) => entry.memberId === occasional.id);
+  assert.equal(occasionalCandidate.characterId, "registered-occasional");
+  assert.deepEqual(occasionalCandidate.variants.map((entry) => [entry.id, entry.cues]), [["open-calm", ["ありがとう"]], ["open-angry", ["逃げ"]]]);
+  assert.deepEqual(policy.reviewedBeats, [{ utteranceId: u01, characterId: "registered-occasional", variant: "open-angry", reason: "" }]);
+  assert.equal(policy.recurringMemberId, recurring.id);
+  assert.equal(buildKoyaEyeOpenPolicy({ showBible, registry }).reviewedBeats, null);
+
+  const missing = auditKoyaEyeOpenPlan({ policy, eyeOpenPlan: { source: "review", boundImages: [] }, activeCastIds: [recurring.id] });
+  assert.equal(missing.pass, false);
+  assert.match(missing.failures[0], new RegExp(`${recurring.id} must open their eyes in every episode`, "u"));
+  assert.equal(auditKoyaEyeOpenPlan({ policy, eyeOpenPlan: { boundImages: [] }, activeCastIds: [occasional.id] }).pass, true, "only an active every-episode member is required");
+  const bound = auditKoyaEyeOpenPlan({
+    policy,
+    eyeOpenPlan: { source: "script-cue", boundImages: [{ utteranceId: u02, characterId: policy.recurringCharacterId }] },
+    activeCastIds: [recurring.id],
+  });
+  assert.deepEqual([bound.pass, bound.recurringImageCount], [true, 1]);
 });
 
 test("one-off validation canary admits only the exact approved cast without weakening normal roster production", async () => {
