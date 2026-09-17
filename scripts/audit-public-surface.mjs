@@ -30,6 +30,10 @@ import { homedir } from "node:os";
 
 import { channelPackRootEntries, channelPackPresent } from "../lib/channelPackResolver.mjs";
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
+import { countVocabularyDigestHits } from "../lib/packageTarballAudit.mjs";
+// 循環 import（audit-package-tarball もこのファイルを読む）だが、どちらも関数を
+// 実行時に呼ぶだけなので評価順に依存しない。
+import { loadSensitiveVocabulary, SENSITIVE_VOCABULARY_DIGEST_PATH } from "./audit-package-tarball.mjs";
 
 function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
@@ -325,13 +329,15 @@ const ALLOWLIST_FILE = "config/public-surface-allowlist.json";
 
 export function readAllowlist(projectDir = REPO_ROOT) {
   const file = path.join(projectDir, ALLOWLIST_FILE);
-  if (!existsSync(file)) return { roster: [], term: [], path: [], pathLeak: [] };
+  if (!existsSync(file)) return { roster: [], term: [], path: [], pathLeak: [], privateTerm: [] };
   const parsed = JSON.parse(readFileSync(file, "utf8"));
   return {
     roster: parsed.roster || [],
     term: parsed.term || [],
     path: parsed.path || [],
     pathLeak: parsed.pathLeak || [],
+    // tarball 監査はこの区分を読むのに、ここで返していなかったので常に空だった。
+    privateTerm: parsed.privateTerm || [],
   };
 }
 
@@ -376,7 +382,28 @@ function splitByAllowlist(findings, allowed) {
   return { unresolved, accepted, stale };
 }
 
-export function auditPublicSurface({ projectDir = REPO_ROOT, stagedOnly = false, revision = "" } = {}) {
+/**
+ * 鍵つき検査語彙（docs/learning/sensitive-vocabulary.digest.json）を読む。
+ *
+ * 公開面の検査は Channel Pack の語しか見ていなかった。語彙ファイルにだけある語
+ * （運営者や依頼者の名前、顧客の識別子、端末の作業ディレクトリ名）は push 前の
+ * 検査を素通りし、実際に共有の学習台帳へ依頼者の名前と発言の引用が入ったまま
+ * push されるところだった。
+ *
+ * 鍵が無い環境では「照合していない」を未検査として返す（一致なしとは言わない）。
+ */
+export function loadPrivateVocabulary(root = REPO_ROOT) {
+  const file = path.join(path.resolve(root), SENSITIVE_VOCABULARY_DIGEST_PATH);
+  // 語彙ファイルが無いプロジェクトは「見る語が宣言されていない」。未検査とは言わない。
+  if (!existsSync(file)) return { vocabulary: null, state: "missing-file" };
+  try {
+    return loadSensitiveVocabulary(file, { projectDir: path.resolve(root) });
+  } catch (error) {
+    return { vocabulary: null, state: "unreadable", reason: String(error?.message || error) };
+  }
+}
+
+export function auditPublicSurface({ projectDir = REPO_ROOT, stagedOnly = false, revision = "", privateVocabulary = null } = {}) {
   const root = path.resolve(projectDir);
   const { terms, castIds } = collectSensitiveSignals(root);
   const packAvailable = channelPackPresent(root);
@@ -401,7 +428,11 @@ export function auditPublicSurface({ projectDir = REPO_ROOT, stagedOnly = false,
   const termFindings = [];
   const rosterFindings = [];
   const pathLeakFindings = [];
+  const privateTermFindings = [];
   const scanIncomplete = [];
+  // 語彙は push の瞬間の作業ツリーから読む（コミット時点の語彙ではない）。
+  const privateLoaded = privateVocabulary ?? loadPrivateVocabulary(root);
+  const privateVocab = privateLoaded.vocabulary || null;
   const homeRoot = homedir();
   for (const relative of files) {
     const candidate = readCandidate(relative, { stagedOnly, projectDir: root, revision });
@@ -445,6 +476,12 @@ export function auditPublicSurface({ projectDir = REPO_ROOT, stagedOnly = false,
     // ホームディレクトリ名は個人を指す。
     const homeHits = countMachineLocalPathHits(text, homeRoot);
     if (homeHits > 0) pathLeakFindings.push({ file: relative, hits: homeHits });
+
+    // 語彙ファイルにだけある語。語そのものは返さない（件数だけ）。
+    if (privateVocab) {
+      const privateHits = countVocabularyDigestHits(text, privateVocab);
+      if (privateHits > 0) privateTermFindings.push({ file: relative, hits: privateHits });
+    }
   }
 
   const allowlist = readAllowlist(root);
@@ -452,6 +489,7 @@ export function auditPublicSurface({ projectDir = REPO_ROOT, stagedOnly = false,
   const term = splitByAllowlist(termFindings, allowlist.term);
   const pathLeak = splitByAllowlist(pathLeakFindings, allowlist.pathLeak);
   const pathRule = splitByAllowlist(pathFindings, allowlist.path);
+  const privateTerm = splitByAllowlist(privateTermFindings, allowlist.privateTerm);
 
   // 検査源が無い区分の stale を「直った」と読まない。
   //
@@ -468,18 +506,23 @@ export function auditPublicSurface({ projectDir = REPO_ROOT, stagedOnly = false,
     ...(signalDependent.term ? term.stale : []),
     ...pathLeak.stale,
     ...pathRule.stale,
+    ...(privateVocab ? privateTerm.stale : []),
   ];
   const unchecked = [];
   if (enumerationError) unchecked.push(enumerationError);
   if (!packAvailable) unchecked.push("チャンネル固有語と固定キャストの名簿（Channel Pack が無い）");
+  if (!privateVocab && privateLoaded.state !== "missing-file") {
+    unchecked.push(`検査語彙の語（${privateLoaded.state === "missing-key" ? "鍵が無い" : "語彙ファイルを読めない"}）`);
+  }
   if (scanIncomplete.length > 0) unchecked.push(`${scanIncomplete.length} ファイルの中身（上限超・読み取り不可）`);
 
   const unresolved = {
     path: pathRule.unresolved, term: term.unresolved,
     roster: roster.unresolved, pathLeak: pathLeak.unresolved,
+    privateTerm: privateTerm.unresolved,
   };
   const unresolvedCount = unresolved.path.length + unresolved.term.length
-    + unresolved.roster.length + unresolved.pathLeak.length;
+    + unresolved.roster.length + unresolved.pathLeak.length + unresolved.privateTerm.length;
 
   // 判定は1つにする。clean と gateOk を別条件で同居させていたので、
   // どちらを「公開してよい」と呼ぶかが未定義だった。
@@ -490,7 +533,8 @@ export function auditPublicSurface({ projectDir = REPO_ROOT, stagedOnly = false,
   let status;
   if (unresolvedCount > 0 || stale.length > 0) status = "failed";
   else if (unchecked.length > 0) status = "incomplete";
-  else if (pathFindings.length + termFindings.length + rosterFindings.length + pathLeakFindings.length > 0) status = "accepted-risk";
+  else if (pathFindings.length + termFindings.length + rosterFindings.length + pathLeakFindings.length
+    + privateTermFindings.length > 0) status = "accepted-risk";
   else status = "clean";
 
   return {
@@ -506,6 +550,8 @@ export function auditPublicSurface({ projectDir = REPO_ROOT, stagedOnly = false,
     termFindings,
     rosterFindings,
     pathLeakFindings,
+    privateTermFindings,
+    privateVocabularyState: privateVocab ? "available" : privateLoaded.state,
     scanIncomplete,
     unchecked,
     // clean は status から導く。別条件で同居させていたので、
@@ -516,6 +562,7 @@ export function auditPublicSurface({ projectDir = REPO_ROOT, stagedOnly = false,
     accepted: {
       path: pathRule.accepted, term: term.accepted,
       roster: roster.accepted, pathLeak: pathLeak.accepted,
+      privateTerm: privateTerm.accepted,
     },
     staleAllowlist: stale,
     status,
@@ -544,8 +591,9 @@ const ZERO_SHA = /^0+$/u;
  * 途中のコミットで入れて次のコミットで消した漏洩も、履歴として push される
  * ので、先端だけでなく範囲内の全コミットを見る。
  */
-export function auditPushRefs(lines, { projectDir = REPO_ROOT } = {}) {
+export function auditPushRefs(lines, { projectDir = REPO_ROOT, privateVocabulary = null } = {}) {
   const root = path.resolve(projectDir);
+  const privateLoaded = privateVocabulary ?? loadPrivateVocabulary(root);
   const results = [];
   for (const raw of lines) {
     const [localRef, localSha, remoteRef, remoteSha] = String(raw).trim().split(/\s+/u);
@@ -556,7 +604,7 @@ export function auditPushRefs(lines, { projectDir = REPO_ROOT } = {}) {
     const commits = execFileSync("git", ["rev-list", "--reverse", ...rangeArgs], { cwd: root, maxBuffer: 64 * 1024 * 1024 })
       .toString().split("\n").filter(Boolean);
     for (const sha of commits) {
-      const report = auditPublicSurface({ projectDir: root, revision: sha });
+      const report = auditPublicSurface({ projectDir: root, revision: sha, privateVocabulary: privateLoaded });
       results.push({ localRef, remoteRef, sha, report });
     }
   }
@@ -608,6 +656,11 @@ function render(report) {
     for (const finding of report.pathLeakFindings) lines.push(`  ${finding.file}  ${finding.hits}件`);
     lines.push("");
   }
+  if ((report.privateTermFindings || []).length > 0) {
+    lines.push("検査語彙の語（語彙ファイルにだけある語。語そのものは表示しない）:");
+    for (const finding of report.privateTermFindings) lines.push(`  ${finding.file}  ${finding.hits}件`);
+    lines.push("");
+  }
   if (report.scanIncomplete.length > 0) {
     lines.push("中身を見られなかったファイル（未検査として数える。飛ばしたことを黙らない）:");
     for (const entry of report.scanIncomplete.slice(0, 20)) lines.push(`  ${entry.file}  — ${entry.why}`);
@@ -620,20 +673,21 @@ function render(report) {
     lines.push("");
   }
   const u = report.unresolved;
-  const unresolvedCount = u.path.length + u.term.length + u.roster.length + u.pathLeak.length;
+  const unresolvedCount = u.path.length + u.term.length + u.roster.length + u.pathLeak.length
+    + (u.privateTerm || []).length;
   if (unresolvedCount > 0) {
     lines.push("一覧に無い、または一覧より増えている検出:");
-    for (const finding of [...u.path, ...u.term, ...u.roster, ...u.pathLeak]) {
+    for (const finding of [...u.path, ...u.term, ...u.roster, ...u.pathLeak, ...(u.privateTerm || [])]) {
       lines.push(`  ${finding.file}${finding.whyUnresolved ? `  — ${finding.whyUnresolved}` : ""}`);
     }
     lines.push("");
   }
-  const acceptedCount = report.accepted.path.length + report.accepted.term.length
-    + report.accepted.roster.length + report.accepted.pathLeak.length;
+  const acceptedAll = [...report.accepted.path, ...report.accepted.term,
+    ...report.accepted.roster, ...report.accepted.pathLeak, ...(report.accepted.privateTerm || [])];
+  const acceptedCount = acceptedAll.length;
   if (acceptedCount > 0) {
     lines.push(`理由つきで一覧に記録された未解決 ${acceptedCount} 件:`);
-    for (const finding of [...report.accepted.path, ...report.accepted.term,
-      ...report.accepted.roster, ...report.accepted.pathLeak]) {
+    for (const finding of acceptedAll) {
       lines.push(`  ${finding.file}  ${finding.current}/${finding.count} — ${finding.why}`);
     }
     lines.push("");

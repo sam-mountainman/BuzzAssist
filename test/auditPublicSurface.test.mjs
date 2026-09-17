@@ -541,3 +541,58 @@ test("push 範囲の検査は、そのコミットが持ち込んだファイル
     assert.equal(range.failed.length, 0, "今回持ち込んでいない過去の問題で push を止めないこと");
   }
 });
+
+test("公開面の検査は、語彙ファイルにだけある語（鍵つき digest）も照合する", async () => {
+  // Channel Pack の語しか見ていなかったので、依頼者の名前と発言の引用、顧客の
+  // エピソード ID、端末の作業ディレクトリ名が共有台帳に入ったまま push されかけた。
+  const { buildSensitiveVocabularyDigest, SENSITIVE_VOCABULARY_KEY_ENV } = await import("../lib/packageTarballAudit.mjs");
+  const { auditPushRefs } = await import("../scripts/audit-public-surface.mjs");
+  const key = "4d".repeat(32);
+  const { dir, git, write } = await scratchRepo();
+  await write("docs/learning/sensitive-vocabulary.digest.json",
+    JSON.stringify(buildSensitiveVocabularyDigest(["架空依頼者", "episodeabc"], { key })));
+  await write("clean.md", "何も入っていない");
+  git("add", "-A"); git("commit", "-qm", "base");
+  const base = git("rev-parse", "HEAD").toString().trim();
+  await write("ledger.jsonl", '{"evidence":"架空依頼者さんの指摘。episodes/episodeabc-v1/audits"}\n');
+  git("add", "-A"); git("commit", "-qm", "leak");
+  const tip = git("rev-parse", "HEAD").toString().trim();
+
+  const saved = process.env[SENSITIVE_VOCABULARY_KEY_ENV];
+  try {
+    process.env[SENSITIVE_VOCABULARY_KEY_ENV] = key;
+    const report = auditPublicSurface({ projectDir: dir });
+    assert.equal(report.privateVocabularyState, "available");
+    assert.deepEqual(report.privateTermFindings.map((f) => f.file), ["ledger.jsonl"]);
+    assert.equal(report.privateTermFindings[0].hits, 2);
+    assert.equal(report.status, "failed");
+    assert.equal(JSON.stringify(report).includes("架空依頼者"), false, "検査の出力に語を出さない");
+    // push 範囲でも止まる。
+    assert.equal(auditPushRefs([`refs/heads/main ${tip} refs/heads/main ${base}`], { projectDir: dir }).failed.length, 1);
+
+    // 語彙ファイルがあるのに鍵が無い＝その語を見ていない。合格とは言わない。
+    process.env[SENSITIVE_VOCABULARY_KEY_ENV] = "";
+    const savedHome = process.env.HOME;
+    process.env.HOME = `${dir}-nohome`;
+    try {
+      const blind = auditPublicSurface({ projectDir: dir });
+      assert.equal(blind.privateVocabularyState, "missing-key");
+      assert.equal(blind.status, "incomplete");
+      assert.ok(blind.unchecked.some((why) => /鍵が無い/u.test(why)));
+    } finally {
+      process.env.HOME = savedHome;
+    }
+  } finally {
+    if (saved === undefined) delete process.env[SENSITIVE_VOCABULARY_KEY_ENV];
+    else process.env[SENSITIVE_VOCABULARY_KEY_ENV] = saved;
+  }
+});
+
+test("語彙ファイルが無いプロジェクトでは、語彙の照合を未検査と呼ばない", async () => {
+  const { dir, git, write } = await scratchRepo();
+  await write("clean.md", "何も入っていない");
+  git("add", "-A");
+  const report = auditPublicSurface({ projectDir: dir });
+  assert.equal(report.privateVocabularyState, "missing-file");
+  assert.equal(report.unchecked.some((why) => /検査語彙/u.test(why)), false, "宣言の無い語彙を未検査として数えない");
+});

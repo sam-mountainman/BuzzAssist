@@ -481,3 +481,15 @@ test("リポジトリは鍵つき digest 語彙をコミットし、平文一覧
     assert.equal(ignored.status, 0, `${privateFile} が .gitignore に無い`);
   }
 });
+
+test("英数字の識別子は、区切りの後ろに接尾辞が続いても語彙に当たる", () => {
+  // 部分と全体だけを照合していたので、語彙の「xxx-yyy」が本文の「xxx-yyy-v1」の
+  // 中にあると見落とした（エピソード ID に版の接尾辞が付く、よくある形）。
+  const vocabulary = parseSensitiveVocabularyDigest(buildSensitiveVocabularyDigest([CUSTOMER_ID], { key: TEST_KEY }), { key: TEST_KEY });
+  assert.equal(countVocabularyDigestHits(`episodes/${CUSTOMER_ID}-v1/audits`, vocabulary), 1);
+  assert.equal(countVocabularyDigestHits(`prefix_${CUSTOMER_ID}.json`, vocabulary), 1);
+  // 一部だけ一致しても当てない（部分の境界で切る）。
+  assert.equal(countVocabularyDigestHits(`${CUSTOMER_ID}x-v1`, vocabulary), 0);
+  const tokens = extractVocabularyTokens("a-b-c");
+  for (const expected of ["a", "b", "c", "a-b", "b-c", "a-b-c"]) assert.ok(tokens.has(expected), expected);
+});
