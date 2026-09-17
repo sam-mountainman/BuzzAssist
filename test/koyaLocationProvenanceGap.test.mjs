@@ -233,12 +233,22 @@ test("the import map rejects a mixed board, a gap that claims a record exists, u
     {
       name: "gap claiming the prompt was recorded",
       mutate: declareProvenanceGap({ override: ({ board }) => { board.provenanceGap.promptRecorded = true; } }),
-      expected: /promptRecorded and generatorContextRecorded must both be false/u,
+      expected: /promptRecorded, generatorContextRecorded, referenceImagesRecorded may only be false/u,
     },
     {
       name: "gap claiming the conversation was recorded",
       mutate: declareProvenanceGap({ override: ({ board }) => { board.provenanceGap.generatorContextRecorded = true; } }),
-      expected: /promptRecorded and generatorContextRecorded must both be false/u,
+      expected: /promptRecorded, generatorContextRecorded, referenceImagesRecorded may only be false/u,
+    },
+    {
+      name: "gap claiming the reference images were recorded",
+      mutate: declareProvenanceGap({ flags: ["referenceImagesRecorded"], override: ({ board }) => { board.provenanceGap.referenceImagesRecorded = true; } }),
+      expected: /promptRecorded, generatorContextRecorded, referenceImagesRecorded may only be false/u,
+    },
+    {
+      name: "gap that declares nothing",
+      mutate: declareProvenanceGap({ flags: [] }),
+      expected: /provenanceGap must declare at least one of/u,
     },
     {
       name: "unknown key inside the gap",
@@ -271,6 +281,161 @@ test("the import map rejects a mixed board, a gap that claims a record exists, u
         testCase.name,
       );
       // 何も書かない。
+      await assert.rejects(() => readFile(join(prepared.plan.jobs[0].outputPath)), /ENOENT/u, testCase.name);
+    });
+  }
+});
+
+// 参照画像の記録が無いボード。作業記録に「別の承認済み画像の一部を添えた」
+// としか残っていないので、アンカーを参照として申告すれば作り話になる。
+const REFERENCE_GAP_REASON = "作業記録には別の承認済み画像の一部を添えたとしか無く、どの画像を添えたかは残っていない";
+const CONTINUITY_CHECK = "architectureLockPass";
+
+function declareReferenceGap({ boardNumber = 2, override = null } = {}) {
+  return declareProvenanceGap({
+    boardNumber,
+    flags: ["referenceImagesRecorded"],
+    reason: REFERENCE_GAP_REASON,
+    override,
+  });
+}
+
+test("a board whose reference images were never recorded imports with an empty reference list instead of an invented anchor binding", async () => {
+  await withProject("koya-refgap-import-", async ({ root, projectDir, authority }) => {
+    const sourceDir = join(root, "downloads");
+    const registered = await importAndRegisterSyntheticLocation({
+      projectDir,
+      authority,
+      locationId: LOCATION_ID,
+      sourceDir,
+      mutate: declareReferenceGap({ boardNumber: 2 }),
+    });
+    const manifest = await readJson(registered.imported.manifestPath);
+    const [anchor, gapped] = manifest.entries;
+
+    // 参照は空、アンカーへの SHA 拘束も作らない（無い記録を書かない）。
+    assert.deepEqual(gapped.import.referenceImages, []);
+    assert.equal(gapped.anchorSha256, "");
+    assert.equal(anchor.sha256.length, 64);
+    assert.deepEqual(gapped.import.provenanceGap, {
+      referenceImagesRecorded: false,
+      reason: REFERENCE_GAP_REASON,
+      specificationPath: join(sourceDir, "set-plan.md"),
+      specificationSha256: sha256(SPECIFICATION_TEXT),
+    });
+
+    // 旗は独立。プロンプトと会話 id はこのボードでも従来どおり残る。
+    assert.equal(gapped.promptSha256, sha256(gapped.import.promptText));
+    assert.ok(gapped.generator.contextId);
+
+    // 残りの継続ビューは今までどおりアンカーを1回だけ参照する。
+    assert.equal(manifest.entries[2].anchorSha256, anchor.sha256);
+    assert.equal(manifest.entries[2].import.referenceImages.filter((reference) => reference.role === "anchor").length, 1);
+
+    // 審査の下書きは、記録では示せないので目で見ろと書く。
+    assert.equal(registered.review.boards[1].checks[ACKNOWLEDGEMENT], true);
+    assert.match(registered.review.instructions, /reference images were never recorded/u);
+    assert.match(registered.review.instructions, /cannot be shown by a recorded reference and has to be judged by eye/u);
+    assert.ok(registered.review.instructions.includes(`'${CONTINUITY_CHECK}'`));
+
+    // 台帳の承認にも、参照の記録が無かったことが残る。
+    const registry = await readCharacterRegistry({ projectDir });
+    const entry = registry.characters.find((character) => character.id === LOCATION_ID);
+    assert.deepEqual(entry.approval.provenanceGaps, [{
+      boardId: gapped.boardId,
+      reason: REFERENCE_GAP_REASON,
+      specificationSha256: sha256(SPECIFICATION_TEXT),
+      referenceImagesRecorded: false,
+    }]);
+  });
+});
+
+test("the anchor review draft says the continuity every later board is measured against has to be judged by eye", async () => {
+  await withProject("koya-refgap-anchor-", async ({ root, projectDir, authority }) => {
+    await importWithGap({ root, projectDir, authority, mutate: declareReferenceGap({ boardNumber: 1 }) });
+    const common = commonOptions({ projectDir, authority });
+    const draft = await createKoyaLocationAnchorReviewDraft(common);
+    assert.equal(draft.anchor.checks[ACKNOWLEDGEMENT], false);
+    assert.match(draft.instructions, /reference images were never recorded/u);
+    assert.match(draft.instructions, /has to be judged by eye/u);
+
+    const review = passAnchorChecks(JSON.parse(JSON.stringify(draft)));
+    review.reviewer = { host: "codex", id: "anchor-reviewer", contextId: "session-anchor-reviewer" };
+    review.reviewedAt = "2026-09-18T01:00:00.000Z";
+    assert.equal((await auditKoyaLocationAnchorReview({ ...common, review })).pass, true);
+  });
+});
+
+test("the final audit fails when the by-eye continuity check is not true for a board whose references were never recorded", async () => {
+  await withProject("koya-refgap-final-", async ({ root, projectDir, authority }) => {
+    const { reviewsDir } = await importWithGap({ root, projectDir, authority, mutate: declareReferenceGap({ boardNumber: 2 }) });
+    const common = commonOptions({ projectDir, authority });
+    const { anchorReviewPath } = await passedAnchorReview({ common, reviewsDir });
+
+    const passing = await finalReview({ common, reviewsDir, anchorReviewPath });
+    assert.equal((await auditKoyaLocationReview({ ...common, review: passing.review })).pass, true);
+
+    for (const [label, mutateReview] of [
+      ["false", (review) => { review.boards[1].checks[CONTINUITY_CHECK] = false; }],
+      ["missing", (review) => { delete review.boards[1].checks[CONTINUITY_CHECK]; }],
+    ]) {
+      const broken = await finalReview({ common, reviewsDir, anchorReviewPath, mutateReview });
+      const audit = await auditKoyaLocationReview({ ...common, review: broken.review });
+      assert.equal(audit.pass, false, label);
+      assert.ok(
+        audit.failures.some((failure) => failure.includes(`check '${CONTINUITY_CHECK}' must be true`)
+          && failure.includes("nothing but this by-eye check shows its architecture continuity with the anchor")),
+        label,
+      );
+      await assert.rejects(
+        () => registerApprovedKoyaLocation({ authority, projectDir, locationId: LOCATION_ID, reviewPath: broken.reviewPath }),
+        new RegExp(`check '${CONTINUITY_CHECK}' must be true`, "u"),
+        label,
+      );
+    }
+  });
+});
+
+test("the import map rejects a reference on a board that declares its references were not recorded, and an empty reference list without that declaration", async () => {
+  const anchorReference = ({ board, map }) => {
+    board.referenceImages = [{ path: map.boards[0].sourcePath, sha256: map.boards[0].sourceSha256, role: "anchor" }];
+  };
+  const cases = [
+    {
+      name: "reference gap that still names the anchor",
+      mutate: declareReferenceGap({ boardNumber: 2, override: anchorReference }),
+      expected: /provenanceGap says the reference images were not recorded, so referenceImages must be empty/u,
+    },
+    {
+      name: "reference gap that still names a style reference",
+      mutate: declareReferenceGap({
+        boardNumber: 2,
+        override: ({ board, map }) => {
+          board.referenceImages = [{ path: map.boards[0].sourcePath, sha256: map.boards[0].sourceSha256, role: "style" }];
+        },
+      }),
+      expected: /provenanceGap says the reference images were not recorded, so referenceImages must be empty/u,
+    },
+    {
+      name: "empty reference list on a continuity view that declares nothing",
+      mutate: async ({ map }) => { map.boards[1].referenceImages = []; },
+      expected: /is a continuity view; list the imported anchor board .* exactly once as its role "anchor" reference/u,
+    },
+    {
+      name: "prompt gap that empties the references without declaring it",
+      mutate: declareProvenanceGap({ boardNumber: 2, override: ({ board }) => { board.referenceImages = []; } }),
+      expected: /is a continuity view; list the imported anchor board .* exactly once as its role "anchor" reference/u,
+    },
+  ];
+  for (const testCase of cases) {
+    await withProject("koya-refgap-reject-", async ({ root, projectDir, authority }) => {
+      const sourceDir = join(root, "downloads");
+      const prepared = await writeSyntheticImport({ authority, locationId: LOCATION_ID, sourceDir, mutate: testCase.mutate });
+      await assert.rejects(
+        () => importKoyaLocationBoards({ authority, locationId: LOCATION_ID, importMapPath: prepared.mapPath, outputDir: "" }),
+        testCase.expected,
+        testCase.name,
+      );
       await assert.rejects(() => readFile(join(prepared.plan.jobs[0].outputPath)), /ENOENT/u, testCase.name);
     });
   }

@@ -38,7 +38,7 @@
       "provenanceGap": {
         "promptRecorded": false,
         "generatorContextRecorded": false,
-        "reason": "replace with why neither record exists, for example: this board was made before the channel kept prompts and conversation ids, and neither survives anywhere. Writing a prompt from memory would be an invented record, so the gap is declared instead",
+        "reason": "replace with why those records do not exist, for example: this board was made before the channel kept prompts and conversation ids, and neither survives anywhere. Writing a prompt from memory would be an invented record, so the gap is declared instead",
         "specificationPath": "./replace-with-the-written-specification-this-board-was-made-to-satisfy.md",
         "specificationSha256": "replace-with-64-hex-sha256-of-that-specification-file"
       },
@@ -49,6 +49,25 @@
           "role": "anchor"
         }
       ]
+    },
+    {
+      "boardIndex": 3,
+      "sourcePath": "./replace-with-third-download.png",
+      "sourceSha256": "replace-with-64-hex-sha256-of-that-file",
+      "generator": {
+        "host": "chat-web-image-tool",
+        "id": "replace-with-product-or-model-label",
+        "contextId": "replace-with-conversation-id-or-url",
+        "generatedAt": "2026-01-01T00:00:00.000Z"
+      },
+      "promptText": "replace with the prompt actually used for this board: the three flags are independent, so a board may keep its prompt and its conversation and still have lost the record of what pictures were attached to it",
+      "provenanceGap": {
+        "referenceImagesRecorded": false,
+        "reason": "replace with why the attached pictures are not known, for example: the written work log says only that a crop of another approved image was attached on one attempt, and it does not say which image. Naming the anchor here would be an invented record, so the gap is declared instead",
+        "specificationPath": "./replace-with-the-written-specification-this-board-was-made-to-satisfy.md",
+        "specificationSha256": "replace-with-64-hex-sha256-of-that-specification-file"
+      },
+      "referenceImages": []
     }
   ]
 }

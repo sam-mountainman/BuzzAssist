@@ -174,29 +174,41 @@ export const SPECIFICATION_TEXT = [
 ].join("\n");
 
 /**
- * 記録が残っていないボードを1枚作る mutate。プロンプトと会話 id を落とし、
+ * 記録が残っていないボードを1枚作る mutate。既定はプロンプトと会話 id を落とし、
  * 代わりに「その絵が満たすべき文書」と provenanceGap を書く。
+ * flags で、どの記録が残っていないかを選べる（旗はボードごとに独立）。
  * override で、混在・記録ありの主張・未知キー・SHA 不一致を1か所だけ壊せる。
  */
+export const PROVENANCE_GAP_FLAG_ORDER = Object.freeze([
+  "promptRecorded",
+  "generatorContextRecorded",
+  "referenceImagesRecorded",
+]);
+
 export function declareProvenanceGap({
   boardNumber = 2,
+  flags = ["promptRecorded", "generatorContextRecorded"],
   reason = "このボードはプロンプトと会話 id を残す決まりより前に作られ、どちらも残っていない",
   specificationName = "set-plan.md",
   specificationText = SPECIFICATION_TEXT,
   writeSpecification = true,
   override = null,
 } = {}) {
+  const declared = new Set(flags);
   return async ({ map, sourceDir }) => {
     const specificationPath = join(sourceDir, specificationName);
     if (writeSpecification) await writeFile(specificationPath, specificationText);
     const board = map.boards[boardNumber - 1];
-    delete board.promptText;
-    delete board.promptPath;
-    delete board.promptSha256;
-    delete board.generator.contextId;
+    if (declared.has("promptRecorded")) {
+      delete board.promptText;
+      delete board.promptPath;
+      delete board.promptSha256;
+    }
+    if (declared.has("generatorContextRecorded")) delete board.generator.contextId;
+    // 参照の記録が無いボードは、アンカー参照も含めて1枚も並べない。
+    if (declared.has("referenceImagesRecorded")) board.referenceImages = [];
     board.provenanceGap = {
-      promptRecorded: false,
-      generatorContextRecorded: false,
+      ...Object.fromEntries(PROVENANCE_GAP_FLAG_ORDER.filter((flag) => declared.has(flag)).map((flag) => [flag, false])),
       reason,
       specificationPath: `./${specificationName}`,
       specificationSha256: sha256(specificationText),

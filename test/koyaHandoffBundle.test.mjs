@@ -986,6 +986,77 @@ test("Koya handoff carries a declared provenance gap and rejects an attestation 
   }
 });
 
+test("Koya handoff carries the unrecorded-reference flag and rejects an attestation that drops or alters it", async () => {
+  // 参照画像の記録が無いまま登録したボードは、引き渡し先でもそう見えること。
+  const savedPack = process.env.BUZZASSIST_CHANNEL_PACK;
+  const savedPackId = process.env.BUZZASSIST_CHANNEL_PACK_ID;
+  delete process.env.BUZZASSIST_CHANNEL_PACK;
+  delete process.env.BUZZASSIST_CHANNEL_PACK_ID;
+  const root = await mkdtemp(path.join(os.tmpdir(), "koya-handoff-location-refgap-"));
+  const sourceProject = path.join(root, "source");
+  const bundleDir = path.join(root, "bundle");
+  const reason = "作業記録には別の承認済み画像の一部を添えたとしか無く、どの画像を添えたかは残っていない";
+  try {
+    await prepareProject(sourceProject, true);
+    await writeJson(path.join(sourceProject, "config", "koya-location-bible.json"), syntheticLocationBible());
+    const authority = await readSyntheticKoyaAuthority(sourceProject);
+    const approved = await importAndRegisterSyntheticLocation({
+      projectDir: sourceProject,
+      authority,
+      locationId: "sample-street",
+      sourceDir: path.join(root, "downloads"),
+      mutate: declareProvenanceGap({ boardNumber: 2, flags: ["referenceImagesRecorded"], reason }),
+    });
+    const gapBoardId = approved.review.boards[1].boardId;
+    const reasonToken = `source-reason-sha256:${sha256(reason)}`;
+    const specificationSha256 = sha256(SPECIFICATION_TEXT);
+
+    await exportKoyaHandoffBundle({ projectDir: sourceProject, outputDir: bundleDir, bundleId: "handoff-location-refgap" });
+    assert.equal((await verifyKoyaHandoffBundle({ bundleDir })).ok, true);
+
+    const registryPath = await bundleRegistryPath(bundleDir);
+    const portableRegistry = JSON.parse(await readFile(registryPath, "utf8"));
+    const portableLocation = portableRegistry.characters.find((entry) => entry.kind === "location");
+    assert.deepEqual(portableLocation.approval.provenanceGaps, [{
+      boardId: gapBoardId,
+      reason: reasonToken,
+      specificationSha256,
+      referenceImagesRecorded: false,
+    }]);
+
+    const attestationPath = path.join(bundleDir, "project", "canvas", portableLocation.approval.identityReviewPath.replace(/^__BUNDLE_CANVAS__\//u, ""));
+    const attestationText = await readFile(attestationPath, "utf8");
+    const attestation = JSON.parse(attestationText);
+    const gapBoard = attestation.snapshot.boards[1];
+    assert.equal(gapBoard.boardId, gapBoardId);
+    assert.deepEqual(gapBoard.provenanceGap, { reason: reasonToken, specificationSha256, referenceImagesRecorded: false });
+    // プロンプトと会話は残っているボードなので、会話の token は運ばれる。
+    assert.match(gapBoard.generatorContextId, /^source-context-sha256:[a-f0-9]{64}$/u);
+    assert.equal(gapBoard.checks.provenanceGapAcknowledged, true);
+    assert.equal(attestationText.includes(reason), false);
+
+    // 改ざん: attestation から旗だけを落とす／true に書き換える。
+    for (const [label, mutateBoard, expected] of [
+      ["dropped", (board) => { delete board.provenanceGap.referenceImagesRecorded; }, /must declare exactly the provenance gaps the approved review recorded/u],
+      ["altered", (board) => { board.provenanceGap.referenceImagesRecorded = true; }, /referenceImagesRecorded may only be false/u],
+    ]) {
+      const tamperedAttestation = JSON.parse(attestationText);
+      mutateBoard(tamperedAttestation.snapshot.boards[1]);
+      const tamperedBytes = `${JSON.stringify(tamperedAttestation, null, 2)}\n`;
+      await writeFile(attestationPath, tamperedBytes);
+      const tamperedRegistry = JSON.parse(await readFile(registryPath, "utf8"));
+      tamperedRegistry.characters.find((entry) => entry.kind === "location").approval.identityReviewSha256 = sha256(tamperedBytes);
+      await writeJson(registryPath, tamperedRegistry);
+      await rehashBundleManifest(bundleDir);
+      await assert.rejects(() => verifyKoyaHandoffBundle({ bundleDir }), expected, label);
+    }
+  } finally {
+    if (savedPack === undefined) delete process.env.BUZZASSIST_CHANNEL_PACK; else process.env.BUZZASSIST_CHANNEL_PACK = savedPack;
+    if (savedPackId === undefined) delete process.env.BUZZASSIST_CHANNEL_PACK_ID; else process.env.BUZZASSIST_CHANNEL_PACK_ID = savedPackId;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Koya handoff rejects a location whose board or attestation is missing or altered", async () => {
   const savedPack = process.env.BUZZASSIST_CHANNEL_PACK;
   const savedPackId = process.env.BUZZASSIST_CHANNEL_PACK_ID;
