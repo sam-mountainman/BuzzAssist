@@ -1,0 +1,107 @@
+{
+  "version": "buzzassist-sensitive-vocabulary-digest-v2",
+  "algorithm": "hmac-sha256(key, NFKC lowercase term)",
+  "keyId": "b14adbcb601ef709",
+  "generatedAt": "2026-09-17T14:20:37.459Z",
+  "termCount": 28,
+  "lengths": [
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    10,
+    12,
+    14,
+    17,
+    21
+  ],
+  "entries": [
+    {
+      "digest": "0d33ab72dd1be631511e1ff9bf134002e5e01483407f107bda91b66ba14eccbd"
+    },
+    {
+      "digest": "12c39ff20b2bf46a1989aea1c5479ae5627a1a410ea36953b6c19c95d8739a86"
+    },
+    {
+      "digest": "1f5dbbf41beba56cc4df1284aecd17a65421127d65f766e5ac34204f761ce144"
+    },
+    {
+      "digest": "203f7e0424269a19a738714d763d6b29e18ccb207e7b683337698eee1ceba363"
+    },
+    {
+      "digest": "27588820ec10821eda66c00e7660893b5b573be98cc5466be55147d6ae816477"
+    },
+    {
+      "digest": "3ab43a68b294462a8b865d315f68c0781c3f626eb570f861e9c4ada0712e2319"
+    },
+    {
+      "digest": "3b0466bba15b3357ccb754199a88dee6dcb0deea2aeb28479d98ab8483f9951d"
+    },
+    {
+      "digest": "4fa9ff792b6d03980ce690ade6809bb6e2f6c8b1f1478ccbd51808f51b7fa6e0"
+    },
+    {
+      "digest": "60630cebe352a284e906b2338af3a5a76254171ca95ff21321cc87d329fb5f76"
+    },
+    {
+      "digest": "663f367db4d394061c623c8a07c04a4af94a26c18f00e50c6c328027e5064447"
+    },
+    {
+      "digest": "6a092be91943f6f3fd5050cf4e069946f6ef19929478932091b5a7ed286b3226"
+    },
+    {
+      "digest": "6c6e22914280ec28168fea5894e92461ada1a5e4a1af10ff203d6f80e9e6abab"
+    },
+    {
+      "digest": "7970d63c638d48f3fca70d323459a59473cae1f86153ca8e084abdd478cbb8f7"
+    },
+    {
+      "digest": "7a07d6eff41a6502201da913d5d08fd15a57b71e7958fee0f80e920c9ea8eed9"
+    },
+    {
+      "digest": "7ef96bf977b23a1d87343ad0700cb9ff4eefc10709b081c6f017f75853921fa0"
+    },
+    {
+      "digest": "81d726aa2d92a31ac82064fe4ec650b1336744f21999eafbebd53d7202ede255"
+    },
+    {
+      "digest": "8f67770d85a2fca914a8ebb8a6c1efdde290902ff6be0bf791442363e557d072"
+    },
+    {
+      "digest": "9f28f2fcd7955f12392779219d4d3662f7b052ed4955213b2a574ef59234be0f"
+    },
+    {
+      "digest": "a42e7fbace42ad4677d4812327788a388c0d6c0e2de7aa3d42749d250b94a6d2"
+    },
+    {
+      "digest": "b400a046ae5c78d1cd3cbd2e5017f1a4b7e6978df45778f003b641e9c1ee1108"
+    },
+    {
+      "digest": "bb2a2850f333e16fe4cec3a4505c084bcbc9218c184a39d0b629c303ad4e6ad7"
+    },
+    {
+      "digest": "bf5caad7cc3bd3dcf913a6dd96f18673ff6bbac6481bdd2ff166b9eb60ef0d98"
+    },
+    {
+      "digest": "e15d8cad60737d2d2e5bff2814676f413889b7ce3de30c22ddae36f4cff80f05"
+    },
+    {
+      "digest": "e2ff223626fc50977cf8248719c2208ce88bad1fc9c48931451096e6cb0826d0"
+    },
+    {
+      "digest": "ee10fd58b09514757d102530746bc89ab7f2e7bea4c924c822f425237fd2822d"
+    },
+    {
+      "digest": "eef41ba8206ae8e92b1aaf570281a19b633c647e9aae45a6dda656f09183b18b"
+    },
+    {
+      "digest": "f2f24f4ae1edbaf44429de5fa0b91ef54c604939adbd02a4c669604e0a63bf63"
+    },
+    {
+      "digest": "f7afc862221df65eb57aeb97173a572eaa40906834a7bfa9e0bfba26a0b3945f"
+    }
+  ]
+}

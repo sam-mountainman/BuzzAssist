@@ -48,8 +48,21 @@ jobs:
 
       - name: Build canvas
         run: npm run build
+      # 検査語彙は鍵つき digest で、鍵は secret でだけ渡す（公開 salt の旧形式は
+      # 総当たりで名前が戻った）。鍵が無い実行（pull request・fork・secret 未設定）
+      # では、その語を照合していないことを警告で残して先へ進む。Release は
+      # 鍵が無ければ止まる（release.yml）。
       - name: Audit actual npm distribution tarball
-        run: npm run package:audit
+        shell: bash
+        env:
+          BUZZASSIST_SENSITIVE_VOCABULARY_KEY: ${{ secrets.BUZZASSIST_SENSITIVE_VOCABULARY_KEY }}
+        run: |
+          if [ -n "$BUZZASSIST_SENSITIVE_VOCABULARY_KEY" ]; then
+            npm run package:audit
+          else
+            echo "::warning title=検査語彙を照合していない::BUZZASSIST_SENSITIVE_VOCABULARY_KEY が無いので docs/learning/sensitive-vocabulary.digest.json の語を照合していない（未検査）。Release は鍵が無ければ止まる。"
+            npm run package:audit -- --allow-missing-signals
+          fi
 
   canvas-browser-smoke:
     name: Ubuntu / real-browser Canvas smoke
