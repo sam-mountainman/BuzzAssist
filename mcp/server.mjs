@@ -86,6 +86,7 @@ import { createMangaProductionDag, executeMangaProductionDag } from "../lib/mang
 import { createKoyaMangaDagRuntime } from "../lib/koyaMangaDagRuntime.mjs";
 import {
   KOYA_MCP_ACTIONS,
+  READ_ONLY_ACTIONS as KOYA_READ_ONLY_ACTIONS,
   doctorKoyaMcp,
   listKoyaMcpJobs,
   readKoyaMcpJob,
@@ -110,6 +111,11 @@ import {
   buzzAssistWidgetResourceMetadata,
   createBuzzAssistWidgetHtml,
 } from "../lib/buzzassistWidgetResource.mjs";
+import {
+  handleVideoHarnessToolCall,
+  isVideoHarnessToolName,
+  videoHarnessToolDefinitions,
+} from "../lib/videoHarnessMcp.mjs";
 import { tmpdir } from "node:os";
 
 const SERVER_NAME = "BuzzAssist Excalidraw Plugin Tools";
@@ -1556,10 +1562,11 @@ async function generateExcalidrawImagesBatch(args = {}) {
         )
       : [];
     return optimizeCharacterBindingsForGeneration(bindings, {
-      // Every multi-character scene uses exactly one approved face reference
-      // per person. Single-character scenes route at most one task-specific
-      // sheet beside the face lock, avoiding face/outfit blending.
+      // Explicit comical intent keeps both the approved face and selected A/B
+      // supplemental art per person; normal routing retains its existing budget.
       referenceIntent: nonEmptyString(job.referenceIntent ?? job.reference_intent ?? job.customData?.buzzassistCharacterReferenceIntent),
+      productionReferenceIndexPath: job.productionReferenceIndexPath ?? job.production_reference_index_path ?? job.customData?.buzzassistProductionReferenceIndexPath ?? args.productionReferenceIndexPath,
+      projectDir: args.projectDir,
       storyStage: nonEmptyString(job.storyStage ?? job.story_stage ?? job.customData?.buzzassistCharacterStoryStage),
       providerReferenceLimit: providerReferenceLimitForJob(job),
     });
@@ -2051,6 +2058,7 @@ async function generateExcalidrawVideosBatch(args = {}) {
 
 function toolDefinitions() {
   return [
+    ...videoHarnessToolDefinitions(),
     {
       name: TOOL_READ_ME,
       title: "Read Excalidraw MCP Format",
@@ -2587,7 +2595,8 @@ function toolDefinitions() {
                 aspectRatio: { type: "string" },
                 imageSize: { type: "string" },
                 quality: { type: "string" },
-                referenceIntent: { type: "string", enum: ["default", "closeup", "expression", "full-body", "profile", "eye-open", "outfit"], description: "Routes only selected-face plus the one task-specific approved sheet." },
+                referenceIntent: { type: "string", enum: ["default", "closeup", "expression", "full-body", "profile", "eye-open", "outfit", "comical-A", "comical-B"], description: "Routes selected-face plus the task-specific sheet. Comical A/B requires a SHA-verified supplemental production reference index." },
+                productionReferenceIndexPath: { type: "string", description: "Explicit supplemental index path for comical-A/B, resolved from projectDir; required for comical intent." },
                 storyStage: { type: "string", description: "Approved outfit stage id; fails if the character has no matching outfit sheet." },
                 styleTags: { type: "array", items: { type: "string" }, description: "Visual-reference selectors such as interior, exterior, day, night, closeup, wide, dialogue, or action." },
                 shotType: { type: "string", description: "Shot language, for example eye-level medium two-shot or reaction close-up." },
@@ -2933,7 +2942,7 @@ function toolDefinitions() {
           projectDir: { type: "string" },
           confirmed: { type: "boolean", description: "Required for mutating or credit-spending actions, including location-generate; not required for contract, audits, plans, drafts, handoff-verify, or status." },
           background: { type: "boolean", description: "Defaults to true for mutating/long actions. Set false only for a bounded action." },
-          options: { type: "object", description: "Official CLI options in camelCase, such as episodeId, scriptPath, workflowId, castId, videoPath, reviewerContextId, retryFailed, force, or pass.", additionalProperties: true },
+          options: { type: "object", description: "Official CLI options in camelCase, such as episodeId, scriptPath, workflowId, castId, videoPath, reviewerContextId, retryFailed, force, or pass. For signoff/audit/reviewer-key-create pass reviewerKeyPath (Ed25519 private key FILE path) and reviewerTrustPath (trust list JSON FILE path) — paths only; key or trust-list contents are rejected. The MCP host's BUZZASSIST_REVIEWER_TRUST (or BUZZASSIST_REVIEWER_TRUST_JSON; legacy BUZZASSIST_KOYA_REVIEWER_TRUST is read for compatibility, a new/legacy mismatch is env-ambiguous) is the only trust anchor and is authoritative: reviewerTrustPath must point at a list with the same canonical sha256 or the action is refused with reviewer-trust-conflict, and when the host has no trust list configured the action fails closed with reviewer-trust-unconfigured (a requester-supplied path never stands in for the operator's anchor). The equivalent narrated-story-video entries are signoff_video_harness_job and create_video_harness_reviewer_key.", additionalProperties: true },
         },
         required: ["action"],
         additionalProperties: false,
@@ -3742,6 +3751,9 @@ async function markCharacterApprovalOnCanvas(args = {}, details = {}) {
 }
 
 async function handleToolCall(params, progress = () => {}) {
+  if (isVideoHarnessToolName(params?.name)) {
+    return handleVideoHarnessToolCall(params);
+  }
   const settingsGateKind = SETTINGS_CONFIRMATION_TOOLS.get(params?.name);
   if (settingsGateKind) {
     const gateArgs = params.arguments ?? {};
@@ -4175,8 +4187,10 @@ if (params?.name === TOOL_GENERATE_SPEECH) {
 
   if (params?.name === TOOL_RUN_KOYA_MANGA_PIPELINE) {
     const args = params.arguments ?? {};
-    const readOnly = args.action === "contract" || args.action === "handoff-verify" || args.action === "status";
-    const result = readOnly || args.background === false
+    // read-only 判定は koyaMcpAdapter が export する READ_ONLY_ACTIONS が唯一の定義（R4-8 / R6-6）。
+    // ここで action 名を二重に列挙しない（列挙が食い違うと片方だけ直る）。read-only action は
+    // 同期実行、それ以外は background=false を明示したときだけ同期、既定は durable Job。
+    const result = KOYA_READ_ONLY_ACTIONS.has(args.action) || args.background === false
       ? await runKoyaMcpAction(args)
       : await startKoyaMcpJob(args);
     const queued = result.status === "queued";

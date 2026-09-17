@@ -20,8 +20,11 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+import { isDirectCli } from "../lib/cliEntrypoint.mjs";
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HARNESS_DIR = path.join(REPO_ROOT, "config", "harnesses");
 
 // 宣言に入っていてはいけない語。この台帳は共有される前提なので、
@@ -209,7 +212,6 @@ function main() {
   }
 }
 
-const invoked = process.argv[1] ? path.resolve(process.argv[1]) : null;
-if (invoked && invoked === path.resolve(new URL(import.meta.url).pathname)) {
+if (isDirectCli(import.meta.url)) {
   try { main(); } catch (error) { process.stderr.write(`${error.message}\n`); process.exit(2); }
 }

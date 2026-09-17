@@ -18,9 +18,20 @@ For any request that produces, changes, reviews, repairs, renders, or audits a J
 - `.agents/skills/manga-video-production/SKILL.md`
 - `.agents/skills/manga-page-camera/SKILL.md`
 
-Use `node scripts/koya-manga-video.mjs` as the only production entrypoint for new episodes. The historical `scripts/build-manga-video.mjs` and versioned `apply/finalize/generate-manga-v*` scripts are benchmark-only migrations and must not be used for a new episode. Do not claim completion until the official final audit passes, the Claude/Codex MP4-derived contact-sheet signoff is valid, `knownRemainingIssues` is empty, and the real MP4 fully decodes.
+The operator-facing top-level entrypoint is `node scripts/run-video-harness.mjs`; it owns the durable Job, signed Channel Pack, doctor, resume/cancel, RunReceipt, and Canvas projection. Inside the selected Koya adapter, `node scripts/koya-manga-video.mjs` is the only production runner for a new episode. The historical `scripts/build-manga-video.mjs` and versioned `apply/finalize/generate-manga-v*` scripts are benchmark-only migrations and must not be used for a new episode. Do not claim completion until the official final audit passes, the Claude/Codex MP4-derived contact-sheet signoff is valid, `knownRemainingIssues` is empty, and the real MP4 fully decodes.
 
 For new episodes, identify the protagonist before paid generation and pass `--protagonist-speaker-id`. Square narration boxes remain visually distinct, but every narration line must use the protagonist's exact approved voice; do not create a dedicated narrator.
+
+# Raw script to finished video — shared route
+
+For any operator request that turns a raw Japanese script into a finished video, first read
+`.agents/skills/platform-craft/SKILL.md` and the selected genre skill completely. For narrated
+story videos that genre skill is `.agents/skills/narrated-story-video/SKILL.md`; manga continues
+to use the two mandatory skills above. Start through `node scripts/run-video-harness.mjs` (or the
+equivalent `run_video_harness` MCP tool), require a signed Channel Pack, and keep the default
+plan-only behavior unless paid execution was explicitly confirmed. Claude Code and Codex must
+use the same Harness declaration, Skill SHA, Channel Pack fingerprint, quality gates, RunReceipt,
+and BuzzAssist Canvas projection; a globally installed plugin or skill is not an implicit fallback.
 
 # 並列実行 — 両ハーネス共通ルート
 

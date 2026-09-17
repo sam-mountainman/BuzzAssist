@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # release.yml が同じ commit の 3OS matrix と実ブラウザ smoke を「公開前ゲート」
+  # として呼ぶための入口。ここに job を二重定義せず、release 側は
+  # `uses: ./.github/workflows/cross-platform.yml` で本ファイルを再利用する。
+  workflow_call:
 
 permissions:
   contents: read
@@ -15,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
         node: [20, 22]
     runs-on: ${{ matrix.os }}
     steps:
@@ -24,12 +28,15 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - name: Install dependencies
         run: npm ci
       - name: Install python QA dependencies for attribute gates
-        run: python3 -m pip install --user opencv-python-headless numpy
+        run: python -m pip install opencv-python-headless numpy
       - name: Run tests including isolated Codex and Claude Code setup
-        run: npm test
+        run: npm test -- --skip-policy config/ci-test-skip-allowlist.json
       # 公開面の検査。このリポジトリは PUBLIC なので、新しいファイルが1つ
       # 増えるたびに運営者名・キャスト名・開発機の絶対パスが紛れ込む余地が
       # できる。手で叩いたときしか働かない検査は実質無いのと同じなので、
@@ -41,5 +48,21 @@ jobs:
 
       - name: Build canvas
         run: npm run build
-      - name: Verify npm distribution contents
-        run: npm pack --dry-run
+      - name: Audit actual npm distribution tarball
+        run: npm run package:audit
+
+  canvas-browser-smoke:
+    name: Ubuntu / real-browser Canvas smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Mount Canvas and exercise projected media in a real browser
+        run: npm run test:e2e:canvas

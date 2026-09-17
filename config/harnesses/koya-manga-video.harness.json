@@ -1,6 +1,6 @@
 {
   "id": "koya-manga-video",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "displayName": "漫画動画（固定キャスト・縦組み吹き出し）",
   "note": "クライアント名・チャンネル名はここに書かない。ここは『何が作れるか』の宣言であって、誰のためのものかの記録ではない。ルーターと横断レビューはこのファイルだけを読む。",
   "produces": {
@@ -83,16 +83,17 @@
   ],
   "entrypoint": "node scripts/koya-manga-video.mjs",
   "canonicalSkills": [
+    ".agents/skills/harness-parallel-execution/SKILL.md",
     ".agents/skills/manga-video-production/SKILL.md",
     ".agents/skills/manga-page-camera/SKILL.md"
   ],
   "learningTargets": [
-    "skill:manga-video-production",
-    "skill:manga-page-camera",
-    "ledger:koya"
+    "genre:manga-video-production",
+    "genre:manga-page-camera",
+    "channel-pack:koya"
   ],
   "status": "in-production",
-  "statusNote": "固定キャスト11人のうち4人が承認済み。残りはクライアントの選択待ち",
+  "statusNote": "固定キャスト11人全員が登録・ロスター監査合格（2026-09-05 roster-review pass、55ペア検査）。声は11人中10人が未割当。承認キャストで最終監査を通過した本編はまだ無い。",
   "keywords": [
     "漫画",
     "まんが",
@@ -104,5 +105,8 @@
     "manga"
   ],
   "keywordsNote": "依頼文からこのハーネスを言い当てるための短い手掛かり。日本語は空白で区切れないので、依頼文を刻むのではなくこちらの語が現れるかで見る。",
-  "gateEvidenceNote": "各保証は、実測監査 evidenceAuditIds が全て pass のときだけ pass にできる。対応を書かずに保証だけ並べると、1つも走っていない状態でも「全部通った」と書けてしまう。契約の requiredAudits を全て、いずれかの保証に割り当てること——どこにも紐づかない監査は、落ちても誰の保証も傷つけない。"
+  "gateEvidenceNote": "各保証は、実測監査 evidenceAuditIds が全て pass のときだけ pass にできる。対応を書かずに保証だけ並べると、1つも走っていない状態でも「全部通った」と書けてしまう。契約の requiredAudits を全て、いずれかの保証に割り当てること——どこにも紐づかない監査は、落ちても誰の保証も傷つけない。",
+  "reviewAttestation": {
+    "subject": "koya-manga-video"
+  }
 }
