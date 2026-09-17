@@ -1,6 +1,6 @@
 {
   "id": "narrated-story-video",
-  "version": "1.0.0",
+  "version": "1.4.0",
   "displayName": "ナレーション物語動画（実写素材＋カメラワーク）",
   "note": "クライアント名・チャンネル名はここに書かない。ここは『何が作れるか』の宣言であって、誰のためのものかの記録ではない。",
   "produces": {
@@ -17,22 +17,12 @@
   "requiresFromOperator": [
     {
       "id": "script",
-      "what": "日本語の台本（セグメント分割済み）",
+      "what": "日本語の生台本。セグメント分割はハーネスが行う",
       "blocking": true
     },
     {
-      "id": "scene-images",
-      "what": "各セグメントの画像",
-      "blocking": true
-    },
-    {
-      "id": "voice-selection",
-      "what": "匿名試聴で選んだ音声。ライセンス済みのもの",
-      "blocking": true
-    },
-    {
-      "id": "bgm",
-      "what": "BGM素材と、その割当の人手承認",
+      "id": "signed-channel-pack",
+      "what": "画風、Voice、BGM方針、禁止事項、承認SHAを含む署名済みChannel Pack。provider secretは含めない",
       "blocking": true
     },
     {
@@ -46,14 +36,14 @@
       "id": "audio-loudness",
       "what": "統合-14 LUFS ±0.5、トゥルーピーク ≤ -1.5 dBFS",
       "evidenceAuditIds": [
-        "audio"
+        "audioIntegratedLoudness"
       ]
     },
     {
       "id": "narration-intelligibility",
       "what": "各発話区間で voice RMS − bed RMS ≥ 6dB。全体が合格でもナレーションが埋もれていれば落とす",
       "evidenceAuditIds": [
-        "audio",
+        "narrationBedSeparation",
         "perceptualReviewChecks"
       ]
     },
@@ -99,14 +89,50 @@
       ]
     }
   ],
-  "entrypoint": "npm run --prefix <deployment-dir>",
-  "canonicalSkills": [],
-  "learningTargets": [
-    "doc:mike-audio-gates"
+  "entrypoint": "node scripts/run-video-harness.mjs",
+  "deploymentEntrypoint": "scripts/narrated-story-video.mjs",
+  "runtimeMetadata": {
+    "classification": "non-secret",
+    "source": "signed-channel-pack:narrated-story.json",
+    "imageModel": {
+      "required": true,
+      "sourceField": "runtime.imageModel",
+      "mustEqual": "image.model"
+    },
+    "ttsProvider": {
+      "required": true,
+      "sourceField": "runtime.ttsProvider",
+      "mustEqual": "voice.provider"
+    },
+    "adapterIdentity": {
+      "image": [
+        "image.provider",
+        "image.model",
+        "image.adapterVersion"
+      ],
+      "tts": [
+        "voice.provider",
+        "voice.model",
+        "voice.adapterVersion"
+      ],
+      "music": [
+        "music.provider",
+        "music.model",
+        "music.adapterVersion"
+      ]
+    },
+    "providerSecretsAllowed": false
+  },
+  "canonicalSkills": [
+    ".agents/skills/harness-parallel-execution/SKILL.md",
+    ".agents/skills/narrated-story-video/SKILL.md"
   ],
-  "status": "awaiting-operator-assets",
-  "statusNote": "本編マスターは完成・監査済み。レビュー章は本人の撮影素材待ち",
-  "entrypointNote": "実際の配置先は config/harness-deployments.json に持つ。宣言にクライアント固有のパスを書くと、この台帳自体を共有できなくなる。",
+  "learningTargets": [
+    "genre:narrated-story-video"
+  ],
+  "status": "implementation-in-progress",
+  "statusNote": "公開CoreのDAGはtest/narratedStoryVideoE2E.test.mjsでfixture adapterによるraw script→監査済み実MP4を検証し、署名Channel Packのimage/voice/music全adapter identityを外側doctorでも課金前probeする。server adapterのlocal contract回帰はあるが、実provider・配備済みbackend・外部目視signoffの運用検証が完了するまで本番provider運用可能とはしない",
+  "entrypointNote": "上位入口はClaude/Codex共通。実際の配備rootだけをconfig/harness-deployments.jsonに持ち、配備内ではdeploymentEntrypointを使う。",
   "keywords": [
     "ナレーション",
     "朗読",
@@ -120,9 +146,13 @@
   ],
   "keywordsNote": "依頼文からこのハーネスを言い当てるための短い手掛かり。日本語は空白で区切れないので、依頼文を刻むのではなくこちらの語が現れるかで見る。",
   "receiptAdapter": {
-    "status": "pending",
-    "reason": "このハーネスの最終監査は steps 配列ではなく checks オブジェクトを返すため、recordGatesFromAuditSteps へそのまま渡せない。evidenceAuditIds は checks のキー名で先に書いてあるので、変換を1つ足せば RunReceipt に載る。変換が無いまま『載っている』ことにしないよう、ここで pending と明記する。",
-    "requiredWork": "checks オブジェクトを [{id, pass, detail}] へ変換するアダプタ"
+    "status": "ready",
+    "implementation": "lib/harnessRunReceipt.mjs#recordGatesFromAuditChecks",
+    "input": "checks object",
+    "failClosed": true
   },
-  "gateEvidenceNote": "各保証は evidenceAuditIds が全て pass のときだけ pass にできる。対応を書かずに保証だけ並べると、1つも走っていない状態でも「全部通った」と書けてしまう。"
+  "gateEvidenceNote": "各保証は evidenceAuditIds が全て pass のときだけ pass にできる。対応を書かずに保証だけ並べると、1つも走っていない状態でも「全部通った」と書けてしまう。",
+  "reviewAttestation": {
+    "subject": "narrated-story-video"
+  }
 }

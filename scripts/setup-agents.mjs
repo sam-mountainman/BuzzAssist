@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { access, cp, mkdir, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { access, cp, lstat, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { constants, existsSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +19,13 @@ import {
   hostInstallHelp,
   normalizeSetupAgentName,
 } from "../lib/setupAgents.mjs";
+import {
+  KOYA_REVIEWER_TRUST_JSON_ENV,
+  KOYA_REVIEWER_TRUST_PATH_ENV,
+  REVIEWER_TRUST_JSON_ENV,
+  REVIEWER_TRUST_PATH_ENV,
+  reviewerTrustEnvSource,
+} from "../lib/koyaReviewAttestation.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const pluginName = "buzzassist";
@@ -29,7 +36,11 @@ const homeDir = resolve(process.env.BUZZASSIST_SETUP_HOME || homedir());
 const managedPluginDir = join(homeDir, "plugins", pluginName);
 const managedPluginRoot = join(managedPluginDir, "plugin");
 const personalMarketplacePath = join(homeDir, ".agents", "plugins", "marketplace.json");
-const argv = process.argv.slice(2);
+// Imports are used by distribution verification. Never inherit an importing
+// process's CLI flags and, most importantly, never run setup unless this file
+// is the actual Node entrypoint.
+const isDirectExecution = Boolean(process.argv[1]) && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+const argv = isDirectExecution ? process.argv.slice(2) : [];
 const packageManifest = JSON.parse(await readFile(join(repoRoot, "package.json"), "utf8"));
 const pluginVersion = packageManifest.version;
 const supportedAgents = SUPPORTED_SETUP_AGENTS;
@@ -40,6 +51,75 @@ const agentLabels = {
   cursor: "Cursor",
   antigravity: "Antigravity",
 };
+
+// ---- reviewer 信頼リスト env の MCP host への伝播（R6-F2） -----------------------------------
+//
+// reviewer attestation の唯一の信頼アンカーは運営者 env（BUZZASSIST_REVIEWER_TRUST /
+// _JSON、旧 KOYA_ 名は互換）。CLI はシェルの env をそのまま読むが、MCP server は host
+// （Codex / Claude Code）が起動する子プロセスで、host が親 env を渡すとは限らない。
+// Codex は `env_vars`（**名前の一覧**）に挙げた変数だけを親 env から転送し、Claude Code は
+// 自身の process env を継承させる。どちらの host でも「値は host を起動したシェルに置き、
+// 設定ファイルには名前しか書かない」で同じ挙動になる。
+//
+// **設定ファイルに信頼リストの path・本文・鍵を埋め込まない。** .mcp.json は配布・同期・
+// plugin cache へコピーされる。値が入れば、要求側の入力で信頼アンカーが立つ（自己承認へ
+// 退化）か、運営者の秘密の置き場が配布物に載る。withReviewerTrustEnvPassthrough は
+// env に信頼リスト名のキーがあれば fail-closed で拒否する。
+export const REVIEWER_TRUST_ENV_PASSTHROUGH = Object.freeze([
+  REVIEWER_TRUST_PATH_ENV,
+  REVIEWER_TRUST_JSON_ENV,
+  KOYA_REVIEWER_TRUST_PATH_ENV,
+  KOYA_REVIEWER_TRUST_JSON_ENV,
+]);
+export const REVIEWER_TRUST_PASSTHROUGH_NOTE =
+  `Reviewer trust anchor: this file names the env vars (${REVIEWER_TRUST_ENV_PASSTHROUGH.join(", ")}) that the host must pass through to the MCP server and never stores their values. `
+  + "The operator sets BUZZASSIST_REVIEWER_TRUST (path to the trust-list JSON) or BUZZASSIST_REVIEWER_TRUST_JSON in the environment of the shell/launcher that starts Codex or Claude Code; "
+  + "Codex forwards exactly the names listed in env_vars, Claude Code inherits its own process environment. Do not write the trust list path, its body, or any key material into this file.";
+const TRUST_MATERIAL_IN_CONFIG = /"reviewers"\s*:\s*\[|-----BEGIN [A-Z ]*(?:PRIVATE|PUBLIC) KEY-----/u;
+
+function* stringValues(value, depth = 0) {
+  if (depth > 8 || value === null || value === undefined) return;
+  if (typeof value === "string") { yield value; return; }
+  if (Array.isArray(value)) { for (const item of value) yield* stringValues(item, depth + 1); return; }
+  if (typeof value === "object") { for (const item of Object.values(value)) yield* stringValues(item, depth + 1); }
+}
+
+/**
+ * MCP server 設定に信頼リスト env の **名前だけ** を passthrough として付ける。
+ * env に信頼リスト名の値があれば投げる（設定ファイルへ値を書く経路を塞ぐ）。
+ */
+export function withReviewerTrustEnvPassthrough(serverConfig) {
+  const env = serverConfig?.env && typeof serverConfig.env === "object" ? serverConfig.env : {};
+  const embedded = Object.keys(env).filter((key) => REVIEWER_TRUST_ENV_PASSTHROUGH.includes(key));
+  if (embedded.length > 0) {
+    throw new Error(
+      `reviewer-trust-in-config: MCP server config must not embed ${embedded.join(", ")}. `
+      + "The trust list is an operator-side host environment variable; config files only name it (env_vars).",
+    );
+  }
+  for (const text of stringValues(serverConfig)) {
+    if (TRUST_MATERIAL_IN_CONFIG.test(text)) {
+      throw new Error("reviewer-trust-in-config: MCP server config contains trust-list or key material; only env var names are allowed.");
+    }
+  }
+  const existing = Array.isArray(serverConfig?.env_vars) ? serverConfig.env_vars.filter((name) => typeof name === "string") : [];
+  const env_vars = [...new Set([...existing, ...REVIEWER_TRUST_ENV_PASSTHROUGH])];
+  return { ...serverConfig, env_vars };
+}
+
+/**
+ * setup を起動したシェルに信頼リスト env が見えるかを、値を印字せずに報告する。
+ * GUI から起動した host が同じ env を見るとは限らないので scope を併記する。
+ */
+export function reviewerTrustEnvStatus(env = process.env) {
+  try {
+    const source = reviewerTrustEnvSource(env);
+    if (!source) return { configured: "no", source: "none" };
+    return { configured: "yes", source: source.trustJson ? "inline-json" : "path" };
+  } catch (error) {
+    return { configured: "ambiguous", source: "env-ambiguous", reason: String(error?.message || error).split(":").slice(0, 3).join(":") };
+  }
+}
 
 function usage() {
   return `Usage: node scripts/setup-agents.mjs [options]
@@ -57,6 +137,8 @@ Options:
   --skip-plugin-source   Do not refresh ~/plugins/buzzassist.
   --no-launch            Do not start the canvas service.
   --no-auto-update       Do not register the daily safe updater for Codex/Claude Code.
+  --allow-harness-not-ready
+                         Diagnostic/canvas-only mode: report missing video-harness prerequisites without failing setup.
   --tunnel               Start a Canvas Tunnel after setup for phone access to the same full Excalidraw UI (Cloudflare by default).
   --ngrok-authtoken <token>
                          Opt into ngrok instead of Cloudflare and configure it. Also reads BUZZASSIST_NGROK_AUTHTOKEN or NGROK_AUTHTOKEN.
@@ -90,17 +172,13 @@ function resolveTargetAgents() {
   return [normalizeSetupAgentName(explicit) || detectSetupAgent({ env: process.env, argv: process.argv })];
 }
 
-if (hasArg("--help") || hasArg("-h")) {
-  console.log(usage());
-  process.exit(0);
-}
-
 const dryRun = hasArg("--dry-run");
 const skipInstall = hasArg("--skip-install");
 const skipBuild = hasArg("--skip-build");
 const skipPluginSource = hasArg("--skip-plugin-source");
 const launchCanvas = !hasArg("--no-launch");
 const enableAutoUpdate = !hasArg("--no-auto-update");
+const allowHarnessNotReady = hasArg("--allow-harness-not-ready");
 const launchTunnel = hasArg("--tunnel") && launchCanvas;
 const targetAgents = resolveTargetAgents();
 const projectDir = resolve(
@@ -304,9 +382,17 @@ export const DISTRIBUTABLE_CONFIG_ENTRIES = Object.freeze([
   "parallel-plans",
 ]);
 
-// ディレクトリ名として、どこに現れても配布しないもの。
+// パス要素として、どこに現れても配布しないもの（ディレクトリ名もファイル名も見る）。
 // allowlist の網から漏れた場合の二重の歯止め。
-const NEVER_DISTRIBUTE = new Set(["channel-packs", "client-work", ".codex-tmp", "node_modules"]);
+//
+// proposals.jsonl / applied.jsonl は本文つきの学習台帳。共有層宛でも evidence に
+// 顧客識別子・端末 path が残るので、配布物へは harness-curator の export-public が
+// 作る proposals.public.jsonl（本文なし）だけを入れる（2026-09-05 独立レビュー D-2）。
+// ここに置くことで、コピー元の一覧を誰かが書き戻しても staging 検査で止まる。
+const NEVER_DISTRIBUTE = new Set([
+  "channel-packs", "client-work", ".codex-tmp", "node_modules",
+  "proposals.jsonl", "applied.jsonl",
+]);
 
 function isChannelPackPath(sourcePath, repoRootPath = repoRoot) {
   const parts = sourcePath.split(sep);
@@ -327,6 +413,73 @@ async function copyIfExists(source, target) {
     dereference: false,
     filter: (src) => !isChannelPackPath(src),
   });
+}
+
+/**
+ * Inspect exactly what host plugin managers will stage.
+ *
+ * A node_modules directory symlink used to point back at the checkout. Codex
+ * followed it while caching the local plugin and recursively copied hundreds
+ * of megabytes. The staged source is now dependency-free; start-mcp installs
+ * its manifest dependencies on first use. Reject symlinks and forbidden roots
+ * here so a later copy-rule change cannot silently recreate that recursion.
+ */
+export async function verifyStagedPluginContents(pluginRoot) {
+  const required = [
+    "package.json",
+    "package-lock.json",
+    ".mcp.json",
+    ".codex-plugin/plugin.json",
+    ".claude-plugin/plugin.json",
+    "mcp/server.mjs",
+    "config/harness-deployments.example.json",
+    "lib/harnessDeploymentResolver.mjs",
+    "lib/narratedStoryOutcome.mjs",
+    "lib/narratedStoryPipeline.mjs",
+    "lib/narratedStoryVideo.mjs",
+    "scripts/narrated-story-video.mjs",
+    "scripts/start-mcp.mjs",
+    "scripts/verify-plugin-runtime.mjs",
+  ];
+  for (const relative of required) {
+    if (!(await pathExists(join(pluginRoot, relative)))) {
+      throw new Error(`Staged BuzzAssist plugin is missing required file: ${relative}`);
+    }
+  }
+
+  let fileCount = 0;
+  let totalBytes = 0;
+  const visit = async (directory, relativeRoot = "") => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const relative = relativeRoot ? join(relativeRoot, entry.name) : entry.name;
+      const parts = relative.split(sep);
+      if (parts.some((part) => NEVER_DISTRIBUTE.has(part))) {
+        throw new Error(`Forbidden path entered staged BuzzAssist plugin: ${relative}`);
+      }
+      const absolute = join(directory, entry.name);
+      if (entry.isSymbolicLink()) {
+        throw new Error(`Symlink entered staged BuzzAssist plugin: ${relative}`);
+      }
+      if (entry.isDirectory()) {
+        await visit(absolute, relative);
+        continue;
+      }
+      if (!entry.isFile()) throw new Error(`Unsupported staged file type: ${relative}`);
+      const details = await lstat(absolute);
+      fileCount += 1;
+      totalBytes += details.size;
+    }
+  };
+  await visit(pluginRoot);
+
+  const configRoot = join(pluginRoot, "config");
+  if (await pathExists(configRoot)) {
+    const unexpected = (await readdir(configRoot)).filter((name) => !DISTRIBUTABLE_CONFIG_ENTRIES.includes(name));
+    if (unexpected.length > 0) {
+      throw new Error(`Staged config is outside the distribution allowlist: ${unexpected.join(", ")}`);
+    }
+  }
+  return { ok: true, fileCount, totalBytes, nodeModulesIncluded: false, symlinksIncluded: false };
 }
 
 async function replaceDirectoryChildrenPreservingRoot(sourceDir, targetDir, { preserveNames = [] } = {}) {
@@ -454,6 +607,8 @@ async function rewriteSkillRelativeDepth(skillDir) {
     "docs/koya-character-gate-runbook-ja.md",
     "docs/koya-voice-quality-runbook-ja.md",
     "docs/learning/targets.json",
+    // 本文つき台帳（proposals.jsonl）は配布しない。公開版 catalog だけ。
+    "docs/learning/proposals.public.jsonl",
     "docs/measurements/parallel-limits-2026-08-28.json",
     "package.json",
     "package-lock.json",
@@ -505,28 +660,31 @@ async function rewriteSkillRelativeDepth(skillDir) {
         url: "https://mcp.excalidraw.com/mcp",
         note: "Official open-source Excalidraw MCP App from excalidraw/excalidraw-mcp. Use for prompt-to-diagram Excalidraw generation and interactive MCP App rendering.",
       },
-      buzzassist_mcp: {
+      buzzassist_mcp: withReviewerTrustEnvPassthrough({
         title: "BuzzAssist Local Canvas MCP",
         description: "Start and control the current host workspace's project-local BuzzAssist Excalidraw canvas.",
         command: process.execPath,
         args: [join(managedPluginRoot, "scripts", "start-mcp.mjs")],
         cwd: managedPluginRoot,
         env: {
-          NODE_PATH: join(repoRoot, "node_modules"),
           EXCALIDRAW_ALLOW_WIDGET_ORIGINS: "1",
           EXCALIDRAW_PROJECT_DIR: projectDir,
           EXCALIDRAW_CANVAS_DIR: canvasDir,
         },
-        note: "Primary local MCP server. EXCALIDRAW_PROJECT_DIR is only the setup fallback: tool calls resolve the current host workspace and use <current-project>/canvas. The server writes that project's canvas/.server.json with its dynamic local URL.",
-      },
+        note: "Primary local MCP server. EXCALIDRAW_PROJECT_DIR is only the setup fallback: tool calls resolve the current host workspace and use <current-project>/canvas. The server writes that project's canvas/.server.json with its dynamic local URL. "
+          + REVIEWER_TRUST_PASSTHROUGH_NOTE,
+      }),
     },
   });
 
+  // Dependencies are deliberately absent from the host-staged source.
+  // scripts/start-mcp.mjs installs the package manifest on first use. Keeping
+  // node_modules here (as either a directory or symlink) makes Codex/Claude
+  // plugin caches recursively duplicate the checkout's entire dependency tree.
   await rm(join(tmpPluginRoot, "node_modules"), { recursive: true, force: true });
-  if (await pathExists(join(repoRoot, "node_modules"))) {
-    await symlink(join(repoRoot, "node_modules"), join(tmpPluginRoot, "node_modules"), process.platform === "win32" ? "junction" : "dir");
-  }
   await rm(join(tmpPluginRoot, "canvas"), { recursive: true, force: true });
+  const staged = await verifyStagedPluginContents(tmpPluginRoot);
+  console.log(`Verified staged plugin: ${staged.fileCount} files / ${staged.totalBytes} bytes / node_modules=absent / symlinks=absent`);
   // Keep both stable directory inodes alive while refreshing their children.
   // Existing canvas/MCP processes may use either directory as cwd; deleting
   // the roots makes their next shell command fail with getcwd/ENOENT.
@@ -700,7 +858,7 @@ async function setupClaude(pluginDir) {
 }
 
 function localMcpServerConfig(pluginDir, { cursor = false } = {}) {
-  const config = {
+  const config = withReviewerTrustEnvPassthrough({
     command: process.execPath,
     args: [join(pluginDir, "scripts", "start-mcp.mjs")],
     env: {
@@ -708,7 +866,7 @@ function localMcpServerConfig(pluginDir, { cursor = false } = {}) {
       EXCALIDRAW_PROJECT_DIR: projectDir,
       EXCALIDRAW_CANVAS_DIR: canvasDir,
     },
-  };
+  });
   if (cursor) config.type = "stdio";
   return config;
 }
@@ -848,6 +1006,31 @@ async function setupAgent(agent, pluginDir) {
   throw new Error(`Unsupported agent "${agent}".`);
 }
 
+export function parseAutoUpdateRegistrationOutput(stdout) {
+  const values = new Map();
+  for (const line of String(stdout || "").split(/\r?\n/gu)) {
+    const match = line.match(/^(BUZZASSIST_AUTO_UPDATE(?:_[A-Z_]+)?)=(.*)$/u);
+    if (match) values.set(match[1], match[2].trim());
+  }
+  const status = values.get("BUZZASSIST_AUTO_UPDATE") || "unknown";
+  const provider = values.get("BUZZASSIST_AUTO_UPDATE_SCHEDULER") || "unknown";
+  const schedulerCheck = values.get("BUZZASSIST_AUTO_UPDATE_SCHEDULER_CHECK") || "unknown";
+  const schedule = values.get("BUZZASSIST_AUTO_UPDATE_SCHEDULE") || "unknown";
+  const enabled = status === "enabled"
+    && provider !== "unknown"
+    && provider !== "manual"
+    && schedulerCheck === "ok"
+    && schedule === "daily-03:17-local-time";
+  return {
+    status,
+    provider,
+    schedulerCheck,
+    schedule,
+    enabled,
+    manual: status === "manual" && schedule === "manual",
+  };
+}
+
 async function configureAutoUpdate(pluginDir, results) {
   const hosts = targetAgents.filter((agent) => ["codex", "claude"].includes(agent) && results[agent]?.ok);
   if (hosts.length === 0) return null;
@@ -858,10 +1041,10 @@ async function configureAutoUpdate(pluginDir, results) {
   logStep("Registering safe automatic updates");
   if (dryRun) {
     console.log(`Would register daily stable-Release updates for ${hosts.join(", ")}.`);
-    return { enabled: true, hosts, dryRun: true };
+    return { enabled: false, hosts, planned: true, dryRun: true };
   }
   const updater = join(pluginDir, "scripts", "auto-update.mjs");
-  await run(process.execPath, [
+  const registration = await run(process.execPath, [
     updater,
     "install",
     "--agent", hosts.join(","),
@@ -874,7 +1057,12 @@ async function configureAutoUpdate(pluginDir, results) {
     timeoutMs: 120_000,
     env: { ...process.env, BUZZASSIST_SETUP_HOME: homeDir },
   });
-  return { enabled: true, hosts };
+  const verified = parseAutoUpdateRegistrationOutput(registration.stdout);
+  if (verified.enabled) return { enabled: true, hosts, ...verified };
+  if (verified.manual) return { enabled: false, manual: true, hosts, ...verified };
+  throw new Error(
+    "Auto-update installer returned success without a verified scheduler; refusing to report BUZZASSIST_AUTO_UPDATE=enabled.",
+  );
 }
 
 function targetIncludesWidgetHost() {
@@ -1035,7 +1223,11 @@ async function launchCanvasTunnel() {
   return status;
 }
 
-async function main() {
+export async function runSetupAgents() {
+  if (hasArg("--help") || hasArg("-h")) {
+    console.log(usage());
+    return { help: true };
+  }
   assertSupportedNodeVersion();
   console.log("BuzzAssist setup");
   console.log(`Repository: ${repoRoot}`);
@@ -1044,16 +1236,13 @@ async function main() {
   console.log(`Plugin source: ${managedPluginDir}`);
   console.log(`Agent target: ${targetAgents.map((agent) => agentLabels[agent]).join(", ")}`);
 
+  // A clean clone may not be able to import the doctor until package
+  // dependencies are installed. Bootstrap/build only the checkout first;
+  // host configuration and managed plugin/cache staging remain behind the
+  // fail-closed readiness gate below.
   await ensureDependencies();
   await ensureBuild();
   await ensureWidgetBuild();
-  const pluginDir = await refreshManagedPluginSource();
-
-  const results = {};
-  for (const agent of targetAgents) {
-    results[agent] = await setupAgent(agent, pluginDir);
-  }
-  const autoUpdateStatus = await configureAutoUpdate(pluginDir, results);
 
   // ホストの設定が済んだことと、ハーネスが動かせることは別。ここを区別せずに
   // 「configured」だけ出していたので、運営者が最初の本番を回したときに
@@ -1063,12 +1252,16 @@ async function main() {
   // --no-auto-update では yes/no/unknown のどれも出ないまま
   // 「configured」だけが見えていた——確認しなかったことが、
   // 確認して問題なかったことと区別できない状態。必ず1回出す。
-  // setup 自体は止めない（canvas だけ使いたい人まで設定できなくなる）。
+  // 通常セットアップは fail-closed。Canvas単体の診断を続けたい場合だけ、
+  // --allow-harness-not-ready という明示的な例外を要求する。
+  let harnessReadinessError = null;
   try {
     const { runHarnessDoctor } = await import("./harness-doctor.mjs");
     const report = await runHarnessDoctor({ projectDir });
     console.log(`BUZZASSIST_HARNESS_READY=${report.ready ? "yes" : "no"}`);
     if (!report.ready) {
+      harnessReadinessError = new Error(`BuzzAssist video harness prerequisites are missing: ${report.blocking.join(", ")}`);
+      harnessReadinessError.exitCode = 2;
       console.log("動画ハーネスを回すには、まだ足りないものがあります:");
       for (const check of report.checks.filter((entry) => entry.required && !entry.ok)) {
         console.log(`  - ${check.id}: ${check.fix}`);
@@ -1084,7 +1277,28 @@ async function main() {
     // 「確認できなかった」を「問題なし」に見せない。
     console.log("BUZZASSIST_HARNESS_READY=unknown");
     console.log(`  前提チェックを実行できませんでした: ${String(error?.message || error).slice(0, 160)}`);
+    harnessReadinessError = new Error(`BuzzAssist video harness prerequisites could not be verified: ${error?.message || error}`);
+    harnessReadinessError.exitCode = 2;
   }
+  if (harnessReadinessError && !allowHarnessNotReady) {
+    console.log("通常セットアップは fail-closed です。前提を直して同じコマンドを再実行してください。");
+    console.log("診断またはCanvas単体の確認だけを続ける場合は --allow-harness-not-ready を明示してください。");
+    throw harnessReadinessError;
+  }
+  if (harnessReadinessError) {
+    console.log("BUZZASSIST_HARNESS_READY_OVERRIDE=diagnostic-only");
+  }
+
+  // A normal setup must not stage a plugin or modify host configuration before
+  // returning HARNESS_READY=no. Only the explicit diagnostic override reaches
+  // host/plugin mutation with missing prerequisites.
+  const pluginDir = await refreshManagedPluginSource();
+
+  const results = {};
+  for (const agent of targetAgents) {
+    results[agent] = await setupAgent(agent, pluginDir);
+  }
+  const autoUpdateStatus = await configureAutoUpdate(pluginDir, results);
 
   const tunnelStatus = launchTunnel ? await launchCanvasTunnel() : null;
   const discovery = launchCanvas
@@ -1115,10 +1329,34 @@ async function main() {
     console.log("BUZZASSIST_HOST_RESTART_REQUIRED=yes");
     console.log("Start a new Codex task or Claude Code session after setup so the newly installed skills and MCP tools are loaded.");
   }
+  // reviewer 信頼リストの MCP 経路（R6-F2）。設定ファイルには env 名だけを書いたこと、
+  // 値は host を起動するシェルに置くことを、値を印字せずに報告する。
+  const trustEnv = reviewerTrustEnvStatus();
+  console.log("BUZZASSIST_REVIEWER_TRUST_PASSTHROUGH=env-name-only");
+  console.log(`BUZZASSIST_REVIEWER_TRUST_ENV_VARS=${REVIEWER_TRUST_ENV_PASSTHROUGH.join(",")}`);
+  console.log(`BUZZASSIST_REVIEWER_TRUST_CONFIGURED=${trustEnv.configured}`);
+  console.log("BUZZASSIST_REVIEWER_TRUST_SCOPE=setup-shell-environment");
+  if (trustEnv.configured !== "yes") {
+    console.log(trustEnv.configured === "ambiguous"
+      ? `  ${REVIEWER_TRUST_PATH_ENV} と旧名 ${KOYA_REVIEWER_TRUST_PATH_ENV}（または _JSON）の両方が違う値で設定されています。どちらか1つにしてください（reviewer-trust-invalid:env-ambiguous）。`
+      : `  ${REVIEWER_TRUST_PATH_ENV}（信頼リスト JSON の path）または ${REVIEWER_TRUST_JSON_ENV} が、この setup シェルには設定されていません。運営者が設定するまで reviewer signoff / RunReceipt は reviewer-trust-unconfigured で止まります（fail-closed）。`);
+  }
+  console.log("The MCP config names these env vars only (Codex: env_vars passthrough; Claude Code: inherits its process environment) and never stores their values. Set the value in the environment of the shell or launcher that starts Codex / Claude Code (GUI hosts do not see this setup shell's exports), then restart the host.");
   if (autoUpdateStatus?.enabled) {
     console.log("BUZZASSIST_AUTO_UPDATE=enabled");
+    console.log(`BUZZASSIST_AUTO_UPDATE_SCHEDULER=${autoUpdateStatus.provider}`);
+    console.log("BUZZASSIST_AUTO_UPDATE_SCHEDULER_CHECK=ok");
+    console.log(`BUZZASSIST_AUTO_UPDATE_SCHEDULE=${autoUpdateStatus.schedule}`);
     console.log(`BUZZASSIST_AUTO_UPDATE_HOSTS=${autoUpdateStatus.hosts.join(",")}`);
     console.log("Stable GitHub Releases are checked daily at 03:17 local time. Updates are verified and rolled back on failure; restart the host to load a newly installed version.");
+  } else if (autoUpdateStatus?.planned) {
+    console.log("BUZZASSIST_AUTO_UPDATE=planned");
+    console.log("BUZZASSIST_AUTO_UPDATE_SCHEDULE=not-registered-dry-run");
+  } else if (autoUpdateStatus?.manual) {
+    console.log("BUZZASSIST_AUTO_UPDATE=manual");
+    console.log(`BUZZASSIST_AUTO_UPDATE_SCHEDULER=${autoUpdateStatus.provider}`);
+    console.log("BUZZASSIST_AUTO_UPDATE_SCHEDULER_CHECK=manual");
+    console.log("BUZZASSIST_AUTO_UPDATE_SCHEDULE=manual");
   }
   if (targetIncludesWidgetHost()) {
     console.log("BUZZASSIST_WIDGET_TOOL=render_buzzassist_canvas_widget");
@@ -1150,9 +1388,12 @@ async function main() {
         "Install or update the host shown above, then rerun the same setup command.",
     );
   }
+  return { results, harnessReady: !harnessReadinessError, discovery, canvasCheck, tunnelStatus };
 }
 
-main().catch((error) => {
-  console.error(error.stack || error.message || String(error));
-  process.exit(1);
-});
+if (isDirectExecution) {
+  runSetupAgents().catch((error) => {
+    console.error(error.stack || error.message || String(error));
+    process.exitCode = Number.isInteger(error?.exitCode) ? error.exitCode : 1;
+  });
+}

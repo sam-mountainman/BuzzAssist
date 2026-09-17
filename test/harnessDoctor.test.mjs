@@ -1,9 +1,52 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
+import { createReviewerTrustEntry, generateReviewerKeyPair } from "../lib/koyaReviewAttestation.mjs";
 import { runHarnessDoctor } from "../scripts/harness-doctor.mjs";
 
 const root = new URL("..", import.meta.url).pathname;
+
+function deterministicDoctorRuntime(overrides = {}) {
+  const binary = (command) => ({ ok: true, command, args: [], version: "7.1.1" });
+  return {
+    ffmpegToolchain: { ok: true, ffmpeg: binary("ffmpeg"), ffprobe: binary("ffprobe") },
+    runCommand: async (_command, args = []) => {
+      if (args.includes("-encoders")) return { stdout: "libx264 aac pcm_s24le", stderr: "" };
+      if (args.includes("-filters")) return { stdout: "scale crop overlay fps loudnorm aresample", stderr: "" };
+      if (args.includes("-show_streams")) {
+        return { stdout: JSON.stringify({ streams: [{ codec_type: "video" }, { codec_type: "audio" }] }), stderr: "" };
+      }
+      return { stdout: "", stderr: "" };
+    },
+    pythonRuntime: { ok: true, command: "python", args: [], version: "3.12.2" },
+    voiceQualityProbe: async () => true,
+    ttsProbe: async () => ({ ok: true, detail: "設定あり", fix: "" }),
+    imageModel: "gpt-image-2-codex",
+    imageHostProbe: async (model) => ({ ok: true, host: "codex", model, detail: `Codex / ${model}` }),
+    ...overrides,
+  };
+}
+
+function narratedRuntimeMetadata(payloadSha256 = "a".repeat(64)) {
+  return {
+    version: "buzzassist-channel-pack-runtime-v1",
+    harnessId: "narrated-story-video",
+    payloadSha256,
+    configSha256: "b".repeat(64),
+    imageModel: "image-model-v1",
+    ttsProvider: "fish-audio",
+    imageProvider: "buzzassist",
+    imageAdapterVersion: "image-adapter-v1",
+    ttsModel: "s2-pro",
+    ttsAdapterVersion: "fish-audio-tts-server-v1",
+    musicProvider: "elevenlabs",
+    musicModel: "music_v1",
+    musicAdapterVersion: "elevenlabs-music-server-v1",
+  };
+}
 
 test("前提チェックは、在ることではなく動くことを見る", async () => {
   // PATH に名前があるだけで通すと、壊れた ffmpeg を「揃っている」と言う。
@@ -37,6 +80,237 @@ test("必須と任意を混ぜない", async () => {
     report.blocking,
     report.checks.filter((check) => check.required && !check.ok).map((check) => check.id),
   );
+});
+
+test("Channel PackはHarness別に判定し、未選択時にKoya正本を強制しない", async () => {
+  const emptyProject = await mkdtemp(join(tmpdir(), "harness-doctor-generic-"));
+  try {
+    const generic = await runHarnessDoctor({
+      projectDir: emptyProject,
+      runtime: deterministicDoctorRuntime(),
+    });
+    const genericPack = generic.checks.find((check) => check.id === "channel-pack");
+    assert.equal(genericPack.required, false);
+    assert.equal(genericPack.ok, true);
+    assert.match(genericPack.detail, /Harness未選択/u);
+  } finally {
+    await rm(emptyProject, { recursive: true, force: true });
+  }
+
+  const evidence = {
+    envelopeVersion: "buzzassist-channel-pack-envelope-v1",
+    id: "narrated-fixture",
+    version: "1.2.3",
+    harnessId: "narrated-story-video",
+    payloadSha256: "a".repeat(64),
+    fileCount: 3,
+    signerKeyId: "operator-key",
+    trustedPublicKeyId: "ed25519:trusted",
+  };
+  const probed = [];
+  const narrated = await runHarnessDoctor({
+    harnessId: "narrated-story-video",
+    job: {
+      channelPackVerification: evidence,
+      deployment: { root: "/fixture/deployment", entrypoint: "node production/internal.mjs" },
+    },
+    runtime: deterministicDoctorRuntime({
+      channelPackRuntime: narratedRuntimeMetadata(evidence.payloadSha256),
+      mediaAdapterProbe: async (spec) => {
+        probed.push(spec);
+        return { ok: true, status: "ready", ...spec, serverVersion: "fixture-server-v1" };
+      },
+      resolveProductionRoute: async () => ({
+        command: "fixture-node",
+        args: ["internal.mjs", "help"],
+        cwd: "/fixture/deployment",
+        label: "production/internal.mjs",
+        mcpTool: "run_video_harness",
+      }),
+    }),
+  });
+  const narratedPack = narrated.checks.find((check) => check.id === "channel-pack");
+  assert.equal(narratedPack.required, true);
+  assert.equal(narratedPack.ok, true, narratedPack.detail);
+  assert.match(narratedPack.detail, /署名検証/u);
+  const narratedRoute = narrated.checks.find((check) => check.id === "harness-production-route");
+  assert.equal(narratedRoute.ok, true, narratedRoute.detail);
+  assert.match(narratedRoute.detail, /production\/internal\.mjs/u);
+  assert.deepEqual(probed, [
+    { kind: "image.generation", provider: "buzzassist", model: "image-model-v1", adapterVersion: "image-adapter-v1" },
+    { kind: "voice.synthesis", provider: "fish-audio", model: "s2-pro", adapterVersion: "fish-audio-tts-server-v1" },
+    { kind: "music.generation", provider: "elevenlabs", model: "music_v1", adapterVersion: "elevenlabs-music-server-v1" },
+  ]);
+  assert.equal(narrated.checks.find((check) => check.id === "image-key")?.provider, "buzzassist");
+  assert.equal(narrated.checks.find((check) => check.id === "tts-key")?.provider, "fish-audio");
+  assert.equal(narrated.checks.find((check) => check.id === "music-key")?.provider, "elevenlabs");
+
+  const mismatched = await runHarnessDoctor({
+    harnessId: "narrated-story-video",
+    job: { channelPackVerification: { ...evidence, harnessId: "koya-manga-video" } },
+    runtime: deterministicDoctorRuntime({
+      channelPackRuntime: narratedRuntimeMetadata(evidence.payloadSha256),
+      mediaAdapterProbe: async (spec) => ({ ok: true, status: "ready", ...spec }),
+      resolveProductionRoute: async () => ({
+        command: "fixture-node",
+        args: ["internal.mjs", "help"],
+        cwd: "/fixture/deployment",
+        label: "production/internal.mjs",
+        mcpTool: "run_video_harness",
+      }),
+    }),
+  });
+  const mismatchedPack = mismatched.checks.find((check) => check.id === "channel-pack");
+  assert.equal(mismatchedPack.ok, false);
+  assert.match(mismatchedPack.detail, /対象Harness/u);
+});
+
+test("narrated doctor fails closed before paid generation when the exact Media Job adapter is disconnected", async () => {
+  const evidence = {
+    envelopeVersion: "buzzassist-channel-pack-envelope-v1",
+    harnessId: "narrated-story-video",
+    payloadSha256: "e".repeat(64),
+    fileCount: 1,
+    signerKeyId: "operator-key",
+    trustedPublicKeyId: "trusted-key",
+  };
+  let calls = 0;
+  const report = await runHarnessDoctor({
+    harnessId: "narrated-story-video",
+    job: { channelPackVerification: evidence },
+    runtime: deterministicDoctorRuntime({
+      channelPackRuntime: narratedRuntimeMetadata(evidence.payloadSha256),
+      mediaAdapterProbe: async (spec) => {
+        calls += 1;
+        return { ok: false, status: "unreachable", ...spec, detail: "fixture broker disconnected" };
+      },
+      resolveProductionRoute: async () => ({
+        command: "fixture-node",
+        args: ["internal.mjs", "help"],
+        cwd: "/fixture/deployment",
+        label: "production/internal.mjs",
+        mcpTool: "run_video_harness",
+      }),
+    }),
+  });
+  assert.equal(calls, 3, "read-only capabilities probe must check all signed adapter identities");
+  assert.equal(report.ready, false);
+  assert.ok(report.blocking.includes("tts-key"));
+  assert.ok(report.blocking.includes("image-key"));
+  assert.ok(report.blocking.includes("music-key"));
+  assert.equal(report.checks.find((check) => check.id === "tts-key")?.status, "unreachable");
+  assert.equal(report.checks.find((check) => check.id === "image-key")?.status, "unreachable");
+  assert.equal(report.checks.find((check) => check.id === "music-key")?.status, "unreachable");
+});
+
+test("Koya doctor requires the exact server-side dialogue adapter and never falls back to a raw ElevenLabs key", async () => {
+  const route = async () => ({
+    command: "fixture-node",
+    args: ["koya-manga-video.mjs", "help"],
+    cwd: root,
+    label: "scripts/koya-manga-video.mjs",
+    mcpTool: "run_video_harness",
+  });
+  let rawKeyProbeCalls = 0;
+  const rawOnly = await runHarnessDoctor({
+    projectDir: root,
+    harnessId: "koya-manga-video",
+    runtime: deterministicDoctorRuntime({
+      env: {
+        ELEVENLABS_API_KEY: "raw-key-that-must-not-count",
+        BUZZASSIST_MEDIA_JOB_API_BASE: "",
+      },
+      ttsProbe: async () => {
+        rawKeyProbeCalls += 1;
+        return { ok: true, detail: "raw key exists" };
+      },
+      resolveProductionRoute: route,
+    }),
+  });
+  const rawOnlyTts = rawOnly.checks.find((check) => check.id === "tts-key");
+  assert.equal(rawKeyProbeCalls, 0, "Koya must not consult the legacy raw-key probe");
+  assert.equal(rawOnlyTts.ok, false);
+  assert.equal(rawOnlyTts.status, "route-missing");
+  assert.ok(rawOnly.blocking.includes("tts-key"));
+  assert.match(rawOnlyTts.fix, /voice\.dialogue/u);
+
+  const exactSpec = {
+    kind: "voice.dialogue",
+    provider: "elevenlabs",
+    model: "eleven_v3",
+    adapterVersion: "elevenlabs-dialogue-server-v1",
+  };
+  const probes = [];
+  const exact = await runHarnessDoctor({
+    projectDir: root,
+    harnessId: "koya-manga-video",
+    runtime: deterministicDoctorRuntime({
+      resolveProductionRoute: route,
+      mediaAdapterProbe: async (spec) => {
+        probes.push(spec);
+        return { ok: true, status: "ready", ...spec, serverVersion: "fixture-v1" };
+      },
+    }),
+  });
+  assert.deepEqual(probes, [exactSpec]);
+  const exactTts = exact.checks.find((check) => check.id === "tts-key");
+  assert.equal(exactTts.ok, true, exactTts.detail);
+  assert.equal(exactTts.status, "ready");
+  assert.deepEqual(
+    Object.fromEntries(Object.keys(exactSpec).map((key) => [key, exactTts[key]])),
+    exactSpec,
+  );
+
+  const mismatched = await runHarnessDoctor({
+    projectDir: root,
+    harnessId: "koya-manga-video",
+    runtime: deterministicDoctorRuntime({
+      resolveProductionRoute: route,
+      mediaAdapterProbe: async (spec) => ({ ...spec, model: "wrong-model", ok: true, status: "ready" }),
+    }),
+  });
+  const mismatchedTts = mismatched.checks.find((check) => check.id === "tts-key");
+  assert.equal(mismatchedTts.ok, false);
+  assert.equal(mismatchedTts.status, "identity-mismatch");
+  assert.ok(mismatched.blocking.includes("tts-key"));
+});
+
+test("narrated doctor never reports ready when only the required BGM adapter is unavailable", async () => {
+  const evidence = {
+    envelopeVersion: "buzzassist-channel-pack-envelope-v1",
+    harnessId: "narrated-story-video",
+    payloadSha256: "f".repeat(64),
+    fileCount: 1,
+    signerKeyId: "operator-key",
+    trustedPublicKeyId: "trusted-key",
+  };
+  const probedKinds = [];
+  const report = await runHarnessDoctor({
+    harnessId: "narrated-story-video",
+    job: { channelPackVerification: evidence },
+    runtime: deterministicDoctorRuntime({
+      channelPackRuntime: narratedRuntimeMetadata(evidence.payloadSha256),
+      mediaAdapterProbe: async (spec) => {
+        probedKinds.push(spec.kind);
+        return spec.kind === "music.generation"
+          ? { ok: false, status: "unavailable", ...spec, detail: "fixture music adapter unavailable" }
+          : { ok: true, status: "ready", ...spec };
+      },
+      resolveProductionRoute: async () => ({
+        command: "fixture-node",
+        args: ["internal.mjs", "help"],
+        cwd: "/fixture/deployment",
+        label: "production/internal.mjs",
+        mcpTool: "run_video_harness",
+      }),
+    }),
+  });
+  assert.deepEqual(probedKinds, ["image.generation", "voice.synthesis", "music.generation"]);
+  assert.equal(report.checks.find((check) => check.id === "image-key")?.ok, true);
+  assert.equal(report.checks.find((check) => check.id === "tts-key")?.ok, true);
+  assert.equal(report.checks.find((check) => check.id === "music-key")?.ok, false);
+  assert.deepEqual(report.blocking.filter((id) => ["image-key", "tts-key", "music-key"].includes(id)), ["music-key"]);
+  assert.equal(report.ready, false);
 });
 
 test("足りないものには必ず直し方が付く（全部欠けた環境で確かめる）", async (t) => {
@@ -115,19 +389,20 @@ test("秘密の値は報告に一切出ない", async () => {
   assert.match(tts.detail, /^(設定あり|未設定)/u);
 });
 
-test("秘密の判定は本体と同じ解決関数に聞く", async () => {
+test("TTSの秘密判定と本番画像ホストは実際の実行経路を見る", async () => {
   // doctor が独自に環境変数だけを見る形にすると、設定ファイルに保存した人へ
   // 「未設定」と言うことになる。狼少年になった検査は読まれなくなり、
   // 本当の欠落も見逃される。
   const { requireElevenLabsApiKey } = await import("../lib/speechGeneration.mjs");
-  const { resolveLovartCredentials } = await import("../lib/lovartMediaGeneration.mjs");
   const report = await runHarnessDoctor();
 
   const ttsResolves = await requireElevenLabsApiKey({}).then(() => true, () => false);
-  const imageResolves = await resolveLovartCredentials().then(() => true, () => false);
 
   assert.equal(report.checks.find((c) => c.id === "tts-key").ok, ttsResolves, "本体の判定と一致すること");
-  assert.equal(report.checks.find((c) => c.id === "image-key").ok, imageResolves, "本体の判定と一致すること");
+  const image = report.checks.find((c) => c.id === "image-key");
+  assert.equal(image.host, "codex", "本番モデルを実行する Codex ホストを見ること");
+  assert.equal(image.model, "gpt-image-2-codex", "契約で選ばれた実モデルを報告すること");
+  assert.match(image.detail, /Codex|codex/u, "無関係なプロバイダの鍵で代用しないこと");
 });
 
 test("音声QAの判定が、別の interpreter の結果を流用しない", async (t) => {
@@ -183,11 +458,11 @@ test("正規入口は、宣言に書いてあるだけでなく実際に起動�
   assert.equal(route.ok, true);
   assert.match(route.detail, /起動した/u, "起動を確かめたことが detail に出ること");
 
-  // 未登録のジャンルは通さない。
-  const narrated = await runHarnessDoctor({ harnessId: "narrated-story-video" });
-  const blocked = narrated.checks.find((check) => check.id === "harness-production-route");
+  // 宣言そのものが無いHarnessは通さない。
+  const unregistered = await runHarnessDoctor({ harnessId: "unregistered-video" });
+  const blocked = unregistered.checks.find((check) => check.id === "harness-production-route");
   assert.equal(blocked.ok, false, "正規ルーティングに載っていないハーネスを ready にしないこと");
-  assert.equal(narrated.ready, false);
+  assert.equal(unregistered.ready, false);
 });
 
 test("自己改善が正本を書き換えたあと、配布コピーのずれを検出する", async () => {
@@ -213,4 +488,55 @@ test("任意項目の未充足を、実害と違う言い方で報告しない",
     assert.ok(check, `${id} の詳細があること`);
     assert.ok(check.detail && check.detail.length > 0, `${id}: 何が未充足なのかを述べること`);
   }
+});
+
+test("R6-1: doctor reports the reviewer trust anchor as a required item for a named harness and an advisory one for setup", async () => {
+  const pair = generateReviewerKeyPair();
+  const active = JSON.stringify({ version: "koya-reviewer-trust-v1", reviewers: [createReviewerTrustEntry({ publicKeyPem: pair.publicKeyPem, label: "doctor-fixture" })] });
+  const revokedOnly = JSON.stringify({
+    version: "koya-reviewer-trust-v1",
+    reviewers: [{ ...createReviewerTrustEntry({ publicKeyPem: pair.publicKeyPem, label: "retired" }), status: "revoked", revokedAt: "2026-09-01T00:00:00.000Z", reason: "fixture" }],
+  });
+  const route = async () => ({ command: "fixture-node", args: ["koya-manga-video.mjs", "help"], cwd: root, label: "scripts/koya-manga-video.mjs", mcpTool: "run_video_harness" });
+  const run = (env, harnessId = "koya-manga-video") => runHarnessDoctor({
+    projectDir: root,
+    harnessId,
+    runtime: deterministicDoctorRuntime({ env, resolveProductionRoute: route, mediaAdapterProbe: async (spec) => ({ ok: true, status: "ready", ...spec }) }),
+  });
+
+  const missing = await run({ BUZZASSIST_MEDIA_JOB_API_BASE: "" });
+  const missingCheck = missing.checks.find((check) => check.id === "reviewer-trust");
+  assert.ok(missingCheck, "reviewer-trust が項目として出る");
+  assert.equal(missingCheck.required, true);
+  assert.equal(missingCheck.ok, false);
+  assert.equal(missingCheck.code, "reviewer-trust-unconfigured");
+  assert.ok(missingCheck.fix.length > 10, "直し方が付く");
+  assert.match(missingCheck.fix, /BUZZASSIST_REVIEWER_TRUST/u);
+  assert.ok(missing.blocking.includes("reviewer-trust"), "ハーネス指定では必須なので blocking に入る");
+  assert.equal(missing.ready, false);
+
+  const ambiguous = await run({ BUZZASSIST_REVIEWER_TRUST_JSON: active, BUZZASSIST_KOYA_REVIEWER_TRUST_JSON: revokedOnly });
+  assert.equal(ambiguous.checks.find((check) => check.id === "reviewer-trust").code, "reviewer-trust-invalid:env-ambiguous:json");
+
+  const revoked = await run({ BUZZASSIST_REVIEWER_TRUST_JSON: revokedOnly });
+  const revokedCheck = revoked.checks.find((check) => check.id === "reviewer-trust");
+  assert.equal(revokedCheck.ok, false);
+  assert.equal(revokedCheck.code, "reviewer-trust-invalid:no-active-reviewers");
+  assert.equal(revokedCheck.activeReviewers, 0);
+
+  const configured = await run({ BUZZASSIST_REVIEWER_TRUST_JSON: active });
+  const okCheck = configured.checks.find((check) => check.id === "reviewer-trust");
+  assert.equal(okCheck.ok, true, okCheck.detail);
+  assert.equal(okCheck.activeReviewers, 1);
+  assert.match(okCheck.detail, /inline JSON/u);
+  assert.doesNotMatch(JSON.stringify(okCheck), /BEGIN PUBLIC KEY/u, "鍵の中身を出さない");
+  assert.ok(!configured.blocking.includes("reviewer-trust"));
+
+  // Harness 未選択の setup: 項目は出るが任意（canvas だけ使う人を止めない）。
+  const setup = await run({ BUZZASSIST_MEDIA_JOB_API_BASE: "" }, "");
+  const setupCheck = setup.checks.find((check) => check.id === "reviewer-trust");
+  assert.equal(setupCheck.required, false);
+  assert.equal(setupCheck.ok, false);
+  assert.ok(setup.advisory.includes("reviewer-trust"));
+  assert.ok(!setup.blocking.includes("reviewer-trust"));
 });

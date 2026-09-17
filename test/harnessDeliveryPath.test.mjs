@@ -8,6 +8,7 @@ import test from "node:test";
 import { channelPackPresent } from "../lib/channelPackResolver.mjs";
 import { exportKoyaHandoffBundle, restoreKoyaHandoffBundle, verifyKoyaHandoffBundle } from "../lib/koyaHandoffBundle.mjs";
 import { runHarnessDoctor } from "../scripts/harness-doctor.mjs";
+import { prepareCompleteKoyaHandoffEvidence } from "./helpers/koyaHandoffFixture.mjs";
 
 const root = new URL("..", import.meta.url).pathname;
 
@@ -28,6 +29,7 @@ test("運営者へ渡す経路が、契約を持たないプロジェクトで�
   // 送り手: Channel Pack だけを持ち、契約のコピーは持たないプロジェクト。
   const sender = await mkdtemp(join(tmpdir(), "koya-sender-"));
   await cp(join(root, "channel-packs"), join(sender, "channel-packs"), { recursive: true });
+  await prepareCompleteKoyaHandoffEvidence({ projectDir: sender });
   assert.equal(
     existsSync(join(sender, "config/koya-manga-production-contract.json")), false,
     "契約のコピーを持たない前提であること",

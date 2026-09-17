@@ -18,10 +18,12 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
+import { isDirectCli } from "../lib/cliEntrypoint.mjs";
 import { redactForPlatform } from "../lib/harnessRunReceipt.mjs";
 
-const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_RECEIPT_DIR = path.join(REPO_ROOT, "docs", "learning", "receipts");
 
 export function loadReceipts(dir = DEFAULT_RECEIPT_DIR) {
@@ -167,7 +169,7 @@ async function main() {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isDirectCli(import.meta.url)) {
   main().catch((error) => {
     process.stderr.write(`${error?.message || error}\n`);
     process.exitCode = 1;

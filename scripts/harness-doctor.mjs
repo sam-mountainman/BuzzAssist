@@ -26,58 +26,38 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import path from "node:path";
 
 import { channelPackPresent } from "../lib/channelPackResolver.mjs";
+import { CHANNEL_PACK_ENVELOPE_VERSION } from "../lib/channelPackEnvelope.mjs";
 import { requireElevenLabsApiKey } from "../lib/speechGeneration.mjs";
 import { resolveLovartCredentials } from "../lib/lovartMediaGeneration.mjs";
-import { DEFAULT_VOICE_QA_PYTHON, voiceQualityAvailable } from "../lib/voiceQualityGate.mjs";
-import { readKoyaChannelAuthority } from "../lib/koyaChannelGovernance.mjs";
+import { VOICE_QA_REQUIRED_MODULES, voiceQualityAvailable } from "../lib/voiceQualityGate.mjs";
+import {
+  fingerprintKoyaChannelAuthority,
+  readKoyaChannelAuthority,
+} from "../lib/koyaChannelGovernance.mjs";
 import { GENRE_CANONICAL_ENTRYPOINTS } from "../lib/harnessRouting.mjs";
+import { channelPackRuntimeAdapterSpecs } from "../lib/harnessChannelPackRuntime.mjs";
+import {
+  resolveHarnessDeployment,
+  resolveHarnessDeploymentCommand,
+} from "../lib/harnessDeploymentResolver.mjs";
+import {
+  formatRuntimeCommand,
+  imageHostForModel,
+  probeCodexImageHost,
+  resolveFfmpegToolchain,
+  resolvePythonRuntime,
+} from "../lib/harnessRuntimeResolver.mjs";
+import { probePaidMediaJobAdapter } from "../lib/paidMediaJobBroker.mjs";
+import { REVIEWER_TRUST_ENV_GUIDANCE, REVIEWER_TRUST_PATH_ENV, preflightReviewerTrust } from "../lib/koyaReviewAttestation.mjs";
+import { resolveCodexCommand } from "./codex-image-bridge.mjs";
 
-const run = promisify(execFile);
-const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
-
-/**
- * 起動して名乗らせる。名前が PATH にあるだけでは通さない。
- *
- * 終了コード0だけで通す形にすると、終了0で何も出さない偽の実行ファイルや、
- * 名前が同じ別のツールのラッパーが「揃っている」ことになる。
- * そのコマンド固有の署名に一致しなければ落とす。
- */
-async function probeCommand(command, args, { signature, versionPattern = /(\d+\.\d+(?:\.\d+)?)/u } = {}) {
-  try {
-    const { stdout, stderr } = await run(command, args, { timeout: 15_000 });
-    const text = `${stdout}${stderr}`;
-    if (signature && !signature.test(text)) {
-      return {
-        ok: false,
-        missing: false,
-        detail: `${command} を名乗る何かが応答したが、${command} の出力署名に一致しない: ${text.slice(0, 80).replace(/\s+/gu, " ")}`,
-      };
-    }
-    const match = text.match(versionPattern);
-    if (!match) {
-      return { ok: false, missing: false, detail: `${command} が版を答えなかった: ${text.slice(0, 80).replace(/\s+/gu, " ")}` };
-    }
-    return { ok: true, version: match[1] };
-  } catch (error) {
-    const message = String(error?.message || error);
-    const missing = /ENOENT|not found|command not found/iu.test(message);
-    return { ok: false, missing, detail: message.slice(0, 200) };
-  }
-}
-
-async function probePythonModules(modules) {
-  const script = `import json,importlib.util as u;print(json.dumps({m:(u.find_spec(m) is not None) for m in ${JSON.stringify(modules)}}))`;
-  try {
-    const { stdout } = await run("python3", ["-c", script], { timeout: 20_000 });
-    return { ok: true, modules: JSON.parse(stdout.trim()) };
-  } catch (error) {
-    return { ok: false, detail: String(error?.message || error).slice(0, 200) };
-  }
-}
+const defaultRunCommand = promisify(execFile);
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
  * 秘密は「あるか無いか」だけ。値も長さも出さない。
@@ -153,45 +133,80 @@ function probeShippedSkillDrift() {
   };
 }
 
-async function probeProductionRoute(declaration, harnessId) {
+function configuredHarnessDeployment(harnessId, runtime = {}) {
+  if (runtime.deployment && typeof runtime.deployment === "object") return runtime.deployment;
+  return resolveHarnessDeployment(harnessId, {
+    repoRoot: REPO_ROOT,
+    deploymentPath: runtime.deploymentPath || "",
+  });
+}
+
+async function resolveProductionRouteProbe(declaration, harnessId, { job, runtime = {} } = {}) {
+  if (typeof runtime.resolveProductionRoute === "function") {
+    return runtime.resolveProductionRoute({ declaration, harnessId, job, projectDir: runtime.projectDir });
+  }
+  if (harnessId === "narrated-story-video") {
+    const deployment = job?.deployment && typeof job.deployment === "object"
+      ? job.deployment
+      : configuredHarnessDeployment(harnessId, runtime);
+    const rootValue = String(deployment.root || "").trim();
+    const declaredEntrypoint = String(deployment.entrypoint || "").trim();
+    if (!rootValue || !declaredEntrypoint || /<[^>]+>/u.test(declaredEntrypoint)) {
+      throw new Error("ナレーションハーネスの実配備root / entrypointが未完成");
+    }
+    const route = resolveHarnessDeploymentCommand(deployment, { additionalArgs: ["help"] });
+    if (!existsSync(route.entrypointPath)) throw new Error(`配備済みの正規internal entrypointが無い: ${declaredEntrypoint}`);
+    return {
+      command: route.command,
+      args: route.args,
+      cwd: route.cwd,
+      label: route.label,
+      mcpTool: "run_video_harness",
+    };
+  }
+
+  const canonical = GENRE_CANONICAL_ENTRYPOINTS[declaration?.produces?.kind];
+  if (!canonical) throw new Error(`${declaration?.produces?.kind || "unknown"} が正規ルーティングに登録されていない`);
+  const entrypoint = String(declaration.entrypoint || "");
+  if (/<[^>]+>/u.test(entrypoint) || !entrypoint) throw new Error(`入口がプレースホルダのまま: ${entrypoint || "(未設定)"}`);
+  if (entrypoint.trim() !== canonical.cli.trim()) {
+    throw new Error(`宣言の入口が正規 CLI と違う: 宣言「${entrypoint}」/ 正規「${canonical.cli}」`);
+  }
+  const script = canonical.cli.replace(/^node\s+/u, "").trim();
+  const scriptPath = path.join(REPO_ROOT, script);
+  if (!existsSync(scriptPath)) throw new Error(`正規 CLI のスクリプトが無い: ${script}`);
+  return {
+    command: process.execPath,
+    args: [scriptPath, "help"],
+    cwd: REPO_ROOT,
+    label: canonical.cli,
+    mcpTool: canonical.mcpTool,
+  };
+}
+
+async function probeProductionRoute(declaration, harnessId, { runCommand = defaultRunCommand, job = null, runtime = {} } = {}) {
   if (!declaration) {
     return { ok: false, detail: `宣言が読めない: config/harnesses/${harnessId}.harness.json`,
       fix: `config/harnesses/${harnessId}.harness.json を置くこと` };
   }
-  const canonical = GENRE_CANONICAL_ENTRYPOINTS[declaration.produces?.kind];
-  const entrypoint = String(declaration.entrypoint || "");
-  if (!canonical) {
-    return { ok: false, detail: `${declaration.produces?.kind} が正規ルーティングに登録されていない`,
-      fix: `lib/harnessRouting.mjs の GENRE_CANONICAL_ENTRYPOINTS に ${declaration.produces?.kind} を登録すること。前提が揃っても、台本を渡す先が無ければ運営者は止まる` };
-  }
-  if (/<[^>]+>/u.test(entrypoint) || !entrypoint) {
-    return { ok: false, detail: `入口がプレースホルダのまま: ${entrypoint || "(未設定)"}`,
-      fix: `${harnessId} の entrypoint を実在するコマンドにすること。前提が揃っても、台本を渡す先が無ければ運営者は止まる` };
-  }
-  // 宣言の入口と正規 CLI が食い違っていないこと。
-  if (entrypoint.trim() !== canonical.cli.trim()) {
-    return { ok: false, detail: `宣言の入口が正規 CLI と違う: 宣言「${entrypoint}」/ 正規「${canonical.cli}」`,
-      fix: "宣言の entrypoint を正規 CLI と一致させること。二重管理は片方だけ古くなる" };
-  }
-  // 実在して起動するか。課金しない help で確かめる。
-  const script = canonical.cli.replace(/^node\s+/u, "").trim();
-  const scriptPath = path.join(REPO_ROOT, script);
-  if (!existsSync(scriptPath)) {
-    return { ok: false, detail: `正規 CLI のスクリプトが無い: ${script}`, fix: `${script} を配置すること` };
-  }
+  let route;
   try {
-    await run(process.execPath, [scriptPath, "help"], { timeout: 30_000 });
+    route = await resolveProductionRouteProbe(declaration, harnessId, { job, runtime });
+    await runCommand(route.command, route.args, { cwd: route.cwd, timeout: 30_000 });
   } catch (error) {
     return { ok: false, detail: `正規 CLI が起動しない: ${String(error?.message || error).slice(0, 140)}`,
-      fix: `node ${script} help が通る状態にすること` };
+      fix: `${harnessId} の実配備canonical entrypointを配置し、非課金の help probe が通る状態にすること` };
   }
-  return { ok: true, detail: `正規入口が起動した: ${canonical.mcpTool} / ${canonical.cli}`, fix: "" };
+  return { ok: true, detail: `正規入口が起動した: ${route.mcpTool || "run_video_harness"} / ${route.label}`, fix: "" };
 }
 
-async function probeFfmpegCapability() {
+async function probeFfmpegCapability({ ffmpeg, ffprobe, runCommand = defaultRunCommand } = {}) {
   const missing = [];
+  if (!ffmpeg?.command || !ffprobe?.command) {
+    return { ok: false, missing: ["ffmpeg", "ffprobe"], detail: "ffmpeg / ffprobe の実行先を解決できない" };
+  }
   try {
-    const { stdout } = await run("ffmpeg", ["-hide_banner", "-encoders"], { timeout: 20_000 });
+    const { stdout } = await runCommand(ffmpeg.command, [...(ffmpeg.args ?? []), "-hide_banner", "-encoders"], { timeout: 20_000 });
     for (const encoder of ["libx264", "aac", "pcm_s24le"]) {
       if (!stdout.includes(encoder)) missing.push(`encoder:${encoder}`);
     }
@@ -199,7 +214,7 @@ async function probeFfmpegCapability() {
     return { ok: false, missing, detail: `encoder 一覧を取れない: ${String(error?.message || error).slice(0, 120)}` };
   }
   try {
-    const { stdout } = await run("ffmpeg", ["-hide_banner", "-filters"], { timeout: 20_000 });
+    const { stdout } = await runCommand(ffmpeg.command, [...(ffmpeg.args ?? []), "-hide_banner", "-filters"], { timeout: 20_000 });
     for (const filter of ["scale", "crop", "overlay", "fps", "loudnorm", "aresample"]) {
       if (!new RegExp(`\\b${filter}\\b`, "u").test(stdout)) missing.push(`filter:${filter}`);
     }
@@ -212,16 +227,24 @@ async function probeFfmpegCapability() {
   const probeDir = await mkdtemp(join(tmpdir(), "harness-doctor-ffmpeg-"));
   const target = join(probeDir, "probe.mp4");
   try {
-    await run("ffmpeg", [
+    await runCommand(ffmpeg.command, [...(ffmpeg.args ?? []),
       "-hide_banner", "-loglevel", "error", "-y",
       "-f", "lavfi", "-i", "color=c=black:s=64x64:d=1:r=10",
       "-f", "lavfi", "-i", "anullsrc=channel_layout=mono:sample_rate=48000",
       "-t", "1", "-vf", "scale=64:64,fps=10", "-af", "aresample=48000",
       "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", target,
     ], { timeout: 60_000 });
-    await run("ffprobe", ["-v", "error", "-show_streams", "-of", "json", target], { timeout: 20_000 });
+    const { stdout: probeOutput } = await runCommand(
+      ffprobe.command,
+      [...(ffprobe.args ?? []), "-v", "error", "-show_streams", "-of", "json", target],
+      { timeout: 20_000 },
+    );
+    const streams = JSON.parse(probeOutput || "{}").streams;
+    if (!Array.isArray(streams) || !streams.some((stream) => stream.codec_type === "video") || !streams.some((stream) => stream.codec_type === "audio")) {
+      throw new Error("ffprobe が音声・映像streamの両方を返さなかった");
+    }
     // 実デコードまで通す。書けても読めない出力を「作れた」ことにしない。
-    await run("ffmpeg", ["-v", "error", "-xerror", "-i", target, "-f", "null", "-"], { timeout: 30_000 });
+    await runCommand(ffmpeg.command, [...(ffmpeg.args ?? []), "-v", "error", "-xerror", "-i", target, "-f", "null", "-"], { timeout: 30_000 });
     return { ok: true, missing: [], detail: "極小MP4の生成・probe・全デコードが通った" };
   } catch (error) {
     return { ok: false, missing, detail: `極小MP4を作って読み返せない: ${String(error?.stderr || error?.message || error).slice(0, 160)}` };
@@ -230,9 +253,297 @@ async function probeFfmpegCapability() {
   }
 }
 
-export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "" } = {}) {
+function configuredImageModel(harnessId = "") {
+  if (harnessId && harnessId !== "koya-manga-video") {
+    try {
+      const declaration = JSON.parse(readFileSync(path.join(REPO_ROOT, "config", "harnesses", `${harnessId}.harness.json`), "utf8"));
+      return String(declaration?.runtime?.imageModel || declaration?.defaults?.imageModel || declaration?.imageModel || "").trim();
+    } catch {
+      return "";
+    }
+  }
+  try {
+    const contract = JSON.parse(readFileSync(path.join(REPO_ROOT, "config", "koya-manga-production-contract.json"), "utf8"));
+    return String(contract?.art?.imageModel || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+async function probeConfiguredImageHost(model, runtime = {}) {
+  if (typeof runtime.imageHostProbe === "function") return runtime.imageHostProbe(model);
+  const host = imageHostForModel(model);
+  if (!model || host === "unknown") {
+    return { ok: false, host, model: model || null, detail: "本番で使う画像モデルが宣言されていない" };
+  }
+  if (host === "codex") {
+    let command = "";
+    try {
+      command = await (runtime.resolveCodexCommand ?? resolveCodexCommand)();
+    } catch (error) {
+      return { ok: false, host, model, detail: String(error?.message || error).slice(0, 180) };
+    }
+    return probeCodexImageHost({
+      model,
+      command,
+      env: runtime.env ?? process.env,
+      runCommand: runtime.runCommand ?? defaultRunCommand,
+    });
+  }
+  if (host === "lovart") {
+    const credentials = await probeSecretVia(runtime.resolveLovartCredentials ?? resolveLovartCredentials, {
+      label: "Lovart画像生成",
+      fix: "LOVART_ACCESS_KEY と LOVART_SECRET_KEY を環境変数に置くか、~/.lovart/credentials.json を作る",
+    });
+    return { ...credentials, host, model, detail: credentials.ok ? `画像ホスト認証情報あり（Lovart / ${model}）` : credentials.detail };
+  }
+  if (host === "grok") {
+    try {
+      const getStatus = runtime.getGrokStatus ?? (await import("../lib/mediaGeneration.mjs")).getHermesStatus;
+      const status = await getStatus();
+      const ok = status?.installed === true && status?.session === "logged-in";
+      return { ok, host, model, detail: ok ? `画像ホスト認証済み（Grok / ${model}）` : `Grok画像ホストを認証できない（${status?.session || "unknown"}）` };
+    } catch (error) {
+      return { ok: false, host, model, detail: `Grok画像ホストを検査できない: ${String(error?.message || error).slice(0, 140)}` };
+    }
+  }
+  try {
+    const getStatus = runtime.getBuzzAssistAuthStatus ?? (await import("../lib/buzzassistApi.mjs")).getBuzzAssistAuthStatus;
+    const status = await getStatus({ verifyServer: true });
+    const ok = status?.loggedIn === true && status?.verified !== false;
+    return { ok, host, model, detail: ok ? `画像ホスト認証済み（BuzzAssist / ${model}）` : `BuzzAssist画像ホストを認証できない（${status?.error || "未ログイン"}）` };
+  } catch (error) {
+    return { ok: false, host, model, detail: `BuzzAssist画像ホストを検査できない: ${String(error?.message || error).slice(0, 140)}` };
+  }
+}
+
+async function probeNarratedPaidMediaRuntime({ job, runtime = {}, env = process.env } = {}) {
+  const evidence = runtime.channelPackEvidence ?? job?.channelPackVerification ?? null;
+  const persisted = runtime.channelPackRuntime ?? job?.channelPackRuntime ?? null;
+  let specs;
+  try {
+    specs = channelPackRuntimeAdapterSpecs(persisted, {
+      harnessId: "narrated-story-video",
+      payloadSha256: evidence?.payloadSha256,
+    });
+  } catch (error) {
+    const detail = `署名Channel Packのruntime metadataを信頼できない: ${String(error?.message || error).slice(0, 180)}`;
+    return {
+      tts: { ok: false, status: "metadata-invalid", provider: null, model: null, detail },
+      image: { ok: false, status: "metadata-invalid", host: "buzzassist-media-job", provider: null, model: null, detail },
+      music: { ok: false, status: "metadata-invalid", provider: null, model: null, detail },
+    };
+  }
+
+  const injectedProbe = typeof runtime.mediaAdapterProbe === "function" ? runtime.mediaAdapterProbe : null;
+  const apiBase = String(runtime.mediaJobApiBase ?? env.BUZZASSIST_MEDIA_JOB_API_BASE ?? "").trim();
+  if (!injectedProbe && !apiBase) {
+    const detail = "BUZZASSIST_MEDIA_JOB_API_BASEが無く、署名Channel Packのadapterを非課金probeできない";
+    return {
+      tts: { ok: false, status: "route-missing", ...specs.tts, detail },
+      image: { ok: false, status: "route-missing", host: "buzzassist-media-job", ...specs.image, detail },
+      music: { ok: false, status: "route-missing", ...specs.music, detail },
+    };
+  }
+  const probe = injectedProbe ?? ((spec) => probePaidMediaJobAdapter(spec, {
+    apiBase,
+    ...(runtime.mediaJobStateDir ? { stateDir: runtime.mediaJobStateDir } : {}),
+    ...(runtime.mediaJobFetch ? { apiFetch: runtime.mediaJobFetch } : {}),
+  }));
+  const safeProbe = async (spec) => {
+    try {
+      const result = await probe(spec);
+      return {
+        ok: result?.ok === true,
+        status: String(result?.status || (result?.ok === true ? "ready" : "unavailable")),
+        kind: spec.kind,
+        provider: spec.provider,
+        model: spec.model,
+        adapterVersion: spec.adapterVersion,
+        ...(result?.serverVersion ? { serverVersion: String(result.serverVersion).slice(0, 120) } : {}),
+        detail: result?.ok === true
+          ? `BuzzAssist Media Job adapter ready（${spec.provider} / ${spec.model} / ${spec.adapterVersion}、非課金GET probe）`
+          : String(result?.detail || "BuzzAssist Media Job adapterがreadyを返さない").slice(0, 200),
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        status: "probe-error",
+        ...spec,
+        detail: `BuzzAssist Media Job adapter probeに失敗: ${String(error?.message || error).slice(0, 180)}`,
+      };
+    }
+  };
+  const [image, tts, music] = await Promise.all([
+    safeProbe(specs.image),
+    safeProbe(specs.tts),
+    safeProbe(specs.music),
+  ]);
+  return {
+    tts,
+    image: { ...image, host: "buzzassist-media-job" },
+    music,
+  };
+}
+
+const KOYA_DIALOGUE_ADAPTER_SPEC = Object.freeze({
+  kind: "voice.dialogue",
+  provider: "elevenlabs",
+  model: "eleven_v3",
+  adapterVersion: "elevenlabs-dialogue-server-v1",
+});
+
+/**
+ * Koya speech no longer calls ElevenLabs with a local raw key. Probe the exact
+ * non-billable BuzzAssist Media Job adapter used by requestKoyaDialogueMediaJob.
+ * A raw ELEVENLABS_API_KEY must never make this check pass.
+ */
+async function probeKoyaDialoguePaidMediaRuntime({ runtime = {}, env = process.env } = {}) {
+  const spec = KOYA_DIALOGUE_ADAPTER_SPEC;
+  const injectedProbe = typeof runtime.mediaAdapterProbe === "function" ? runtime.mediaAdapterProbe : null;
+  const apiBase = String(runtime.mediaJobApiBase ?? env.BUZZASSIST_MEDIA_JOB_API_BASE ?? "").trim();
+  if (!injectedProbe && !apiBase) {
+    return {
+      ok: false,
+      status: "route-missing",
+      ...spec,
+      detail: "BUZZASSIST_MEDIA_JOB_API_BASEが無く、Koya本番のvoice.dialogue adapterを非課金probeできない",
+    };
+  }
+  const probe = injectedProbe ?? ((input) => probePaidMediaJobAdapter(input, {
+    apiBase,
+    ...(runtime.mediaJobStateDir ? { stateDir: runtime.mediaJobStateDir } : {}),
+    ...(runtime.mediaJobFetch ? { apiFetch: runtime.mediaJobFetch } : {}),
+  }));
+  try {
+    const result = await probe(spec);
+    const identityMatches = ["kind", "provider", "model", "adapterVersion"]
+      .every((key) => result?.[key] === spec[key]);
+    const ready = result?.ok === true && result?.status === "ready" && identityMatches;
+    return {
+      ok: ready,
+      status: ready ? "ready" : (identityMatches ? String(result?.status || "unavailable") : "identity-mismatch"),
+      ...spec,
+      ...(result?.serverVersion ? { serverVersion: String(result.serverVersion).slice(0, 120) } : {}),
+      detail: ready
+        ? `BuzzAssist Media Job adapter ready（${spec.kind} / ${spec.provider} / ${spec.model} / ${spec.adapterVersion}、非課金GET probe）`
+        : identityMatches
+          ? String(result?.detail || "Koya voice.dialogue adapterがreadyを返さない").slice(0, 200)
+          : "Koya paid-media capability responseが要求したvoice.dialogue adapter identityと一致しない",
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: "probe-error",
+      ...spec,
+      detail: `Koya voice.dialogue adapter probeに失敗: ${String(error?.message || error).slice(0, 180)}`,
+    };
+  }
+}
+
+function validateSignedChannelPackEvidence(evidence, harnessId) {
+  const value = evidence && typeof evidence === "object" ? evidence : null;
+  const failures = [];
+  if (!value) failures.push("署名検証evidenceが無い");
+  else {
+    if (value.envelopeVersion !== CHANNEL_PACK_ENVELOPE_VERSION) failures.push("envelope versionが違う");
+    if (value.harnessId !== harnessId) failures.push(`対象Harnessが違う（${value.harnessId || "無し"}）`);
+    if (!/^[a-f0-9]{64}$/u.test(String(value.payloadSha256 || ""))) failures.push("payload SHA-256が無いか不正");
+    if (!Number.isSafeInteger(value.fileCount) || value.fileCount < 1) failures.push("payload file countが不正");
+    if (!String(value.signerKeyId || "").trim()) failures.push("signer key IDが無い");
+    if (!String(value.trustedPublicKeyId || "").trim()) failures.push("信頼済み公開鍵IDが無い");
+  }
+  return {
+    ok: failures.length === 0,
+    detail: failures.length === 0
+      ? `署名検証evidence確認（${harnessId} / ${value.fileCount}ファイル）`
+      : `署名検証evidenceを信頼できない: ${failures.join(", ")}`,
+  };
+}
+
+async function probeChannelPack({ projectDir, harnessId, job, runtime }) {
+  if (!harnessId) {
+    // Setup時はHarness未選択でも、実際に復元済みのKoya正本があるなら
+    // 「存在する」だけでなく読んで検証する。何も無い新規projectへKoyaを
+    // 強制はせず、このcheck自体は任意のままにする。
+    if (channelPackPresent(projectDir)) {
+      let packDetail = "未設置";
+      let packOk = false;
+      try {
+        const authority = await (runtime.readKoyaChannelAuthority ?? readKoyaChannelAuthority)({ projectDir });
+        packOk = authority.source === "project";
+        packDetail = packOk
+          ? `設置済み・正本を検証（cast ${authority.validation.show.castCount}名 / styling ${authority.validation.styling.specCount}件）`
+          : `データは読めたが正本の出所が ${authority.source}`;
+      } catch (error) {
+        packDetail = `設置されているが正本を読めない: ${String(error?.message || error).slice(0, 140)}`;
+      }
+      return {
+        id: "channel-pack",
+        required: false,
+        ok: packOk,
+        detail: packDetail,
+        fix: packOk ? "" : "復元済みChannel Packのshow/location/thumbnail/styling正本を読める状態にする",
+      };
+    }
+    return {
+      id: "channel-pack",
+      required: false,
+      ok: true,
+      detail: "Harness未選択のため対象外（本番JobでHarness別に検証）",
+      fix: "",
+    };
+  }
+
+  if (harnessId === "koya-manga-video") {
+    let packDetail = "未設置";
+    let packOk = false;
+    let authorityFingerprint = null;
+    if (channelPackPresent(projectDir)) {
+      try {
+        const authority = await (runtime.readKoyaChannelAuthority ?? readKoyaChannelAuthority)({ projectDir });
+        packOk = authority.source === "project";
+        if (packOk) {
+          authorityFingerprint = await (runtime.fingerprintKoyaChannelAuthority ?? fingerprintKoyaChannelAuthority)(authority);
+        }
+        packDetail = packOk
+          ? `設置済み・正本を検証（cast ${authority.validation.show.castCount}名 / styling ${authority.validation.styling.specCount}件）`
+          : `データは読めたが正本の出所が ${authority.source}`;
+      } catch (error) {
+        packDetail = `設置されているが正本を読めない: ${String(error?.message || error).slice(0, 140)}`;
+      }
+    }
+    return {
+      id: "channel-pack",
+      required: true,
+      ok: packOk,
+      detail: packDetail,
+      ...(authorityFingerprint ? { authorityFingerprint } : {}),
+      fix: packOk ? "" : "Koya本番には、署名済みChannel PackからJob固有workspaceへ復元した番組正本が要る。run_video_harnessのprepareを通し、show/location/thumbnail/stylingの全検証が通る状態にする",
+    };
+  }
+
+  const evidence = runtime.channelPackEvidence ?? job?.channelPackVerification ?? null;
+  const verified = validateSignedChannelPackEvidence(evidence, harnessId);
+  return {
+    id: "channel-pack",
+    required: true,
+    ...verified,
+    fix: verified.ok ? "" : "run_video_harnessに対象Harness用の署名済みChannel Pack envelopeを渡し、prepareが保存した署名・payload hash・信頼済み公開鍵のevidence付きでdoctorを実行する",
+  };
+}
+
+/**
+ * Canonical CLI/MCP preflight.
+ *
+ * `runtime` is dependency injection for deterministic tests; production
+ * callers should omit it. Both CLI and MCP return this same report/schema.
+ */
+export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "", job = null, runtime = {} } = {}) {
   const checks = [];
   const add = (entry) => { checks.push(entry); return entry; };
+  const runCommand = runtime.runCommand ?? defaultRunCommand;
+  const runtimeEnv = runtime.env ?? process.env;
 
   // ハーネスを名指しされたら、そのハーネスが実際に配れる状態かを見る。
   // 入口がプレースホルダのまま、正規ルーティングにも載っていないハーネスは、
@@ -242,7 +553,11 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "" 
     const declarationPath = path.join(REPO_ROOT, "config", "harnesses", `${harnessId}.harness.json`);
     let declaration = null;
     try { declaration = JSON.parse(readFileSync(declarationPath, "utf8")); } catch { /* 下で落とす */ }
-    const route = await probeProductionRoute(declaration, harnessId);
+    const route = await probeProductionRoute(declaration, harnessId, {
+      runCommand,
+      job,
+      runtime: { ...runtime, projectDir },
+    });
     add({ id: "harness-production-route", required: true, ...route });
   }
 
@@ -256,23 +571,29 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "" 
     fix: nodeMajor >= 20 ? "" : "Node 20 以上が要る。nvm を使っているなら `nvm use 22` で切り替える（既定が18のままだと Vite も動かない）",
   });
 
-  for (const [id, command] of [["ffmpeg", "ffmpeg"], ["ffprobe", "ffprobe"]]) {
-    const probe = await probeCommand(command, ["-version"], {
-      signature: new RegExp(`${command} version`, "iu"),
-    });
+  const mediaToolchain = runtime.ffmpegToolchain ?? await resolveFfmpegToolchain({
+    env: runtimeEnv,
+    runCommand,
+  });
+  for (const [id, probe] of [["ffmpeg", mediaToolchain.ffmpeg], ["ffprobe", mediaToolchain.ffprobe]]) {
     add({
       id,
       required: true,
       ok: probe.ok,
-      detail: probe.ok ? `${command} ${probe.version}` : probe.detail,
-      fix: probe.ok ? "" : `${command} が要る。macOS なら \`brew install ffmpeg\`、Windows なら \`winget install Gyan.FFmpeg\`。動画のレンダーと実測監査の全部がこれに乗っているので、無いと本編は1本も作れない`,
+      detail: probe.ok ? `${id} ${probe.version}（${formatRuntimeCommand(probe)}）` : probe.detail,
+      fix: probe.ok ? "" : `${id} が要る。macOS なら \`brew install ffmpeg\`、Windows なら \`winget install Gyan.FFmpeg\`。動画のレンダーと実測監査の全部がこれに乗っているので、無いと本編は1本も作れない。独自パスは ${id === "ffmpeg" ? "FFMPEG_PATH" : "FFPROBE_PATH"} で指定できる`,
     });
   }
 
   // 版を答えられるだけでは足りない。本体が使う encoder と filter を欠いた
   // ビルドは珍しくなく（libx264 抜きの最小ビルドなど）、その場合 doctor は
   // ready と言った直後にレンダーが落ちる。**実際に1本作って読み返す**。
-  const capability = await probeFfmpegCapability();
+  const capability = mediaToolchain.ok
+    ? await probeFfmpegCapability({ ffmpeg: mediaToolchain.ffmpeg, ffprobe: mediaToolchain.ffprobe, runCommand })
+    : { ok: false, missing: [
+        ...(!mediaToolchain.ffmpeg?.ok ? ["ffmpeg"] : []),
+        ...(!mediaToolchain.ffprobe?.ok ? ["ffprobe"] : []),
+      ], detail: "ffmpeg / ffprobe のどちらかを起動できないため実MP4検査を実行できない" };
   add({
     id: "ffmpeg-capability",
     required: true,
@@ -282,57 +603,117 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "" 
   });
 
   // --- 音声品質ゲート ---
-  // 本体の判定関数に聞く。doctor が PATH の python3 を見る形にすると、
-  // 本体が使う VOICE_QA_PYTHON（既定 /usr/bin/python3）と別の interpreter を
-  // 調べることになり、揃っていないのに ready と言う。実際そうなっていた。
+  // 本体と同じ解決器に聞く。doctor だけ PATH の python3 に固定すると、
+  // Windows の `py -3`、project venv、VOICE_QA_PYTHON と違う interpreter を
+  // 調べることになり、揃っていないのに ready と言う。
   // 必須にするのは、正規入口が音声品質ゲートを既定で有効にしていて、
   // QA環境が無いと有償生成の手前で止まるため——ready と言った直後に
   // 止まるなら、それは ready ではない。
-  const voiceQa = await voiceQualityAvailable().then((value) => value === true, () => false);
+  const pythonRuntime = runtime.pythonRuntime ?? await resolvePythonRuntime({
+    env: runtimeEnv,
+    platform: runtime.platform ?? process.platform,
+    projectDir,
+    purposeEnv: "VOICE_QA_PYTHON",
+    requiredModules: VOICE_QA_REQUIRED_MODULES,
+    runCommand,
+  });
+  const voiceQa = pythonRuntime.ok
+    ? await (runtime.voiceQualityProbe
+        ? runtime.voiceQualityProbe(pythonRuntime)
+        : voiceQualityAvailable(pythonRuntime)).then((value) => value === true, () => false)
+    : false;
+  const pythonLabel = formatRuntimeCommand(pythonRuntime);
   add({
     id: "voice-quality-python",
     required: true,
     ok: voiceQa,
-    detail: voiceQa ? `利用可能（${DEFAULT_VOICE_QA_PYTHON}）` : `利用不可（${DEFAULT_VOICE_QA_PYTHON}）`,
-    fix: voiceQa ? "" : `音声品質ゲートが動かない。正規入口はこのゲートを既定で有効にしているので、有償生成の手前で止まる。${DEFAULT_VOICE_QA_PYTHON} に numpy / soundfile / pyworld / torch / faster_whisper / fugashi を入れるか、別の interpreter を VOICE_QA_PYTHON で指定する`,
+    detail: voiceQa
+      ? `利用可能（${pythonLabel} / Python ${pythonRuntime.version || "version確認済み"}）`
+      : `利用不可（${pythonLabel}${pythonRuntime.detail ? ` / ${pythonRuntime.detail}` : ""}）`,
+    fix: voiceQa ? "" : `音声品質ゲートが動かない。正規入口はこのゲートを既定で有効にしているので、有償生成の手前で止まる。利用するPythonに ${VOICE_QA_REQUIRED_MODULES.join(" / ")} を入れ、UTMOSキャッシュを用意する。別のinterpreterは VOICE_QA_PYTHON で指定できる（Windowsは py -3 / python.exe も自動探索）`,
   });
 
   // --- 有償API（必須。無いと生成が1つも通らない） ---
-  const tts = await probeSecretVia(() => requireElevenLabsApiKey({}), {
-    label: "音声合成",
-    fix: "ELEVENLABS_API_KEY を環境変数に置くか、音声ジェネレーターの設定から保存する。キーはファイルにもログにも書かない",
+  const narratedMedia = harnessId === "narrated-story-video"
+    ? await probeNarratedPaidMediaRuntime({ job, runtime, env: runtimeEnv })
+    : null;
+  const tts = narratedMedia?.tts
+    ?? (harnessId === "koya-manga-video"
+      ? await probeKoyaDialoguePaidMediaRuntime({ runtime, env: runtimeEnv })
+      : (runtime.ttsProbe
+        ? await runtime.ttsProbe()
+        : await probeSecretVia(() => requireElevenLabsApiKey({}), {
+            label: "音声合成",
+            fix: "ELEVENLABS_API_KEY を環境変数に置くか、音声ジェネレーターの設定から保存する。キーはファイルにもログにも書かない",
+          })));
+  add({
+    id: "tts-key",
+    required: true,
+    ...tts,
+    fix: tts.ok ? "" : harnessId === "narrated-story-video"
+      ? "署名Channel Packのruntime.ttsProvider / voice adapter identityを一致させ、BUZZASSIST_MEDIA_JOB_API_BASEの非課金capabilities probeがreadyを返す状態にする"
+      : harnessId === "koya-manga-video"
+        ? "BUZZASSIST_MEDIA_JOB_API_BASEを設定し、voice.dialogue / elevenlabs / eleven_v3 / elevenlabs-dialogue-server-v1 の非課金capabilities probeがreadyを返す状態にする。生のELEVENLABS_API_KEYだけではKoya本番経路の確認にならない"
+        : tts.fix,
   });
-  add({ id: "tts-key", required: true, ...tts });
 
-  const image = await probeSecretVia(() => resolveLovartCredentials(), {
-    label: "画像生成",
-    fix: "LOVART_ACCESS_KEY と LOVART_SECRET_KEY を環境変数に置くか、~/.lovart/credentials.json を作る",
+  const imageModel = runtime.imageModel ?? configuredImageModel(harnessId);
+  const image = narratedMedia?.image ?? await probeConfiguredImageHost(imageModel, runtime);
+  add({
+    id: "image-key",
+    required: true,
+    ...image,
+    fix: image.ok ? "" : harnessId === "narrated-story-video"
+      ? "署名Channel Packのruntime.imageModel / image adapter identityを一致させ、BUZZASSIST_MEDIA_JOB_API_BASEの非課金capabilities probeがreadyを返す状態にする"
+      : image.host === "codex"
+      ? "本番モデルは Codex の GPT Image 2 経路。ChatGPTデスクトップアプリまたはCodex CLIを入れ、`codex login status` がログイン済みを返す状態にする"
+      : image.host === "lovart"
+        ? "LOVART_ACCESS_KEY と LOVART_SECRET_KEY を設定し、本番契約の画像モデルへアクセスできる状態にする"
+        : image.host === "grok"
+          ? "Grok CLIを入れて `grok login --device-auth` を完了する"
+          : "BuzzAssistへログインし、本番契約の画像モデルへアクセスできる状態にする",
   });
-  add({ id: "image-key", required: true, ...image });
+
+  if (harnessId === "narrated-story-video") {
+    const music = narratedMedia?.music ?? {
+      ok: false,
+      status: "metadata-invalid",
+      detail: "署名Channel Packのmusic adapter identityを取得できない",
+    };
+    add({
+      id: "music-key",
+      required: true,
+      ...music,
+      fix: music.ok ? "" : "署名Channel Packのmusic adapter identityを一致させ、BUZZASSIST_MEDIA_JOB_API_BASEの非課金capabilities probeがreadyを返す状態にする",
+    });
+  }
+
+  // --- reviewer 信頼アンカー（R6-1） ---
+  // 有料生成を終えた Job が Receipt 確定で reviewer-trust-unconfigured に落ちるのは「ready と言った
+  // 直後に止まる」の一形。ハーネスを名指しした本番 preflight では必須、Harness 未選択の setup では任意
+  // （canvas だけ使う人を止めない）。判定は本体と同じ preflightReviewerTrust に聞く。秘密も path も出さない。
+  const reviewerTrust = runtime.reviewerTrustProbe
+    ? await runtime.reviewerTrustProbe()
+    : await preflightReviewerTrust({ env: runtimeEnv });
+  add({
+    id: "reviewer-trust",
+    required: Boolean(harnessId),
+    ok: reviewerTrust.ok === true,
+    ...(reviewerTrust.code ? { code: reviewerTrust.code } : {}),
+    activeReviewers: Number(reviewerTrust.activeReviewers) || 0,
+    detail: reviewerTrust.ok === true
+      ? `運営者の信頼リスト設定あり（env ${reviewerTrust.source === "json" ? "inline JSON" : "path"} / active な reviewer 鍵 ${reviewerTrust.activeReviewers} 件 / sha256 ${String(reviewerTrust.sha256 || "").slice(0, 16)}…）`
+      : `reviewer 信頼アンカーが有料実行前 preflight を通らない: ${String(reviewerTrust.code || "reviewer-trust-unconfigured")}`,
+    fix: reviewerTrust.ok === true
+      ? ""
+      : `運営者（owner）が、監査・Receipt を実行するこの端末の環境変数 ${REVIEWER_TRUST_ENV_GUIDANCE} に、status=active の reviewer 公開鍵を 1 件以上含む信頼リスト（koya-reviewer-trust-v1）を配る。新旧 env 名の両方を別内容で設定しない（env-ambiguous）。要求側の --reviewer-trust-path / Job options / MCP 引数では代替できない。これが無いと有料生成を終えてから Receipt 確定で止まる（${REVIEWER_TRUST_PATH_ENV} 未設定の host では start/resume 自体が reviewer-trust-unconfigured で拒否される）`,
+  });
 
   // --- Channel Pack ---
-  // ディレクトリの存在だけを見ると、空ディレクトリでも「設置済み」になる。
-  // 正本が実際に読めて検証を通ることまで見る。
-  let packDetail = "未設置";
-  let packOk = false;
-  if (channelPackPresent(projectDir)) {
-    try {
-      const authority = await readKoyaChannelAuthority({ projectDir });
-      packOk = authority.source === "project";
-      packDetail = packOk
-        ? `設置済み・正本を検証（cast ${authority.validation.show.castCount}名 / styling ${authority.validation.styling.specCount}件）`
-        : `ディレクトリはあるが正本の出所が ${authority.source}`;
-    } catch (error) {
-      packDetail = `設置されているが正本を読めない: ${String(error?.message || error).slice(0, 120)}`;
-    }
-  }
-  add({
-    id: "channel-pack",
-    required: false,
-    ok: packOk,
-    detail: packDetail,
-    fix: packOk ? "" : "自分のチャンネルの本番を回すには Channel Pack が要る（キャスト、番組規則、承認記録）。`node scripts/koya-manga-video.mjs handoff-restore --bundle-dir <配布された束>` で入れる。無くてもジャンル共通の工程は動くが、番組ルールは適用されない",
-  });
+  // Koyaの番組正本を全Harnessへ強制しない。Koyaは復元先の
+  // authority自体を検証し、他Harnessは共通prepareが残した署名検証
+  // evidenceを見る。Harness未選択のセットアップでは対象外と明記する。
+  add(await probeChannelPack({ projectDir, harnessId, job, runtime }));
 
   const drift = probeShippedSkillDrift();
   add({ id: "shipped-skill-drift", required: false, ...drift });
@@ -385,17 +766,18 @@ function knownHarnessIds(repoRoot = REPO_ROOT) {
 }
 
 function parseArgs(argv) {
-  const known = new Set(["--json", "--project-dir", "--harness"]);
-  const args = { json: false, projectDir: REPO_ROOT, harnessId: "" };
+  const known = new Set(["--help", "-h", "--json", "--project-dir", "--harness"]);
+  const args = { help: false, json: false, projectDir: REPO_ROOT, harnessId: "" };
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
-    if (!token.startsWith("--")) throw new Error(`余分な引数: ${token}`);
+    if (!token.startsWith("--") && token !== "-h") throw new Error(`余分な引数: ${token}`);
     if (!known.has(token)) {
       // 未知の引数を黙って無視すると、運営者は希望した診断が通ったと
       // 誤認する。実際 --harness は使用例にあるのに解析されておらず、
       // 別ジャンルを指定しても漫画動画と同じ検査をしていた。
       throw new Error(`未知の引数: ${token}\n使えるのは ${[...known].join(" / ")}`);
     }
+    if (token === "--help" || token === "-h") { args.help = true; continue; }
     if (token === "--json") { args.json = true; continue; }
     const value = argv[i + 1];
     if (!value || value.startsWith("--")) throw new Error(`${token} に値が要る`);
@@ -408,6 +790,13 @@ function parseArgs(argv) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  if (args.help) {
+    process.stdout.write(
+      "Usage: node scripts/harness-doctor.mjs [--json] [--project-dir DIR] [--harness ID]\n"
+      + "\n有料生成の前提、実runtime、provider、署名Channel Pack、Canvasをfail-closedで検査します。\n",
+    );
+    return;
+  }
   const ids = knownHarnessIds();
   if (args.harnessId && !ids.includes(args.harnessId)) {
     throw new Error(`未知のハーネス: ${args.harnessId}\n宣言があるのは: ${ids.join(", ")}`);
@@ -419,7 +808,10 @@ async function main() {
   if (!report.ready) process.exitCode = 2;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+const isDirectExecution = Boolean(process.argv[1])
+  && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+
+if (isDirectExecution) {
   main().catch((error) => {
     process.stderr.write(`${error?.message || error}\n`);
     process.exitCode = 1;

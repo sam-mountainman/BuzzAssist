@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { readFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,8 +8,13 @@ import test from "node:test";
 import {
   computeHarnessBuild,
   finalizeRunReceipt,
+  auditStepsFromCheckMap,
   openRunReceipt,
+  recordApproval,
   recordGate,
+  recordGatesFromAuditChecks,
+  recordPaidMediaJob,
+  recordRunArtifact,
   redactForPlatform,
   writeRunReceipt,
 } from "../lib/harnessRunReceipt.mjs";
@@ -31,6 +37,9 @@ test("ハーネスの指紋は3層を別々に取る", () => {
   const build = computeHarnessBuild({ projectDir: root, harnessId: "koya-manga-video" });
   assert.equal(build.harness.id, "koya-manga-video");
   assert.match(build.harness.declarationDigest, /^[0-9a-f]{64}$/u);
+  assert.match(build.productionDependencies.runtime.digest, /^[0-9a-f]{64}$/u);
+  assert.match(build.productionDependencies.deployment.digest, /^[0-9a-f]{64}$/u);
+  assert.ok(build.productionDependencies.runtime.fileCount > 0);
   assert.ok(build.declaredGates.length > 0, "宣言された保証がゲート一覧になること");
   // キーの有無だけを見ていたせいで、**全スキルの指紋が null のまま**
   // このテストが通っていた。宣言が完全相対パスなのにスキル名として扱って
@@ -43,6 +52,9 @@ test("ハーネスの指紋は3層を別々に取る", () => {
     assert.equal(name.includes("/"), false, `${name}: 宣言のパスがそのままキーになっている`);
   }
   assert.match(build.platform["lib/harnessRouting.mjs"] || "", /^[0-9a-f]{64}$/u, "プラットフォーム層の指紋が実体であること");
+  assert.match(build.platform["lib/paidMediaJobBroker.mjs"] || "", /^[0-9a-f]{64}$/u, "課金brokerの版がReceiptへ入ること");
+  assert.match(build.platform["lib/videoHarnessJob.mjs"] || "", /^[0-9a-f]{64}$/u, "durable Jobの版がReceiptへ入ること");
+  assert.match(build.platform["lib/canvasRunProjection.mjs"] || "", /^[0-9a-f]{64}$/u, "Canvas投影の版がReceiptへ入ること");
   // 層を混ぜた1つのハッシュだと、どこを直して結果が変わったのか読めない。
   assert.notEqual(
     JSON.stringify(build.genreSkills),
@@ -56,6 +68,116 @@ test("記録は入力の本文を持たない", () => {
   const serialized = JSON.stringify(receipt);
   assert.equal(serialized.includes("台本の本文"), false, "台本本文が記録に残らないこと");
   assert.match(receipt.inputDigests.script, /^[0-9a-f]{64}$/u);
+});
+
+test("承認種別を分け、人間承認の自己申告を受け取らない", () => {
+  const receipt = openManga();
+  assert.throws(
+    () => recordApproval(receipt, { type: "human", scope: "contact-sheet", evidence: { pass: true }, decidedAt: NOW }),
+    /reviewer と reviewerContextId/u,
+  );
+  recordApproval(receipt, {
+    type: "independent-agent",
+    scope: "contact-sheet",
+    evidence: { pass: true, sha256: "a".repeat(64) },
+    reviewer: "codex-reviewer",
+    reviewerContextId: "task-review",
+    decidedAt: NOW,
+  });
+  for (const id of receipt.harnessBuild.declaredGates) {
+    recordGate(receipt, { id, verdict: "pass", evidence: { measured: 1 } });
+  }
+  const done = finalizeRunReceipt(receipt, { outcome: "pass", timestamp: NOW });
+  assert.deepEqual(done.summary.approvalCounts, { "independent-agent": 1 });
+  assert.deepEqual(redactForPlatform(done).approvals, [{ type: "independent-agent", scope: "contact-sheet" }]);
+});
+
+test("SHA拘束済みsignoff evidenceは二重hashせずReceiptへ保持する", () => {
+  const receipt = openManga();
+  const evidenceSha256 = "a".repeat(64);
+  recordApproval(receipt, {
+    type: "independent-agent",
+    scope: "contact-sheet",
+    evidence: `sha256:${evidenceSha256}`,
+    reviewer: "codex-reviewer",
+    reviewerContextId: "task-review",
+    decidedAt: NOW,
+  });
+  assert.equal(receipt.approvals[0].evidenceDigest, evidenceSha256);
+});
+
+test("成果物・Media Job・費用を本文やpath無しで記録する", () => {
+  const receipt = openManga();
+  recordRunArtifact(receipt, { kind: "final-video", sha256: "a".repeat(64), bytes: 1234, mimeType: "video/mp4" });
+  recordPaidMediaJob(receipt, {
+    version: "buzzassist-paid-media-receipt-v1",
+    jobId: "job-1",
+    providerJobId: "provider-1",
+    requestKey: "台本由来かもしれないrequest-key",
+    status: "completed",
+    kind: "voice.synthesis",
+    provider: "fish-audio",
+    adapterVersion: "fish-v2",
+    model: "speech-1",
+    voiceId: "voice-1",
+    inputHash: "b".repeat(64),
+    reservation: { reservationId: "r-1", estimatedCost: 1.2, currency: "USD" },
+    usage: { seconds: 3.5, cost: 0.8, currency: "USD" },
+    artifact: { sha256: "c".repeat(64), bytes: 456, mimeType: "audio/wav" },
+    attempts: { total: 2, retries: [{ attempt: 1 }] },
+  });
+  for (const id of receipt.harnessBuild.declaredGates) {
+    recordGate(receipt, { id, verdict: "pass", evidence: { measured: true } });
+  }
+  const done = finalizeRunReceipt(receipt, { outcome: "pass", timestamp: NOW });
+  assert.equal(done.outcome, "pass");
+  assert.equal(done.summary.artifactCount, 1);
+  assert.deepEqual(done.summary.mediaCostByCurrency, { USD: 0.8 });
+  const serialized = JSON.stringify(done);
+  assert.equal(serialized.includes("台本由来かもしれないrequest-key"), false);
+  assert.equal(serialized.includes("/tmp/"), false);
+});
+
+test("未完了の課金Media JobがあればRunReceiptをpassにしない", () => {
+  const receipt = openManga();
+  recordPaidMediaJob(receipt, {
+    status: "recovery-required",
+    kind: "voice.synthesis",
+    provider: "elevenlabs",
+    inputHash: "d".repeat(64),
+  });
+  for (const id of receipt.harnessBuild.declaredGates) {
+    recordGate(receipt, { id, verdict: "pass", evidence: { measured: true } });
+  }
+  const done = finalizeRunReceipt(receipt, { outcome: "pass", timestamp: NOW });
+  assert.equal(done.outcome, "fail");
+  assert.equal(done.summary.incompleteMediaJobCount, 1);
+});
+
+test("checks object adapterはtruthy文字列をpassにせず、宣言された全監査を拘束する", () => {
+  assert.deepEqual(auditStepsFromCheckMap({ a: true, b: { pass: false, detail: "不合格" }, c: "yes" }), [
+    { id: "a", pass: true, detail: "check=true" },
+    { id: "b", pass: false, detail: "不合格" },
+    { id: "c", pass: false, detail: "booleanまたは{pass,detail}ではない: string" },
+  ]);
+  const declaration = JSON.parse(readFileSync(
+    join(root, "config/harnesses/narrated-story-video.harness.json"),
+    "utf8",
+  ));
+  const receipt = openRunReceipt({
+    projectDir: root,
+    harnessId: "narrated-story-video",
+    entrypoint: "scripts/run-video-harness.mjs",
+    action: "audit",
+  });
+  const auditIds = declaration.guarantees.flatMap((entry) => entry.evidenceAuditIds);
+  recordGatesFromAuditChecks(receipt, {
+    declaration,
+    checks: Object.fromEntries(auditIds.map((id) => [id, true])),
+    requiredAuditIds: auditIds,
+    contractVersion: "narrated-story-v1",
+  });
+  assert.equal(finalizeRunReceipt(receipt, { outcome: "pass", timestamp: NOW }).outcome, "pass");
 });
 
 test("宣言されたゲートに判定が1つでも欠けていれば finalize できない", () => {
@@ -366,11 +488,16 @@ test("どのハーネス宣言も、保証の裏づけを書くか、書けな�
         `${file}: 保証 ${guarantee.id} に evidenceAuditIds が無い`,
       );
     }
-    // 記録に載せられないハーネスは、その理由が宣言に書かれていること。
+    // adapterは pending なら理由、ready なら実装位置を必須にする。
     if (declaration.receiptAdapter) {
-      assert.ok(declaration.receiptAdapter.reason, `${file}: receiptAdapter に reason が無い`);
-      assert.ok(declaration.receiptAdapter.requiredWork, `${file}: receiptAdapter に requiredWork が無い`);
-      assert.equal(declaration.receiptAdapter.status, "pending");
+      assert.ok(["pending", "ready"].includes(declaration.receiptAdapter.status));
+      if (declaration.receiptAdapter.status === "pending") {
+        assert.ok(declaration.receiptAdapter.reason, `${file}: receiptAdapter に reason が無い`);
+        assert.ok(declaration.receiptAdapter.requiredWork, `${file}: receiptAdapter に requiredWork が無い`);
+      } else {
+        assert.ok(declaration.receiptAdapter.implementation, `${file}: ready adapter の実装位置が無い`);
+        assert.equal(declaration.receiptAdapter.failClosed, true);
+      }
     }
   }
 });

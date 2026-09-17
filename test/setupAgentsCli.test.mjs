@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-async function runSetup(agent) {
+async function runSetup(agent, envOverrides = {}) {
   const { stdout } = await execFileAsync(process.execPath, [
     "scripts/setup-agents.mjs",
     "--dry-run",
@@ -16,13 +16,22 @@ async function runSetup(agent) {
     "--skip-build",
     "--skip-plugin-source",
     "--no-launch",
+    "--allow-harness-not-ready",
     "--agent",
     agent,
     "--project-dir",
     `/tmp/buzzassist-${agent}-test`,
-  ], { cwd: repoRoot });
+  ], { cwd: repoRoot, env: { ...process.env, ...envOverrides } });
   return stdout;
 }
+
+// reviewer 信頼リスト env をこのテスト自身の環境から消した状態（値は一切渡さない）。
+const NO_REVIEWER_TRUST_ENV = {
+  BUZZASSIST_REVIEWER_TRUST: "",
+  BUZZASSIST_REVIEWER_TRUST_JSON: "",
+  BUZZASSIST_KOYA_REVIEWER_TRUST: "",
+  BUZZASSIST_KOYA_REVIEWER_TRUST_JSON: "",
+};
 
 async function runSetupWithTunnel(agent) {
   const { stdout } = await execFileAsync(process.execPath, [
@@ -36,6 +45,7 @@ async function runSetupWithTunnel(agent) {
     "--project-dir",
     `/tmp/buzzassist-${agent}-tunnel-test`,
     "--tunnel",
+    "--allow-harness-not-ready",
   ], { cwd: repoRoot });
   return stdout;
 }
@@ -48,6 +58,36 @@ test("setup CLI configures only Cursor when --agent cursor is used", async () =>
   assert.match(stdout, /Claude Code: not touched/);
   assert.match(stdout, /Cursor: configured/);
   assert.match(stdout, /Antigravity: not touched/);
+});
+
+test("setup dry-run describes auto-update as planned without claiming a registered daily scheduler", async () => {
+  const stdout = await runSetup("codex");
+  assert.match(stdout, /BUZZASSIST_AUTO_UPDATE=planned/u);
+  assert.match(stdout, /BUZZASSIST_AUTO_UPDATE_SCHEDULE=not-registered-dry-run/u);
+  assert.doesNotMatch(stdout, /BUZZASSIST_AUTO_UPDATE=enabled/u);
+  assert.doesNotMatch(stdout, /Stable GitHub Releases are checked daily/u);
+});
+
+test("R6-F2: setup reports the reviewer trust passthrough as env names only and never prints the operator's value", async () => {
+  const sentinel = "/secure/operator-only/reviewer-trust-sentinel-9f3c.json";
+  for (const agent of ["codex", "claude"]) {
+    const unset = await runSetup(agent, NO_REVIEWER_TRUST_ENV);
+    assert.match(unset, /BUZZASSIST_REVIEWER_TRUST_PASSTHROUGH=env-name-only/u);
+    assert.match(unset, /BUZZASSIST_REVIEWER_TRUST_ENV_VARS=BUZZASSIST_REVIEWER_TRUST,BUZZASSIST_REVIEWER_TRUST_JSON,BUZZASSIST_KOYA_REVIEWER_TRUST,BUZZASSIST_KOYA_REVIEWER_TRUST_JSON/u);
+    assert.match(unset, /BUZZASSIST_REVIEWER_TRUST_CONFIGURED=no/u);
+    assert.match(unset, /BUZZASSIST_REVIEWER_TRUST_SCOPE=setup-shell-environment/u);
+    assert.match(unset, /reviewer-trust-unconfigured/u, "未設定は fail-closed だと運営者に伝える");
+    assert.match(unset, /Codex: env_vars passthrough; Claude Code: inherits its process environment/u);
+
+    const set = await runSetup(agent, { ...NO_REVIEWER_TRUST_ENV, BUZZASSIST_REVIEWER_TRUST: sentinel });
+    assert.match(set, /BUZZASSIST_REVIEWER_TRUST_CONFIGURED=yes/u);
+    assert.doesNotMatch(set, /reviewer-trust-sentinel-9f3c/u, "運営者の信頼リスト path の値を出力に載せない");
+
+    const ambiguous = await runSetup(agent, { ...NO_REVIEWER_TRUST_ENV, BUZZASSIST_REVIEWER_TRUST: sentinel, BUZZASSIST_KOYA_REVIEWER_TRUST: "/secure/other-a1b2.json" });
+    assert.match(ambiguous, /BUZZASSIST_REVIEWER_TRUST_CONFIGURED=ambiguous/u);
+    assert.match(ambiguous, /env-ambiguous/u);
+    assert.doesNotMatch(ambiguous, /sentinel-9f3c|other-a1b2/u);
+  }
 });
 
 test("setup CLI configures only Claude Desktop when --agent claude-desktop is used", async () => {
@@ -83,4 +123,56 @@ test("setup CLI can include Canvas Tunnel output when --tunnel is used", async (
   assert.match(stdout, /BUZZASSIST_TUNNEL_ACCESS_URL=https:\/\/example\.ngrok-free\.dev\/\?t=<generated>/);
   assert.match(stdout, /BUZZASSIST_TUNNEL_CHECK=ok/);
   assert.doesNotMatch(stdout, /BUZZASSIST_TUNNEL_PASSWORD=/);
+});
+
+test("normal setup fails closed when the canonical harness doctor is not ready", async () => {
+  const { access, mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const isolatedHome = await mkdtemp(join(tmpdir(), "buzzassist-setup-fail-closed-"));
+  try {
+    await assert.rejects(
+      () => execFileAsync(process.execPath, [
+        "scripts/setup-agents.mjs",
+        "--skip-install",
+        "--skip-build",
+        "--skip-plugin-source",
+        "--no-launch",
+        "--no-auto-update",
+        "--agent",
+        "codex",
+        "--project-dir",
+        isolatedHome,
+      ], {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          HOME: isolatedHome,
+          USERPROFILE: isolatedHome,
+          BUZZASSIST_SETUP_HOME: isolatedHome,
+          PATH: "",
+          CODEX_COMMAND: "",
+          ELEVENLABS_API_KEY: "",
+          XI_API_KEY: "",
+          LOVART_ACCESS_KEY: "",
+          LOVART_SECRET_KEY: "",
+          BUZZASSIST_MEDIA_TOKEN: "",
+          BUZZASSIST_TOKEN: "",
+        },
+      }),
+      (error) => {
+        assert.equal(error.code, 2);
+        assert.match(String(error.stdout), /BUZZASSIST_HARNESS_READY=no/);
+        assert.match(String(error.stdout), /fail-closed/u);
+        return true;
+      },
+    );
+    await assert.rejects(
+      access(join(isolatedHome, "plugins", "buzzassist")),
+      { code: "ENOENT" },
+      "fail-closed preflight must stop before staging or configuring a host plugin",
+    );
+  } finally {
+    await rm(isolatedHome, { recursive: true, force: true });
+  }
 });
