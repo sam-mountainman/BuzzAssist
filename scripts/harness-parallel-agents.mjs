@@ -20,8 +20,11 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+import { isDirectCli } from "../lib/cliEntrypoint.mjs";
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 // タスクIDは結果ファイル名になる。`../` を許すと出力先の外に書けてしまう。
 const SAFE_TASK_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
@@ -567,8 +570,7 @@ async function main() {
   process.exit(summary.ok ? 0 : 1);
 }
 
-const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : null;
-if (invokedPath && invokedPath === path.resolve(new URL(import.meta.url).pathname)) {
+if (isDirectCli(import.meta.url)) {
   main().catch((error) => {
     process.stderr.write(`${error?.stack ?? error}\n`);
     process.exit(1);

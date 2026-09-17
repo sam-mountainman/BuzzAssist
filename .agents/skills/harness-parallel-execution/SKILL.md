@@ -217,6 +217,16 @@ styling シーケンス制約がすべて `<workflowId>/<castId>` で名前空�
   `canvas/manga-quality-harness/incident-ledger.json` を更新するので、
   そのパスを `locks` に宣言すること（ロック自体はライブラリ側にも入れたが、
   計画に書いておけば待ち時間が可視化される）
+- Koyaの`generateKoyaDialogueSpeech`内部のカット横断TTS … 並列可。
+  正本manifest/reportを書くのは直列collectorだけで、ワーカーはcut固有の
+  音声・sidecar・隔離manifestだけを書く。再開の正本は
+  `koya-speech-cut-set-v1`の`completedCutIds` / `pendingCutIds`であり、
+  完了順ではなく台本のcut順に保存する。既定のcut並列数は
+  `floor(4 / initialTakeCount)`（通常2テイクなら2 cut）で、同時paid requestを
+  4以下に保つ。`--speech-concurrency`はこの値を下げられるが上げられない。
+  429・失敗・cancel後は新しいcutを投入せず、既に完了したcutだけcollectorが
+  checkpointする。再開時は承認済みcutを飛ばし、途中のMedia Jobは同じ
+  requestKeyでrecoverするため、再課金目的の新規requestへ置き換えない。
 - 読み取り専用アクション（`contract` / `status` / `story-audit` /
   `location-*-review-draft` / `cast-readiness` / `handoff-verify` 等）
   … 何本でも同時可
@@ -259,14 +269,6 @@ canvas/assets/<ep>/script-image-*.json
   つまり prepare は画像の完了に**データとして**依存していて、
   音声はその manifest の cuts に依存する。画像と音声を重ねるには、
   台本由来の対話定義と画像由来のページ束縛を分離する必要がある。
-- **カット横断のTTS**
-  使用上限に当たったとき `report.nextCutId = cut.id` を書いて中断し、
-  再開は「nextCutId より前は完了済み」という**逐次前提**に乗っている。
-  カットを4本並列にすると、上限に当たった時点で前後の完了状況が
-  ばらけるため、この記録は意味を失う。完了済みカットへの再課金か、
-  未完了カットの取りこぼしのどちらかが起きる。並列にするなら
-  `nextCutId` をカット単位の完了集合へ置き換えるのが先。
-  なお**同一カット内の初期テイクは並列化済み**。
 - **画像生成の枠がQA完了まで解放されない**
   ワーカーが「生成 → 保存 → semantic QA」を1本で持つため、AIMDの生成枠は
   QAが終わるまで空かない。`semanticQa` はリポジトリ内に実装が無く
