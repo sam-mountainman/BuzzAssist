@@ -22,18 +22,74 @@
 //     「問題なし」と報告しない
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { homedir } from "node:os";
 
 import { channelPackRootEntries, channelPackPresent } from "../lib/channelPackResolver.mjs";
+import { isDirectCli } from "../lib/cliEntrypoint.mjs";
 
 function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
-const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+const ROSTER_CONTEXT_KEY = /(?:cast|character|speaker|member|roster)/iu;
+const CHANNEL_CONTEXT_KEY = /(?:channel|show|location|town)/iu;
+const EXPLICIT_ROSTER_ID_KEY = /^(?:cast|character|member)[_-]?id$/iu;
+
+function jsonFilesBelow(root, { maxFiles = 1_000, maxDepth = 8 } = {}) {
+  const files = [];
+  const visit = (dir, depth) => {
+    if (depth > maxDepth || files.length >= maxFiles || !existsSync(dir)) return;
+    for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (files.length >= maxFiles) break;
+      const full = path.join(dir, entry.name);
+      let info;
+      try { info = lstatSync(full); } catch { continue; }
+      if (info.isSymbolicLink()) continue;
+      if (info.isDirectory()) visit(full, depth + 1);
+      else if (info.isFile() && entry.name.toLowerCase().endsWith(".json") && info.size <= 8 * 1024 * 1024) files.push(full);
+    }
+  };
+  visit(root, 0);
+  return files;
+}
+
+function collectStructuredSignals(value, { terms, castIds }, ancestors = [], key = "") {
+  if (Array.isArray(value)) {
+    for (const item of value) collectStructuredSignals(item, { terms, castIds }, [...ancestors, key], key);
+    return;
+  }
+  if (value && typeof value === "object") {
+    for (const [childKey, child] of Object.entries(value)) {
+      collectStructuredSignals(child, { terms, castIds }, [...ancestors, key], childKey);
+    }
+    return;
+  }
+  const strings = typeof value === "string" ? [value] : [];
+  const context = [...ancestors, key].join(".");
+  const immediateParent = [...ancestors].reverse().find((value) => value) || "";
+  for (const raw of strings) {
+    const text = raw.trim();
+    if (!text || text.length > 240 || /^(?:https?:|file:|sha256:)/iu.test(text)) continue;
+    const normalizedKey = key.replace(/[_-]/gu, "").toLowerCase();
+    const rosterTerm = ROSTER_CONTEXT_KEY.test(context)
+      && ["name", "displayname", "hiddenname", "alias", "aliases"].includes(normalizedKey);
+    const channelTerm = CHANNEL_CONTEXT_KEY.test(context)
+      && ["name", "displayname", "hiddenname", "town"].includes(normalizedKey);
+    if (rosterTerm || channelTerm) terms.add(text);
+    const normalizedIdKey = key.replace(/[_-]/gu, "");
+    const directRosterId = normalizedIdKey.toLowerCase() === "id"
+      && /^(?:cast|characters?|members?|roster)$/iu.test(immediateParent);
+    if (directRosterId || (EXPLICIT_ROSTER_ID_KEY.test(key) && ROSTER_CONTEXT_KEY.test(context))) {
+      castIds.add(text);
+    }
+  }
+}
 
 /**
  * 探す語を Channel Pack から集める。禁止語の一覧を公開リポジトリに
@@ -54,11 +110,14 @@ export function collectSensitiveSignals(projectDir = REPO_ROOT) {
   const castIds = new Set();
   for (const entry of channelPackRootEntries(projectDir)) {
     if (entry.kind === "fixture" || !existsSync(entry.root)) continue;
-    for (const relative of ["config/koya-show-bible.json", "config/koya-location-bible.json"]) {
-      const file = path.join(entry.root, relative);
-      if (!existsSync(file)) continue;
+    const files = [
+      ...jsonFilesBelow(path.join(entry.root, "config")),
+      ...jsonFilesBelow(path.join(entry.root, "registry")),
+    ];
+    for (const file of [...new Set(files)]) {
       let parsed;
       try { parsed = JSON.parse(readFileSync(file, "utf8")); } catch { continue; }
+      collectStructuredSignals(parsed, { terms, castIds });
       for (const member of parsed.cast || []) {
         for (const value of [member.name, member.hiddenName, ...(member.aliases || [])]) {
           if (value) terms.add(String(value));
@@ -111,6 +170,58 @@ export function countHomePathHits(text, homeRoot) {
     hits += (source.match(new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(flattened)}(?![A-Za-z0-9])`, "gu")) || []).length;
   }
   return hits;
+}
+
+const PATH_PLACEHOLDER_USERS = new Set([
+  "a+b", "example", "test", "test user", "user", "username", "name", "your name", "x",
+]);
+
+/**
+ * 実行中のHOMEだけでなく、別端末から貼られたmacOS/Linux/Windowsの
+ * ユーザーディレクトリも検出する。範囲をmergeして、同じpathをHOMEの
+ * exact照合と一般形の両方で二重計上しない。
+ */
+export function countMachineLocalPathHits(text, homeRoot = homedir()) {
+  const source = String(text || "");
+  const ranges = [];
+  const add = (index, length) => {
+    if (index >= 0 && length > 0) ranges.push([index, index + length]);
+  };
+  const addMatches = (regex, usernameGroup = 0) => {
+    for (const match of source.matchAll(regex)) {
+      const user = usernameGroup ? String(match[usernameGroup] || "").trim().toLowerCase() : "";
+      if (user && PATH_PLACEHOLDER_USERS.has(user)) continue;
+      add(match.index, match[0].length);
+    }
+  };
+
+  const exact = String(homeRoot || "");
+  if (exact) {
+    addMatches(new RegExp(escapeRegExp(exact), "gu"));
+    const flattened = exact.replace(/[\\/]/gu, "-").replace(/^([A-Za-z]):/u, "$1-");
+    if (flattened.length >= 6 && flattened.includes("-")) {
+      addMatches(new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(flattened)}(?![A-Za-z0-9])`, "gu"));
+    }
+  }
+
+  addMatches(/\/(?:Users|home)\/([^/\\\r\n"'`<>]+)\//gu, 1);
+  addMatches(/[A-Za-z]:[\\/]Users[\\/]([^\\/\r\n"'`<>]+)[\\/]/gu, 1);
+  // Windows共有pathもmachine-local。drive letterだけを見ると、NASや社内shareを
+  // review logへ貼った場合に公開面を素通りする。
+  // UNC は canonical な `\\\\server\\share\\...` だけを検出する。`//server/share`
+  // まで一般化すると、JavaScript の `//module/path/` コメントを共有pathとして
+  // 大量に誤検出するため、forward-slash表記はここでは扱わない。
+  addMatches(/\\\\([A-Za-z0-9][A-Za-z0-9._-]{0,62})\\([A-Za-z0-9$][A-Za-z0-9._$-]{0,127})\\/gu, 1);
+  addMatches(/(?<![A-Za-z0-9])-(?:Users|home)-([A-Za-z0-9._]+)-/gu, 1);
+
+  ranges.sort((left, right) => left[0] - right[0] || left[1] - right[1]);
+  let count = 0;
+  let end = -1;
+  for (const [start, nextEnd] of ranges) {
+    if (start >= end) count += 1;
+    end = Math.max(end, nextEnd);
+  }
+  return count;
 }
 
 /** 構造規則。語が引けない環境でも、これだけは常に見る。 */
@@ -326,7 +437,7 @@ export function auditPublicSurface({ projectDir = REPO_ROOT, stagedOnly = false 
 
     // 開発機の絶対パス。運営者にも配布物にも要らないうえ、
     // ホームディレクトリ名は個人を指す。
-    const homeHits = countHomePathHits(text, homeRoot);
+    const homeHits = countMachineLocalPathHits(text, homeRoot);
     if (homeHits > 0) pathLeakFindings.push({ file: relative, hits: homeHits });
   }
 
@@ -493,7 +604,7 @@ function render(report) {
   return lines.join("\n");
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isDirectCli(import.meta.url)) {
   const asJson = process.argv.includes("--json");
   const stagedOnly = process.argv.includes("--staged");
   const requireSignals = process.argv.includes("--require-signals");

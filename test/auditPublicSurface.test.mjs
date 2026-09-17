@@ -106,7 +106,7 @@ test("npm pack に、追跡外・チャンネル固有のものが入らない",
   assert.deepEqual(untracked, [], `追跡外のファイルが npm pack に入っています: ${untracked.join(", ")}`);
 });
 
-test("検出器は、実 pack が無い環境でも動くことを合成 pack で確かめる", async () => {
+test("検出器は、実 pack が無い環境でも動くことを合成 pack で確かめる", async (t) => {
   // ここが最大の見落としだった。検査は表示名しか集めておらず、11人分の
   // castId が並んだ一覧と開発機の絶対パスが公開されたまま「検出なし」と
   // 報告していた。私はその出力を根拠に「公開面0件」と報告した。
@@ -117,11 +117,12 @@ test("検出器は、実 pack が無い環境でも動くことを合成 pack �
   // 出ない——「走らなかった」ことが誰にも見えない。
   // 前提を待つのではなく、前提を自分で作る。
   const { collectSensitiveSignals } = await import("../scripts/audit-public-surface.mjs");
-  const { mkdtemp, mkdir, writeFile } = await import("node:fs/promises");
+  const { mkdtemp, mkdir, rm, writeFile } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
 
   const projectDir = await mkdtemp(join(tmpdir(), "public-surface-probe-"));
+  t.after(() => rm(projectDir, { recursive: true, force: true }));
   const packConfig = join(projectDir, "channel-packs", "probe", "config");
   await mkdir(packConfig, { recursive: true });
   await writeFile(join(packConfig, "koya-show-bible.json"), JSON.stringify({
@@ -210,6 +211,26 @@ test("開発機の絶対パスを、数として正しく数える", async () =>
   assert.equal(countHomePathHits("無関係な文字列", "/a"), 0, "4文字未満の形は使わない");
 });
 
+test("別端末由来のmacOS/Linux/Windows絶対pathも検出する", async () => {
+  const { countMachineLocalPathHits } = await import("../scripts/audit-public-surface.mjs");
+  const mac = ["", "Users", "private-builder", "work"].join("/");
+  const linux = ["", "home", "private-operator", "project"].join("/");
+  const windows = ["D:", "Users", "private-editor", "project"].join("\\");
+  const windowsForward = ["D:", "Users", "private-editor", "project"].join("/");
+  const unc = ["", "", "private-nas", "editor-share", "project"].join("\\");
+  assert.equal(countMachineLocalPathHits(mac, "/unrelated/home"), 1);
+  assert.equal(countMachineLocalPathHits(linux, "/unrelated/home"), 1);
+  assert.equal(countMachineLocalPathHits(windows, "/unrelated/home"), 1);
+  assert.equal(countMachineLocalPathHits(windowsForward, "/unrelated/home"), 1);
+  assert.equal(countMachineLocalPathHits(unc, "/unrelated/home"), 1);
+  assert.equal(
+    countMachineLocalPathHits(`${mac} and ${linux} and ${windows} and ${windowsForward} and ${unc}`, "/unrelated/home"),
+    5,
+  );
+  // 公開test fixtureの慣用placeholderは個人情報として扱わない。
+  assert.equal(countMachineLocalPathHits(["", "Users", "example", "project"].join("/"), "/unrelated/home"), 0);
+});
+
 test("共有層の学習台帳に、チャンネル固有語を書けない", async () => {
   // 自己改善ループが書く docs/learning/proposals.jsonl は公開リポジトリで
   // 追跡されている。**宛先が共有層でも evidence にキャスト名が入りうる**——
@@ -291,12 +312,15 @@ test("検査の範囲に、まだ追跡されていないファイルも入る",
 });
 
 /** 検査を端から端まで通すための、使い捨ての git リポジトリ。 */
+const scratchDirs = new Set();
+
 async function scratchRepo() {
   const { mkdtemp, mkdir, writeFile } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const { execFileSync } = await import("node:child_process");
   const dir = await mkdtemp(join(tmpdir(), "public-surface-e2e-"));
+  scratchDirs.add(dir);
   const git = (...args) => execFileSync("git", args, { cwd: dir, stdio: "pipe" });
   git("init", "-q");
   git("config", "user.email", "t@example.invalid");
@@ -318,6 +342,12 @@ async function scratchRepo() {
   await writeFile(join(dir, ".gitignore"), "channel-packs/\n");
   return { dir, git, write };
 }
+
+test.after(async () => {
+  const { rm } = await import("node:fs/promises");
+  await Promise.all([...scratchDirs].map((dir) => rm(dir, { recursive: true, force: true })));
+  scratchDirs.clear();
+});
 
 test("検出器を、実物のリポジトリで端から端まで通す", async () => {
   // ここまでのテストは exported helper の戻り値しか見ていなかったので、

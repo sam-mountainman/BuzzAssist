@@ -2,16 +2,6 @@
   "note": "まだ直っていないが理由が書いてある検出。ここに無い検出が1件でも出れば検査は落ちる。直ったら消すこと（消し忘れも落ちる）。",
   "roster": [
     {
-      "file": "lib/koyaChannelGovernance.mjs",
-      "why": "castId が共有層の識別子として使われている。全面改名は公開済み MCP ツール名を含む破壊的変更なので、やるかどうかがユーザー判断待ち。表示名は漏れていない（語 0件）。",
-      "count": 4
-    },
-    {
-      "file": "scripts/koya-setting-sheet-repair-round.mjs",
-      "why": "castId が共有層の識別子として使われている。全面改名は公開済み MCP ツール名を含む破壊的変更なので、やるかどうかがユーザー判断待ち。表示名は漏れていない（語 0件）。",
-      "count": 4
-    },
-    {
       "file": "test/characterAttributeAudit.test.mjs",
       "why": "castId が共有層の識別子として使われている。全面改名は公開済み MCP ツール名を含む破壊的変更なので、やるかどうかがユーザー判断待ち。表示名は漏れていない（語 0件）。",
       "count": 3

@@ -4,6 +4,9 @@ import { chmod, readdir, rename, rm, stat } from "node:fs/promises";
 import { once } from "node:events";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
+import { fileURLToPath } from "node:url";
+
+import { isDirectCli } from "../lib/cliEntrypoint.mjs";
 
 const RULES = [
   {
@@ -171,7 +174,7 @@ async function collectDefaultPaths(repoRoot) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
-  const repoRoot = resolve(dirname(new URL(import.meta.url).pathname), "..");
+  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   let paths = options.paths;
   let source = "explicit";
   if (paths.length === 0) {
@@ -208,6 +211,6 @@ async function main() {
   if (!options.apply && options.failOnFindings && matchCount > 0) process.exitCode = 2;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname)) {
+if (isDirectCli(import.meta.url)) {
   await main();
 }

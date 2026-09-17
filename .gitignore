@@ -36,6 +36,11 @@ channel-packs/
 client-work/
 config/harness-deployments.json
 
+# One-off operator repair utilities can contain Channel Pack cast IDs and local
+# workflow paths. Keep them usable on this machine without publishing them in
+# the repository or npm package.
+private-tools/koya/
+
 # Channel Pack への橋渡しリンク（従来パスからの互換）。実体は channel-packs/。
 config/koya-character-styling
 config/koya-manga-source-face-reviews
@@ -43,6 +48,7 @@ config/koya-manga-source-face-reviews
 # RunReceipt の集計置き場。記録そのものは成果物側（エピソードの監査ディレクトリ）
 # に書かれる。ここは横断で見るためのローカルの集約なので追跡しない。
 docs/learning/receipts/
+var/feedback-ingest/
 config/koya-location-bible.json
 config/koya-show-bible.json
 config/koya-thumbnail-contract.json
@@ -56,3 +62,47 @@ cmp_*.txt
 old-*.wav
 examples/reference-scripts/*.reference.md
 config/parallel-plans/koya-cast-gates.json
+
+# 一回限りの運営者ユーティリティと、チャンネルの作業メモ。
+#
+# これらは追跡されていないが、`git add -A` は拾う。実際に公開面監査が
+# チャンネル固有語・キャスト ID・開発機の絶対パスをここから検出した。
+# 追跡していないことを .gitignore で恒久化して、取り違えた一括 add で
+# 公開リポジトリへ入らないようにする（既存の private-tools/koya/ と同じ扱い）。
+# 許容一覧へ足さないのは、あれが「公開したうえで承知している未解決」の
+# 置き場であって、そもそも公開しないものの置き場ではないため。
+scripts/build-koya-setting-sheet-attribute-inventories-20260901.mjs
+scripts/build-koya-setting-sheet-machine-repack-plans-20260901.mjs
+scripts/build-koya-setting-sheet-round-report-20260901.mjs
+scripts/fill-koya-setting-sheet-reviews-20260901.mjs
+scripts/koya-audit-channel-icon-options-20260902.py
+scripts/koya-build-header-crop-sheets-20260902.py
+scripts/koya-build-header-crop-sheets-20260902-v2.py
+scripts/koya-generate-channel-header-20260902.mjs
+scripts/koya-generate-channel-header-20260902-v2.mjs
+scripts/koya-generate-channel-icon-options-20260902.mjs
+scripts/koya-generate-garment-drape-sheets-20260901.mjs
+scripts/koya-generate-thumbnail-directions-20260902.mjs
+scripts/koya-generate-thumbnail-wide-20260902.mjs
+scripts/koya-stress-thumbnail-shortlist-20260904.mjs
+scripts/koya-write-icon-options-doc-20260902.py
+scripts/tmp-*.mjs
+docs/koya-commit-plan-2026-09-02.md
+docs/koya-remaining-work-2026-09-02.md
+docs/koya-resume-2026-09-02.md
+docs/koya-setting-sheet-round-2026-09-01.md
+docs/koya-todo-2026-09-02.md
+
+# 運営者向け納品物の置き場（imagegen プロンプト・クライアント共有zip・PDF）。
+# チャンネル固有語と顧客名を含むので、公開リポジトリでも npm 配布物でも
+# 追跡しない。実際に公開面監査が output/imagegen のプロンプトから
+# チャンネル固有語を検出していた。中身は消さない——追跡しないだけ。
+output/
+
+# 公開面検査の語彙（平文）。名簿そのものなので追跡しない。digest 版
+# docs/learning/sensitive-vocabulary.digest.json だけをコミットする。
+docs/learning/sensitive-vocabulary.local.txt
+
+# reviewer attestation の Ed25519 秘密鍵。reviewer-key-create はリポジトリ配下への
+# 書き込みを拒否するが、手で置かれた鍵が `git add -A` で公開されないよう二重に守る。
+*.pem
