@@ -598,8 +598,13 @@ switch (args.action) {
       status: result.report.status,
       pass: result.report.pass,
       inventoryPath: result.reportPath,
+      verdictDigest: result.report.verdictDigest,
       summary: result.report.summary,
       pendingSlotIds: result.report.pendingSlotIds,
+      // 人の名前を伏せたせいで消えた場面キーワード（スロットは作らないが黙って落とさない）。
+      maskedKeywordHits: result.report.scenes
+        .filter((scene) => (scene.maskedKeywordHits || []).length > 0)
+        .map((scene) => ({ sceneKey: scene.sceneKey, hits: scene.maskedKeywordHits })),
       slots: result.report.slots.map((slot) => ({
         slotId: slot.slotId,
         castId: slot.castId,

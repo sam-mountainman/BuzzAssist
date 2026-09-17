@@ -811,3 +811,266 @@ test("契約へ足したゲートで、前の版の契約で合格した回が�
   assert.deepEqual(now.summary.skippedGates, ["wardrobe-readiness"]);
   assert.equal(measure(contract.version, contract.requiredAudits).outcome, "pass");
 });
+
+// --- 修正round: レビュー指摘への回帰テスト ---------------------------------
+
+/** 台帳には人物のほかに場所・小物も入る（この経路は location-register が書く）。 */
+function registryWithSetPieces() {
+  return normalizeCharacterRegistry({
+    characters: [
+      {
+        id: "yamada-hanako",
+        name: "山田花子",
+        kind: "character",
+        role: "fixed",
+        status: "approved",
+        aliases: ["花子"],
+        referenceAssets: [{ id: "identity-face", role: "identity-face", path: "characters/hanako-face.png", sha256: "a".repeat(64) }],
+      },
+      {
+        id: "yukimura-midori",
+        name: "雪村みどり",
+        kind: "character",
+        role: "fixed",
+        status: "approved",
+        referenceAssets: [{ id: "identity-face", role: "identity-face", path: "characters/midori-face.png", sha256: "b".repeat(64) }],
+      },
+      {
+        id: "shimin-pool",
+        name: "市民プール",
+        kind: "location",
+        status: "approved",
+        referenceAssets: [{ id: "board", role: "supplemental", path: "locations/pool.png", sha256: "c".repeat(64) }],
+      },
+      {
+        id: "yukata-prop",
+        name: "浴衣",
+        kind: "prop",
+        status: "approved",
+        referenceAssets: [{ id: "board", role: "supplemental", path: "props/yukata.png", sha256: "e".repeat(64) }],
+      },
+    ],
+    voices: [],
+  });
+}
+
+test("登録済みの場所や小物の名前は、場面の根拠を消さない（伏せるのは人の名前だけ）", () => {
+  const registry = registryWithSetPieces();
+  const showBible = showBibleWith(undefined, [{ id: "yamada-hanako", name: "山田花子" }, { id: "yukimura-midori", name: "雪村みどり" }]);
+
+  // 場所「市民プール」が登録されていても、プール場面は swim のまま。
+  const pool = evaluate(sceneScript([
+    "#場面 1 市民プール・昼",
+    "",
+    "夏の市民プール。山田花子は友人を待っていた。",
+    "",
+    "山田花子：久しぶり",
+  ].join("\n")), { registry, showBible });
+  assert.equal(pool.pass, false, "場所名がキーワードを含んでも、ゲートは黙って開かないこと");
+  assert.deepEqual(pool.scenes[0].sceneTags, ["swim"]);
+  assert.equal(pool.slots.length, 1);
+  assert.equal(pool.slots[0].castId, "yamada-hanako");
+
+  // 小物「浴衣」が登録されていても、浴衣の場面は summer-out のまま。
+  const festival = evaluate(sceneScript([
+    "#場面 1 商店街・夜",
+    "",
+    "山田花子は浴衣で通りを歩いていた。",
+    "",
+    "山田花子：涼しいね",
+  ].join("\n")), { registry, showBible });
+  assert.deepEqual(festival.scenes[0].sceneTags, ["summer-out"]);
+  assert.equal(festival.slots.length, 1);
+
+  // 人の名前は今までどおり伏せる（「雪村みどり」が冬の場面を作らない）。
+  // ただし黙って落とさず、伏せたせいで消えたキーワードを在庫に残す。
+  const person = evaluate(sceneScript([
+    "#場面 1 喫茶店・朝",
+    "",
+    "雪村みどりは喫茶店の扉を開けた。",
+    "",
+    "雪村みどり：おはよう",
+  ].join("\n")), { registry, showBible });
+  assert.equal(person.pass, true);
+  assert.deepEqual(person.scenes[0].sceneTags, []);
+  assert.deepEqual(person.scenes[0].maskedKeywordHits, [
+    { tag: "winter-out", keyword: "雪", source: "narration:cut-01-u01", maskedBy: ["雪村みどり"] },
+  ]);
+  assert.equal(person.summary.maskedKeywordHitCount, 1);
+});
+
+test("この回の判定に関係の無い台帳の書き込みでは、pass レポートが無効にならない", async () => {
+  const registry = registryWith({
+    outfits: [{ id: "outfit-poolside", role: "outfit", path: "characters/hanako-swimwear.png", storyStage: "poolside", sceneTags: ["swim"], sha256: "d".repeat(64) }],
+  });
+  const project = await writeProject({ registry });
+  const options = {
+    projectDir: project.projectDir,
+    episodeId: EPISODE_ID,
+    scriptPath: project.scriptPath,
+    generatorHost: "claude",
+    generatorContextId: GENERATOR_CONTEXT,
+  };
+  const runtime = wardrobeRuntime();
+  try {
+    assert.equal((await runKoyaWardrobeReadiness(options, runtime)).exitCode, 0);
+    assert.equal((await assertKoyaWardrobeReadinessBeforeImages(options, { runtime })).pass, true);
+
+    // 来期のキャストを1人登録する（この回の台本には出ない）。在庫の digest は
+    // 変わるが、この回の判定は1文字も変わらないので Job は止まらない。
+    const widened = structuredClone(registry);
+    widened.characters.push({
+      id: "suzuki-jiro",
+      name: "鈴木次郎",
+      kind: "character",
+      role: "fixed",
+      status: "approved",
+      referenceAssets: [{ id: "identity-face", role: "identity-face", path: "characters/jiro-face.png", sha256: "f".repeat(64) }],
+    });
+    await writeFile(join(project.canvasDir, "characters.json"), `${JSON.stringify(normalizeCharacterRegistry(widened), null, 2)}\n`);
+    const still = await assertKoyaWardrobeReadinessBeforeImages(options, { runtime });
+    assert.equal(still.pass, true, "関係の無い登録で pass レポートを捨てないこと");
+
+    const report = await readJsonFile(project.paths.wardrobeReadinessPath);
+    const fresh = await runKoyaWardrobeReadiness(options, runtime);
+    assert.notEqual(fresh.report.inventoryDigest, report.inventoryDigest, "在庫そのものは変わること");
+    assert.equal(fresh.report.verdictDigest, report.verdictDigest, "判定は変わらないこと");
+
+    // この回に効く変更（着る予定の服が台帳から消える）は、今までどおり止める。
+    await writeFile(join(project.canvasDir, "characters.json"), `${JSON.stringify(registryWith(), null, 2)}\n`);
+    await assert.rejects(
+      assertKoyaWardrobeReadinessBeforeImages(options, { runtime }),
+      (error) => error.code === KOYA_WARDROBE_READINESS_REQUIRED_CODE,
+    );
+  } finally {
+    await rm(project.projectDir, { recursive: true, force: true });
+  }
+});
+
+test("verdictDigest に結び付けたレビューは、関係の無い登録では失効しない", () => {
+  const generatorContexts = [{ role: "gate-invocation", host: "claude", id: `claude:${GENERATOR_CONTEXT}`, contextId: GENERATOR_CONTEXT }];
+  const script = sceneScript(CAFE_SCENE, POOL_SCENE);
+  const pending = evaluate(script, { generatorContexts });
+  const review = {
+    version: KOYA_WARDROBE_REVIEW_VERSION,
+    episodeId: EPISODE_ID,
+    scriptDigest: pending.scriptDigest,
+    verdictDigest: pending.verdictDigest,
+    reviewer: { host: "claude", id: `claude:${REVIEWER_CONTEXT}`, contextId: REVIEWER_CONTEXT },
+    reviewedAt: "2026-09-18T01:00:00.000Z",
+    decisions: [{ slotId: pending.slots[0].slotId, decision: "fits", outfit: "base", reason: "プールサイドの見学で、水には入らない場面のため" }],
+  };
+  assert.equal(evaluate(script, { generatorContexts, review, reviewSha256: "f".repeat(64) }).pass, true);
+
+  // 別の人物を登録しても（在庫は変わる）、この回の判定は同じなのでレビューは生きている。
+  const widened = structuredClone(registryWith());
+  widened.characters.push({
+    id: "suzuki-jiro",
+    name: "鈴木次郎",
+    kind: "character",
+    role: "fixed",
+    status: "approved",
+    referenceAssets: [{ id: "identity-face", role: "identity-face", path: "characters/jiro-face.png", sha256: "f".repeat(64) }],
+  });
+  const registry = normalizeCharacterRegistry(widened);
+  const later = evaluate(script, { registry, generatorContexts, review, reviewSha256: "f".repeat(64) });
+  assert.equal(later.pass, true);
+  assert.equal(later.slots[0].status, "resolved");
+
+  // 判定そのものが変わった後の古いレビューは、今までどおり受け取らない。
+  const stale = structuredClone(review);
+  stale.verdictDigest = "0".repeat(64);
+  assert.throws(() => evaluate(script, { generatorContexts, review: stale, reviewSha256: "f".repeat(64) }), /verdictDigest/u);
+});
+
+test("照合待ちの記録は、進行中の回のチェックポイントを壊さない", async () => {
+  const project = await writeProject();
+  const options = {
+    projectDir: project.projectDir,
+    episodeId: EPISODE_ID,
+    scriptPath: project.scriptPath,
+    generatorHost: "claude",
+    generatorContextId: GENERATOR_CONTEXT,
+  };
+  const runtime = wardrobeRuntime();
+  try {
+    // 画像を作り終えて音声・レンダー待ちの回を再開したとき。
+    await mkdir(dirname(project.paths.statePath), { recursive: true });
+    await writeFile(project.paths.statePath, `${JSON.stringify({
+      version: "koya-production-state-v1",
+      episodeId: EPISODE_ID,
+      status: "speech-ready",
+      currentStage: "render",
+      knownRemainingIssues: [{ id: "bubble-typography", detail: "縦組みの追い込みを目視で確認する" }],
+    }, null, 2)}\n`);
+    await assert.rejects(
+      assertKoyaWardrobeReadinessBeforeImages(options, { runtime }),
+      (error) => error.code === KOYA_WARDROBE_READINESS_REQUIRED_CODE,
+    );
+    const paused = await readJsonFile(project.paths.statePath);
+    assert.equal(paused.status, "speech-ready", "再開位置を上書きしないこと");
+    assert.equal(paused.currentStage, "render");
+    assert.deepEqual(paused.knownRemainingIssues.map((entry) => entry.id), ["bubble-typography", "wardrobe-readiness-required"]);
+    assert.equal(paused.wardrobeReadiness.status, "missing");
+
+    // 画像より前の回は、今までどおり照合待ちへ移り、通れば元の位置へ戻る。
+    await writeFile(project.paths.statePath, `${JSON.stringify({
+      version: "koya-production-state-v1",
+      episodeId: EPISODE_ID,
+      status: "planned",
+      currentStage: "images",
+      knownRemainingIssues: [],
+    }, null, 2)}\n`);
+    await assert.rejects(
+      assertKoyaWardrobeReadinessBeforeImages(options, { runtime }),
+      (error) => error.code === KOYA_WARDROBE_READINESS_REQUIRED_CODE,
+    );
+    const waiting = await readJsonFile(project.paths.statePath);
+    assert.equal(waiting.status, "awaiting-wardrobe-readiness");
+    assert.equal(waiting.currentStage, "wardrobe-readiness");
+    assert.deepEqual(waiting.wardrobeReadiness.interrupted, { status: "planned", currentStage: "images" });
+
+    const registry = registryWith({
+      outfits: [{ id: "outfit-poolside", role: "outfit", path: "characters/hanako-swimwear.png", storyStage: "poolside", sceneTags: ["swim"], sha256: "d".repeat(64) }],
+    });
+    await writeFile(join(project.canvasDir, "characters.json"), `${JSON.stringify(registry, null, 2)}\n`);
+    await runKoyaWardrobeReadiness(options, runtime);
+    assert.equal((await assertKoyaWardrobeReadinessBeforeImages(options, { runtime })).pass, true);
+    const resumed = await readJsonFile(project.paths.statePath);
+    assert.equal(resumed.status, "planned", "通ったら元の位置へ戻すこと");
+    assert.equal(resumed.currentStage, "images");
+    assert.deepEqual(resumed.knownRemainingIssues, []);
+  } finally {
+    await rm(project.projectDir, { recursive: true, force: true });
+  }
+});
+
+test("別の台本が持っている episode id には、照合の記録を書かない", async () => {
+  const project = await writeProject();
+  const options = {
+    projectDir: project.projectDir,
+    episodeId: EPISODE_ID,
+    scriptPath: project.scriptPath,
+    generatorHost: "claude",
+    generatorContextId: GENERATOR_CONTEXT,
+  };
+  try {
+    await mkdir(dirname(project.paths.imagePlanPath), { recursive: true });
+    await mkdir(dirname(project.paths.statePath), { recursive: true });
+    await writeFile(project.paths.imagePlanPath, `${JSON.stringify({ scriptSha256: "9".repeat(64), pages: [] }, null, 2)}\n`);
+    await writeFile(project.paths.statePath, `${JSON.stringify({
+      version: "koya-production-state-v1",
+      episodeId: EPISODE_ID,
+      status: "images-ready",
+      currentStage: "source-face-placement",
+      knownRemainingIssues: [],
+    }, null, 2)}\n`);
+    const skipped = await assertKoyaWardrobeReadinessBeforeImages(options, { runtime: wardrobeRuntime() });
+    assert.deepEqual(skipped, { skipped: "episode-owns-another-script" }, "所有権の誤りは計画が自分の言葉で断ること");
+    const state = await readJsonFile(project.paths.statePath);
+    assert.equal(state.status, "images-ready");
+    assert.equal(state.wardrobeReadiness, undefined, "他の台本の回の記録を書き換えないこと");
+  } finally {
+    await rm(project.projectDir, { recursive: true, force: true });
+  }
+});
