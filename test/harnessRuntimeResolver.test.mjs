@@ -91,6 +91,42 @@ test("required Python resolution fails closed and preserves preverified launcher
   assert.deepEqual(trusted.args, ["-3"]);
 });
 
+test("Python resolver requires an attribute when asked, not only a successful import", async () => {
+  // OpenCV 5 は cv2.CascadeClassifier を本体から外した。import だけを見ていたので
+  // 解決は通り、顔検出を使う監査が本番で AttributeError になった。
+  // 属性の判定は解決器が作る Python スクリプトの中にあるので、本物の Python で確かめる。
+  const present = await resolvePythonRuntime({ requiredModules: ["json", "json:dumps"] });
+  assert.equal(present.ok, true, `Python を解決できない: ${present.detail}`);
+  const interpreter = { command: present.command, args: present.args };
+  const absent = await resolvePythonRuntime({
+    candidates: [interpreter],
+    requiredModules: ["json", "json:NoSuchAttributeForBuzzAssist"],
+  });
+  assert.equal(absent.ok, false, "import できても、要求した属性が無ければ使えないと判定すること");
+  assert.deepEqual(absent.missingModules, ["json:NoSuchAttributeForBuzzAssist"]);
+  const missingModule = await resolvePythonRuntime({
+    candidates: [interpreter],
+    requiredModules: ["buzzassist_no_such_module:anything"],
+  });
+  assert.deepEqual(missingModule.missingModules, ["buzzassist_no_such_module:anything"]);
+
+  // 止めるときは、版を固定する直し方まで言う。
+  await assert.rejects(
+    () => requirePythonRuntime({
+      runtime: { command: "python3", args: [] },
+      requiredModules: ["cv2", "cv2:CascadeClassifier"],
+      runCommand: async () => ({
+        stdout: `BUZZASSIST_PYTHON_RUNTIME=${JSON.stringify({
+          version: [3, 11, 9],
+          modules: { cv2: true, "cv2:CascadeClassifier": false },
+        })}\n`,
+        stderr: "",
+      }),
+    }),
+    /不足 cv2:CascadeClassifier.*opencv-python-headless<5/u,
+  );
+});
+
 test("ffmpeg and ffprobe resolution honors explicit cross-platform paths", async () => {
   const calls = [];
   const runCommand = async (command, args) => {
