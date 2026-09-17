@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -379,7 +379,8 @@ test("re-import moves differing boards and the older manifest aside, and refuses
     const secondImport = await importKoyaLocationBoards({ authority, locationId, importMapPath: second.mapPath });
     assert.ok(secondImport.superseded.directory.includes("superseded-"));
     assert.deepEqual(secondImport.written, [second.plan.jobs[2].outputPath]);
-    const movedNames = secondImport.superseded.moved.map((row) => row.to.split("/").pop()).sort();
+    // 退避先は join() で組み立てるので、区切りは OS 依存。basename で取り出す。
+    const movedNames = secondImport.superseded.moved.map((row) => basename(row.to)).sort();
     assert.deepEqual(movedNames, ["board-3-view-3.png", "location-generation.manifest.json"].sort());
     const movedBoard = secondImport.superseded.moved.find((row) => row.to.endsWith(".png"));
     assert.equal(sha256(await readFile(movedBoard.to)), first.sources[2].sha256, "古いボードは消さずに退避する");
@@ -555,7 +556,11 @@ test("the location-import CLI action feeds the official draft, audit and registe
     const registered = run("location-register", "--location-id", locationId, "--location-review-path", reviewPath);
     assert.equal(registered.status, 0, registered.stderr);
     assert.equal(registered.json.reviewPass, true);
-    assert.equal(registered.json.location.referenceAssets[0].path, `assets/koya-locations/${locationId}/chat-import/${prepared.plan.jobs[0].boardId}.png`);
+    // 登録簿は canvas からの相対パスを OS の区切りで書く。期待値も join で組み立てる。
+    assert.equal(
+      registered.json.location.referenceAssets[0].path,
+      join("assets", "koya-locations", locationId, "chat-import", `${prepared.plan.jobs[0].boardId}.png`),
+    );
     assert.ok((await stat(join(projectDir, "canvas", "characters.json"))).isFile());
   });
 });

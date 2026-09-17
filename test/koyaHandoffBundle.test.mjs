@@ -890,7 +890,8 @@ test("Koya handoff carries an approved location with its boards and a portable r
     const registryPath = await bundleRegistryPath(bundleDir);
     const bundledRegistry = JSON.parse(await readFile(registryPath, "utf8"));
     const bundledLocation = bundledRegistry.characters.find((entry) => entry.kind === "location");
-    const tamperedToken = `__BUNDLE_CANVAS__/${path.relative(path.join(bundleDir, "project", "canvas"), tamperedBoard)}`;
+    // 束の中の path は常に "/" 区切りのトークン。relative() の区切りは OS 依存なので揃える。
+    const tamperedToken = `__BUNDLE_CANVAS__/${path.relative(path.join(bundleDir, "project", "canvas"), tamperedBoard).split(path.sep).join("/")}`;
     const tamperedAsset = bundledLocation.referenceAssets.find((asset) => asset.path === tamperedToken);
     tamperedAsset.sha256 = sha256(await readFile(tamperedBoard));
     await writeJson(registryPath, bundledRegistry);
