@@ -36,7 +36,7 @@ import re
 
 
 def parse_svg_glyphs(svg_path):
-    text = Path(svg_path).read_text()
+    text = Path(svg_path).read_text(encoding="utf-8")
     root = re.search(r'<svg[^>]*\bwidth="([0-9.]+)"[^>]*\bheight="([0-9.]+)"', text)
     source_size = (float(root.group(1)), float(root.group(2))) if root else (0.0, 0.0)
     glyphs = []
@@ -124,7 +124,7 @@ def main():
     args = parser.parse_args()
     manifest_path = args.manifest.resolve()
     output_path = args.output.resolve() if args.output else manifest_path.parent / "bubble-typography-audit.json"
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     rows = []
     for u in manifest["utterances"]:
         entries = []
@@ -134,7 +134,7 @@ def main():
                 spec_bounds = seg.get("bounds")
                 entries.append((seg["id"], seg["overlayPath"], spec_bounds))
         else:
-            spec = json.loads(Path(u["overlaySpecPath"]).read_text())
+            spec = json.loads(Path(u["overlaySpecPath"]).read_text(encoding="utf-8"))
             bounds = (spec.get("plan", {}).get("bubbles") or [{}])[0].get("bounds")
             entries.append((u["id"], u["overlayPath"], bounds))
         for entry_id, overlay_path, bounds in entries:
@@ -155,7 +155,7 @@ def main():
         "pass": bool(rows) and all(r["pass"] for r in rows),
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(result, indent=1))
+    output_path.write_text(json.dumps(result, indent=1), encoding="utf-8")
     print(json.dumps({"pass": result["pass"], "failures": [r for r in rows if not r["pass"]][:8], "checked": len(rows)}, ensure_ascii=False))
     if not result["pass"]:
         sys.exit(1)

@@ -12,10 +12,11 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { channelPackPresent } from "../../lib/channelPackResolver.mjs";
 
-const REPO_ROOT = new URL("../..", import.meta.url).pathname;
+const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
 /**
  * Channel Pack が要るテスト。

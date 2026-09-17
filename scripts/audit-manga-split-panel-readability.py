@@ -20,7 +20,7 @@ import numpy as np
 
 
 def read_json(path: Path) -> dict:
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def main() -> None:
@@ -120,7 +120,7 @@ def main() -> None:
         "rows": rows,
         "pass": bool(rows) and all(r["pass"] for r in rows),
     }
-    (episode_dir / "split-panel-readability-audit.json").write_text(json.dumps(result, indent=1))
+    (episode_dir / "split-panel-readability-audit.json").write_text(json.dumps(result, indent=1), encoding="utf-8")
     print(json.dumps({"pass": result["pass"], "rows": rows}, ensure_ascii=False))
     if not result["pass"]:
         sys.exit(1)

@@ -16,7 +16,7 @@ import {
   runWithAdaptiveConcurrency,
 } from "../lib/adaptiveConcurrency.mjs";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import process from "node:process";
 
 import { disposeMediaGenerationResources, generateImageMedia } from "../lib/mediaGeneration.mjs";
@@ -60,7 +60,10 @@ await mkdir(dirname(manifestPath), { recursive: true });
 function containedOutputPath(name) {
   if (typeof name !== "string" || !name) throw new Error("job.out is required");
   const outPath = resolve(outputDir, name);
-  if (outPath !== outputDir && !outPath.startsWith(`${outputDir}/`)) {
+  // 区切り文字を決め打ちしない（`${outputDir}/` との前方一致は Windows で必ず外れる）。
+  const rel = relative(outputDir, outPath);
+  const inside = rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+  if (outPath !== outputDir && !inside) {
     throw new Error(`job.out escapes the output directory: ${name}`);
   }
   if (outPath === resolve(manifestPath)) throw new Error("job.out must not overwrite the manifest");

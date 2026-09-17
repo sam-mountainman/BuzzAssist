@@ -397,7 +397,7 @@ def main() -> None:
         "videos": videos,
         "summary": summarize(videos),
     }
-    args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+    args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"output": str(args.output.resolve()), "summary": report["summary"]}, ensure_ascii=False, indent=2))
 
 

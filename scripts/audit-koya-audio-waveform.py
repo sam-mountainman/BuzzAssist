@@ -96,7 +96,7 @@ def main():
     parser.add_argument("--video", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    manifest = json.loads(args.manifest.read_text())
+    manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
     samples = decode_audio(args.video)
     rows = []
     quiet_parts = []
@@ -205,7 +205,7 @@ def main():
         "gates": gates, "pass": all(gates.values()),
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
+    args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"pass": result["pass"], "gates": gates, "checked": len(rows)}, ensure_ascii=False))
     if not result["pass"]:
         sys.exit(1)

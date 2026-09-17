@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve as pathResolve, sep as pathSep } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   analyzeSkillInventory,
   buildSkillInventory,
@@ -16,7 +17,7 @@ import {
   shippedSkillContent,
 } from "../lib/skillInventory.mjs";
 
-const projectDir = new URL("..", import.meta.url).pathname;
+const projectDir = fileURLToPath(new URL("..", import.meta.url));
 
 test("project inventory has four explicit classifications and no ambiguous project implementation", async () => {
   const report = await buildSkillInventory({ projectDir });
@@ -258,24 +259,27 @@ test("a same-version host cache that lacks a bundled skill is reported as missin
 });
 
 test("installation root and version are derived from the host cache path or the shipped-source spec", () => {
+  // 本体はパスを resolve してから "/" 区切りにする。Windows ではドライブ名が付くので、
+  // 期待値も同じ正規化で作る（POSIX では元の文字列のまま）。
+  const normalized = (value) => pathResolve(value).split(pathSep).join("/");
   const cache = installationForPath(
     "/home/example/.claude/plugins/cache/buzzassist/buzzassist/0.1.25/skills/platform-craft/SKILL.md",
     { path: "/home/example/.claude/plugins/cache", host: "claude-code" },
     { sourceRole: "installed-plugin-skill", namespace: "buzzassist" },
   );
-  assert.deepEqual(cache, { root: "/home/example/.claude/plugins/cache/buzzassist/buzzassist/0.1.25", host: "claude-code", version: "0.1.25", namespace: "buzzassist" });
+  assert.deepEqual(cache, { root: normalized("/home/example/.claude/plugins/cache/buzzassist/buzzassist/0.1.25"), host: "claude-code", version: "0.1.25", namespace: "buzzassist" });
   const nested = installationForPath(
     "/home/example/.codex/plugins/cache/buzzassist/buzzassist/0.1.25/.agents/skills/skill-creator/SKILL.md",
     { path: "/home/example/.codex/plugins/cache", host: "codex" },
     { sourceRole: "installed-plugin-skill", namespace: "buzzassist" },
   );
-  assert.equal(nested.root, "/home/example/.codex/plugins/cache/buzzassist/buzzassist/0.1.25");
+  assert.equal(nested.root, normalized("/home/example/.codex/plugins/cache/buzzassist/buzzassist/0.1.25"));
   const shipped = installationForPath(
     "/home/example/plugins/buzzassist/plugin/skills/platform-craft/SKILL.md",
     { path: "/home/example/plugins/buzzassist/plugin/skills", host: "shared", version: "0.1.25" },
     { sourceRole: "shipped-plugin-source", namespace: "buzzassist" },
   );
-  assert.deepEqual(shipped, { root: "/home/example/plugins/buzzassist/plugin/skills", host: "shared", version: "0.1.25", namespace: "buzzassist" });
+  assert.deepEqual(shipped, { root: normalized("/home/example/plugins/buzzassist/plugin/skills"), host: "shared", version: "0.1.25", namespace: "buzzassist" });
   assert.equal(installationForPath("/home/example/.codex/skills/x/SKILL.md", { path: "/home/example/.codex/skills" }, { sourceRole: "global-install", namespace: "user-global" }), null);
 });
 

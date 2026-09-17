@@ -68,7 +68,7 @@ def spoken_chars(text):
 
 
 def main():
-    manifest = json.loads(MANIFEST.read_text())
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     utterances = {u["id"]: u for u in manifest["utterances"]}
 
     def measure(u):
@@ -132,7 +132,7 @@ def main():
         "rows": rows,
         "pass": all(r["pass"] for r in rows),
     }
-    (MANIFEST.parent / "narration-prosody-audit.json").write_text(json.dumps(result, indent=1))
+    (MANIFEST.parent / "narration-prosody-audit.json").write_text(json.dumps(result, indent=1), encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False))
     if not result["pass"]:
         sys.exit(1)

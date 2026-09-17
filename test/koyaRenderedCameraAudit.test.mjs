@@ -70,7 +70,7 @@ test("rendered camera audit preserves Windows Python launcher arguments", async 
       },
     });
     assert.equal(calls[0].command, "py.exe");
-    assert.deepEqual(calls[0].args.slice(0, 2), ["-3", join(projectDir, "scripts/analyze-manga-shot-motion.py")]);
+    assert.deepEqual(calls[0].args.slice(0, 4), ["-3", "-X", "utf8", join(projectDir, "scripts/analyze-manga-shot-motion.py")]);
     assert.equal(result.audit.gates.find((gate) => gate.id === "full-video-decode").pass, true);
   } finally {
     await rm(projectDir, { recursive: true, force: true });

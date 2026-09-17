@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { deflateSync } from "node:zlib";
+import { fileURLToPath } from "node:url";
 
 import {
   approveKoyaCharacterCandidate,
@@ -1081,8 +1082,8 @@ test("source-face placement preserves Windows launcher arguments from the resolv
   );
   assert.equal(result.report.pass, true);
   assert.equal(invocation.command, "py.exe");
-  assert.equal(invocation.args[0], "-3");
-  assert.equal(invocation.args[1], join(scriptsDir, "detect-koya-manga-source-faces.py"));
+  // Windows ランチャーの "-3" と UTF-8 モードの指定を、スクリプトの前に保つ。
+  assert.deepEqual(invocation.args.slice(0, 4), ["-3", "-X", "utf8", join(scriptsDir, "detect-koya-manga-source-faces.py")]);
   assert.equal(invocation.options.cwd, projectDir);
 });
 
@@ -1505,7 +1506,7 @@ test("character-approve with a full-role import map stages every declared eye-op
   const projectDir = await mkdtemp(join(tmpdir(), "koya-eye-open-approve-"));
   try {
     const canvasDir = join(projectDir, "canvas");
-    await cp(new URL("./fixtures/channel-pack/config", import.meta.url).pathname, join(projectDir, "config"), { recursive: true });
+    await cp(fileURLToPath(new URL("./fixtures/channel-pack/config", import.meta.url)), join(projectDir, "config"), { recursive: true });
     const showPath = join(projectDir, "config/koya-show-bible.json");
     const showBible = JSON.parse(await readFile(showPath, "utf8"));
     // Pick the member by rule so no cast name enters the public test.

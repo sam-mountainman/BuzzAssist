@@ -6,6 +6,7 @@ import path from "node:path";
 import { requireArtifacts, requireChannelPack } from "./helpers/requirePrerequisites.mjs";
 
 import { writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { createReviewerTrustEntry, generateReviewerKeyPair } from "../lib/koyaReviewAttestation.mjs";
 import {
   KOYA_MCP_ACTIONS,
@@ -19,7 +20,7 @@ import {
   startKoyaMcpJob,
 } from "../lib/koyaMcpAdapter.mjs";
 
-const root = path.resolve(new URL("..", import.meta.url).pathname);
+const root = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 
 // R6-1: doctor は reviewer 信頼アンカーを必須項目として見るので、決定論 runtime には運営者 env を含める。
 const OPERATOR_TRUST_JSON = (() => {

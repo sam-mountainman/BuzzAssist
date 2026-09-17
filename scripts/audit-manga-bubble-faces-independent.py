@@ -31,7 +31,7 @@ MINIMUM_CASCADE_WEIGHT = 1.0
 
 
 def read_json(path):
-    return json.loads(Path(path).read_text())
+    return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
 def rendered_overlay_geometry(path):
@@ -505,7 +505,7 @@ def main():
         "pass": all(r["pass"] for r in rows),
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(result, indent=1))
+    output_path.write_text(json.dumps(result, indent=1), encoding="utf-8")
     print(json.dumps({"pass": result["pass"], "failures": [r for r in rows if not r["pass"]], "checked": len(rows)}, ensure_ascii=False))
     if not result["pass"]:
         sys.exit(1)

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -135,7 +135,7 @@ test('production plan sends A/B to actual generator arguments; retries retain bo
         : { pass: true, score: 99, issues: [], hardFailures: [] },
     });
     assert.equal(result.ledger.status, 'complete');
-    const sceneCalls = calls.filter(c => c.fileName === job.outputPath.split('/').at(-1));
+    const sceneCalls = calls.filter(c => c.fileName === basename(job.outputPath));
     assert.equal(sceneCalls.length, 2);
     for (const call of sceneCalls) {
       assert.deepEqual(call.referenceImagePaths, job.referenceImagePaths);

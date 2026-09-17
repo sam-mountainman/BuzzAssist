@@ -3,11 +3,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { createReviewerTrustEntry, generateReviewerKeyPair } from "../lib/koyaReviewAttestation.mjs";
 import { runHarnessDoctor } from "../scripts/harness-doctor.mjs";
 
-const root = new URL("..", import.meta.url).pathname;
+const root = fileURLToPath(new URL("..", import.meta.url));
 
 function deterministicDoctorRuntime(overrides = {}) {
   const binary = (command) => ({ ok: true, command, args: [], version: "7.1.1" });
@@ -346,6 +347,11 @@ test("足りないものには必ず直し方が付く（全部欠けた環境�
     XI_API_KEY: "",
     LOVART_ACCESS_KEY: "",
     LOVART_SECRET_KEY: "",
+    // Windows のホームは HOME ではなく USERPROFILE。SystemRoot が無いと
+    // 子の Node が OS の機能を初期化できないことがあるので、それだけは渡す。
+    ...(process.platform === "win32"
+      ? { USERPROFILE: throwawayHome, SystemRoot: process.env.SystemRoot || "C:\\Windows" }
+      : {}),
   };
   let stdout = "";
   try {

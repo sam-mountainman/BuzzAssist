@@ -5,13 +5,14 @@ const require = createRequire(import.meta.url);
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 
 
 import { auditPublicSurface, collectSensitiveTerms } from "../scripts/audit-public-surface.mjs";
 import { channelPackPresent } from "../lib/channelPackResolver.mjs";
 
-const root = new URL("..", import.meta.url).pathname;
+const root = fileURLToPath(new URL("..", import.meta.url));
 
 test("公開面に、チャンネル固有語も禁止パスも無い", () => {
   const report = auditPublicSurface();
@@ -66,7 +67,11 @@ test("npm pack に、追跡外・チャンネル固有のものが入らない",
   // 「出力が取れた」を「中身を確かめた」と取り違えないよう、JSON で受けて
   // 件数まで突き合わせる。
   const { execFileSync, spawnSync } = require("node:child_process");
-  const run = spawnSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], { cwd: root, encoding: "utf8" });
+  // Windows の npm は npm.cmd で、.cmd はシェルを通さないと起動できない（引数は固定）。
+  const isWindows = process.platform === "win32";
+  const run = spawnSync(isWindows ? "npm.cmd" : "npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
+    cwd: root, encoding: "utf8", shell: isWindows,
+  });
   assert.equal(run.error, undefined, `npm pack を起動できていない: ${run.error?.message || ""}`);
   assert.equal(run.status, 0, `npm pack が失敗した（exit ${run.status}）: ${String(run.stderr || "").slice(0, 300)}`);
 
@@ -289,7 +294,7 @@ test("検査の範囲に、まだ追跡されていないファイルも入る",
   const { filesInScope } = await import("../scripts/audit-public-surface.mjs");
   const { mkdirSync, writeFileSync, rmSync } = await import("node:fs");
   const { join } = await import("node:path");
-  const root = new URL("..", import.meta.url).pathname;
+  const root = fileURLToPath(new URL("..", import.meta.url));
   const probeDir = join(root, ".audit-scope-probe");
 
   mkdirSync(probeDir, { recursive: true });

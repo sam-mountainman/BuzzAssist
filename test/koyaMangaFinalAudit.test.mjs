@@ -75,7 +75,7 @@ test("final audit keeps a preverified Windows Python launcher command", async ()
     pythonRuntime: { ok: true, command: "py.exe", args: ["-3"], version: "3.12.1" },
   }, "C:\\fixture-project");
   assert.equal(runtime.command, "py.exe");
-  assert.deepEqual(runtime.args, ["-3"]);
+  assert.deepEqual(runtime.args, ["-3", "-X", "utf8"]);
 });
 
 test("terminal punctuation audit permits internal timed-segment sentence periods", async () => {

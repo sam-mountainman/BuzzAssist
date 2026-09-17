@@ -5,6 +5,7 @@ import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve as resolvePath } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   auditKoyaCharacterBootstrap,
@@ -31,7 +32,7 @@ import { renderEditorialPlatePng } from "../lib/mangaScriptImagePipeline.mjs";
 import { parseMangaScript } from "../lib/mangaVideoPipeline.mjs";
 import { auditKoyaCharacterRosterReview, createKoyaCharacterRosterReviewDraft } from "../lib/koyaCharacterRosterReview.mjs";
 
-const root = new URL("..", import.meta.url).pathname;
+const root = fileURLToPath(new URL("..", import.meta.url));
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 
 async function readFixtureShowBible() {

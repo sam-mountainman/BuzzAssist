@@ -27,7 +27,7 @@ def dialogue_split_start(audio):
     input_index = audio.get("dialogueInputIndex")
     if not metadata_path or input_index is None or not Path(metadata_path).is_file():
         return None
-    metadata = json.loads(Path(metadata_path).read_text())
+    metadata = json.loads(Path(metadata_path).read_text(encoding="utf-8"))
     grouped = {}
     for segment in metadata.get("voiceSegments") or []:
         index = int(segment.get("dialogue_input_index", -1))
@@ -64,7 +64,7 @@ def main():
     args = parser.parse_args()
     manifest_path = args.manifest.resolve()
     output_path = args.output.resolve() if args.output else manifest_path.parent / "audio-onset-integrity-audit.json"
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     rows = []
     for u in manifest["utterances"]:
         a = u["audio"]
@@ -114,7 +114,7 @@ def main():
         "pass": all(r["pass"] for r in rows),
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(result, indent=1))
+    output_path.write_text(json.dumps(result, indent=1), encoding="utf-8")
     print(json.dumps({"pass": result["pass"], "failures": [r for r in rows if not r["pass"]], "checked": len(rows)}, ensure_ascii=False))
     if not result["pass"]:
         sys.exit(1)

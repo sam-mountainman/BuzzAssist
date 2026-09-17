@@ -187,7 +187,7 @@ def main() -> None:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     annotations = {}
     if args.annotations and args.annotations.exists():
-        document = json.loads(args.annotations.read_text())
+        document = json.loads(args.annotations.read_text(encoding="utf-8"))
         annotations = {int(entry["index"]): entry for entry in document.get("images", [])}
     def natural_key(path: Path) -> list[object]:
         return [int(part) if part.isdigit() else part.lower() for part in re.split(r"(\d+)", path.name)]
@@ -223,7 +223,7 @@ def main() -> None:
         "images": measurements,
     }
     output_path = args.output_dir / "reference-image-measurements.json"
-    output_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+    output_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({
         "outputPath": str(output_path.resolve()),
         "contactSheetPath": str(contact_path.resolve()),

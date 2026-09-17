@@ -4,8 +4,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
-const root = new URL("..", import.meta.url).pathname;
+const root = fileURLToPath(new URL("..", import.meta.url));
 
 test("ディレクトリ監視が失敗しても、MCP のプロセスは落ちない", async () => {
   // watch(dir, cb) を try/catch で囲んでいたが、try/catch は同期例外しか
