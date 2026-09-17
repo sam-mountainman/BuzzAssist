@@ -92,6 +92,7 @@ docs/koya-remaining-work-2026-09-02.md
 docs/koya-resume-2026-09-02.md
 docs/koya-setting-sheet-round-2026-09-01.md
 docs/koya-todo-2026-09-02.md
+docs/koya-test-triage-2026-09-02.md
 
 # 運営者向け納品物の置き場（imagegen プロンプト・クライアント共有zip・PDF）。
 # チャンネル固有語と顧客名を含むので、公開リポジトリでも npm 配布物でも
@@ -106,3 +107,14 @@ docs/learning/sensitive-vocabulary.local.txt
 # reviewer attestation の Ed25519 秘密鍵。reviewer-key-create はリポジトリ配下への
 # 書き込みを拒否するが、手で置かれた鍵が `git add -A` で公開されないよう二重に守る。
 *.pem
+
+# 手作業の品質確認ディレクトリ。番組設定の写し・キャスト名簿・開発機の
+# 絶対パスを含む出力が置かれる（qa/<キャラ>-native-source/ に 83 ファイル、
+# 固有語・全員分の名簿・パス数千件が入っていた）。どのコードも書き先に
+# しておらず追跡も0件だが、ignore されていなかったので `git add -A` 一回で
+# PUBLIC リポジトリへ入る状態だった。
+qa/
+
+# 検査語彙の鍵。既定の置き場は ~/.buzzassist/ だが、手でリポジトリへ置かれても
+# 公開されないようにする（鍵が漏れると digest から語彙を総当たりで戻せる）。
+**/sensitive-vocabulary.key

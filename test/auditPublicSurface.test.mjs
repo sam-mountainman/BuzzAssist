@@ -451,3 +451,93 @@ test("Channel Pack が無い環境で、許容一覧を「直った」と誤読�
   assert.equal(report.gateOk, true, "pack を持たない CI を永久に赤にしない");
   assert.ok(report.unchecked.some((why) => /Channel Pack/u.test(why)), "何を見ていないかを述べること");
 });
+
+test("push 前の検査は作業ツリーではなく、push される全コミットを見る", async () => {
+  // pre-push フックは作業ツリーを検査していた。push されるのはコミットなので、
+  // 作業ツリーが clean な状態で漏洩入りのブランチを push すると素通りした。
+  // 実際、作業ツリーを丸ごと保存したブランチ5本が、番組設定の写し・全キャストの
+  // 名簿・開発機のパスをコミットとして抱えていた。
+  const { auditPushRefs } = await import("../scripts/audit-public-surface.mjs");
+  const { dir, git, write } = await scratchRepo();
+  await write("clean.md", "何も入っていない");
+  git("add", "-A"); git("commit", "-qm", "base");
+  const base = git("rev-parse", "HEAD").toString().trim();
+
+  // 途中のコミットで漏洩を入れ、次のコミットで消す。先端は clean。
+  await write("roster.md", "probe-alpha probe-bravo probe-charlie");
+  git("add", "-A"); git("commit", "-qm", "leak");
+  await write("roster.md", "消した");
+  git("add", "-A"); git("commit", "-qm", "remove");
+  const tip = git("rev-parse", "HEAD").toString().trim();
+
+  // 作業ツリーは clean。作業ツリーだけを見る検査なら通ってしまう。
+  assert.equal(auditPublicSurface({ projectDir: dir }).rosterFindings.length, 0, "前提: 作業ツリーは clean");
+
+  const range = auditPushRefs([`refs/heads/main ${tip} refs/heads/main ${base}`], { projectDir: dir });
+  assert.equal(range.commitCount, 2, "base より後の2コミットを両方見ること");
+  assert.equal(range.failed.length, 1, "途中で入れて消した漏洩も、履歴として push されるので止めること");
+  assert.equal(range.failed[0].report.rosterFindings[0].file, "roster.md");
+
+  // 削除の push は検査対象が無い。
+  const zero = "0".repeat(40);
+  assert.equal(auditPushRefs([`(delete) ${zero} refs/heads/x ${tip}`], { projectDir: dir }).commitCount, 0);
+});
+
+test("語彙が後から増えると、過去に clean だったコミットも止まる", async () => {
+  // コミットした時点では pack に無かった地名が後から登録され、16日前に
+  // clean と確認したコミットが、push する時点では漏洩になっていた。
+  // 検査は push の瞬間に、現在の語彙で行う。
+  const { auditPushRefs } = await import("../scripts/audit-public-surface.mjs");
+  const { writeFile } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const { dir, git, write } = await scratchRepo();
+  await write("clean.md", "何も入っていない");
+  git("add", "-A"); git("commit", "-qm", "base");
+  const base = git("rev-parse", "HEAD").toString().trim();
+  await write("story.md", "架空港町の小さな催事場で");
+  git("add", "-A"); git("commit", "-qm", "story");
+  const tip = git("rev-parse", "HEAD").toString().trim();
+  const line = [`refs/heads/main ${tip} refs/heads/main ${base}`];
+
+  assert.equal(auditPushRefs(line, { projectDir: dir }).failed.length, 0, "登録前は通る");
+
+  // pack に地名を登録する（コミットは変えていない）。
+  await writeFile(join(dir, "channel-packs", "probe", "config", "koya-location-bible.json"),
+    JSON.stringify({ locations: [{ name: "架空港町" }] }));
+  assert.equal(auditPushRefs(line, { projectDir: dir }).failed.length, 1, "登録後は同じコミットを止めること");
+});
+
+test("push 範囲の検査は、そのコミットが持ち込んだファイルだけを見る", async () => {
+  // 作業ツリーのファイル一覧を使って各コミットを読む形にすると、2つ壊れる。
+  // (1) 後のコミットで git rm された漏洩ファイルは一覧に無いので見落とす。
+  // (2) 既に公開済みの過去の問題を毎回拾い、無関係な push まで永久に止める。
+  const { auditPushRefs } = await import("../scripts/audit-public-surface.mjs");
+
+  // (1) 入れて、次のコミットで git rm する。
+  {
+    const { dir, git, write } = await scratchRepo();
+    await write("clean.md", "何も入っていない");
+    git("add", "-A"); git("commit", "-qm", "base");
+    const base = git("rev-parse", "HEAD").toString().trim();
+    await write("leak.md", "probe-alpha probe-bravo probe-charlie");
+    git("add", "-A"); git("commit", "-qm", "leak");
+    git("rm", "-q", "leak.md"); git("commit", "-qm", "rm");
+    const tip = git("rev-parse", "HEAD").toString().trim();
+    const range = auditPushRefs([`refs/heads/main ${tip} refs/heads/main ${base}`], { projectDir: dir });
+    assert.equal(range.failed.length, 1, "削除済みでも、履歴に入った漏洩は止めること");
+  }
+
+  // (2) 既に remote にある過去の問題は、今回の push の責任ではない。
+  {
+    const { dir, git, write } = await scratchRepo();
+    await write("old.md", "probe-alpha probe-bravo probe-charlie");
+    git("add", "-A"); git("commit", "-qm", "already public");
+    const remote = git("rev-parse", "HEAD").toString().trim();
+    await write("new.md", "無関係な変更");
+    git("add", "-A"); git("commit", "-qm", "unrelated");
+    const tip = git("rev-parse", "HEAD").toString().trim();
+    const range = auditPushRefs([`refs/heads/main ${tip} refs/heads/main ${remote}`], { projectDir: dir });
+    assert.equal(range.commitCount, 1);
+    assert.equal(range.failed.length, 0, "今回持ち込んでいない過去の問題で push を止めないこと");
+  }
+});
