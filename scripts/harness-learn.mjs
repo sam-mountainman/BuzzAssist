@@ -31,6 +31,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveChannelPackPath } from "../lib/channelPackResolver.mjs";
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
+import { loadHarnessDeployments } from "../lib/harnessDeploymentResolver.mjs";
 import { redactSharedLearningText } from "../lib/harnessFeedbackBundle.mjs";
 import {
   digestVocabularyTerm,
@@ -531,16 +532,28 @@ export function clusterForConsolidation(summary) {
     .sort((a, b) => b.entries.length - a.entries.length);
 }
 
-// 宛先が deployment 相対なら、配置先を config/harness-deployments.json から引く。
-// 配置先はクライアント固有なので追跡しない。未設定なら「まだ配置していない」
-// として扱い、パスを勝手に決めない。
+// 宛先が deployment 相対なら、配置先を運営者の配置表（config/harness-deployments.json）から引く。
+// 解析は共通の解決器（lib/harnessDeploymentResolver.mjs）に任せる（同じ規則を2か所に持たない）。
+//
+// ただし、共通の解決器が持つ「配置表が無ければ同梱の example へ戻る」はここでは使わない。
+// example の root は "." で、実行する場所としては正しいが、**台帳の置き場としては共有台帳と
+// 同じ場所になる**。新規インストール（配置表なし）では pack 側の台帳へ書く（ledgerPathFor の
+// 既定）のが正しく、配布シミュレーションもそれを確かめている。
+//
+// リポジトリ内の配置は相対で返す（記録に端末の絶対パスを残さない）。
 function resolveDeploymentRoot(harnessId) {
-  const mapPath = path.join(REPO_ROOT, "config", "harness-deployments.json");
-  if (!fs.existsSync(mapPath)) return null;
+  const operatorMap = path.join(REPO_ROOT, "config", "harness-deployments.json");
+  if (!fs.existsSync(operatorMap)) return null;
+  let deployment;
   try {
-    const map = JSON.parse(fs.readFileSync(mapPath, "utf8"));
-    return (map.deployments ?? []).find((d) => d.harnessId === harnessId)?.root ?? null;
-  } catch { return null; }
+    deployment = loadHarnessDeployments({ repoRoot: REPO_ROOT, deploymentPath: operatorMap }).get(harnessId);
+  } catch {
+    return null;
+  }
+  if (!deployment) return null;
+  const rel = path.relative(REPO_ROOT, deployment.root);
+  if (rel === "") return ".";
+  return rel.startsWith("..") || path.isAbsolute(rel) ? deployment.root : rel;
 }
 
 function requireTarget(rawTarget) {
@@ -556,17 +569,17 @@ function requireTarget(rawTarget) {
   if (def.relativeToDeployment) {
     const root = resolveDeploymentRoot(def.relativeToDeployment);
     if (!root) {
-      throw new Error(
-        `${target} は ${def.relativeToDeployment} の配置先が要ります。`
-        + "config/harness-deployments.json に root を書いてください"
-        + "（このファイルは運営者固有なので追跡しません）",
-      );
+      // 捕捉は「あとで判断するための記録」なので、配置先が未設定でも受け取る
+      // （下の「正本が手元に無い」と同じ扱い）。ここで投げていたので、配置表を持たない
+      // 環境（CI・clone 直後）では pack 宛の捕捉が、台帳の隔離の検査より前に落ちていた。
+      // 書き込む工程（requireWritableTarget）だけが配置先を要求する。
+      return { rel, full: null, missing: true, missingDeployment: def.relativeToDeployment };
     }
     rel = path.join(root, rel);
   }
   // channel-pack の正本は Channel Pack 側にある。pack を持たない環境
   // （リポジトリを clone しただけの人、CI）でも解決を試みる。
-  let full = path.join(REPO_ROOT, rel);
+  let full = path.resolve(REPO_ROOT, rel);
   if (!fs.existsSync(full)) {
     const viaPack = resolveChannelPackPath(REPO_ROOT, rel);
     if (fs.existsSync(viaPack)) full = viaPack;
@@ -583,6 +596,13 @@ function requireTarget(rawTarget) {
 /** 書き込む工程だけが要求する。読むだけの工程は missing を許す。 */
 function requireWritableTarget(rawTarget) {
   const resolved = requireTarget(rawTarget);
+  if (resolved.missingDeployment) {
+    throw new Error(
+      `${resolveTarget(rawTarget)} は ${resolved.missingDeployment} の配置先が要ります。`
+      + "config/harness-deployments.json に root を書いてください"
+      + "（このファイルは運営者固有なので追跡しません。捕捉はできますが、書き込みは配置先が要ります）",
+    );
+  }
   if (resolved.missing) {
     throw new Error(
       `target の正本がこの環境にありません: ${resolved.rel}\n`
