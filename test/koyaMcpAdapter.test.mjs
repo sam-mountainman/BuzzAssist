@@ -112,11 +112,20 @@ test("Koya MCP mutating actions require confirmation and checkpoint background f
       },
     });
     let current = started;
-    for (let attempt = 0; attempt < 100 && ["queued", "running"].includes(current.status); attempt += 1) {
-      await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+    // 固定回数（100回×50ms＝5秒）で打ち切っていたので、子プロセスの起動が遅い
+    // Windows のランナーでは running のまま assert に入って落ちた。締め切りで待ち、
+    // 超えたときは何秒待ったのかを出す。
+    const waitStartedAt = Date.now();
+    const deadline = waitStartedAt + 120_000;
+    while (["queued", "running"].includes(current.status) && Date.now() < deadline) {
+      await new Promise((resolveWait) => setTimeout(resolveWait, 100));
       current = await readKoyaMcpJob({ projectDir, jobId: started.id });
     }
-    assert.equal(current.status, "failed", JSON.stringify(current));
+    assert.equal(
+      current.status,
+      "failed",
+      `${Math.round((Date.now() - waitStartedAt) / 1000)}秒待っても終わらない: ${JSON.stringify(current)}`,
+    );
     assert.notEqual(current.exitCode, 0);
     assert.match(current.stderrTail, /Unknown character workflow/u);
   } finally {
