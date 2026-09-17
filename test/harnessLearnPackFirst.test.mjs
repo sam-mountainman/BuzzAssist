@@ -204,6 +204,10 @@ function snapshot(dir) {
 }
 
 const packDisplay = path.join("channel-packs", PACK_ID, CANONICAL_REL);
+// 出力の読み先は path.relative で作るので、区切りは OS ごとの区切り（Windows では \）。
+// 宣言どおりの "docs/..." で探すと Windows の CI だけ落ちる。
+const repoDisplay = path.normalize(CANONICAL_REL);
+const repoCanonicalLine = `正本: ${repoDisplay}（リポジトリ）`;
 
 // --- 解決器（in-process） ---
 
@@ -264,7 +268,8 @@ test("Channel Pack に正本が無いときだけ、リポジトリ直下の正�
     assert.equal(resolved.source, "repository");
     assert.equal(resolved.missing, false);
     assert.equal(resolved.packRootWithoutCanonical, null);
-    assert.match(describeCanonicalResolution(resolved, { repoRoot: noPack.repo }).join("\n"), /リポジトリ/u);
+    const noPackLines = describeCanonicalResolution(resolved, { repoRoot: noPack.repo }).join("\n");
+    assert.ok(noPackLines.includes(repoCanonicalLine), `リポジトリ側の読み先が出ない:\n${noPackLines}`);
     const readers = createCanonicalReaders({ repoRoot: noPack.repo, targets: TARGETS });
     assert.equal(readers.readCanonical(CANONICAL_REL, { target: PACK_TARGET }), LEGACY_BODY);
 
@@ -416,7 +421,7 @@ test("CLI: Channel Pack に正本が無ければ、従来どおりリポジト�
   const status = runLearn(layout.repo, ["status"]);
   assert.equal(status.status, 0, status.stderr);
   assert.ok(!status.stdout.includes(A.id), `従来配置の反映済みが未反映に出た:\n${status.stdout}`);
-  assert.ok(status.stdout.includes(CANONICAL_REL), status.stdout);
+  assert.ok(status.stdout.includes(repoCanonicalLine), `status にリポジトリ側の読み先が出ない:\n${status.stdout}`);
   assert.match(status.stdout, /リポジトリ側を使います/u);
 
   const before = snapshot(layout.repo);
