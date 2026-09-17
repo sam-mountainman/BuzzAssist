@@ -163,6 +163,48 @@ export async function writeSyntheticImport({ authority, locationId, sourceDir, o
   return { mapPath, map, plan, sources, stylePath, promptPath };
 }
 
+// 「その絵が満たすべき文書」の見本。合成 location bible の1件目と同じ言い方に揃える。
+export const SPECIFICATION_TEXT = [
+  "# 配置表（見本）",
+  "",
+  "- 入口は画面の左手前、配膳台は右奥。",
+  "- 通りに面した大窓は一枚だけ。",
+  "- 人物は描かない。",
+  "",
+].join("\n");
+
+/**
+ * 記録が残っていないボードを1枚作る mutate。プロンプトと会話 id を落とし、
+ * 代わりに「その絵が満たすべき文書」と provenanceGap を書く。
+ * override で、混在・記録ありの主張・未知キー・SHA 不一致を1か所だけ壊せる。
+ */
+export function declareProvenanceGap({
+  boardNumber = 2,
+  reason = "このボードはプロンプトと会話 id を残す決まりより前に作られ、どちらも残っていない",
+  specificationName = "set-plan.md",
+  specificationText = SPECIFICATION_TEXT,
+  writeSpecification = true,
+  override = null,
+} = {}) {
+  return async ({ map, sourceDir }) => {
+    const specificationPath = join(sourceDir, specificationName);
+    if (writeSpecification) await writeFile(specificationPath, specificationText);
+    const board = map.boards[boardNumber - 1];
+    delete board.promptText;
+    delete board.promptPath;
+    delete board.promptSha256;
+    delete board.generator.contextId;
+    board.provenanceGap = {
+      promptRecorded: false,
+      generatorContextRecorded: false,
+      reason,
+      specificationPath: `./${specificationName}`,
+      specificationSha256: sha256(specificationText),
+    };
+    if (typeof override === "function") override({ board, map, specificationPath });
+  };
+}
+
 export function passAnchorChecks(review) {
   review.anchor.checks = Object.fromEntries(Object.keys(review.anchor.checks).map((key) => [key, true]));
   return review;
@@ -178,9 +220,9 @@ export function passBoardChecks(review) {
  * 取り込み → アンカー下書き → 独立したアンカー審査 → 本審査の下書き → 独立した本審査 → 登録。
  * 公式 CLI と同じ関数だけを使う。
  */
-export async function importAndRegisterSyntheticLocation({ projectDir, authority, locationId, sourceDir, outputDir = "" }) {
+export async function importAndRegisterSyntheticLocation({ projectDir, authority, locationId, sourceDir, outputDir = "", mutate = null }) {
   const common = { projectDir, locationBible: authority.locationBible, showBible: authority.showBible, locationId, outputDir };
-  const prepared = await writeSyntheticImport({ authority, locationId, sourceDir, outputDir });
+  const prepared = await writeSyntheticImport({ authority, locationId, sourceDir, outputDir, mutate });
   const imported = await importKoyaLocationBoards({ authority, locationId, importMapPath: prepared.mapPath, outputDir });
   const reviewsDir = join(projectDir, "canvas", "reviews");
   await mkdir(reviewsDir, { recursive: true });

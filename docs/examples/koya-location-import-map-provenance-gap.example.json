@@ -1,0 +1,54 @@
+{
+  "version": "koya-location-import-map-v1",
+  "locationId": "replace-with-location-bible-id",
+  "importedBy": {
+    "host": "replace-with-claude-or-codex",
+    "id": "replace-with-operator-or-agent-id",
+    "contextId": "replace-with-real-session-or-task-id"
+  },
+  "boards": [
+    {
+      "boardIndex": 1,
+      "sourcePath": "./replace-with-anchor-download.png",
+      "sourceSha256": "replace-with-64-hex-sha256-of-that-file",
+      "generator": {
+        "host": "chat-web-image-tool",
+        "id": "replace-with-product-or-model-label",
+        "contextId": "replace-with-conversation-id-or-url",
+        "generatedAt": "2026-01-01T00:00:00.000Z"
+      },
+      "promptText": "replace with the prompt actually used for this board: a board whose prompt and conversation were kept keeps recording them",
+      "referenceImages": [
+        {
+          "path": "./replace-with-channel-style-reference.png",
+          "sha256": "replace-with-64-hex-sha256-of-that-file",
+          "role": "style"
+        }
+      ]
+    },
+    {
+      "boardIndex": 2,
+      "sourcePath": "./replace-with-second-download.png",
+      "sourceSha256": "replace-with-64-hex-sha256-of-that-file",
+      "generator": {
+        "host": "chat-web-image-tool",
+        "id": "replace-with-product-or-model-label",
+        "generatedAt": "2026-01-01T00:00:00.000Z"
+      },
+      "provenanceGap": {
+        "promptRecorded": false,
+        "generatorContextRecorded": false,
+        "reason": "replace with why neither record exists, for example: this board was made before the channel kept prompts and conversation ids, and neither survives anywhere. Writing a prompt from memory would be an invented record, so the gap is declared instead",
+        "specificationPath": "./replace-with-the-written-specification-this-board-was-made-to-satisfy.md",
+        "specificationSha256": "replace-with-64-hex-sha256-of-that-specification-file"
+      },
+      "referenceImages": [
+        {
+          "path": "./replace-with-anchor-download.png",
+          "sha256": "replace-with-64-hex-sha256-of-the-anchor-file",
+          "role": "anchor"
+        }
+      ]
+    }
+  ]
+}
