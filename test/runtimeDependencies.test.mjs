@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, relative, resolve } from "node:path";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, relative, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -70,4 +72,52 @@ test("契約の検証は、ajv を使う瞬間に読んでも、合格と不合�
   assert.ok(bad.failures.some((failure) => /unexpectedTopLevelField/u.test(failure.path)), "どこが悪いかを返すこと");
   // 2回目以降も同じ結果（コンパイル済みの検証器を使い回しても、前回のエラーを引きずらない）。
   assert.equal(validateKoyaMangaProductionSchema(contract).failures.length, 0);
+});
+
+test("原子的な置き換えは、読まれている最中の拒否をやり直す（Windows）", async () => {
+  // Windows は、他のプロセスがそのファイルを読んでいる瞬間の置き換えを EPERM で拒む。
+  // MCP の背景ジョブは「状態を書く側」と「状態を見る側」が同時に触るので、これで
+  // runner が起動直後に死に、記録は queued・ログは空のまま残った。
+  const { renameWithRetry, writeJsonAtomic, readJsonIfExists } = await import("../lib/atomicJsonFile.mjs");
+  const waits = [];
+  const waitImpl = async (ms) => { waits.push(ms); };
+
+  let calls = 0;
+  const flaky = async () => {
+    calls += 1;
+    if (calls < 3) throw Object.assign(new Error("EPERM: operation not permitted, rename"), { code: "EPERM" });
+  };
+  assert.equal(await renameWithRetry("a", "b", { renameImpl: flaky, waitImpl }), 3, "拒まれた分だけやり直すこと");
+  assert.deepEqual(waits, [5, 10]);
+
+  // 別の理由（置き換え元が無い）は、やり直さずそのまま伝える。
+  let missingCalls = 0;
+  await assert.rejects(
+    () => renameWithRetry("a", "b", {
+      renameImpl: async () => { missingCalls += 1; throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); },
+      waitImpl,
+    }),
+    /ENOENT/u,
+  );
+  assert.equal(missingCalls, 1, "やり直してよい理由だけをやり直すこと");
+
+  // 何度やっても拒まれるなら、黙って諦めずに投げる。
+  await assert.rejects(
+    () => renameWithRetry("a", "b", {
+      renameImpl: async () => { throw Object.assign(new Error("EBUSY"), { code: "EBUSY" }); },
+      attempts: 3,
+      waitImpl,
+    }),
+    /EBUSY/u,
+  );
+
+  // 実ファイルでも書けること（中身が壊れないこと）。
+  const dir = await mkdtemp(join(tmpdir(), "atomic-json-"));
+  try {
+    const target = join(dir, "nested", "state.json");
+    await writeJsonAtomic(target, { status: "queued" });
+    assert.deepEqual(await readJsonIfExists(target, null), { status: "queued" });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

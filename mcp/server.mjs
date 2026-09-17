@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { copyFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -31,6 +31,7 @@ import {
   setupHermesGrok,
 } from "../lib/mediaGeneration.mjs";
 import { getBuzzAssistAuthStatus, loginBuzzAssistViaBrowser } from "../lib/buzzassistApi.mjs";
+import { renameWithRetry } from "../lib/atomicJsonFile.mjs";
 import {
   OFFICIAL_EXCALIDRAW_README,
   createExcalidrawView,
@@ -876,7 +877,8 @@ async function writeJsonAtomic(filePath, payload) {
   await mkdir(dirname(filePath), { recursive: true });
   const tempFile = `${filePath}.${process.pid}.tmp`;
   await writeFile(tempFile, `${JSON.stringify(payload, null, 2)}\n`);
-  await rename(tempFile, filePath);
+  // Windows は、読まれている最中の置き換えを拒む（lib/atomicJsonFile.mjs と同じ理由）。
+  await renameWithRetry(tempFile, filePath);
 }
 
 async function readJsonIfExists(filePath, fallback) {
