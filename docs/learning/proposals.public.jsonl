@@ -2,6 +2,7 @@
 {"id":"079632f77850","kind":"constraint","target":"genre:narrated-story-video"}
 {"id":"0e71978746a3","kind":"fact","target":"genre:manga-video-production"}
 {"id":"145f594ef34e","kind":"correction","target":"genre:narrated-story-video"}
+{"id":"16f40d5a72a4","kind":"correction","target":"genre:manga-video-production"}
 {"id":"1a29a7b76bb8","kind":"fact","target":"platform:platform-craft"}
 {"id":"1e408436698b","kind":"correction","target":"genre:narrated-story-video"}
 {"id":"1e781555b959","kind":"fact","target":"genre:manga-video-production"}
@@ -21,15 +22,22 @@
 {"id":"6261ec9acf18","kind":"fact","target":"genre:narrated-story-video"}
 {"id":"6c35b11653d8","kind":"constraint","target":"genre:manga-video-production"}
 {"id":"6cb267bfbc38","kind":"fact","target":"platform:platform-craft"}
+{"id":"6e231dff9bfb","kind":"fact","target":"platform:platform-craft"}
 {"id":"6edb2451ffe2","kind":"constraint","target":"genre:narrated-story-video"}
 {"id":"6fc1a6d87bdd","kind":"correction","target":"platform:platform-craft"}
 {"id":"7009e9e5c53f","kind":"fact","target":"genre:manga-video-production"}
+{"id":"751aa0517717","kind":"fact","target":"platform:platform-craft"}
+{"id":"783cdad4eaa5","kind":"fact","target":"platform:platform-craft"}
+{"id":"7a5c4eaf8d4f","kind":"fact","target":"genre:manga-video-production"}
+{"id":"837a389bb6a2","kind":"fact","target":"genre:manga-video-production"}
 {"id":"85c4ff144509","kind":"correction","target":"platform:platform-craft"}
 {"id":"86a0f746b4e5","kind":"fact","target":"genre:manga-video-production"}
 {"id":"86b858191c47","kind":"correction","target":"genre:manga-video-production"}
 {"id":"8a0621b02d59","kind":"constraint","target":"platform:platform-craft"}
+{"id":"8be413c835e9","kind":"fact","target":"platform:harness-self-improvement"}
 {"id":"8c313f6338c5","kind":"constraint","target":"genre:manga-video-production"}
 {"id":"8fef50772caa","kind":"fact","target":"genre:manga-page-camera"}
+{"id":"9317162f68e9","kind":"correction","target":"genre:manga-video-production"}
 {"id":"94d77630360e","kind":"fact","target":"genre:narrated-story-video"}
 {"id":"963ccdec443e","kind":"correction","target":"genre:manga-video-production"}
 {"id":"9cd3924e61b3","kind":"fact","target":"genre:manga-video-production"}
@@ -40,6 +48,7 @@
 {"id":"af895bf4ea2c","kind":"fact","target":"platform:harness-parallel-execution"}
 {"id":"b44eda8caab9","kind":"fact","target":"platform:platform-craft"}
 {"id":"b775a8490d88","kind":"fact","target":"genre:manga-video-production"}
+{"id":"b88f9357c1cb","kind":"correction","target":"genre:manga-video-production"}
 {"id":"bfccffc4ae54","kind":"fact","target":"genre:manga-video-production"}
 {"id":"c0f0c7b1ec69","kind":"correction","target":"platform:harness-parallel-execution"}
 {"id":"c16da288755c","kind":"fact","target":"genre:manga-video-production"}
@@ -49,7 +58,9 @@
 {"id":"cfd98c2c43e9","kind":"fact","target":"genre:manga-video-production"}
 {"id":"d04c21b9b8d8","kind":"correction","target":"platform:platform-craft"}
 {"id":"d2091885825a","kind":"correction","target":"platform:platform-craft"}
+{"id":"e2064c6266a3","kind":"correction","target":"platform:platform-craft"}
 {"id":"e4bfed5416e8","kind":"correction","target":"genre:manga-video-production"}
+{"id":"e5fc6bc0daff","kind":"correction","target":"genre:narrated-story-video"}
 {"id":"e722b47c28f8","kind":"fact","target":"genre:manga-video-production"}
 {"id":"e778fdfbbc3e","kind":"correction","target":"genre:narrated-story-video"}
 {"id":"e90e362408cd","kind":"fact","target":"genre:manga-video-production"}
@@ -60,4 +71,5 @@
 {"id":"f7c8baefc7cc","kind":"fact","target":"genre:manga-page-camera"}
 {"id":"f8b11ac1431b","kind":"correction","target":"platform:harness-parallel-execution"}
 {"id":"fbd19cce7f6e","kind":"fact","target":"genre:manga-page-camera"}
+{"id":"fcf0c3ff6772","kind":"fact","target":"genre:narrated-story-video"}
 {"id":"fdd0ce24a66f","kind":"fact","target":"genre:manga-video-production"}
