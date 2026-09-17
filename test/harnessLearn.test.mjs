@@ -643,3 +643,43 @@ test("共有台帳への捕捉は、同じロックの中で公開 catalog を�
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("共有台帳への捕捉は、検査語彙に一致する語（人の名前や顧客の識別子）を拒否する", async () => {
+  // 捕捉の検査は Channel Pack の語しか見ていなかったので、語彙ファイルにだけある語
+  // ——依頼者の名前と発言の引用、顧客のエピソード ID、端末の作業ディレクトリ名——が
+  // 共有台帳へ入り、公開リポジトリへ push されるところだった。
+  const { captureLearningProposal, privateTermsInSharedEntry } = await import("../scripts/harness-learn.mjs");
+  const vocabulary = parseSensitiveVocabularyDigest(
+    buildSensitiveVocabularyDigest(["架空依頼者", "episode-xyz"], { key: TEST_VOCABULARY_KEY }),
+    { key: TEST_VOCABULARY_KEY },
+  );
+  const writes = [];
+  const options = {
+    signals: { terms: [], castIds: [] },
+    append: (file, entry) => writes.push({ file, entry }),
+    read: () => [],
+    lock: (_file, action) => action(),
+    refreshCatalog: () => ({ written: false }),
+    privateVocabulary: vocabulary,
+  };
+  const base = { kind: "fact", session: "s1", now: "2026-09-17T00:00:00Z", target: "platform:platform-craft" };
+
+  assert.throws(
+    () => captureLearningProposal({ ...base, text: "共有層の一般的な規則", evidence: "架空依頼者さんの発言より" }, options),
+    (error) => /公開してはいけない語/u.test(error.message) && !error.message.includes("架空依頼者"),
+    "人の名前を含む根拠を共有台帳へ書かせない（拒否の文に語を出さない）",
+  );
+  assert.throws(
+    () => captureLearningProposal({ ...base, text: "共有層の一般的な規則", evidence: "episodes/episode-xyz-v1/audits" }, options),
+    /公開してはいけない語/u,
+  );
+  assert.equal(writes.length, 0, "拒否したものは台帳へ書かない");
+
+  // 一般的な言い方なら通る。
+  const ok = captureLearningProposal({ ...base, text: "共有層の一般的な規則", evidence: "依頼者の指摘より" }, options);
+  assert.equal(ok.appended, true);
+  // pack 宛は対象外（pack 側の台帳は公開しない）。
+  assert.equal(privateTermsInSharedEntry({ target: "channel-pack:koya", text: "架空依頼者" }, vocabulary).ok, true);
+  // 語彙を照合できない環境では止めない（push 前の検査が同じ語彙で止める）。
+  assert.deepEqual(privateTermsInSharedEntry({ target: "platform:platform-craft", text: "架空依頼者" }, null), { ok: true, hits: 0, checked: false });
+});

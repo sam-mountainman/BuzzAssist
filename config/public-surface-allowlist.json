@@ -34,5 +34,37 @@
   ],
   "term": [],
   "path": [],
-  "pathLeak": []
+  "pathLeak": [],
+  "privateTerm": [
+    {
+      "file": "docs/manga-wardrobe-readiness-spec-ja.md",
+      "count": 2,
+      "why": "origin/main で既に公開済みの識別子（ファイル名や既存の本文に出ている語）。新たな公開ではない。改名するかは運営者名を含む識別子の改名と一緒に判断待ち。"
+    },
+    {
+      "file": "test/fixtures/channel-pack/config/koya-show-bible.json",
+      "count": 2,
+      "why": "origin/main で既に公開済みの識別子（ファイル名や既存の本文に出ている語）。新たな公開ではない。改名するかは運営者名を含む識別子の改名と一緒に判断待ち。"
+    },
+    {
+      "file": "test/koyaChannelGovernance.test.mjs",
+      "count": 1,
+      "why": "origin/main で既に公開済みの識別子（ファイル名や既存の本文に出ている語）。新たな公開ではない。改名するかは運営者名を含む識別子の改名と一緒に判断待ち。"
+    },
+    {
+      "file": "test/koyaMangaProduction.test.mjs",
+      "count": 2,
+      "why": "origin/main で既に公開済みの識別子（ファイル名や既存の本文に出ている語）。新たな公開ではない。改名するかは運営者名を含む識別子の改名と一緒に判断待ち。"
+    },
+    {
+      "file": "docs/review/independent-final-review-2026-09-01.json",
+      "count": 2,
+      "why": "origin/main で既に公開済みの識別子（ファイル名や既存の本文に出ている語）。新たな公開ではない。改名するかは運営者名を含む識別子の改名と一緒に判断待ち。"
+    },
+    {
+      "file": "test/bestOfNRuntime.test.mjs",
+      "count": 1,
+      "why": "origin/main で既に公開済みの識別子（ファイル名や既存の本文に出ている語）。新たな公開ではない。改名するかは運営者名を含む識別子の改名と一緒に判断待ち。"
+    }
+  ]
 }

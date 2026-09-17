@@ -719,6 +719,39 @@ export function channelTermsInSharedEntry(entry, signals) {
   };
 }
 
+/**
+ * 共有層の提案に、検査語彙（語彙ファイルにだけある語）が入っていないか。
+ *
+ * channelTermsInSharedEntry は Channel Pack の語しか見ない。語彙ファイルにだけある
+ * 語——依頼者や運営者の名前、顧客の識別子、端末の作業ディレクトリ名——は素通りし、
+ * 実際に共有台帳へ「依頼者の名前＋発言の引用」が入ったまま push されるところだった。
+ * 共有台帳は公開リポジトリで追跡されるので、書く前に止める。
+ * 語彙を照合できない環境（鍵が無い端末）では通す——push 前の検査が同じ語彙で止める。
+ */
+export function privateTermsInSharedEntry(entry, vocabulary) {
+  const target = String(entry?.target || "");
+  const isShared = !(target.startsWith("channel-pack:") || target.startsWith("ledger:") || target.startsWith("doc:"));
+  if (!isShared || !vocabulary) return { ok: true, hits: 0, checked: Boolean(vocabulary) };
+  const { hits } = redactVocabularyDigestTokens(`${entry?.text || ""} ${entry?.evidence || ""}`, vocabulary);
+  return {
+    ok: hits === 0,
+    hits,
+    checked: true,
+    message: hits === 0 ? "" :
+      `共有層（${target}）の提案に、公開してはいけない語が ${hits} 箇所ある（検査語彙に一致）。`
+      + "人の名前・顧客の識別子・端末のパスを一般的な言い方へ書き換えること。"
+      + "発言をそのまま引用せず、何を直すべきかの形にすること。",
+  };
+}
+
+function defaultPrivateVocabulary() {
+  try {
+    return loadSensitiveVocabulary(path.join(REPO_ROOT, SENSITIVE_VOCABULARY_DIGEST_PATH), { projectDir: REPO_ROOT }).vocabulary;
+  } catch {
+    return null;
+  }
+}
+
 export function buildProposal({ kind, target, text, evidence, session, now }) {
   if (!PROPOSAL_KINDS.has(kind)) {
     throw new Error(`kind は ${[...PROPOSAL_KINDS].join(" / ")} のいずれかにしてください: ${kind}`);
@@ -757,10 +790,14 @@ export function captureLearningProposal(input, {
   lock = withProposalCaptureLock,
   signals = collectSensitiveSignals(REPO_ROOT),
   refreshCatalog = refreshCatalogForSharedLedger,
+  privateVocabulary = undefined,
 } = {}) {
   const entry = buildProposal(input);
   const verdict = channelTermsInSharedEntry(entry, signals);
   if (!verdict.ok) throw new Error(verdict.message);
+  const vocabulary = privateVocabulary === undefined ? defaultPrivateVocabulary() : privateVocabulary;
+  const privateVerdict = privateTermsInSharedEntry(entry, vocabulary);
+  if (!privateVerdict.ok) throw new Error(privateVerdict.message);
   const ledgerPath = ledgerPathResolver(entry.target, "proposals");
   assertCaptureLedgerIsolation(entry.target, ledgerPath, ledgerPathResolver);
   return lock(ledgerPath, () => {
