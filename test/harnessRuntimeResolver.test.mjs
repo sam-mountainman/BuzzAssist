@@ -17,7 +17,8 @@ test("Python candidates are platform-aware and keep the Windows launcher args", 
     platform: "win32",
     projectDir: "C:\\empty-project",
   });
-  assert.deepEqual(windows[0], { command: "py.exe", args: ["-3"], source: "windows-launcher" });
+  // どの候補も UTF-8 モードで起動する（Windows の既定の文字コードで日本語が読めないため）。
+  assert.deepEqual(windows[0], { command: "py.exe", args: ["-3", "-X", "utf8"], source: "windows-launcher" });
   assert.ok(windows.some((entry) => entry.command === "python.exe"));
   assert.equal(windows.some((entry) => entry.command === "python3"), false);
 
@@ -67,8 +68,8 @@ test("Python resolver rejects a runnable interpreter when required modules are a
   });
   assert.equal(result.ok, false);
   assert.deepEqual(result.missingModules, ["soundfile"]);
-  assert.equal(formatRuntimeCommand(result), "py -3");
-  assert.deepEqual(calls[1].args.slice(0, 2), ["-3", "-c"]);
+  assert.equal(formatRuntimeCommand(result), "py -3 -X utf8");
+  assert.deepEqual(calls[1].args.slice(0, 4), ["-3", "-X", "utf8", "-c"]);
 });
 
 test("required Python resolution fails closed and preserves preverified launcher args", async () => {
@@ -88,7 +89,10 @@ test("required Python resolution fails closed and preserves preverified launcher
     requiredModules: ["cv2"],
   });
   assert.equal(trusted.command, "py.exe");
-  assert.deepEqual(trusted.args, ["-3"]);
+  assert.deepEqual(trusted.args, ["-3", "-X", "utf8"]);
+  // 解決済みの実行環境を渡し直しても、UTF-8 モードの指定は重ならない。
+  const again = await requirePythonRuntime({ runtime: { ...trusted, ok: true } });
+  assert.deepEqual(again.args, ["-3", "-X", "utf8"]);
 });
 
 test("Python resolver requires an attribute when asked, not only a successful import", async () => {

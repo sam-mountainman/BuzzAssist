@@ -152,7 +152,7 @@ def main():
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
-    manifest = json.loads(Path(args.manifest).read_text())
+    manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
     samples = decode_audio(Path(args.video))
     rows = utterance_windows(manifest)
     references = build_references(samples, rows)
@@ -227,7 +227,7 @@ def main():
     }
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(result, ensure_ascii=False, indent=1))
+    output_path.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
     print(json.dumps({
         "pass": result["pass"],
         "evaluated": len(evaluated),

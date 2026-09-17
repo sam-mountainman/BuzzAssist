@@ -396,7 +396,8 @@ test("CLI build-vocabulary は鍵をリポジトリ外に作り、audit が同�
     assert.equal(result.termCount, 3);
     assert.equal(result.keyCreated, true);
     assert.equal(built.stdout.includes(readFileSync(keyFile, "utf8").trim()), false, "鍵を出力しない");
-    assert.equal(statSync(keyFile).mode & 0o777, 0o600, "鍵ファイルは本人だけが読める");
+    // Windows は POSIX の権限ビットを持たない（Node は書き込み可否しか反映しない）。
+    if (process.platform !== "win32") assert.equal(statSync(keyFile).mode & 0o777, 0o600, "鍵ファイルは本人だけが読める");
     const digestText = readFileSync(digestFile, "utf8");
     for (const term of [CUSTOMER_ID, SURNAME, KANA_NAME]) assert.equal(digestText.includes(term), false);
     const keyId = JSON.parse(digestText).keyId;

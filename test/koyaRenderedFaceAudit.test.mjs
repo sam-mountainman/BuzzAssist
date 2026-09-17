@@ -5,6 +5,7 @@ import { test } from "node:test";
 test("rendered face audit rejects bubble-only cascade hits absent from adjacent clear frames", () => {
   const source = String.raw`
 import importlib.util
+import os
 import numpy as np
 import cv2
 import tempfile
@@ -49,16 +50,19 @@ class WeightedCascade:
 weighted = module.detect_faces(WeightedCascade(), np.zeros((1080, 1920, 3), dtype=np.uint8))
 assert weighted == [(100, 100, 80, 80)]
 
-with tempfile.NamedTemporaryFile(suffix=".png") as target:
+# Windows cannot reopen a NamedTemporaryFile while it is still open, so the
+# PNG goes into a temporary directory instead.
+with tempfile.TemporaryDirectory() as scratch:
+    target_path = os.path.join(scratch, "overlay.png")
     # The production raster can be 1920x1080 even when the SVG placement spec
     # was authored at 1672x941. Alpha coordinates must use the real PNG size.
     overlay = np.zeros((1080, 1920, 4), dtype=np.uint8)
     overlay[216:864, 288:1440, 3] = 255
-    cv2.imwrite(target.name, overlay)
-    assert module.rendered_overlay_bounds(target.name) == {
+    assert cv2.imwrite(target_path, overlay)
+    assert module.rendered_overlay_bounds(target_path) == {
         "x": 288, "y": 216, "width": 1152, "height": 648
     }
-    geometry = module.rendered_overlay_geometry(target.name)
+    geometry = module.rendered_overlay_geometry(target_path)
     assert geometry["imageSize"] == {"width": 1920, "height": 1080}
     normalized = (
         geometry["bounds"]["x"] / geometry["imageSize"]["width"],

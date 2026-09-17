@@ -29,7 +29,7 @@ import numpy as np
 
 
 def read_json(path: Path) -> dict:
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def clamp(value: float, low: float, high: float) -> float:
@@ -287,7 +287,7 @@ def main() -> None:
         "rows": rows,
         "pass": bool(rows) and all(row["pass"] for row in rows),
     }
-    output_path.write_text(json.dumps(result, indent=1))
+    output_path.write_text(json.dumps(result, indent=1), encoding="utf-8")
     print(json.dumps({"pass": result["pass"], "rows": [{"id": r["utteranceId"], "pass": r["pass"]} for r in rows], "output": str(output_path)}, ensure_ascii=False))
     if not result["pass"]:
         sys.exit(1)

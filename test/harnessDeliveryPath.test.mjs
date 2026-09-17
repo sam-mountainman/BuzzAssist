@@ -4,13 +4,14 @@ import { cp, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { channelPackPresent } from "../lib/channelPackResolver.mjs";
 import { exportKoyaHandoffBundle, restoreKoyaHandoffBundle, verifyKoyaHandoffBundle } from "../lib/koyaHandoffBundle.mjs";
 import { runHarnessDoctor } from "../scripts/harness-doctor.mjs";
 import { prepareCompleteKoyaHandoffEvidence } from "./helpers/koyaHandoffFixture.mjs";
 
-const root = new URL("..", import.meta.url).pathname;
+const root = fileURLToPath(new URL("..", import.meta.url));
 
 test("運営者へ渡す経路が、契約を持たないプロジェクトで端から端まで通る", async (t) => {
   // これが配布の本体。ここが通らなければ、他が全部揃っていても

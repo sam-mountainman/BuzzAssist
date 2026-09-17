@@ -102,7 +102,7 @@ def reusable_cached_report(output_path, video, current_audio_sha256, expected_sh
     if not output_path.exists():
         return None
     try:
-        cached = json.loads(output_path.read_text())
+        cached = json.loads(output_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
     if cached.get("pass") is not True or [row.get("id") for row in cached.get("rows", [])] != expected_ids:
@@ -136,7 +136,7 @@ def main():
     parser.add_argument("--output")
     args = parser.parse_args()
     manifest_path = Path(args.manifest).resolve()
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     pronunciation_variants = {
         str(entry.get("from", "")): str(entry.get("to", ""))
         for entry in manifest.get("speech", {}).get("pronunciations", [])
@@ -187,7 +187,7 @@ def main():
                 "basis": "exact-decoded-pcm-and-ordered-utterance-ids",
             },
         })
-        output_path.write_text(json.dumps(cached, ensure_ascii=False, indent=1))
+        output_path.write_text(json.dumps(cached, ensure_ascii=False, indent=1), encoding="utf-8")
         os.unlink(tmp_path)
         print(json.dumps({"pass": True, "failures": [], "checked": len(cached["rows"]), "cacheHit": True}, ensure_ascii=False))
         return
@@ -291,7 +291,7 @@ def main():
         "rows": rows,
         "pass": all(r["pass"] for r in rows),
     }
-    output_path.write_text(json.dumps(result, ensure_ascii=False, indent=1))
+    output_path.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
     print(json.dumps({"pass": result["pass"], "failures": [r for r in rows if not r["pass"]], "checked": len(rows)}, ensure_ascii=False))
     if not result["pass"]:
         sys.exit(1)

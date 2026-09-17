@@ -6,6 +6,7 @@ import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:
 import os from "node:os";
 import path from "node:path";
 import { deflateSync } from "node:zlib";
+import { fileURLToPath } from "node:url";
 
 import {
   buildApprovedIdentityPackJobs,
@@ -724,7 +725,7 @@ test("approval stages real sheets and registers only after eight-view and twelve
     await passCandidateReview(cast.candidateReviewDraftPath);
 
     const selected = cast.candidates[1];
-    const showBible = JSON.parse(await readFile(resolveChannelPackPath(new URL("..", import.meta.url).pathname, "config/koya-show-bible.json"), "utf8"));
+    const showBible = JSON.parse(await readFile(resolveChannelPackPath(fileURLToPath(new URL("..", import.meta.url)), "config/koya-show-bible.json"), "utf8"));
     const bootstrapMember = showBible.cast.find((member) => member.id === "ibuki");
     bootstrapMember.hiddenName = cast.name;
     bootstrapMember.selectedBaseLabel = selected.blindLabel;
@@ -1104,7 +1105,7 @@ test("a single unkeyed eye-open sheet keeps the pre-variant pack, review, and re
     const draft = JSON.parse(await readFile(staged.identityReviewDraftPath, "utf8"));
     assert.equal(draft.extraSheets.length, 1);
     assert.equal(Object.hasOwn(draft.extraSheets[0], "storyStage"), false, "unkeyed drafts keep the historical shape");
-    assert.match(draft.extraSheets[0].cells[0].path, /\/eye-open-default-front\.png$/u);
+    assert.match(draft.extraSheets[0].cells[0].path, /[\\/]eye-open-default-front\.png$/u);
 
     // A workflow staged before variants existed has only identityPack.eyeOpen.
     await updateCharacterWorkflow({ projectDir }, prepared.workflow.id, (current) => {

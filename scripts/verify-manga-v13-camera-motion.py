@@ -102,9 +102,9 @@ def main() -> None:
     args = parser.parse_args()
 
     episode_dir = args.episode_dir.resolve()
-    manifest = json.loads((episode_dir / "episode-manifest.json").read_text())
+    manifest = json.loads((episode_dir / "episode-manifest.json").read_text(encoding="utf-8"))
     plan_path = (args.plan or episode_dir / "v13-camera-motion-plan.json").resolve()
-    plan = json.loads(plan_path.read_text())
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
     plan_by_cut: dict[str, list[dict]] = {}
     for row in plan["rows"]:
         plan_by_cut.setdefault(row["cutId"], []).append(row)
@@ -164,7 +164,7 @@ def main() -> None:
         "contactSheetPath": str(contact_path),
         "checks": checks,
     }
-    output_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+    output_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({
         "outputPath": str(output_path),
         "contactSheetPath": str(contact_path),

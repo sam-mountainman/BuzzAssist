@@ -508,7 +508,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--cascade", type=Path, default=HERE / "data" / "lbpcascade_animeface.xml")
     args = parser.parse_args()
-    plan = json.loads(args.plan.read_text())
+    plan = json.loads(args.plan.read_text(encoding="utf-8"))
     cascade = cv2.CascadeClassifier(str(args.cascade))
     if cascade.empty():
         raise SystemExit("anime face cascade missing")
@@ -529,7 +529,7 @@ def main():
         "pass": bool(cuts) and all(all(row["pass"] for row in cut["gates"]) for cut in cuts),
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, indent=1, ensure_ascii=False))
+    args.output.write_text(json.dumps(report, indent=1, ensure_ascii=False), encoding="utf-8")
     print(json.dumps({"pass": report["pass"], "cuts": [
         {"cutId": cut["cutId"], "failed": [row["id"] for row in cut["gates"] if not row["pass"]]} for cut in cuts
     ]}, ensure_ascii=False))

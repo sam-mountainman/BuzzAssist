@@ -5,7 +5,7 @@ import { createInterface } from "node:readline";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { basename, extname, join, posix, win32 } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_SERVICE_NAME = "excalidraw-codex-image-bridge";
@@ -274,7 +274,7 @@ async function writeReferenceInputs(tempDir, payload) {
       continue;
     }
 
-    const filePath = source.startsWith("file://") ? new URL(source).pathname : source;
+    const filePath = source.startsWith("file://") ? fileURLToPath(source) : source;
     inputs.push({ type: "localImage", path: filePath });
     index += 1;
   }
@@ -316,7 +316,7 @@ async function resolveImageSource(source, fileNameHint, mimeTypeHint) {
     };
   }
 
-  const filePath = raw.startsWith("file://") ? new URL(raw).pathname : raw;
+  const filePath = raw.startsWith("file://") ? fileURLToPath(raw) : raw;
   return readImageFile(filePath, fileNameHint, mimeTypeHint);
 }
 

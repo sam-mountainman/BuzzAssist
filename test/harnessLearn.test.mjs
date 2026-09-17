@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { HUMAN_VERIFIED } from "../scripts/harness-learn.mjs";
 
@@ -262,7 +263,7 @@ test("再生成済みの overlay に evidence 逐語の行が残っていない"
   // tarball 監査（private-term）と二重に見る。
   const { readFileSync, existsSync, readdirSync } = await import("node:fs");
   const { join } = await import("node:path");
-  const root = new URL("..", import.meta.url).pathname;
+  const root = fileURLToPath(new URL("..", import.meta.url));
   const skillsRoot = join(root, ".agents", "skills");
   if (!existsSync(skillsRoot)) return;
   let checked = 0;
@@ -467,7 +468,7 @@ test("既存の記録に、人の確認が取れていないことが残って�
   // 消さない（スキルの原則）。ただし「人が確認した」と読めないようにする。
   const { readFileSync, existsSync } = await import("node:fs");
   const { join } = await import("node:path");
-  const root = new URL("..", import.meta.url).pathname;
+  const root = fileURLToPath(new URL("..", import.meta.url));
   const file = join(root, "docs/learning/applied.jsonl");
   if (!existsSync(file)) return;
   const rows = readFileSync(file, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));

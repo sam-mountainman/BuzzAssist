@@ -4,6 +4,7 @@ import { readFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   computeHarnessBuild,
@@ -20,7 +21,7 @@ import {
 } from "../lib/harnessRunReceipt.mjs";
 import { rollup } from "../scripts/harness-receipts.mjs";
 
-const root = new URL("..", import.meta.url).pathname;
+const root = fileURLToPath(new URL("..", import.meta.url));
 const NOW = "2026-08-29T12:00:00.000Z";
 
 function openManga() {

@@ -18,7 +18,7 @@ def main() -> None:
     parser.add_argument("--video", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
-    manifest = json.loads(args.manifest.read_text())
+    manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
     cuts = {cut["id"]: cut for cut in manifest["cuts"]}
     samples = []
     for utterance in manifest["utterances"]:
@@ -40,7 +40,7 @@ def main() -> None:
                     "height": 941,
                 })
         else:
-            spec = json.loads(Path(utterance["overlaySpecPath"]).read_text())
+            spec = json.loads(Path(utterance["overlaySpecPath"]).read_text(encoding="utf-8"))
             bounds = spec["plan"]["bubbles"][0]["bounds"]
             samples.append({
                 "id": utterance["id"],

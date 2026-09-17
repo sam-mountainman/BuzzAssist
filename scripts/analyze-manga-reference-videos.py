@@ -208,7 +208,7 @@ def audio_measure(video_path: Path) -> dict:
 
 def metadata_for(video_path: Path, capture: cv2.VideoCapture) -> dict:
     info_path = video_path.with_suffix(".info.json")
-    info = json.loads(info_path.read_text()) if info_path.exists() else {}
+    info = json.loads(info_path.read_text(encoding="utf-8")) if info_path.exists() else {}
     fps = float(capture.get(cv2.CAP_PROP_FPS) or 0)
     frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     duration = frame_count / fps if fps > 0 else float(info.get("duration") or 0)
@@ -348,7 +348,7 @@ def main() -> None:
         "reports": reports,
     }
     output_path = args.output_dir / "reference-video-measurements.json"
-    output_path.write_text(json.dumps(aggregate, ensure_ascii=False, indent=2) + "\n")
+    output_path.write_text(json.dumps(aggregate, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({
         "outputPath": str(output_path.resolve()),
         "videoCount": len(reports),

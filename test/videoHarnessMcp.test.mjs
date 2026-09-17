@@ -179,12 +179,13 @@ test("MCP handler is a thin dispatcher and preserves the service result envelope
   }, { service, feedbackCollector, reviewerActions });
   assert.deepEqual(calls.map(([operation]) => operation), ["start", "get", "list", "cancel", "resume", "collect-feedback", "signoff", "reviewer-key-create"]);
   // R5-REV-02: Job 系 6 tool すべてで projectDir が絶対 path で service / collector まで届く。
-  for (const index of [0, 1, 2, 3, 4, 5]) assert.equal(calls[index][1].projectDir, "/tmp/project", `${calls[index][0]} projectDir`);
-  assert.equal(calls[0][1].scriptPath, "/tmp/project/script.txt", "相対 scriptPath は projectDir 基準で解決される");
-  assert.equal(calls[0][1].channelPackPath, "/tmp/project/pack", "相対 channelPackPath は projectDir 基準で解決される");
+  // 本体は path を resolve して渡す。Windows ではドライブ名と "\\" 区切りになるので、期待値も resolve で作る。
+  for (const index of [0, 1, 2, 3, 4, 5]) assert.equal(calls[index][1].projectDir, resolve("/tmp/project"), `${calls[index][0]} projectDir`);
+  assert.equal(calls[0][1].scriptPath, resolve("/tmp/project", "script.txt"), "相対 scriptPath は projectDir 基準で解決される");
+  assert.equal(calls[0][1].channelPackPath, resolve("/tmp/project", "pack"), "相対 channelPackPath は projectDir 基準で解決される");
   assert.equal(calls[4][1].confirmed, true);
-  assert.equal(calls[4][1].reviewerTrustPath, "/secure/reviewer-trust.json", "MCP 引数の信頼リスト path は service.resume まで届く");
-  assert.equal(calls[6][1].reviewerKeyPath, "/secure/k.pem", "signoff 引数は reviewer adapter までそのまま届く");
+  assert.equal(calls[4][1].reviewerTrustPath, resolve("/secure/reviewer-trust.json"), "MCP 引数の信頼リスト path は service.resume まで届く");
+  assert.equal(calls[6][1].reviewerKeyPath, resolve("/secure/k.pem"), "signoff 引数は reviewer adapter までそのまま届く");
   assert.equal(feedback.structuredContent.captured, 1);
   assert.match(feedback.content[0].text, /captured=1/u);
   assert.match(signed.content[0].text, /Reviewer signoff written for narrated-story-video Job video-a/u);
@@ -262,7 +263,7 @@ test("F-4: narrated signoff / reviewer-key-create MCP entries carry only paths a
   assert.equal(flag("--reviewer"), "codex");
   assert.equal(flag("--reviewer-id"), "independent-reviewer-1");
   assert.equal(flag("--reviewer-context-id"), "codex-task-9");
-  assert.equal(flag("--reviewer-key-path"), "/secure/outside-repo/reviewer-ed25519.pem");
+  assert.equal(flag("--reviewer-key-path"), resolve("/secure/outside-repo/reviewer-ed25519.pem"));
   assert.equal(flag("--reviewer-trust-path"), operatorCopy);
   assert.equal(flag("--video-path"), join(dir, "final.mp4"));
   assert.equal(flag("--contact-sheet-path"), join(dir, "contact-sheet.png"));
@@ -312,8 +313,8 @@ test("F-4: narrated signoff / reviewer-key-create MCP entries carry only paths a
   assert.match(created.result.keyId, /^ed25519:/u);
   const keyCall = invocations.at(-1);
   assert.equal(keyCall.argv[1], "reviewer-key-create");
-  assert.equal(keyCall.argv[keyCall.argv.indexOf("--reviewer-key-path") + 1], "/secure/outside-repo/new.pem");
-  assert.equal(keyCall.argv[keyCall.argv.indexOf("--reviewer-public-key-path") + 1], "/secure/outside-repo/new.pub");
+  assert.equal(keyCall.argv[keyCall.argv.indexOf("--reviewer-key-path") + 1], resolve("/secure/outside-repo/new.pem"));
+  assert.equal(keyCall.argv[keyCall.argv.indexOf("--reviewer-public-key-path") + 1], resolve("/secure/outside-repo/new.pub"));
   assert.equal(keyCall.argv[keyCall.argv.indexOf("--reviewer-label") + 1], "independent-reviewer-2");
   assert.equal(keyCall.argv[keyCall.argv.indexOf("--project-dir") + 1], dir);
   await assert.rejects(actions.createReviewerKey({ confirmed: true, reviewerKeyPath: "/x.pem", reviewerPrivateKeyPem: "x" }), /key material/u);
@@ -360,7 +361,7 @@ test("R5-REV-02: run/resume/get/list/cancel/collect-feedback never fall back to 
 
   // 明示 projectDir: 相対 script / pack は projectDir 基準、絶対はそのまま。cwd の値は結果に現れない。
   await handleVideoHarnessToolCall({ name: TOOL_RUN_VIDEO_HARNESS, arguments: { projectDir: "/work/project", scriptPath: "rel/script.md", channelPackPath: "/packs/pack.json", reviewerTrustPath: "/secure/trust.json" } }, deps);
-  assert.deepEqual(calls.at(-1)[1], { projectDir: "/work/project", scriptPath: "/work/project/rel/script.md", channelPackPath: "/packs/pack.json", reviewerTrustPath: "/secure/trust.json" });
+  assert.deepEqual(calls.at(-1)[1], { projectDir: resolve("/work/project"), scriptPath: resolve("/work/project", "rel/script.md"), channelPackPath: resolve("/packs/pack.json"), reviewerTrustPath: resolve("/secure/trust.json") });
   // server が roots から埋めた projectDir が env より優先される。
   await handleVideoHarnessToolCall({ name: TOOL_GET_VIDEO_HARNESS_JOB, arguments: { projectDir: "/work/from-roots", jobId: "video-a" } }, { ...deps, env: { EXCALIDRAW_PROJECT_DIR: "/work/from-env" } });
   assert.equal(calls.at(-1)[1].projectDir, "/work/from-roots");
@@ -431,7 +432,8 @@ test("the real MCP server registers all generic harness tools and list uses the 
     assert.equal(created.structuredContent.result.privateKeyPath, keyPath);
     assert.equal(created.structuredContent.result.trustEntry.label, "mcp lane-j");
     assert.doesNotMatch(JSON.stringify(created), /PRIVATE KEY/u, "秘密鍵の中身は MCP 応答に載せない");
-    assert.equal(((await stat(keyPath)).mode & 0o777), 0o600);
+    // Windows は POSIX の権限ビットを持たない（Node は書き込み可否しか反映しない）。
+    if (process.platform !== "win32") assert.equal(((await stat(keyPath)).mode & 0o777), 0o600);
 
     const refused2 = await client.callTool({
       name: "run_koya_manga_pipeline",
@@ -461,7 +463,7 @@ test("the real MCP server registers all generic harness tools and list uses the 
       assert.equal(createdNarrated.structuredContent.result.privateKeyPath, narratedKeyPath);
       assert.equal(createdNarrated.structuredContent.result.trustEntry.label, "mcp lane-e");
       assert.doesNotMatch(JSON.stringify(createdNarrated), /PRIVATE KEY/u, "秘密鍵の中身は MCP 応答に載せない");
-      assert.equal(((await stat(narratedKeyPath)).mode & 0o777), 0o600);
+      if (process.platform !== "win32") assert.equal(((await stat(narratedKeyPath)).mode & 0o777), 0o600);
 
       const insideProject = await client.callTool({
         name: TOOL_CREATE_VIDEO_HARNESS_REVIEWER_KEY,

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import {
   formatBestOfNCommand,
@@ -40,7 +40,9 @@ test("BESTOFN_ROOT works without a user-specific folder name", async () => {
 });
 
 test("relative BESTOFN_ROOT resolves from the requested working directory", async () => {
-  const expected = join("/project", "vendor", "bestofn", "bin", "bon.js");
+  // 本体は相対の root を resolve で解決する。Windows では resolve がドライブ名を
+  // 付けるので、期待値も join ではなく resolve で作る。
+  const expected = resolve("/project", "vendor", "bestofn", "bin", "bon.js");
   const invocation = await resolveBestOfNInvocation({
     env: { BESTOFN_ROOT: "vendor/bestofn" },
     cwd: "/project",

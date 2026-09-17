@@ -103,7 +103,7 @@ def main():
     args = parser.parse_args()
 
     manifest_path = Path(args.manifest_path).resolve()
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     utterance = next(row for row in manifest["utterances"] if row["id"] == args.utterance_id)
     absolute_start = float(utterance["timing"]["audioStartSeconds"])
     ordered = sorted(manifest["utterances"], key=lambda row: float(row.get("timing", {}).get("audioStartSeconds", 0)))
@@ -221,7 +221,7 @@ def main():
         plt.close(tail_figure)
         report["previousTailPlotPath"] = str(tail_plot_path)
     report_path = output_dir / "click-region-analysis.json"
-    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
 

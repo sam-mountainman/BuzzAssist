@@ -1,2 +1,11 @@
+# 改行は LF に揃える。Windows の git は既定で CRLF に変換して取り出すので、
+# 内容の SHA を固定しているもの（Skill の在庫、公開 catalog など）が
+# Windows の clone でだけ食い違い、本番経路が「在庫の SHA が古い」で止まる
+# （Windows の CI で30件以上がこれで落ちていた）。
+* text=auto eol=lf
+# cmd.exe のバッチは CRLF のままにする（LF だけだとラベルの解釈が崩れることがある）。
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
 dist/assets/* linguist-generated=true -diff
 dist-widget/assets/* linguist-generated=true -diff

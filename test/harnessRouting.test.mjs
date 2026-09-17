@@ -3,10 +3,11 @@ import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { GENRE_CANONICAL_ENTRYPOINTS, assertCanonicalRouting, checkCanonicalRouting } from "../lib/harnessRouting.mjs";
 
-const root = new URL("..", import.meta.url).pathname;
+const root = fileURLToPath(new URL("..", import.meta.url));
 
 test("Channel Pack 設置済みの環境では、ガバナンスを迂回する旧入口が塞がれる", async () => {
   // 旧入口は同じ MP4 を出せてしまう。出せるからこそ、エージェントが
