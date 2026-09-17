@@ -943,6 +943,8 @@ test("Koya handoff carries a declared provenance gap and rejects an attestation 
       boardId: gapBoardId,
       reason: reasonToken,
       specificationSha256,
+      promptRecorded: false,
+      generatorContextRecorded: false,
     }]);
 
     const attestationPath = path.join(bundleDir, "project", "canvas", portableLocation.approval.identityReviewPath.replace(/^__BUNDLE_CANVAS__\//u, ""));
@@ -950,7 +952,12 @@ test("Koya handoff carries a declared provenance gap and rejects an attestation 
     const attestation = JSON.parse(attestationText);
     const gapBoard = attestation.snapshot.boards[1];
     assert.equal(gapBoard.boardId, gapBoardId);
-    assert.deepEqual(gapBoard.provenanceGap, { reason: reasonToken, specificationSha256 });
+    assert.deepEqual(gapBoard.provenanceGap, {
+      reason: reasonToken,
+      specificationSha256,
+      promptRecorded: false,
+      generatorContextRecorded: false,
+    });
     assert.equal(gapBoard.generatorContextId, "");
     assert.equal(gapBoard.provenance, "external-import");
     assert.equal(gapBoard.checks.provenanceGapAcknowledged, true);
@@ -1037,7 +1044,9 @@ test("Koya handoff carries the unrecorded-reference flag and rejects an attestat
 
     // 改ざん: attestation から旗だけを落とす／true に書き換える。
     for (const [label, mutateBoard, expected] of [
-      ["dropped", (board) => { delete board.provenanceGap.referenceImagesRecorded; }, /must declare exactly the provenance gaps the approved review recorded/u],
+      // このボードの旗はこれ1つなので、落とすと「何が無かったのか言っていない
+      // 欠落」になる。形の検査と台帳との突き合わせのどちらで落ちてもよい。
+      ["dropped", (board) => { delete board.provenanceGap.referenceImagesRecorded; }, /must say which records were never kept|must declare exactly the provenance gaps the approved review recorded/u],
       ["altered", (board) => { board.provenanceGap.referenceImagesRecorded = true; }, /referenceImagesRecorded may only be false/u],
     ]) {
       const tamperedAttestation = JSON.parse(attestationText);
@@ -1046,6 +1055,75 @@ test("Koya handoff carries the unrecorded-reference flag and rejects an attestat
       await writeFile(attestationPath, tamperedBytes);
       const tamperedRegistry = JSON.parse(await readFile(registryPath, "utf8"));
       tamperedRegistry.characters.find((entry) => entry.kind === "location").approval.identityReviewSha256 = sha256(tamperedBytes);
+      await writeJson(registryPath, tamperedRegistry);
+      await rehashBundleManifest(bundleDir);
+      await assert.rejects(() => verifyKoyaHandoffBundle({ bundleDir }), expected, label);
+    }
+  } finally {
+    if (savedPack === undefined) delete process.env.BUZZASSIST_CHANNEL_PACK; else process.env.BUZZASSIST_CHANNEL_PACK = savedPack;
+    if (savedPackId === undefined) delete process.env.BUZZASSIST_CHANNEL_PACK_ID; else process.env.BUZZASSIST_CHANNEL_PACK_ID = savedPackId;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Koya handoff rejects an attestation that invents a generator conversation for a board that declared none", async () => {
+  // 旗をボードごとに分けたあと、「欠落あり」でまとめて会話 id を緩めると、
+  // 記録の無い会話を本物らしい token で騙れてしまう。旗そのもので判定すること。
+  const savedPack = process.env.BUZZASSIST_CHANNEL_PACK;
+  const savedPackId = process.env.BUZZASSIST_CHANNEL_PACK_ID;
+  delete process.env.BUZZASSIST_CHANNEL_PACK;
+  delete process.env.BUZZASSIST_CHANNEL_PACK_ID;
+  const root = await mkdtemp(path.join(os.tmpdir(), "koya-handoff-location-context-forge-"));
+  const sourceProject = path.join(root, "source");
+  const bundleDir = path.join(root, "bundle");
+  try {
+    await prepareProject(sourceProject, true);
+    await writeJson(path.join(sourceProject, "config", "koya-location-bible.json"), syntheticLocationBible());
+    const authority = await readSyntheticKoyaAuthority(sourceProject);
+    await importAndRegisterSyntheticLocation({
+      projectDir: sourceProject,
+      authority,
+      locationId: "sample-street",
+      sourceDir: path.join(root, "downloads"),
+      mutate: declareProvenanceGap({ boardNumber: 2, flags: ["promptRecorded", "generatorContextRecorded"] }),
+    });
+    await exportKoyaHandoffBundle({ projectDir: sourceProject, outputDir: bundleDir, bundleId: "handoff-location-context-forge" });
+    assert.equal((await verifyKoyaHandoffBundle({ bundleDir })).ok, true);
+
+    const registryPath = await bundleRegistryPath(bundleDir);
+    const portableRegistry = JSON.parse(await readFile(registryPath, "utf8"));
+    const portableLocation = portableRegistry.characters.find((entry) => entry.kind === "location");
+    // 台帳の承認にも、会話が残っていないという旗が乗っていること。
+    assert.equal(portableLocation.approval.provenanceGaps[0].generatorContextRecorded, false);
+    const attestationPath = path.join(bundleDir, "project", "canvas", portableLocation.approval.identityReviewPath.replace(/^__BUNDLE_CANVAS__\//u, ""));
+    const attestationText = await readFile(attestationPath, "utf8");
+    assert.equal(JSON.parse(attestationText).snapshot.boards[1].generatorContextId, "");
+
+    // 改ざん: 会話の記録を騙る／旗を落とす／旗を書き換える。毎回、台帳の SHA と
+    // 束の manifest まで作り直して、署名の整合では止まらない状態にしてから見る。
+    for (const [label, mutateBoard, expected] of [
+      [
+        "forged context token",
+        (board) => { board.generatorContextId = `source-context-sha256:${sha256("invented-conversation")}`; },
+        /generation provenance must use one-way context tokens/u,
+      ],
+      [
+        "dropped flag",
+        (board) => { delete board.provenanceGap.generatorContextRecorded; },
+        /must declare exactly the provenance gaps the approved review recorded/u,
+      ],
+      [
+        "altered flag",
+        (board) => { board.provenanceGap.generatorContextRecorded = true; },
+        /generatorContextRecorded may only be false/u,
+      ],
+    ]) {
+      const forged = JSON.parse(attestationText);
+      mutateBoard(forged.snapshot.boards[1]);
+      const forgedBytes = `${JSON.stringify(forged, null, 2)}\n`;
+      await writeFile(attestationPath, forgedBytes);
+      const tamperedRegistry = JSON.parse(await readFile(registryPath, "utf8"));
+      tamperedRegistry.characters.find((entry) => entry.kind === "location").approval.identityReviewSha256 = sha256(forgedBytes);
       await writeJson(registryPath, tamperedRegistry);
       await rehashBundleManifest(bundleDir);
       await assert.rejects(() => verifyKoyaHandoffBundle({ bundleDir }), expected, label);

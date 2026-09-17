@@ -122,8 +122,12 @@ test("a board whose prompt and conversation were never recorded is imported as a
       boardId: gapped.boardId,
       reason: "このボードはプロンプトと会話 id を残す決まりより前に作られ、どちらも残っていない",
       specificationSha256: sha256(SPECIFICATION_TEXT),
+      promptRecorded: false,
+      generatorContextRecorded: false,
     }]);
-    assert.match(entry.approval.reason, /provenance gap/u);
+    // 承認の文は、実際に宣言された旗だけを言う。
+    assert.match(entry.approval.reason, /provenance gap for records that were never kept \(the prompt, the generator conversation\)/u);
+    assert.equal(entry.approval.reason.includes("the reference images"), false);
   });
 });
 
@@ -347,6 +351,11 @@ test("a board whose reference images were never recorded imports with an empty r
       specificationSha256: sha256(SPECIFICATION_TEXT),
       referenceImagesRecorded: false,
     }]);
+    // 台帳に残る文が、そのボードについて事実でないことを言わないこと。
+    // このボードはプロンプトも会話も残っているので、そう書いたら作り話になる。
+    assert.match(entry.approval.reason, /provenance gap for records that were never kept \(the reference images\)/u);
+    assert.equal(entry.approval.reason.includes("no prompt and no generator conversation"), false);
+    assert.equal(entry.approval.reason.includes("SHA-bound prompt, reference and context provenance"), false);
   });
 });
 
