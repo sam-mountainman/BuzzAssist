@@ -2,7 +2,7 @@
 import { spawn } from "node:child_process";
 import { access, cp, lstat, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { constants, existsSync } from "node:fs";
-import { dirname, join, resolve, sep } from "node:path";
+import path, { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { resolveCodexCommand } from "./codex-image-bridge.mjs";
@@ -394,11 +394,24 @@ const NEVER_DISTRIBUTE = new Set([
   "proposals.jsonl", "applied.jsonl",
 ]);
 
-function isChannelPackPath(sourcePath, repoRootPath = repoRoot) {
-  const parts = sourcePath.split(sep);
+// Node 20 の fs.cp は、Windows で filter に "\\?\D:\..." 形式（名前空間つき）のパスを渡す。
+function withoutWindowsNamespace(value) {
+  const text = String(value);
+  if (text.startsWith("\\\\?\\UNC\\")) return `\\\\${text.slice(8)}`;
+  if (text.startsWith("\\\\?\\")) return text.slice(4);
+  return text;
+}
+
+export function isChannelPackPath(sourcePath, repoRootPath = repoRoot, pathApi = path) {
+  const normalized = withoutWindowsNamespace(sourcePath);
+  const parts = normalized.split(/[\\/]+/u);
   if (parts.some((part) => NEVER_DISTRIBUTE.has(part))) return true;
-  // config/ 直下は列挙されたものだけ通す。
-  const relative = sourcePath.startsWith(repoRootPath) ? sourcePath.slice(repoRootPath.length).split(sep).filter(Boolean) : parts;
+  // config/ 直下は列挙されたものだけ通す。リポジトリのルートとの前方一致で
+  // 見ていたので、Windows の Node 20 では名前空間つきのパスが一致せず、
+  // 許可していない設定ファイル（skip や公開面の許可リスト）まで配布物へ入った。
+  const rel = pathApi.relative(withoutWindowsNamespace(repoRootPath), normalized);
+  const inside = rel !== "" && rel !== ".." && !rel.startsWith(`..${pathApi.sep}`) && !pathApi.isAbsolute(rel);
+  const relative = inside ? rel.split(/[\\/]+/u).filter(Boolean) : [];
   if (relative[0] === "config" && relative.length >= 2) {
     return !DISTRIBUTABLE_CONFIG_ENTRIES.includes(relative[1]);
   }
