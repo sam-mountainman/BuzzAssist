@@ -1,0 +1,434 @@
+{
+  "schemaVersion": 1,
+  "manifestVersion": "1.2.0",
+  "namespace": "buzzassist",
+  "classifications": [
+    "installed",
+    "bundled",
+    "productionAllowed",
+    "developmentOnly"
+  ],
+  "skills": [
+    {
+      "id": "buzzassist:platform-craft",
+      "name": "platform-craft",
+      "version": "1.2.3",
+      "contentSha256": "sha256:ee255c60da6c6cd7bfe3670b1f9beacb930865d035507fb07dc1b27d7db6b698",
+      "language": "ja",
+      "owner": "BuzzAssist maintainers",
+      "origin": "project-canonical",
+      "canonicalPath": ".agents/skills/platform-craft/SKILL.md",
+      "hosts": [
+        "claude-code",
+        "codex"
+      ],
+      "adapters": [
+        {
+          "host": "claude-code",
+          "path": ".claude/skills/platform-craft/SKILL.md",
+          "name": "platform-craft"
+        },
+        {
+          "host": "codex",
+          "path": ".codex/skills/platform-craft/SKILL.md",
+          "name": "platform-craft"
+        }
+      ],
+      "classification": {
+        "installed": false,
+        "bundled": true,
+        "productionAllowed": true,
+        "developmentOnly": false
+      }
+    },
+    {
+      "id": "buzzassist:harness-parallel-execution",
+      "name": "harness-parallel-execution",
+      "version": "1.0.0",
+      "contentSha256": "sha256:772343dcb1fe3688ce14feb449ddd82e7d1059428fa482c6a845dd5bee1a18ff",
+      "language": "ja",
+      "owner": "BuzzAssist maintainers",
+      "origin": "project-canonical",
+      "canonicalPath": ".agents/skills/harness-parallel-execution/SKILL.md",
+      "hosts": [
+        "claude-code",
+        "codex"
+      ],
+      "adapters": [
+        {
+          "host": "claude-code",
+          "path": ".claude/skills/harness-parallel-execution/SKILL.md",
+          "name": "harness-parallel-execution"
+        },
+        {
+          "host": "codex",
+          "path": ".codex/skills/harness-parallel-execution/SKILL.md",
+          "name": "harness-parallel-execution"
+        }
+      ],
+      "classification": {
+        "installed": false,
+        "bundled": true,
+        "productionAllowed": true,
+        "developmentOnly": false
+      }
+    },
+    {
+      "id": "buzzassist:harness-self-improvement",
+      "name": "harness-self-improvement",
+      "version": "1.2.1",
+      "contentSha256": "sha256:9f5587c9659ef5dc99c6cb0b318d7d8fea146586a1f6af938aa492c7ba4a8679",
+      "language": "ja",
+      "owner": "BuzzAssist maintainers",
+      "origin": "project-canonical",
+      "canonicalPath": ".agents/skills/harness-self-improvement/SKILL.md",
+      "hosts": [
+        "claude-code",
+        "codex"
+      ],
+      "adapters": [
+        {
+          "host": "claude-code",
+          "path": ".claude/skills/harness-self-improvement/SKILL.md",
+          "name": "harness-self-improvement"
+        },
+        {
+          "host": "codex",
+          "path": ".codex/skills/harness-self-improvement/SKILL.md",
+          "name": "harness-self-improvement"
+        }
+      ],
+      "classification": {
+        "installed": false,
+        "bundled": true,
+        "productionAllowed": true,
+        "developmentOnly": false
+      }
+    },
+    {
+      "id": "buzzassist:manga-video-production",
+      "name": "manga-video-production",
+      "version": "1.2.1",
+      "contentSha256": "sha256:fdc639a0dde6bc06318a537225f4c533027b0a842688897f8f0a3978cff6ccc9",
+      "language": "ja",
+      "owner": "BuzzAssist maintainers",
+      "origin": "project-canonical",
+      "canonicalPath": ".agents/skills/manga-video-production/SKILL.md",
+      "hosts": [
+        "claude-code",
+        "codex"
+      ],
+      "adapters": [
+        {
+          "host": "claude-code",
+          "path": ".claude/skills/manga-video-production/SKILL.md",
+          "name": "manga-video-production"
+        },
+        {
+          "host": "codex",
+          "path": ".codex/skills/manga-video-production/SKILL.md",
+          "name": "manga-video-production"
+        }
+      ],
+      "classification": {
+        "installed": false,
+        "bundled": true,
+        "productionAllowed": true,
+        "developmentOnly": false
+      }
+    },
+    {
+      "id": "buzzassist:manga-page-camera",
+      "name": "manga-page-camera",
+      "version": "1.0.0",
+      "contentSha256": "sha256:94fce9c90e029256c16a5117c075991d18be42be0cb8e2079bfebd18374407cb",
+      "language": "ja",
+      "owner": "BuzzAssist maintainers",
+      "origin": "project-canonical",
+      "canonicalPath": ".agents/skills/manga-page-camera/SKILL.md",
+      "hosts": [
+        "claude-code",
+        "codex"
+      ],
+      "adapters": [
+        {
+          "host": "claude-code",
+          "path": ".claude/skills/manga-page-camera/SKILL.md",
+          "name": "manga-page-camera"
+        },
+        {
+          "host": "codex",
+          "path": ".codex/skills/manga-page-camera/SKILL.md",
+          "name": "manga-page-camera"
+        }
+      ],
+      "classification": {
+        "installed": false,
+        "bundled": true,
+        "productionAllowed": true,
+        "developmentOnly": false
+      }
+    },
+    {
+      "id": "buzzassist:narrated-story-video",
+      "name": "narrated-story-video",
+      "version": "1.2.2",
+      "contentSha256": "sha256:bd6da78763a5de317710f489487b506e508dc0edfe4fa22b0362c3ce7845c639",
+      "language": "ja",
+      "owner": "BuzzAssist maintainers",
+      "origin": "project-canonical",
+      "canonicalPath": ".agents/skills/narrated-story-video/SKILL.md",
+      "hosts": [
+        "claude-code",
+        "codex"
+      ],
+      "adapters": [
+        {
+          "host": "claude-code",
+          "path": ".claude/skills/narrated-story-video/SKILL.md",
+          "name": "narrated-story-video"
+        },
+        {
+          "host": "codex",
+          "path": ".codex/skills/narrated-story-video/SKILL.md",
+          "name": "narrated-story-video"
+        }
+      ],
+      "classification": {
+        "installed": false,
+        "bundled": true,
+        "productionAllowed": true,
+        "developmentOnly": false
+      }
+    },
+    {
+      "id": "buzzassist:skill-creator",
+      "name": "skill-creator",
+      "version": "0.1.0",
+      "contentSha256": "sha256:6bf00a8ef45cab253bddbe10e4b4c7b8dacbfa6ce0a8095d87fafe91bd5bc1fc",
+      "language": "ja",
+      "owner": "BuzzAssist maintainers",
+      "origin": "project-canonical",
+      "canonicalPath": ".agents/skills/skill-creator/SKILL.md",
+      "hosts": [
+        "claude-code",
+        "codex"
+      ],
+      "adapters": [
+        {
+          "host": "claude-code",
+          "path": ".claude/skills/buzzassist-skill-creator/SKILL.md",
+          "name": "buzzassist-skill-creator"
+        },
+        {
+          "host": "codex",
+          "path": ".codex/skills/buzzassist-skill-creator/SKILL.md",
+          "name": "buzzassist-skill-creator"
+        },
+        {
+          "host": "shared",
+          "name": "buzzassist-skill-creator",
+          "path": ".agents/skills/buzzassist-skill-creator/SKILL.md"
+        }
+      ],
+      "classification": {
+        "installed": false,
+        "bundled": true,
+        "productionAllowed": false,
+        "developmentOnly": true
+      }
+    },
+    {
+      "id": "buzzassist:excalidraw-open-canvas",
+      "name": "excalidraw-open-canvas",
+      "version": "0.1.25",
+      "contentSha256": "sha256:32764e284d90a665b9e570ba1f8d3393476a064fbe66d0264f49c4ef7817c69a",
+      "language": "en",
+      "owner": "BuzzAssist maintainers",
+      "origin": "plugin-runtime-source",
+      "canonicalPath": "skills/excalidraw-open-canvas/SKILL.md",
+      "hosts": [
+        "claude-code",
+        "codex"
+      ],
+      "adapters": [],
+      "classification": {
+        "installed": false,
+        "bundled": true,
+        "productionAllowed": true,
+        "developmentOnly": false
+      }
+    },
+    {
+      "id": "buzzassist:excalidraw-official-mcp",
+      "name": "excalidraw-official-mcp",
+      "version": "0.1.25",
+      "contentSha256": "sha256:8770a7c6b042f6401264acd7c7bc8b06b36bacb8a343eb91da0750392f98d6ea",
+      "language": "en",
+      "owner": "BuzzAssist maintainers",
+      "origin": "plugin-runtime-source",
+      "canonicalPath": "skills/excalidraw-official-mcp/SKILL.md",
+      "hosts": [
+        "claude-code",
+        "codex"
+      ],
+      "adapters": [],
+      "classification": {
+        "installed": false,
+        "bundled": true,
+        "productionAllowed": true,
+        "developmentOnly": false
+      }
+    },
+    {
+      "id": "buzzassist:excalidraw-image-gen",
+      "name": "excalidraw-image-gen",
+      "version": "0.1.25",
+      "contentSha256": "sha256:17ce4aea194cbf892f0a74327f5fc1253ae9b099d49d3c51105332c555566581",
+      "language": "en",
+      "owner": "BuzzAssist maintainers",
+      "origin": "plugin-runtime-source",
+      "canonicalPath": "skills/excalidraw-image-gen/SKILL.md",
+      "hosts": [
+        "claude-code",
+        "codex"
+      ],
+      "adapters": [],
+      "classification": {
+        "installed": false,
+        "bundled": true,
+        "productionAllowed": true,
+        "developmentOnly": false
+      }
+    },
+    {
+      "id": "buzzassist:excalidraw-video-gen",
+      "name": "excalidraw-video-gen",
+      "version": "0.1.25",
+      "contentSha256": "sha256:c79df5fdd7d63ce80304d8be0d37a349199e899ee608e0de1ae95c0ca0a114a6",
+      "language": "en",
+      "owner": "BuzzAssist maintainers",
+      "origin": "plugin-runtime-source",
+      "canonicalPath": "skills/excalidraw-video-gen/SKILL.md",
+      "hosts": [
+        "claude-code",
+        "codex"
+      ],
+      "adapters": [],
+      "classification": {
+        "installed": false,
+        "bundled": true,
+        "productionAllowed": true,
+        "developmentOnly": false
+      }
+    },
+    {
+      "id": "buzzassist:excalidraw-subtitle-gen",
+      "name": "excalidraw-subtitle-gen",
+      "version": "0.1.25",
+      "contentSha256": "sha256:cdba15885d861bfe9aa432e9607fef159396bf55f49196eb199064970e1a27e5",
+      "language": "en",
+      "owner": "BuzzAssist maintainers",
+      "origin": "plugin-runtime-source",
+      "canonicalPath": "skills/excalidraw-subtitle-gen/SKILL.md",
+      "hosts": [
+        "claude-code",
+        "codex"
+      ],
+      "adapters": [],
+      "classification": {
+        "installed": false,
+        "bundled": true,
+        "productionAllowed": true,
+        "developmentOnly": false
+      }
+    },
+    {
+      "id": "buzzassist:excalidraw-silence-cut",
+      "name": "excalidraw-silence-cut",
+      "version": "0.1.25",
+      "contentSha256": "sha256:ee5d5e1f19985c5a0f7648150fbfae3b5991e631770191aebe6f941779128c8d",
+      "language": "en",
+      "owner": "BuzzAssist maintainers",
+      "origin": "plugin-runtime-source",
+      "canonicalPath": "skills/excalidraw-silence-cut/SKILL.md",
+      "hosts": [
+        "claude-code",
+        "codex"
+      ],
+      "adapters": [],
+      "classification": {
+        "installed": false,
+        "bundled": true,
+        "productionAllowed": true,
+        "developmentOnly": false
+      }
+    },
+    {
+      "id": "buzzassist:excalidraw-speech-bubbles",
+      "name": "excalidraw-speech-bubbles",
+      "version": "0.1.25",
+      "contentSha256": "sha256:f4a369d78822fe35ba9f02e0de33805bb15bec3ca56cae390c5ee3cc90c2da9c",
+      "language": "en",
+      "owner": "BuzzAssist maintainers",
+      "origin": "plugin-runtime-source",
+      "canonicalPath": "skills/excalidraw-speech-bubbles/SKILL.md",
+      "hosts": [
+        "claude-code",
+        "codex"
+      ],
+      "adapters": [],
+      "classification": {
+        "installed": false,
+        "bundled": true,
+        "productionAllowed": true,
+        "developmentOnly": false
+      }
+    },
+    {
+      "id": "buzzassist:excalidraw-benchmark-manga-style",
+      "name": "excalidraw-benchmark-manga-style",
+      "version": "0.1.25",
+      "contentSha256": "sha256:7e3d323cb89e7fa64b5981d6e18f1d49cb1e45bcbce9a599afa07ce174fb5e33",
+      "language": "en",
+      "owner": "BuzzAssist maintainers",
+      "origin": "plugin-runtime-source",
+      "canonicalPath": "skills/excalidraw-benchmark-manga-style/SKILL.md",
+      "hosts": [
+        "claude-code",
+        "codex"
+      ],
+      "adapters": [],
+      "classification": {
+        "installed": false,
+        "bundled": true,
+        "productionAllowed": false,
+        "developmentOnly": true
+      }
+    }
+  ],
+  "plugins": [
+    {
+      "id": "buzzassist:core-plugin",
+      "name": "buzzassist",
+      "version": "0.1.25",
+      "owner": "BuzzAssist maintainers",
+      "origin": "project-bundle",
+      "manifestPaths": [
+        ".codex-plugin/plugin.json",
+        ".claude-plugin/plugin.json",
+        ".agents/plugins/marketplace.json"
+      ],
+      "hosts": [
+        "claude-code",
+        "codex"
+      ],
+      "classification": {
+        "installed": false,
+        "bundled": true,
+        "productionAllowed": true,
+        "developmentOnly": false
+      }
+    }
+  ]
+}

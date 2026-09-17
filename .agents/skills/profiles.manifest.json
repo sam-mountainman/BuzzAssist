@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 1,
+  "manifestVersion": "1.0.0",
+  "profiles": [
+    {
+      "id": "operator-production",
+      "displayName": "Operator Production",
+      "purpose": "正式HarnessをCanvasから安全に実行する最小構成",
+      "allowUnlisted": false,
+      "selectorRequiresDeclaration": true,
+      "alwaysAllowedSkills": [
+        "buzzassist:platform-craft",
+        "buzzassist:excalidraw-open-canvas",
+        "buzzassist:excalidraw-official-mcp",
+        "buzzassist:harness-self-improvement"
+      ],
+      "eligibleDeclaredSkills": [
+        "buzzassist:harness-parallel-execution",
+        "buzzassist:narrated-story-video",
+        "buzzassist:manga-video-production",
+        "buzzassist:manga-page-camera",
+        "buzzassist:excalidraw-image-gen",
+        "buzzassist:excalidraw-video-gen",
+        "buzzassist:excalidraw-subtitle-gen",
+        "buzzassist:excalidraw-silence-cut",
+        "buzzassist:excalidraw-speech-bubbles"
+      ],
+      "conditionallyAllowedSelectors": [
+        "fable*:*",
+        "grok-*:*",
+        "runpod:*",
+        "hyperframes*",
+        "remotion-*"
+      ],
+      "hardDeniedSelectors": [
+        "yt-analytics*",
+        "yt-quality-loop*",
+        "youtube-analytics*",
+        "anthropic-skills:*",
+        "cowork-*:*",
+        "brand-voice:*",
+        "common-room:*",
+        "customer-support:*",
+        "data:*",
+        "design:*",
+        "enterprise-search:*",
+        "finance:*",
+        "human-resources:*",
+        "legal:*",
+        "marketing:*",
+        "operations:*",
+        "product-management:*",
+        "productivity:*",
+        "sales:*",
+        "slack-by-salesforce:*"
+      ],
+      "allowedPlugins": ["buzzassist:core-plugin"],
+      "requiredCapabilities": ["canvas", "browser", "formal-harness", "provider", "feedback-capture"]
+    },
+    {
+      "id": "buzzassist-development",
+      "displayName": "BuzzAssist Development",
+      "purpose": "BuzzAssist本体、Skill、評価、独立監査の開発",
+      "inherits": "operator-production",
+      "allowUnlisted": false,
+      "selectorRequiresDeclaration": false,
+      "alwaysAllowedSkills": [
+        "buzzassist:skill-creator",
+        "buzzassist:excalidraw-benchmark-manga-style"
+      ],
+      "eligibleDeclaredSkills": [],
+      "conditionallyAllowedSelectors": [
+        "run-bestofn*",
+        "engineering:*",
+        "codex-mcp:*",
+        "grok-*:*",
+        "hyp-consult*"
+      ],
+      "hardDeniedSelectors": ["yt-quality-loop*"],
+      "allowedPlugins": ["buzzassist:core-plugin"],
+      "requiredCapabilities": ["skill-curation", "best-of-n", "independent-audit", "engineering"]
+    },
+    {
+      "id": "general-work",
+      "displayName": "General Work",
+      "purpose": "動画制作とは独立したOffice・Finance・HR・Legal・Sales・Cowork作業",
+      "allowUnlisted": false,
+      "selectorRequiresDeclaration": false,
+      "alwaysAllowedSkills": [],
+      "eligibleDeclaredSkills": [],
+      "conditionallyAllowedSelectors": [
+        "anthropic-skills:*",
+        "brand-voice:*",
+        "common-room:*",
+        "documents:*",
+        "spreadsheets:*",
+        "presentations:*",
+        "pdf:*",
+        "data:*",
+        "design:*",
+        "enterprise-search:*",
+        "finance:*",
+        "human-resources:*",
+        "legal:*",
+        "sales:*",
+        "marketing:*",
+        "operations:*",
+        "product-management:*",
+        "productivity:*",
+        "customer-support:*",
+        "slack-by-salesforce:*"
+      ],
+      "hardDeniedSelectors": [],
+      "allowedPlugins": [],
+      "requiredCapabilities": ["general-productivity"]
+    }
+  ]
+}
