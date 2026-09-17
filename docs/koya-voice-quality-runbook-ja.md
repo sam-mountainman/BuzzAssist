@@ -44,7 +44,7 @@ python3 scripts/prepare-speech-text.py input.json
   感情の強い台詞 0.35〜0.45（バラつきを許して演技を取る）。
 - 1リクエストの合計2,000字制限に注意（カット分割で自然に満たされる）。
 
-### Fish Audio（マイク）
+### Fish Audio（ナレーション物語チャンネル）
 - **モデルは `s2-pro`**（ヘッダで明示。API値として `s2.1-pro` は存在しない。
   s1 は括弧の感情タグを使う旧世代）。
 - オフライン一括生成では `latency: "normal"`（安定優先）、`format: wav`、
