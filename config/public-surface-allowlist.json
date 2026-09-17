@@ -66,5 +66,42 @@
       "count": 1,
       "why": "origin/main で既に公開済みの識別子（ファイル名や既存の本文に出ている語）。新たな公開ではない。改名するかは運営者名を含む識別子の改名と一緒に判断待ち。"
     }
+  ],
+  "packText": [
+    {
+      "file": ".agents/skills/platform-craft/SKILL.md",
+      "count": 1,
+      "why": "Channel Pack と同じ文字列だが、どのチャンネルでも同じ語（文字入れ方針の区分名・並列計画の見出しの型）か、機械のフォントのパス。依頼者固有の中身ではない。"
+    },
+    {
+      "file": "docs/four-session-integrated-audit-2026-08-10.md",
+      "count": 1,
+      "why": "Channel Pack と同じ文字列だが、どのチャンネルでも同じ語（文字入れ方針の区分名・並列計画の見出しの型）か、機械のフォントのパス。依頼者固有の中身ではない。"
+    },
+    {
+      "file": "docs/koya-manga-production-v44.md",
+      "count": 1,
+      "why": "Channel Pack と同じ文字列だが、どのチャンネルでも同じ語（文字入れ方針の区分名・並列計画の見出しの型）か、機械のフォントのパス。依頼者固有の中身ではない。"
+    },
+    {
+      "file": "lib/textRenderingGate.mjs",
+      "count": 2,
+      "why": "Channel Pack と同じ文字列だが、どのチャンネルでも同じ語（文字入れ方針の区分名・並列計画の見出しの型）か、機械のフォントのパス。依頼者固有の中身ではない。"
+    },
+    {
+      "file": "scripts/build-koya-candidate-pdf.py",
+      "count": 1,
+      "why": "macOS のフォントのパス（ヒラギノ）。Channel Pack の指定と同じ文字列になるが、機械側の設定であって依頼者固有の中身ではない。"
+    },
+    {
+      "file": "scripts/harness-registry.mjs",
+      "count": 1,
+      "why": "Channel Pack と同じ文字列だが、どのチャンネルでも同じ語（文字入れ方針の区分名・並列計画の見出しの型）か、機械のフォントのパス。依頼者固有の中身ではない。"
+    },
+    {
+      "file": "test/harnessParallelRun.test.mjs",
+      "count": 1,
+      "why": "Channel Pack と同じ文字列だが、どのチャンネルでも同じ語（文字入れ方針の区分名・並列計画の見出しの型）か、機械のフォントのパス。依頼者固有の中身ではない。"
+    }
   ]
 }

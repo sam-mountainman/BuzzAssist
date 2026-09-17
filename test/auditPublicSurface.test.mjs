@@ -601,3 +601,63 @@ test("語彙ファイルが無いプロジェクトでは、語彙の照合を�
   assert.equal(report.privateVocabularyState, "missing-file");
   assert.equal(report.unchecked.some((why) => /検査語彙/u.test(why)), false, "宣言の無い語彙を未検査として数えない");
 });
+
+test("名前を伏せても、Channel Pack の本文をそのまま写したファイルは落とす", async () => {
+  // 合成 fixture に、非公開の台帳の規則文が一字一句同じまま23件残っていた。
+  // 名前は伏せ字にしてあったので、語の照合では素通りしていた（2026-09-18 に別セッションが指摘）。
+  const { readFile, writeFile } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const { dir, git, write } = await scratchRepo();
+
+  const packPath = join(dir, "channel-packs", "probe", "config", "koya-show-bible.json");
+  const pack = JSON.parse(await readFile(packPath, "utf8"));
+  const rule = "承認した板だけを参照に使い、未承認の板は参照へ入れない";
+  const shortWord = "夜の帯";
+  pack.locations = [{ id: "probe-place", name: "架空の場所", generationRules: [rule, shortWord] }];
+  await writeFile(packPath, JSON.stringify(pack));
+
+  // 名前は伏せているのに、規則の文はそのまま写した合成 fixture。
+  await write("test/fixtures/pack/config/location.json", JSON.stringify({
+    locations: [{ id: "sample-place", name: "見本の場所", generationRules: [rule, shortWord] }],
+  }, null, 2));
+  git("add", "-A");
+  git("commit", "-qm", "fixture");
+
+  const detected = auditPublicSurface({ projectDir: dir });
+  const hit = detected.packTextFindings.find((entry) => entry.file === "test/fixtures/pack/config/location.json");
+  assert.ok(hit, JSON.stringify(detected.packTextFindings));
+  assert.equal(hit.hits, 1, "6字未満の語は数えない（一般語と衝突するため）");
+  assert.equal(detected.status, "failed");
+  assert.equal(detected.gateOk, false);
+  assert.equal(JSON.stringify(detected).includes(rule), false, "検出した文そのものは報告に出さない");
+
+  // 理由つきで一覧に入れれば通る。件数に束縛されるので、増えたらまた止まる。
+  await write("config/public-surface-allowlist.json", JSON.stringify({
+    packText: [{ file: "test/fixtures/pack/config/location.json", count: 1, why: "試験用" }],
+  }, null, 2));
+  git("add", "-A");
+  git("commit", "-qm", "allowlist");
+  const accepted = auditPublicSurface({ projectDir: dir });
+  assert.equal(accepted.unresolved.packText.length, 0, JSON.stringify(accepted.unresolved.packText));
+  assert.equal(accepted.status, "accepted-risk");
+
+  const second = "未承認の板は次の工程へ回さない";
+  pack.locations[0].generationRules.push(second);
+  await writeFile(packPath, JSON.stringify(pack));
+  await write("test/fixtures/pack/config/location.json", JSON.stringify({
+    locations: [{ id: "sample-place", name: "見本の場所", generationRules: [rule, second] }],
+  }, null, 2));
+  git("add", "-A");
+  git("commit", "-qm", "more");
+  const grown = auditPublicSurface({ projectDir: dir });
+  assert.equal(grown.unresolved.packText.length, 1, "写しが増えたら、前の理由では通さない");
+  assert.equal(grown.status, "failed");
+
+  // Channel Pack が無い環境では、この区分は「未検査」であって合格ではない。
+  const { rm } = await import("node:fs/promises");
+  await rm(join(dir, "channel-packs"), { recursive: true, force: true });
+  const withoutPack = auditPublicSurface({ projectDir: dir });
+  assert.equal(withoutPack.packTextFindings.length, 0);
+  assert.ok(withoutPack.unchecked.some((entry) => entry.includes("パック本文の写し")), JSON.stringify(withoutPack.unchecked));
+  assert.equal(withoutPack.status, "incomplete");
+});
