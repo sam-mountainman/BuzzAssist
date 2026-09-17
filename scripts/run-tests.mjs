@@ -62,6 +62,18 @@ const commands = [
 const isWindows = process.platform === "win32";
 const buildCommand = { command: isWindows ? "npm.cmd" : "npm", args: ["run", "build"], label: "vite build" };
 
+// テストはホスト（Claude Code / Codex）の中で走るとは限らない。CI にはホストの
+// セッション変数が無いのに、手元では Claude Code が入れた変数で生成者の記録
+// （provenance）が埋まり、CI でだけ落ちるテストが手元では見えなかった。
+// ホストを名乗る変数はテストへ渡さない。ホストの外では Canvas を外部ブラウザーで
+// 開く経路が実際に窓を開くので、テスト中は明示されない限り閉じる。
+const HOST_IDENTITY_ENV = new Set([
+  "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID",
+  "CODEX", "CODEX_HOME", "CODEX_THREAD_ID",
+]);
+const testEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !HOST_IDENTITY_ENV.has(key)));
+testEnv.EXCALIDRAW_OPEN_MODE ??= "none";
+
 let skipped = [];
 // process.exit() は書きかけの stdout を捨てる。CI のログはパイプで、捕まえた
 // テスト出力（数 MB）を書いている途中で exit していたので、GitHub Actions の
@@ -91,7 +103,7 @@ for (const { args, countsSkips } of commands) {
   // 見え方は変わらない。
   const result = spawnSync(process.execPath, args, {
     cwd: rootDir,
-    env: process.env,
+    env: testEnv,
     stdio: countsSkips ? ["inherit", "pipe", "inherit"] : "inherit",
     shell: false,
     maxBuffer: 256 * 1024 * 1024,

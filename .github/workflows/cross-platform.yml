@@ -35,8 +35,30 @@ jobs:
         run: npm ci
       - name: Install python QA dependencies for attribute gates
         # 人物の同一性チェック（scripts/audit-koya-character-identity.py）は cv2・numpy・PIL を読む。
-        # PIL が無いと下書き作成の9件が「Python実行環境を解決できない」で落ちる。
-        run: python -m pip install opencv-python-headless numpy pillow
+        # PIL が無いと下書き作成の23件が「Python実行環境を解決できない」で落ちる。
+        # OpenCV 5 は Haar cascade（cv2.CascadeClassifier）を本体から外したので、
+        # 顔検出を使う監査が全部落ちる（2026-09 に 5.0 が出て CI が拾った）。4 系に固定する。
+        run: python -m pip install "opencv-python-headless<5" numpy pillow
+      # 動画のレンダーと実MP4の監査は ffmpeg / ffprobe に乗っている。ランナーの
+      # イメージには入っていない。入れないと数十件が落ち、許可できない skip も出る
+      # （必須の道具の欠落は skip の許可リストに入れない決まり）。各 OS の
+      # パッケージ管理で入れ、第三者の action は使わない（release の gate でも走るため）。
+      - name: Install ffmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: Install ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: brew install ffmpeg
+      - name: Install ffmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y --no-progress
+      - name: Show media toolchain
+        run: |
+          ffmpeg -hide_banner -version
+          ffprobe -hide_banner -version
       - name: Run tests including isolated Codex and Claude Code setup
         run: npm test -- --skip-policy config/ci-test-skip-allowlist.json
       # 公開面の検査。このリポジトリは PUBLIC なので、新しいファイルが1つ

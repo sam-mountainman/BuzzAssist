@@ -1086,6 +1086,10 @@ test("source-face placement preserves Windows launcher arguments from the resolv
   assert.equal(invocation.options.cwd, projectDir);
 });
 
+// 生成者の記録（provenance）は、指定が無ければホストのセッション変数から取る。
+// テストが Claude Code / Codex の中で走るとは限らない（CI には無い）ので明示する。
+// 手元では Claude Code が入れた変数で埋まり、CI でだけ落ちていた。
+const PLAN_TEST_GENERATOR = Object.freeze({ generatorHost: "codex", generatorContextId: "plan-test-generator-context" });
 const script = `# 契約テスト\n\n## CUT 1: 教室\nナレーション: 放課後の教室だった。\n悠斗: 絶対に諦めない！\n\n## CUT 2: 廊下\n美咲: 本当に大丈夫？\n悠斗: ありがとう。\n`;
 
 test("character-bible readings become deterministic STT pronunciation aliases", () => {
@@ -1369,6 +1373,7 @@ test("Koya production planning writes a contract snapshot and resumable state wi
     // ここはジャンル共通ハーネスの経路——プラン生成の仕組みと再開状態を見る
     // のが目的で、番組ルールは対象外——なので明示的に許す。
     allowBorrowedChannelData: true,
+    ...PLAN_TEST_GENERATOR,
     projectDir,
     scriptPath: join(projectDir, "script.txt"),
     episodeId: "koya-plan-test",
@@ -1406,6 +1411,7 @@ test("Koya planning refuses to overwrite an episode id owned by another script",
     // ここはジャンル共通ハーネスの経路——プラン生成の仕組みと再開状態を見る
     // のが目的で、番組ルールは対象外——なので明示的に許す。
     allowBorrowedChannelData: true,
+    ...PLAN_TEST_GENERATOR,
     projectDir,
     scriptPath,
     episodeId: "koya-collision-test",
@@ -1428,6 +1434,7 @@ test("Koya planning stops before paid generation when a narrated multi-character
     // ここはジャンル共通ハーネスの経路——プラン生成の仕組みと再開状態を見る
     // のが目的で、番組ルールは対象外——なので明示的に許す。
     allowBorrowedChannelData: true,
+    ...PLAN_TEST_GENERATOR,
     projectDir,
     scriptPath,
     episodeId: "koya-protagonist-required",
