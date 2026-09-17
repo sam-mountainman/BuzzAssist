@@ -5,7 +5,10 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { validateKoyaStylingImportSourceProvenance } from "../lib/koyaMangaProduction.mjs";
+import {
+  isUnselectedStylingConsolidation,
+  validateKoyaStylingImportSourceProvenance,
+} from "../lib/koyaMangaProduction.mjs";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
@@ -87,4 +90,51 @@ test("styling import provenance rejects derivatives without an ordered SHA-bound
   } finally {
     await rm(projectDir, { recursive: true, force: true });
   }
+});
+
+test("styling import provenance accepts a SHA-bound shared identity authority for archival sibling sheets", async () => {
+  const projectDir = await mkdtemp(path.join(os.tmpdir(), "buzzassist-styling-shared-authority-"));
+  const canvasDir = path.join(projectDir, "canvas");
+  await mkdir(canvasDir, { recursive: true });
+  const authorityPath = path.join(canvasDir, "client-identity.png");
+  const sourcePath = path.join(canvasDir, "prior-sibling-sheet.png");
+  const authorityBytes = Buffer.from("client-team-identity-authority");
+  const sourceBytes = Buffer.from("prior-sibling-sheet");
+  await writeFile(authorityPath, authorityBytes);
+  await writeFile(sourcePath, sourceBytes);
+  try {
+    const result = await validateKoyaStylingImportSourceProvenance({
+      canvasDir,
+      baseAssetSha256: "c".repeat(64),
+      sharedIdentityAuthoritySha256: sha256(authorityBytes),
+      source: {
+        sourceSha256: sha256(sourceBytes),
+        rootIdentitySha256: sha256(authorityBytes),
+        sourceLineage: [
+          { path: authorityPath, sha256: sha256(authorityBytes) },
+          { path: sourcePath, sha256: sha256(sourceBytes) },
+        ],
+      },
+    });
+    assert.equal(result.rootIdentitySha256, sha256(authorityBytes));
+    assert.equal(result.sourceLineage.length, 2);
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("a later unselected styling round can consolidate without erasing an earlier selected round", () => {
+  const cast = {
+    stylingSelection: { roundId: "earlier-outfit-round", optionId: "approved-outfit" },
+  };
+  const supersededRound = {
+    id: "later-hair-round",
+    status: "awaiting-selection",
+    selectedOptionId: "",
+  };
+  assert.equal(isUnselectedStylingConsolidation({ cast, supersededRound }), true);
+  assert.equal(isUnselectedStylingConsolidation({
+    cast: { stylingSelection: { roundId: "later-hair-round", optionId: "already-selected" } },
+    supersededRound,
+  }), false);
 });

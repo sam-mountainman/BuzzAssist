@@ -225,3 +225,18 @@ test("空の作業フォルダからでも契約が読める", async () => {
 
   for (const dir of [empty, stale]) await rm(dir, { recursive: true, force: true });
 });
+
+test("implicit episode overrideは不存在だけを無視し、壊れたJSONをfail-openしない", async () => {
+  const root = await mkdtemp(join(tmpdir(), "koya-malformed-implicit-override-"));
+  try {
+    const overrideDir = join(root, "config/koya-manga-episode-overrides");
+    await mkdir(overrideDir, { recursive: true });
+    await writeFile(join(overrideDir, "episode-broken.json"), "{not-json", "utf8");
+    await assert.rejects(
+      resolveKoyaMangaProductionContract({ projectDir: root, episodeId: "episode-broken" }),
+      /JSON|Unexpected|property name/iu,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

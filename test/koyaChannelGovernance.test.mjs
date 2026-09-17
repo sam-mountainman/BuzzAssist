@@ -3,7 +3,7 @@ import { channelPackPresent, resolveChannelPackPath } from "../lib/channelPackRe
 import { createHash } from "node:crypto";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve as resolvePath } from "node:path";
 import test from "node:test";
 
 import {
@@ -23,6 +23,7 @@ import {
   registerApprovedKoyaLocation,
   resolveKoyaValidationCanary,
   koyaThumbnailCopySha256,
+  validateKoyaShowBible,
 } from "../lib/koyaChannelGovernance.mjs";
 import { renderEditorialPlatePng } from "../lib/mangaScriptImagePipeline.mjs";
 import { parseMangaScript } from "../lib/mangaVideoPipeline.mjs";
@@ -30,6 +31,10 @@ import { auditKoyaCharacterRosterReview, createKoyaCharacterRosterReviewDraft } 
 
 const root = new URL("..", import.meta.url).pathname;
 const hash = (value) => createHash("sha256").update(value).digest("hex");
+
+async function readFixtureShowBible() {
+  return JSON.parse(await readFile(join(root, "test/fixtures/channel-pack/config/koya-show-bible.json"), "utf8"));
+}
 
 async function installAuthority(projectDir) {
   await mkdir(join(projectDir, "config/koya-character-styling"), { recursive: true });
@@ -42,6 +47,12 @@ async function installAuthority(projectDir) {
   // pack を分離した環境で fixture が組み立てられない。
   for (const relativePath of paths) {
     await writeFile(join(projectDir, relativePath), await readFile(resolveChannelPackPath(root, relativePath)));
+  }
+  // チャンネル画風のスタイル参照も正本の一部。宣言だけ複製して画像を
+  // 置き去りにすると、生成前の実在検査がテスト環境の都合で落ちる。
+  for (const relativePath of showBible.artStyle?.styleReference?.paths || []) {
+    await mkdir(join(projectDir, dirname(relativePath)), { recursive: true });
+    await writeFile(join(projectDir, relativePath), await readFile(join(root, relativePath)));
   }
 }
 
@@ -75,12 +86,44 @@ test("Koya authority is all-or-nothing and validates the three channel contracts
   await assert.rejects(() => readKoyaChannelAuthority({ allowFixture: true, projectDir, runtimeRoot: root }), /must start with stylingSpecPath/u);
 });
 
+test("show-bible cast semantics are complete, unique, and bound to existing cast IDs", async () => {
+  const showBible = await readFixtureShowBible();
+  assert.equal(validateKoyaShowBible(showBible).pass, true);
+
+  const missingMap = structuredClone(showBible);
+  delete missingMap.storyGrammar.castSemantics;
+  assert.throws(() => validateKoyaShowBible(missingMap), /castSemantics is required/u);
+
+  const missingId = structuredClone(showBible);
+  delete missingId.storyGrammar.castSemantics.recurringEyeOpen.castId;
+  assert.throws(() => validateKoyaShowBible(missingId), /recurringEyeOpen\.castId is required/u);
+
+  const duplicateId = structuredClone(showBible);
+  duplicateId.storyGrammar.castSemantics.exitBlocker.castId = duplicateId.storyGrammar.castSemantics.recurringEyeOpen.castId;
+  assert.throws(() => validateKoyaShowBible(duplicateId), /distinct cast IDs/u);
+
+  const unknownId = structuredClone(showBible);
+  unknownId.storyGrammar.castSemantics.reversalSignal.castId = "missing-fixture-cast";
+  assert.throws(() => validateKoyaShowBible(unknownId), /does not exist in cast/u);
+
+  const aliasedSignalBeat = structuredClone(showBible);
+  aliasedSignalBeat.storyGrammar.castSemantics.reversalSignal.reviewBeat = "evidence";
+  assert.throws(() => validateKoyaShowBible(aliasedSignalBeat), /six required ordered/u);
+
+  const reorderedBeats = structuredClone(showBible);
+  [reorderedBeats.storyReview.requiredBeats[0], reorderedBeats.storyReview.requiredBeats[2]] = [
+    reorderedBeats.storyReview.requiredBeats[2],
+    reorderedBeats.storyReview.requiredBeats[0],
+  ];
+  assert.throws(() => validateKoyaShowBible(reorderedBeats), /exact position/u);
+});
+
 test("Koya story review binds ordered reversal beats to the exact script and protagonist", async (t) => {
   // この検証は台本の話者名が実際のキャストと一致することに依存している。
   // 話者名は pack から引く——公開リポジトリにキャスト名を直書きすると、
   // 運営者の実名を消してもチャンネルは特定できてしまう。
   // pack を持たない環境でも合成 fixture の名前で同じ形が成立する。
-  const authority = await readKoyaChannelAuthority({ allowFixture: true, projectDir: root });
+  const authority = { showBible: await readFixtureShowBible() };
   const nameFor = (id) => {
     const member = (authority.showBible.cast || []).find((entry) => entry.id === id);
     assert.ok(member, `show bible に ${id} が無い`);
@@ -131,6 +174,30 @@ ${elder}: 見本19b1。
   const failed = auditKoyaStory({ scriptText, parsed, showBible: authority.showBible, storyReview: allyStealsFinish });
   assert.equal(failed.pass, false);
   assert.match(failed.failures.join("\n"), /protagonistFinish/u);
+
+  const signalMappedToProtagonist = structuredClone(authority.showBible);
+  signalMappedToProtagonist.storyGrammar.castSemantics.reversalSignal.castId = "nodoka";
+  const wrongSemanticSignal = auditKoyaStory({
+    scriptText,
+    parsed,
+    showBible: signalMappedToProtagonist,
+    storyReview: review,
+  });
+  assert.equal(wrongSemanticSignal.pass, false);
+  assert.match(wrongSemanticSignal.failures.join("\n"), /castSemantics\.reversalSignal/u);
+
+  const exitMappedToVillain = structuredClone(authority.showBible);
+  exitMappedToVillain.storyGrammar.castSemantics.exitBlocker.castId = "ibariyama";
+  const mappedExitMember = exitMappedToVillain.cast.find((member) => member.id === "ibariyama");
+  mappedExitMember.requiredReferenceRoles = [...(mappedExitMember.requiredReferenceRoles || []), "eye-open"];
+  const wrongSemanticExit = auditKoyaStory({
+    scriptText,
+    parsed,
+    showBible: exitMappedToVillain,
+    storyReview: review,
+  });
+  assert.equal(wrongSemanticExit.pass, false);
+  assert.match(wrongSemanticExit.failures.join("\n"), /exitBlocker/u);
 });
 
 test("Koya fixed cast cannot be replaced by episode-local candidates and must carry required identity roles", async () => {
@@ -204,23 +271,32 @@ test("Koya character bootstrap status reports the next legal action without inve
 });
 
 test("one-off validation canary admits only the exact approved cast without weakening normal roster production", async () => {
-  const authority = await readKoyaChannelAuthority({ allowFixture: true, projectDir: root });
-  const approvedMembers = authority.showBible.cast.filter((member) => member.designStatus === "approved");
-  assert.equal(approvedMembers.length, 8);
+  // 以前ここは readKoyaChannelAuthority({ projectDir: root }) を呼んでいた。
+  // root はリポジトリルートなので、fixture ではなく**実物の Channel Pack**を
+  // 読み、承認が進むたびに落ちた（承認 8 人を直書きしていた）。検証対象は
+  // カナリア方針の論理であってチャンネルの進捗ではないので、追跡下の
+  // fixture を正本にして hermetic にする。
+  const showBible = await readFixtureShowBible();
+  const approvedMembers = showBible.cast.filter((member) => member.designStatus === "approved");
+  assert.deepEqual(
+    approvedMembers.map((member) => member.id),
+    ["ibuki", "nodoka", "taisho", "ibariyama"],
+    "fixture の承認済みキャストが変わったら、この契約テストも見直すこと",
+  );
   const policy = resolveKoyaValidationCanary({
-    episodeId: "manga-approved-eight-canary-001",
-    showBible: authority.showBible,
+    episodeId: "manga-approved-cast-canary-001",
+    showBible: showBible,
     policy: {
       version: "koya-validation-canary-v1",
       enabled: true,
-      episodeId: "manga-approved-eight-canary-001",
+      episodeId: "manga-approved-cast-canary-001",
       scope: "one-off-non-public-quality-preview",
       publicationEligible: false,
       requireExactAllowedCast: true,
       allowIncompleteRosterReview: true,
       allowedCastIds: approvedMembers.map((member) => member.id),
       omittedRequiredEveryEpisodeIds: ["horo"],
-      provisionalVoiceProfileByCastId: { reiji: "fixture-reiji-voice" },
+      provisionalVoiceProfileByCastId: { ibuki: "fixture-protagonist-voice" },
       reason: "One-off user-requested video quality preview.",
     },
   });
@@ -246,7 +322,7 @@ test("one-off validation canary admits only the exact approved cast without weak
       approval: { identityReviewPath: `${member.id}-review.json`, identityReviewSha256: "a".repeat(64) },
     })),
   };
-  const protagonist = approvedMembers.find((member) => member.id === "reiji");
+  const protagonist = approvedMembers.find((member) => member.id === "ibuki");
   const parsed = parseMangaScript(`${protagonist.name}: 僕が証拠を示す`);
   const characterBible = {
     cast: approvedMembers.map((member) => ({
@@ -256,7 +332,7 @@ test("one-off validation canary admits only the exact approved cast without weak
     })),
   };
   const canaryResult = auditKoyaFixedCastReadiness({
-    showBible: authority.showBible,
+    showBible: showBible,
     registry,
     parsed,
     characterBible,
@@ -265,11 +341,11 @@ test("one-off validation canary admits only the exact approved cast without weak
     validationCanary: policy,
   });
   assert.equal(canaryResult.pass, true, JSON.stringify(canaryResult));
-  assert.equal(canaryResult.activeCastIds.length, 8);
+  assert.equal(canaryResult.activeCastIds.length, approvedMembers.length);
   assert.equal(canaryResult.validationCanary.publicationEligible, false);
 
   const normalResult = auditKoyaFixedCastReadiness({
-    showBible: authority.showBible,
+    showBible: showBible,
     registry,
     parsed,
     characterBible,
@@ -280,12 +356,12 @@ test("one-off validation canary admits only the exact approved cast without weak
   assert.match(normalResult.failures.join("\n"), /roster review|must be declared/iu);
 
   const invalidPending = resolveKoyaValidationCanary({
-    episodeId: "manga-approved-eight-canary-001",
-    showBible: authority.showBible,
+    episodeId: "manga-approved-cast-canary-001",
+    showBible: showBible,
     policy: {
       version: "koya-validation-canary-v1",
       enabled: true,
-      episodeId: "manga-approved-eight-canary-001",
+      episodeId: "manga-approved-cast-canary-001",
       scope: "one-off-non-public-quality-preview",
       publicationEligible: false,
       requireExactAllowedCast: true,
@@ -368,8 +444,8 @@ test("Koya location registration requires four SHA-bound, independently reviewed
   const projectDir = await mkdtemp(join(tmpdir(), "koya-location-"));
   await installAuthority(projectDir);
   const authority = await readKoyaChannelAuthority({ allowFixture: true, projectDir, runtimeRoot: root });
-  const plan = buildKoyaLocationBoardPlan({ projectDir, locationBible: authority.locationBible, locationId: "yamatani" });
-  const emptyDraft = await createKoyaLocationReviewDraft({ projectDir, locationBible: authority.locationBible, locationId: "yamatani" });
+  const plan = buildKoyaLocationBoardPlan({ projectDir, locationBible: authority.locationBible, showBible: authority.showBible, locationId: "yamatani" });
+  const emptyDraft = await createKoyaLocationReviewDraft({ projectDir, locationBible: authority.locationBible, showBible: authority.showBible, locationId: "yamatani" });
   assert.ok(emptyDraft.boards.every((row) => row.sha256 === "" && row.checks.originalScalePass === false));
   const png = renderEditorialPlatePng("white-solid", 1280, 720);
   const generationCalls = [];
@@ -394,7 +470,7 @@ test("Koya location registration requires four SHA-bound, independently reviewed
   assert.equal(anchorGenerated.complete, false);
   const anchorReviewPath = join(projectDir, "canvas/reviews/yamatani-anchor.json");
   await mkdir(join(projectDir, "canvas/reviews"), { recursive: true });
-  const anchorReview = await createKoyaLocationAnchorReviewDraft({ projectDir, locationBible: authority.locationBible, locationId: "yamatani" });
+  const anchorReview = await createKoyaLocationAnchorReviewDraft({ projectDir, locationBible: authority.locationBible, showBible: authority.showBible, locationId: "yamatani" });
   anchorReview.reviewer = { host: "claude", id: "anchor-reviewer", contextId: "session-anchor-reviewer" };
   anchorReview.reviewedAt = "2026-08-27T00:00:00.000Z";
   anchorReview.anchor.checks = {
@@ -406,7 +482,7 @@ test("Koya location registration requires four SHA-bound, independently reviewed
     continuitySourceApproved: true,
   };
   await writeFile(anchorReviewPath, `${JSON.stringify(anchorReview, null, 2)}\n`);
-  const anchorAudit = await auditKoyaLocationAnchorReview({ projectDir, locationBible: authority.locationBible, locationId: "yamatani", review: anchorReview });
+  const anchorAudit = await auditKoyaLocationAnchorReview({ projectDir, locationBible: authority.locationBible, showBible: authority.showBible, locationId: "yamatani", review: anchorReview });
   assert.equal(anchorAudit.pass, true, JSON.stringify(anchorAudit));
   await assert.rejects(() => generateKoyaLocationBoards({
     projectDir,
@@ -424,8 +500,19 @@ test("Koya location registration requires four SHA-bound, independently reviewed
     generateImage: generator,
   });
   assert.equal(generated.complete, true);
-  assert.equal(generationCalls[0].referenceImagePaths.length, 0);
+  // アンカーが守るのは「建築を他の画像から継がない」ことであって、
+  // 「参照画像を一切受け取らない」ことではない。画風だけを決める参照は
+  // 建築を持ち込まないので、渡してもこの独立性は損なわれない。
+  assert.deepEqual(plan.jobs[0].references.architecture, []);
+  assert.deepEqual(
+    generationCalls[0].referenceImagePaths,
+    (authority.showBible.artStyle.styleReference.paths || []).map((relativePath) => resolvePath(projectDir, relativePath)),
+  );
+  assert.deepEqual(generationCalls[0].referenceImagePaths, plan.jobs[0].references.style);
+  assert.match(plan.jobs[0].prompt, /CHANNEL STYLE-ONLY/u);
+  assert.match(plan.jobs[0].prompt, /NOT an architecture, layout, camera, prop, or content source/u);
   assert.ok(generationCalls.slice(1).every((call) => call.referenceImagePaths.length === 1 && call.referenceImagePaths[0] === plan.jobs[0].outputPath));
+  assert.ok(plan.jobs.slice(1).every((job) => job.references.style.length === 0));
   const manifestBytesBeforeReuse = await readFile(generated.manifestPath);
   const reused = await generateKoyaLocationBoards({
     projectDir,
@@ -440,7 +527,7 @@ test("Koya location registration requires four SHA-bound, independently reviewed
   assert.deepEqual(await readFile(generated.manifestPath), manifestBytesBeforeReuse);
   const reviewPath = join(projectDir, "canvas/reviews/yamatani.json");
   await mkdir(join(projectDir, "canvas/reviews"), { recursive: true });
-  const review = await createKoyaLocationReviewDraft({ projectDir, locationBible: authority.locationBible, locationId: "yamatani" });
+  const review = await createKoyaLocationReviewDraft({ projectDir, locationBible: authority.locationBible, showBible: authority.showBible, locationId: "yamatani" });
   review.reviewer = { host: "claude", id: "location-reviewer", contextId: "session-reviewer" };
   review.reviewedAt = "2026-08-27T00:00:00.000Z";
   review.checks = { crossViewArchitectureContinuity: true, originalScaleReview: true };
@@ -450,11 +537,11 @@ test("Koya location registration requires four SHA-bound, independently reviewed
     () => registerApprovedKoyaLocation({ projectDir, locationId: "yamatani", review }),
     /reviewPath is required/u,
   );
-  const audit = await auditKoyaLocationReview({ projectDir, locationBible: authority.locationBible, locationId: "yamatani", review });
+  const audit = await auditKoyaLocationReview({ projectDir, locationBible: authority.locationBible, showBible: authority.showBible, locationId: "yamatani", review });
   assert.equal(audit.pass, true, JSON.stringify(audit));
   const selfReviewed = structuredClone(review);
   selfReviewed.reviewer.contextId = "session-generator";
-  const rejected = await auditKoyaLocationReview({ projectDir, locationBible: authority.locationBible, locationId: "yamatani", review: selfReviewed });
+  const rejected = await auditKoyaLocationReview({ projectDir, locationBible: authority.locationBible, showBible: authority.showBible, locationId: "yamatani", review: selfReviewed });
   assert.equal(rejected.pass, false);
   assert.match(rejected.failures.join("\n"), /different from its generator/u);
   const registered = await registerApprovedKoyaLocation({ projectDir, locationId: "yamatani", reviewPath });

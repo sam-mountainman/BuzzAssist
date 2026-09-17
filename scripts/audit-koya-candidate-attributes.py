@@ -92,12 +92,52 @@ def mean_hair_lab(image, region):
     return np.array([mean[0] * 100.0 / 255.0, mean[1] - 128.0, mean[2] - 128.0])
 
 
+def mean_cell_hair_lab(image, cell_region, top_fraction):
+    """Measure the top of the foreground inside a declared identity-sheet cell.
+
+    A setting sheet and its approved source often use different grid layouts.
+    Applying one absolute normalized rectangle to both images measures clothing
+    in one image and hair in the other.  The caller therefore declares the
+    corresponding cell in each image; this function finds that cell's actual
+    foreground bounds and measures only its upper hair band.  Low-saturation
+    grey hair is intentionally retained instead of being discarded by the
+    chroma mask used by the legacy free-form region mode.
+    """
+    cell = crop_region(image, cell_region)
+    foreground = np.any(cell < 235, axis=2)
+    ys, xs = np.where(foreground)
+    if len(xs) < 64:
+        fail(f"hair cell does not contain enough foreground pixels ({len(xs)})")
+    x0, x1 = int(xs.min()), int(xs.max()) + 1
+    y0, y1 = int(ys.min()), int(ys.max()) + 1
+    fraction = float(top_fraction)
+    if fraction <= 0 or fraction > 0.5:
+        fail(f"hairCellTopFraction must be within (0, 0.5]: {fraction}")
+    top_y1 = max(y0 + 1, round(y0 + (y1 - y0) * fraction))
+    crop = cell[y0:top_y1, x0:x1]
+    mask = np.any(crop < 235, axis=2) & np.any(crop > 30, axis=2)
+    if int(mask.sum()) < max(64, int(crop.shape[0] * crop.shape[1] * 0.01)):
+        fail(f"hair cell band does not contain enough non-background pixels ({int(mask.sum())})")
+    lab = cv2.cvtColor(crop, cv2.COLOR_BGR2LAB)[mask].astype(np.float64)
+    mean = lab.mean(axis=0)
+    return np.array([mean[0] * 100.0 / 255.0, mean[1] - 128.0, mean[2] - 128.0])
+
+
 def check_hair_color_delta(check):
     # Calibrated on 2026-08-28 real assets: same-color regenerations score <=2.4,
     # the human-flagged ivory drift scored 4.13, hard color mistakes score >=11.
-    region = check.get("region", DEFAULT_HAIR_REGION)
-    candidate = mean_hair_lab(load_bgr(check["image"]), region)
-    reference = mean_hair_lab(load_bgr(check["reference"]), region)
+    image_cell = check.get("imageCell")
+    reference_cell = check.get("referenceCell")
+    if bool(image_cell) != bool(reference_cell):
+        fail("hairColorDelta imageCell and referenceCell must be supplied together")
+    if image_cell and reference_cell:
+        top_fraction = check.get("hairCellTopFraction", 0.15)
+        candidate = mean_cell_hair_lab(load_bgr(check["image"]), image_cell, top_fraction)
+        reference = mean_cell_hair_lab(load_bgr(check["reference"]), reference_cell, top_fraction)
+    else:
+        region = check.get("region", DEFAULT_HAIR_REGION)
+        candidate = mean_hair_lab(load_bgr(check["image"]), region)
+        reference = mean_hair_lab(load_bgr(check["reference"]), region)
     delta = float(np.linalg.norm(candidate - reference))
     warn, hard = float(check.get("warnDeltaE", 3.5)), float(check.get("failDeltaE", 8.0))
     status = "pass" if delta < warn else ("warn" if delta < hard else "fail")

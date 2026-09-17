@@ -28,7 +28,50 @@
     "realBrandSignsForbidden": true,
     "homeBase": "小料理屋・sample-x0"
   },
+  "artStyle": {
+    "id": "fixture-flat-2d-manga-v1",
+    "medium": "clean 2D manga artwork, drawn by hand",
+    "derivedFrom": "synthetic contract fixture; not a real channel's art direction",
+    "sharedIdiom": [
+      "Draw this as clean 2D manga artwork. It is a drawing, never a photograph and never a 3D render.",
+      "Keep tonal steps restrained: a base fill plus at most one soft cel-shadow on a surface."
+    ],
+    "characterIdiom": [
+      "a smooth simple face",
+      "flat pale skin"
+    ],
+    "environmentIdiom": [
+      "Paint the location in the same drawn world as the characters, with no style seam.",
+      "Hold the background quieter than a character: lower contrast, saturation and edge density."
+    ],
+    "forbidden": [
+      "photographic or photorealistic rendering of any kind",
+      "3D architectural render or CG visualisation"
+    ],
+    "styleReference": {
+      "policy": "style-only",
+      "policyNote": "参照は線と塗りだけを決める。間取りと什器は architectureLock からのみ取る。",
+      "maximum": 4,
+      "paths": []
+    }
+  },
   "storyGrammar": {
+    "castSemantics": {
+      "recurringEyeOpen": {
+        "castId": "horo"
+      },
+      "exitBlocker": {
+        "castId": "tatsu",
+        "reviewBeat": "tatsuExitBlock"
+      },
+      "episodeRoleWardrobe": {
+        "castId": "ema"
+      },
+      "reversalSignal": {
+        "castId": "ibuki",
+        "reviewBeat": "ibukiSignal"
+      }
+    },
     "escalation": [
       "攻撃1",
       "攻撃2",

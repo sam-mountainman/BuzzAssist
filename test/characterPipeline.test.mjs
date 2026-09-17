@@ -27,6 +27,7 @@ import {
   validateStoryboardCharacterBindings,
   writeCharacterWorkflowStore,
 } from "../lib/characterPipeline.mjs";
+import { normalizeSideLockedFeatures } from "../lib/characterIdentityReview.mjs";
 import { readCharacterRegistry, writeCharacterRegistry } from "../lib/characterRegistry.mjs";
 import { auditKoyaCharacterBootstrap } from "../lib/koyaChannelGovernance.mjs";
 
@@ -595,12 +596,15 @@ test("a SHA-bound candidate rebuild replaces only the exact unselected workflow 
         output,
         outputSha256: createHash("sha256").update(bytes).digest("hex"),
         prompt: `参考ミナの${label}設計を生成する`,
+        generator: index === 0
+          ? { host: "claude", id: "claude-imagegen", contextId: "client-output-context", model: "fixture-claude-imagegen" }
+          : { host: "codex", id: "openai-imagegen", contextId: "candidate-rebuild-context", model: "fixture-imagegen" },
       });
     }
     const sourceManifestPath = path.join(rebuildDir, "source-manifest.json");
     await writeFile(sourceManifestPath, `${JSON.stringify({
       version: "koya-character-candidate-source-manifest-v1",
-      generator: { host: "codex", id: "openai-imagegen", contextId: "candidate-rebuild-context", model: "fixture-imagegen" },
+      generator: { host: "legacy-migration", id: "mixed-origin-candidate-import", contextId: "candidate-rebuild-context", model: "per-entry-source-model" },
       generatedAt: new Date().toISOString(),
       entries,
     }, null, 2)}\n`);
@@ -626,8 +630,8 @@ test("a SHA-bound candidate rebuild replaces only the exact unselected workflow 
       workflowId: workflow.id,
       castId: cast.id,
       candidateImportMapPath: importMapPath,
-      generatorHost: "codex",
-      generatorId: "openai-imagegen",
+      generatorHost: "legacy-migration",
+      generatorId: "mixed-origin-candidate-import",
       generatorContextId: "candidate-rebuild-context",
     }), /workflowCastId must bind the exact target/u);
 
@@ -637,8 +641,8 @@ test("a SHA-bound candidate rebuild replaces only the exact unselected workflow 
       workflowId: workflow.id,
       castId: cast.id,
       candidateImportMapPath: importMapPath,
-      generatorHost: "codex",
-      generatorId: "openai-imagegen",
+      generatorHost: "legacy-migration",
+      generatorId: "mixed-origin-candidate-import",
       generatorContextId: "candidate-rebuild-context",
     });
     assert.equal(imported.cast.candidateImportEvidencePath, imported.evidencePath);
@@ -655,6 +659,8 @@ test("a SHA-bound candidate rebuild replaces only the exact unselected workflow 
       "axis-C: distinct design C",
     ]);
     const evidence = JSON.parse(await readFile(imported.evidencePath, "utf8"));
+    assert.equal(evidence.importedCandidates[0].sourceGenerator.host, "claude");
+    assert.equal(evidence.importedCandidates[1].sourceGenerator.host, "codex");
     assert.deepEqual(evidence.previousCandidates.map((candidate) => candidate.blindLabel).sort(), ["A", "B", "C"]);
     for (const previous of evidence.previousCandidates) {
       const expected = originalEvidence.get(previous.blindLabel);
@@ -891,6 +897,149 @@ test("storyboard resolves character names to ids and flags multi-character ident
     const validation = validateStoryboardCharacterBindings(readyWorkflow, jobs);
     assert.equal(validation.ok, false);
     assert.match(validation.warnings.join("\n"), /multi-character identity-mixing risk/);
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});
+
+function sideChecksOf(cell) {
+  return Array.isArray(cell.asymmetricFeatureChecks) ? cell.asymmetricFeatureChecks : [];
+}
+
+async function recordSideChecks(pathname, mutate) {
+  const review = JSON.parse(await readFile(pathname, "utf8"));
+  const cells = [...review.turnaround.viewChecks, ...review.expression.cells];
+  for (const cell of cells) {
+    for (const check of sideChecksOf(cell)) mutate(check, cell);
+    // 名前の付いた左右判定も、行の記録と同じ判断で埋める。行だけ直して
+    // このフラグを放置できるなら、フラグは何も守っていないことになる。
+    cell.sideLockedFeaturesConsistent = sideChecksOf(cell)
+      .every((check) => check.applicable === false || check.pass === true);
+  }
+  await writeFile(pathname, `${JSON.stringify(review, null, 2)}\n`);
+  return review;
+}
+
+test("a declared side-locked feature blocks registration until every cell records the anatomical side", async () => {
+  assert.throws(() => normalizeSideLockedFeatures([{ feature: "肩タオル", expectedSide: "left" }]), /expectedSide must be one of subject-left, subject-right/u);
+  assert.throws(() => normalizeSideLockedFeatures([{ feature: "肩タオル", expectedSide: "subject-left", scopes: ["turnaround", "storyboard"] }]), /scopes must be a non-empty subset/u);
+  assert.deepEqual(
+    normalizeSideLockedFeatures([{ feature: "肩タオル", expectedSide: "subject-right" }])[0].scopes,
+    ["expression", "extra", "outfit", "turnaround"],
+  );
+
+  const projectDir = await mkdtemp(path.join(os.tmpdir(), "buzzassist-side-locked-"));
+  try {
+    const workflow = await prepareCharacterWorkflow({
+      projectDir,
+      // 表示名は中立な仮名。実キャスト名を直書きすると、公開リポジトリの
+      // 追跡下にチャンネル固有語が入る（公開面監査で実際に検出された）。
+      // ここで見ているのは side-locked feature の扱いなので、名前の中身は問わない。
+      scriptText: "仮名店主：いらっしゃい。",
+      episodeId: "episode-side-lock",
+      candidateCount: 3,
+      cast: [{
+        name: "仮名店主",
+        description: "屋台の店主。",
+        invariants: ["作務衣"],
+        sideLockedFeatures: [
+          { id: "shoulder-towel", feature: "肩に掛けたタオル", expectedSide: "subject-right" },
+          { id: "sukajan-open-shoulder", feature: "スカジャンを外している肩", expectedSide: "subject-left", scopes: ["turnaround"] },
+        ],
+      }],
+    });
+    const declared = workflow.cast[0].sideLockedFeatures;
+    assert.equal(declared.length, 2);
+    assert.equal(declared[0].expectedSide, "subject-right");
+
+    const jobs = await buildCharacterCandidateJobs(workflow);
+    assert.match(jobs[0].prompt, /肩に掛けたタオル is on the character's own right side/u);
+    assert.match(jobs[0].prompt, /never mirrored between views/u);
+    await markCharacterCandidatesGenerating({ projectDir }, workflow.id, jobs);
+    const canvasAssets = path.join(projectDir, "canvas", "assets");
+    await mkdir(canvasAssets, { recursive: true });
+    const results = [];
+    for (const [index] of jobs.entries()) {
+      const assetFile = path.join(canvasAssets, `side-candidate-${index + 1}.png`);
+      await writeFile(assetFile, testRaster(index + 1));
+      results.push({ elementId: `c-${index + 1}`, frameElementId: `f-${index + 1}`, assetFile, assetUrl: `/excalidraw-assets/side-candidate-${index + 1}.png` });
+    }
+    const awaitingApproval = await recordCharacterCandidateResults({ projectDir, generatorContextId: "candidate-generator-session" }, workflow.id, jobs, results);
+    const cast = awaitingApproval.cast[0];
+    await passCandidateReview(cast.candidateReviewDraftPath);
+    const selected = cast.candidates[1];
+    const [turnaroundJob, expressionJob] = buildApprovedIdentityPackJobs(awaitingApproval, cast, selected);
+    const turnaroundFile = path.join(canvasAssets, "side-turnaround.png");
+    const expressionFile = path.join(canvasAssets, "side-expression.png");
+    await writeFile(turnaroundFile, testRaster(11, 400, 200));
+    await writeFile(expressionFile, testRaster(12, 400, 300));
+    const staged = await stageApprovedCharacterIdentityPack({
+      projectDir,
+      workflowId: workflow.id,
+      castId: cast.id,
+      candidateId: selected.id,
+      approvalReason: "役柄に最も合い、他人物とも明確に区別できる",
+      approvedBy: "test-human",
+      candidateReviewPath: cast.candidateReviewDraftPath,
+      generatorContextId: "identity-generator-session",
+      jobs: [turnaroundJob, expressionJob],
+      results: [
+        { elementId: "turnaround-element", assetFile: turnaroundFile, assetUrl: "/excalidraw-assets/side-turnaround.png" },
+        { elementId: "expression-element", assetFile: expressionFile, assetUrl: "/excalidraw-assets/side-expression.png" },
+      ],
+    });
+
+    const draft = JSON.parse(await readFile(staged.identityReviewDraftPath, "utf8"));
+    assert.deepEqual(sideChecksOf(draft.turnaround.viewChecks[0]).map((entry) => entry.id), ["shoulder-towel", "sukajan-open-shoulder"]);
+    assert.deepEqual(sideChecksOf(draft.expression.cells[0]).map((entry) => entry.id), ["shoulder-towel"]);
+    assert.equal(sideChecksOf(draft.turnaround.viewChecks[0])[0].observedSide, "");
+
+    const register = () => finalizeApprovedCharacter({
+      projectDir,
+      workflowId: workflow.id,
+      castId: cast.id,
+      identityReviewPath: staged.identityReviewDraftPath,
+    });
+
+    // 既存の真偽値をすべて true にしただけでは通らない。これが今回の欠陥。
+    await passIdentityReview(staged.identityReviewDraftPath);
+    await assert.rejects(register, /asymmetricFeatureChecks\[0\]: 肩に掛けたタオル must be on subject-right but the review records no side/u);
+
+    // 左右が逆のシートは、他が全部合っていても合格にできない。
+    await recordSideChecks(staged.identityReviewDraftPath, (check) => {
+      check.applicable = true;
+      check.observedSide = check.expectedSide === "subject-right" ? "subject-left" : "subject-right";
+      check.pass = true;
+      check.note = "原寸で左右を確認";
+    });
+    await assert.rejects(register, /pass cannot be true while shoulder-towel is observed on subject-left instead of subject-right/u);
+
+    // 「見えない」だけで埋めた合格も作れない。
+    await passIdentityReview(staged.identityReviewDraftPath);
+    await recordSideChecks(staged.identityReviewDraftPath, (check) => {
+      check.applicable = false;
+      check.observedSide = "not-visible";
+      check.pass = false;
+      check.note = "このセルでは当該部位が画角外";
+    });
+    await assert.rejects(register, /turnaround must confirm shoulder-towel on subject-right in at least one cell/u);
+
+    // 一致を記録すれば通る。1セルだけ「見えない」は許容する。
+    await passIdentityReview(staged.identityReviewDraftPath);
+    const filled = await recordSideChecks(staged.identityReviewDraftPath, (check) => {
+      check.applicable = true;
+      check.observedSide = check.expectedSide;
+      check.pass = true;
+      check.note = "原寸で本人基準の左右を確認";
+    });
+    const hidden = filled.turnaround.viewChecks.find((view) => view.id === "top-head");
+    for (const check of sideChecksOf(hidden)) {
+      Object.assign(check, { applicable: false, observedSide: "not-visible", pass: false, note: "真上ビューでは肩の左右が判別できない" });
+    }
+    hidden.sideLockedFeaturesConsistent = true;
+    await writeFile(staged.identityReviewDraftPath, `${JSON.stringify(filled, null, 2)}\n`);
+    const finalized = await register();
+    assert.equal(finalized.character.status, "approved");
   } finally {
     await rm(projectDir, { recursive: true, force: true });
   }
