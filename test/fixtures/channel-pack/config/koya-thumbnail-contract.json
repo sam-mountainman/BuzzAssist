@@ -48,10 +48,10 @@
       "concreteNounOnly": true
     },
     "forbiddenAbstractHooks": [
-      "実は",
-      "まさか",
-      "衝撃",
-      "驚愕"
+      "見本",
+      "架空1",
+      "試験",
+      "仮設"
     ],
     "exactTextMustBeApproved": true,
     "approvalBinding": {
@@ -69,14 +69,14 @@
     "characterIdentityReferencesApprovedOnly": true
   },
   "qa": [
-    "1280x720原寸",
-    "320x180縮小",
-    "文字切れ0",
-    "顔欠け0",
-    "帯2行制約",
-    "吹き出し制約",
-    "具体名詞テロップ",
-    "本編流用なし",
-    "実在ロゴなし"
+    "標本139の指示・試",
+    "見本140の板・試",
+    "架空141",
+    "試験14",
+    "仮設143",
+    "標本144の",
+    "見本145の規則",
+    "架空146の",
+    "試験147の"
   ]
 }

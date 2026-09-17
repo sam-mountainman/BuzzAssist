@@ -1534,7 +1534,7 @@ test("character-approve with a full-role import map stages every declared eye-op
     const episodeId = "manga-eye-open-approve";
     const workflow = await prepareCharacterWorkflow({
       projectDir,
-      scriptText: `${memberName}：逃げなさんな。`,
+      scriptText: `${memberName}：見本33の試。`,
       episodeId,
       candidateCount: 3,
       cast: [{ id: member.id, name: memberName, role: "fixed", description: "普段は糸目の老人。", invariants: ["白髪"] }],

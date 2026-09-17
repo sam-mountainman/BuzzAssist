@@ -1224,7 +1224,7 @@ test("eye-open beats bind the variant chosen from the lines and keep other image
 【カット2：対決】
 長老：ほう。
 ナレーション：長老の糸目が、すっと開いた。
-長老：逃げなさんな。
+長老：もう逃げられんぞ。
 【カット3：見送り】
 ナレーション：長老は目を見開き、笑った。
 長老：ありがとうな。`;
@@ -1317,12 +1317,12 @@ test("eye-open planning stops instead of guessing a subject, a variant, or a mis
     referenceAssets: [{ id: "guest-face", role: "identity-face", path: "assets/guest-face.png", sha256: "b".repeat(64) }],
   });
   assert.throws(
-    () => plan("【カット1：全員】\nナレーション：長老の糸目が開いた。長老と若者と少女と客人が並ぶ。\n長老：逃げなさんな。", ELDER_POLICY, crowded),
+    () => plan("【カット1：全員】\nナレーション：長老の糸目が開いた。長老と若者と少女と客人が並ぶ。\n長老：もう逃げられんぞ。", ELDER_POLICY, crowded),
     /cannot bind 長老's eyes-open sheet within the 5-reference budget/u,
   );
 
   // A reviewed binding replaces detection completely.
-  const reviewed = plan("【カット1：対面】\n長老：さて。\nナレーション：長老の糸目が開いた。\n長老：逃げなさんな。", {
+  const reviewed = plan("【カット1：対面】\n長老：さて。\nナレーション：長老の糸目が開いた。\n長老：もう逃げられんぞ。", {
     ...ELDER_POLICY,
     reviewedBeats: [{ utteranceId: "cut-01-u01", characterId: "elder", variant: "open-angry" }],
   });

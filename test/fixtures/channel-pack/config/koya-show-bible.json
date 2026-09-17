@@ -2,28 +2,28 @@
   "version": "koya-show-bible-v1",
   "channel": {
     "name": "Sample Manga Channel",
-    "reading": "あっぱれまんがでスカッといっぱい",
-    "shortName": "アパイチ",
+    "reading": "見本00の設定・試験用の合成文言",
+    "shortName": "架空01",
     "brandCall": "Sampleれ漫画",
-    "closingCall": "アッパレ！",
+    "closingCall": "試験02の",
     "fictionNoticeRequired": true,
     "alcoholKeywordPolicy": "restrained",
-    "alcoholKeywordReason": "YouTube広告親和性のため、チャンネル名・タイトル・シナリオで酒語彙を主軸にしない",
+    "alcoholKeywordReason": "仮設03の指示・試験用の合成文言・試験用の合成文言・試験用の合成文言・試験用の合成文言",
     "alcoholLexicon": [
-      "日本酒",
-      "焼酎",
-      "ビール",
-      "ワイン",
-      "飲酒",
-      "泥酔",
+      "標本0",
+      "見本",
+      "架空0",
+      "試験0",
+      "仮設",
+      "標本",
       "酒",
       "呑"
     ]
   },
   "world": {
     "town": "Sample Town",
-    "townReading": "アッパレちょう",
-    "visualSummary": "和の下町と夜のネオンが混ざる、あたたかい架空の飲み屋街",
+    "townReading": "見本10の場面",
+    "visualSummary": "架空11の指示・試験用の合成文言・試験用の合成文言・試",
     "realPlaceNamesForbidden": true,
     "realBrandSignsForbidden": true,
     "homeBase": "小料理屋・sample-x0"
@@ -73,19 +73,19 @@
       }
     },
     "escalation": [
-      "攻撃1",
-      "攻撃2",
-      "攻撃3"
+      "試験1",
+      "仮設1",
+      "標本1"
     ],
     "reversal": [
       "sample-x3の号砲",
-      "証拠の提示",
-      "とどめは主人公本人",
+      "見本15の",
+      "架空16の設定・試",
       "sample-x4は退路を塞ぐ一言だけ"
     ],
-    "villainComedy": "敵同士もマウントを取り合う、憎めない小物の生態を見せる",
+    "villainComedy": "試験17の規則・試験用の合成文言・試験用の合成文言・試",
     "protagonistAgencyRequired": true,
-    "tatsuViolenceDepiction": "直接的な暴力を描かず、元組長を美化しない"
+    "tatsuViolenceDepiction": "仮設18の場面・試験用の合成文言・試験用"
   },
   "storyReview": {
     "version": "koya-story-review-v1",
@@ -131,19 +131,19 @@
       "hiddenName": "sample-x1",
       "role": "ally-mascot",
       "speech": {
-        "dialect": "関西弁",
+        "dialect": "標本1",
         "firstPerson": "私",
         "anchors": [
           "ベロベロちゃう！sample-x2酔いや！",
-          "その話、酒場で聞いたで",
-          "一杯奢ってや",
-          "ほな、また呑もな",
-          "にゃはは！",
+          "見本20の板・試験用の",
+          "架空21の帯",
+          "試験22の語・試",
+          "仮設23の",
           "Sampleれや！",
-          "ほな、ぼちぼち反撃といこか"
+          "標本24の設定・試験用の合"
         ]
       },
-      "usage": "毎話どこかに映る。説教せず肯定から入る。開眼は切り札。",
+      "usage": "見本25の規則・試験用の合成文言・試験用の合成文言・試",
       "requiredEveryEpisode": true,
       "requiredReferenceRoles": [
         "identity-face",
@@ -161,12 +161,12 @@
       ],
       "currentDesignDirective": [
         "Aの束感とハネ感を土台",
-        "編み込みなし",
-        "髪飾りなし",
-        "八重歯",
+        "架空26の場",
+        "試験27の",
+        "仮設2",
         "だぼっとしたジャージ",
-        "黒無地インナー",
-        "短パンは軽いダメージ",
+        "標本29の帯・",
+        "見本30の語・試験用",
         "スニーカー",
         "赤茶を含む重複しない髪色を複数比較"
       ],
@@ -181,15 +181,15 @@
       "name": "sample-2",
       "role": "ally-brain",
       "speech": {
-        "dialect": "男勝りな標準語",
+        "dialect": "架空31の条件",
         "firstPerson": "私",
         "anchors": [
-          "ほぅ…",
-          "お前…ときめきの匂いがするな",
-          "答え合わせ、始めましょうか"
+          "試験3",
+          "仮設33の規則・試験用の合成",
+          "標本34の場面・試験用の合"
         ]
       },
-      "usage": "人間観察・推理・証拠提示。恋愛小説家の秘密と甘い趣味をギャップにする。",
+      "usage": "見本35の指示・試験用の合成文言・試験用の合成文言・試験用の合成文言・",
       "designStatus": "approved",
       "selectedLabel": "C"
     },
@@ -198,18 +198,18 @@
       "name": "sample-3",
       "role": "ally-natural-heiress",
       "speech": {
-        "dialect": "おっとり敬語",
+        "dialect": "架空36の板",
         "firstPerson": "私",
         "anchors": [
-          "あら、かわいい",
-          "あらあら〜",
-          "めっ、ですよ〜",
-          "まぁまぁ",
-          "いい子、いい子",
-          "うふふ"
+          "試験37の帯・",
+          "仮設38の",
+          "標本39の条件",
+          "見本40",
+          "架空41の規則",
+          "試験4"
         ]
       },
-      "usage": "本物しか知らない鑑定眼で、悪意なく嘘・偽物・粉飾を見抜く。",
+      "usage": "仮設43の指示・試験用の合成文言・試験用の合成文言・試験用",
       "designStatus": "approved",
       "selectedLabel": "E"
     },
@@ -218,25 +218,25 @@
       "name": "sample-4",
       "role": "ally-technical",
       "speech": {
-        "dialect": "陰キャ、時々厨二病の標準語",
+        "dialect": "標本44の板・試験用の合成",
         "firstPerson": "僕",
         "anchors": [
-          "帰りたい",
-          "はぁ、やだやだ",
-          "これだからリア充は…",
-          "コイツ、素人ですね"
+          "見本45",
+          "架空46の語・",
+          "試験47の条件・試験",
+          "仮設48の設定・試"
         ]
       },
-      "usage": "キーボードがスイッチ。普段は臆病だが技術と正義感で反転する。",
+      "usage": "標本49の規則・試験用の合成文言・試験用の合成文言・試験用の",
       "designStatus": "pending-revision-approval",
       "selectedBaseLabel": "A",
       "stylingSpecPath": "config/koya-character-styling/reiji-hairstyle-v5.json",
       "currentDesignDirective": [
-        "Aを土台",
-        "前髪を短く",
-        "見える片目は本人の左目",
-        "頭頂のアホ毛・ちょんまげ状のハネなし",
-        "提示された既存アニメ人物に似せない"
+        "見本50",
+        "架空51の",
+        "試験52の板・試験用の",
+        "仮設53の帯・試験用の合成文言・試験",
+        "標本54の語・試験用の合成文言・試"
       ]
     },
     {
@@ -244,16 +244,16 @@
       "name": "sample-5",
       "role": "ally-closer",
       "speech": {
-        "dialect": "丁寧な老人語",
-        "firstPerson": "わし",
+        "dialect": "見本55の条",
+        "firstPerson": "架空",
         "anchors": [
-          "ケジメ、つけてもらおうか",
-          "逃げなさんな",
-          "腰が入っとらんのぅ",
-          "落とし前、どうつける？"
+          "試験57の規則・試験用の",
+          "仮設58の場",
+          "標本59の指示・試",
+          "見本60の板・試験用の"
         ]
       },
-      "usage": "スポット起用。退路を静かに塞ぐ。元組長だが暴力を直接描かない。",
+      "usage": "架空61の帯・試験用の合成文言・試験用の合成文言・試験用の合成",
       "requiredReferenceRoles": [
         "identity-face",
         "turnaround",
@@ -264,9 +264,9 @@
       "selectedBaseLabel": "C",
       "stylingSpecPath": "config/koya-character-styling/tatsu-refinement-v1.json",
       "currentDesignDirective": [
-        "腰は曲げずまっすぐ",
-        "首タオルあり",
-        "開眼差分必須"
+        "試験62の語・試験",
+        "仮設63の条",
+        "標本64の設"
       ]
     },
     {
@@ -274,15 +274,15 @@
       "name": "sample-6",
       "role": "neutral-location-anchor",
       "speech": {
-        "dialect": "最小限の標準語",
-        "firstPerson": "俺・自分",
+        "dialect": "見本65の規則",
+        "firstPerson": "架空66",
         "anchors": [
-          "自分は不器用なんで",
-          "人生ってのは山あり谷ありですよ",
+          "試験67の指示・試",
+          "仮設68の板・試験用の合成文言",
           "Sampleれでしたね"
         ]
       },
-      "usage": "店は立てるがキャラは立てない。ギャップや切り札を足さない。",
+      "usage": "標本69の帯・試験用の合成文言・試験用の合成文言・試験用の",
       "designStatus": "approved",
       "selectedLabel": "A"
     },
@@ -292,19 +292,19 @@
       "role": "neutral-sub-mascot",
       "speech": {
         "anchors": [
-          "ニャ〜",
-          "フシャー！"
+          "見本7",
+          "架空71の"
         ]
       },
-      "usage": "2〜3回に1回。『デブ』と呼んだ悪人は末路が悪い。『ぽっちゃり』は許す。",
+      "usage": "試験72の設定・試験用の合成文言・試験用の合成文言・試験用の合成文言・試",
       "designStatus": "pending-revision-approval",
       "selectedBaseLabel": "A",
       "stylingSpecPath": "config/koya-character-styling/fuku-body-v1.json",
       "currentDesignDirective": [
-        "ぶっちょう面を維持",
-        "体だけ一回り小さく",
-        "白茶の招き猫柄",
-        "古い鈴"
+        "仮設73の規則・試",
+        "標本74の場面・試",
+        "見本75の指示",
+        "架空7"
       ]
     },
     {
@@ -312,16 +312,16 @@
       "name": "sample-8",
       "role": "variable-ally-or-antagonist",
       "speech": {
-        "dialect": "ギャル語",
+        "dialect": "試験77",
         "firstPerson": "私",
         "anchors": [
-          "それな",
-          "きも",
-          "マジないわー",
+          "仮設7",
+          "標本",
+          "見本80の設",
           "sample-1的にポイント高め"
         ]
       },
-      "usage": "味方・敵を明示してから書く。若者の代弁者。",
+      "usage": "架空81の規則・試験用の合成文言・試験用の",
       "episodeRoleSelectionRequired": true,
       "requiredReferenceRoles": [
         "identity-face",
@@ -335,9 +335,9 @@
           "label": "社会人OL",
           "description": "sample-9",
           "invariants": [
-            "高校制服に見せない",
+            "試験82の場面・試",
             "プリーツミニを使わない",
-            "実在ブランドなし"
+            "仮設83の指示・"
           ]
         },
         {
@@ -347,15 +347,15 @@
           "invariants": [
             "学生服に見せない",
             "顔・髪・ギャル感は同一",
-            "実在ブランドなし"
+            "仮設83の指示・"
           ]
         },
         {
           "id": "private-dressy",
-          "label": "社会人のきれいめ私服",
+          "label": "社会人の見本語60試",
           "description": "sample-11",
           "invariants": [
-            "丈は膝下",
+            "標本84",
             "アイドル衣装にしない",
             "顔・髪・ギャル感は同一"
           ]
@@ -366,7 +366,7 @@
       "stylingSpecPath": "config/koya-character-styling/ema-outfit-v1.json",
       "currentDesignDirective": [
         "顔・髪・ギャル感はB",
-        "高校生に見えない社会人服",
+        "見本85の帯・試験用の合",
         "OL・私服カジュアル・私服きれいめを比較",
         "採用後はstoryStage衣装シートへ"
       ]
@@ -376,14 +376,14 @@
       "name": "sample-12",
       "role": "antagonist-showa",
       "speech": {
-        "dialect": "偉そうな標準語",
+        "dialect": "架空86の語・",
         "firstPerson": "俺",
         "anchors": [
-          "俺を誰だと思ってる？",
-          "これだから最近の若いやつは"
+          "試験87の条件・試験",
+          "仮設88の設定・試験用の合"
         ]
       },
-      "usage": "死亡フラグ台詞の後は毎回ブーメラン。長いものには巻かれる小物。",
+      "usage": "標本89の規則・試験用の合成文言・試験用の合成文言・試験用の合",
       "designStatus": "approved",
       "selectedLabel": "A"
     },
@@ -392,13 +392,13 @@
       "name": "sample-13",
       "role": "antagonist-modern",
       "speech": {
-        "dialect": "横文字を混ぜる標準語",
+        "dialect": "見本90の場面・試験",
         "firstPerson": "俺",
         "anchors": [
-          "そのエビデンスは？",
-          "よう、陰キャ",
-          "ダッセェなぁw",
-          "無能はコスパ悪りぃなぁ"
+          "架空91の指示・試",
+          "試験92の板",
+          "仮設93の帯・",
+          "標本94の語・試験用の"
         ]
       },
       "usage": "sample-2と世代2レーン。自称エリートだが浅い。",
@@ -406,7 +406,7 @@
       "selectedBaseLabel": "C",
       "stylingSpecPath": "config/koya-character-styling/heito-refinement-v4.json",
       "currentDesignDirective": [
-        "ネクタイあり",
+        "見本95の条",
         "明るめ茶またはオレンジ系の髪",
         "最終色は人間が選ぶ"
       ]
@@ -416,18 +416,18 @@
       "name": "sample-14",
       "role": "antagonist-female",
       "speech": {
-        "dialect": "猫なで声から金切り声",
+        "dialect": "架空96の設定・試験",
         "firstPerson": "私",
         "anchors": [
-          "〜のくせに",
-          "私まだ20代だし",
-          "この価値がわからないの？"
+          "試験97の",
+          "仮設98の場面・",
+          "標本99の指示・試験用の"
         ]
       },
-      "usage": "お局・義母・ママ友ボス。実年齢は公開しない。",
+      "usage": "見本100の板・試験用の合成文言・試験用の合",
       "designStatus": "candidate-selection-required",
       "currentDesignDirective": [
-        "固定11人目として必ず用意する",
+        "架空101の帯・試験用の合成文",
         "現行A/B/Cは採用しない",
         "38〜45歳相当の成熟した女性",
         "ギャル感と無理な若作りをなくす",
@@ -470,16 +470,16 @@
   },
   "provenance": [
     {
-      "source": "2026-08-22制作共有PDF",
+      "source": "試験102の語・試験用の合成文言・",
       "priority": 1
     },
     {
       "source": "2026-08-26sample-channelさんフィードバック",
       "priority": 2,
-      "rule": "後日の明示修正はPDF旧指定を上書きする"
+      "rule": "仮設103の条件・試験用の合成文言・試験"
     },
     {
-      "source": "2026-08-27ユーザー原寸再監査・見栄原明示指示",
+      "source": "標本104の設定・試験用の合成文言・試験用の合成文言・",
       "priority": 3,
       "rule": "見栄原を固定11人目へ復帰し、sample-x2・sample-5・弊斗の弱い比較案は最終承認前に再制作する"
     }

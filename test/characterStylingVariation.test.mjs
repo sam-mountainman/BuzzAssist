@@ -145,11 +145,11 @@ test("styling variations generate independent sheets, require per-option QA, and
     const planned = await buildCharacterStylingVariationJobs(workflow, cast.id, "A", {
       version: "koya-character-styling-spec-v1",
       kind: "hairColor",
-      sharedInvariants: ["Aの髪シルエット", "編み込みなし", "髪飾りなし"],
+      sharedInvariants: ["Aの髪シルエット", "見本39の試", "髪飾りなし"],
       minimumPassingCandidates: 2,
       options: [
         { id: "red-brown", label: "赤茶", description: "落ち着いた赤茶", invariants: ["髪以外の色を変更しない"] },
-        { id: "dark-choco", label: "ダークチョコ", description: "暗い焦茶", invariants: ["髪以外の色を変更しない"] },
+        { id: "dark-choco", label: "見本40の試", description: "暗い焦茶", invariants: ["髪以外の色を変更しない"] },
         { id: "weak-beige", label: "ベージュ", description: "淡いベージュ", invariants: ["髪以外の色を変更しない"] },
       ],
     }, {
@@ -198,7 +198,7 @@ test("styling variations generate independent sheets, require per-option QA, and
     const composed = await composeCharacterStylingReviewSheet({ ...f, workflowId: workflow.id, castId: cast.id, roundId: round.id, reviewPath: recorded.reviewDraftPath });
     const svg = await readFile(composed.sheetPath, "utf8");
     assert.match(svg, /赤茶/u);
-    assert.match(svg, /ダークチョコ/u);
+    assert.match(svg, /見本40の試/u);
     assert.doesNotMatch(svg, /ベージュ/u);
     assert.deepEqual(composed.manifest.candidates.map((entry) => entry.optionId), ["red-brown", "dark-choco"]);
 
