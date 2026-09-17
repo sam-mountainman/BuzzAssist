@@ -1,30 +1,42 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { normalizeCharacterRegistry } from "../lib/characterRegistry.mjs";
 import { generateKoyaDialogueSpeech } from "../lib/koyaDialogueSpeech.mjs";
 import {
+  assertKoyaFullPreflight,
   assertKoyaSpeechVoiceSelections,
+  assertKoyaVoiceSelectionsBeforeImages,
+  createKoyaEpisodeManifest,
   explainKoyaUnvoicedProtagonist,
+  generateKoyaMangaSpeech,
   koyaEpisodeManifestPipelineOptions,
   koyaEpisodePaths,
   koyaSpeechVoiceSelectionGate,
+  koyaVoiceSelectionPauseResult,
   recordKoyaRegistryVoiceSelections,
+  runKoyaMangaFullProduction,
 } from "../lib/koyaMangaProduction.mjs";
 import {
   applyKoyaNarrationVoicePolicy,
   resolveKoyaMangaProductionContract,
 } from "../lib/koyaMangaProductionContract.mjs";
+import { createKoyaOuterJobBinding } from "../lib/koyaOuterJobBinding.mjs";
 import {
   assertKoyaHumanVoiceSelections,
   auditKoyaVoiceSelections,
   classifyKoyaVoiceCastingRecord,
+  KOYA_HANDOFF_VOICE_SELECTION_ATTESTATION,
   KOYA_VOICE_SELECTION_REQUIRED_CODE,
+  portableKoyaVoiceSelectionAttestation,
+  portableKoyaVoiceSelectionAttestationFailures,
 } from "../lib/koyaVoiceSelectionGuard.mjs";
+import { executeVideoHarnessAdapter } from "../lib/videoHarnessAdapters.mjs";
 import { createEpisodeManifest } from "../lib/mangaVideoPipeline.mjs";
 import { castRegistryVoices } from "../lib/voiceCasting.mjs";
 import {
@@ -237,6 +249,7 @@ test("Koya guard rejects auto-cast voices and names every character plus the rec
       narrationVoicePolicy: "protagonist-voice",
       projectDir: "/work/project",
       jobId: JOB_ID,
+      jobProjectDir: "/work/jobs",
     });
   } catch (error) {
     caught = error;
@@ -249,7 +262,8 @@ test("Koya guard rejects auto-cast voices and names every character plus the rec
   assert.match(caught.message, /automatic/u);
   assert.match(caught.message, /node scripts\/build-manga-video\.mjs voice-library-audition --project-dir \/work\/project --episode-id global --character-ids sato-ken,yamada-hanako/u);
   assert.match(caught.message, /voice-library-approve --project-dir \/work\/project --plan-path canvas\/voice-casting\/global-elevenlabs-audition\.json/u);
-  assert.match(caught.message, /run-video-harness\.mjs resume --job-id video-koya-manga-video-0123456789abcdef --project-dir \/work\/project --confirmed/u);
+  assert.match(caught.message, /Then resume the same Video Harness Job .*run-video-harness\.mjs resume --job-id video-koya-manga-video-0123456789abcdef --project-dir \/work\/jobs --confirmed/u);
+  assert.doesNotMatch(caught.message, /signed handoff bundle/u, "locally approved characters get the local route only");
   assert.equal(caught.audit.pass, false);
   assert.ok(caught.audit.speakers.every((entry) => entry.selectionKind === "automatic"));
 });
@@ -705,5 +719,587 @@ test("the paid-speech gate is skipped when nothing would be paid for", async () 
     assert.deepEqual(gateCalls, [["cut-02"]], "the gate sees only the cuts that would be generated");
   } finally {
     await rm(projectDir, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Handoff bundles carry a sanitized human-selection record
+
+/** Registry shaped like a handoff restore leaves it: hashed approvals, voice casting as given. */
+function handoffRestoredRegistry(source, castingFor = () => null) {
+  const restored = normalizeCharacterRegistry(structuredClone(source));
+  for (const character of restored.characters) {
+    character.approval = {
+      route: "anonymous-candidate-selection",
+      approvedBy: `source-approver-sha256:${sha256(`approver-${character.id}`)}`,
+      approvedAt: "2026-09-01T00:00:00.000Z",
+      selectedCandidateLabel: "",
+      reason: "",
+      identityReviewPath: "",
+      identityReviewSha256: "",
+    };
+    character.voiceCasting = null;
+  }
+  for (const voice of restored.voices) {
+    voice.casting = castingFor(voice);
+    voice.previewUrl = "";
+    voice.labels = {};
+  }
+  return restored;
+}
+
+test("only the exact sanitized handoff attestation counts as a human selection, and it hides the private record", async () => {
+  const human = await humanSelectedRegistry();
+  const record = human.voices[0].casting;
+  const portable = portableKoyaVoiceSelectionAttestation(record);
+  assert.equal(portable.attestation, KOYA_HANDOFF_VOICE_SELECTION_ATTESTATION);
+  assert.deepEqual(portableKoyaVoiceSelectionAttestationFailures(portable), []);
+  const classified = classifyKoyaVoiceCastingRecord(portable);
+  assert.equal(classified.kind, "human-selection");
+  assert.equal(classified.form, "handoff-attestation");
+  assert.deepEqual(portableKoyaVoiceSelectionAttestation(portable), portable, "a restored registry re-exports unchanged");
+  const text = JSON.stringify(portable);
+  for (const privateValue of [record.selectionReason, record.approvedBy, record.candidateSetId, record.previewUrl, record.auditionPlanId]) {
+    assert.equal(text.includes(privateValue), false, privateValue);
+  }
+  assert.equal(Object.hasOwn(portable, "selectedCandidateLabel"), false, "a one-letter label hash would hide nothing, so it is not carried");
+  assert.equal(portable.winnerLabelRecorded, true);
+
+  assert.equal(portableKoyaVoiceSelectionAttestation(autoCastRegistry().voices[0].casting), null, "automatic casting never travels");
+  assert.equal(portableKoyaVoiceSelectionAttestation({ ...record, previewConfirmed: false }), null, "incomplete selections never travel");
+  assert.equal(portableKoyaVoiceSelectionAttestation(null), null);
+
+  for (const [name, tampered] of [
+    ["raw reason", { ...portable, selectionReason: "年齢感が合う" }],
+    ["extra private field", { ...portable, previewUrl: "https://example.test/preview.mp3" }],
+    ["label in the clear", { ...portable, selectedCandidateLabel: "B" }],
+    ["one candidate", { ...portable, auditionCandidateCount: 1 }],
+    ["not heard", { ...portable, previewConfirmed: false }],
+    ["automatic-era version", { ...portable, selectionVersion: 1 }],
+    ["unknown attestation", { ...portable, attestation: "koya-handoff-voice-selection-v0" }],
+    ["missing field", Object.fromEntries(Object.entries(portable).filter(([key]) => key !== "approvedBy"))],
+  ]) {
+    assert.notEqual(classifyKoyaVoiceCastingRecord(tampered).kind, "human-selection", name);
+    assert.ok(portableKoyaVoiceSelectionAttestationFailures(tampered).length > 0, name);
+  }
+  assert.equal(classifyKoyaVoiceCastingRecord({ ...portable, method: "auto" }).kind, "automatic");
+});
+
+test("a registry restored from a handoff bundle passes with the attestation and gets the bundle route without it", async () => {
+  const human = await humanSelectedRegistry();
+  const attested = handoffRestoredRegistry(human, (voice) => portableKoyaVoiceSelectionAttestation(human.voices.find((entry) => entry.id === voice.id).casting));
+  const attestedAudit = auditKoyaVoiceSelections({ manifest: koyaManifest(attested), registry: attested, narrationVoicePolicy: "protagonist-voice" });
+  assert.equal(attestedAudit.pass, true);
+  assert.ok(attestedAudit.speakers.every((entry) => entry.registrySource === "handoff-bundle"));
+
+  // A bundle exported before the attestation existed: every voice is missing its record.
+  const bare = handoffRestoredRegistry(human);
+  let bareError = null;
+  try {
+    assertKoyaHumanVoiceSelections({
+      manifest: koyaManifest(bare),
+      registry: bare,
+      narrationVoicePolicy: "protagonist-voice",
+      projectDir: "/work/jobs/canvas/harness-runs/job/workspace",
+      jobId: JOB_ID,
+      jobProjectDir: "/work/jobs",
+    });
+  } catch (error) {
+    bareError = error;
+  }
+  assert.deepEqual(bareError?.characterIds, ["sato-ken", "yamada-hanako"]);
+  assert.match(bareError.message, /no casting record/u);
+  assert.match(bareError.message, /come from the signed handoff bundle: sato-ken, yamada-hanako\. Every Job run restores them/u);
+  assert.match(bareError.message, /voice-library-audition --project-dir <channel-pack source project> --episode-id global --character-ids sato-ken,yamada-hanako/u);
+  assert.match(bareError.message, /koya-manga-video\.mjs handoff-export --project-dir <channel-pack source project>/u);
+  assert.match(bareError.message, /run-video-harness\.mjs start --harness koya-manga-video --channel-pack <new signed envelope>/u);
+  assert.doesNotMatch(bareError.message, /Then resume the same Video Harness Job/u, "resuming cannot help while the bundle replaces the registry");
+  assert.doesNotMatch(bareError.message, /--project-dir \/work\/jobs\/canvas\/harness-runs/u, "the workspace is not where a bundle character is chosen");
+
+  // A per-episode character registered in the workspace is not replaced on resume.
+  const mixed = normalizeCharacterRegistry(structuredClone(bare));
+  mixed.characters.find((entry) => entry.id === "yamada-hanako").approval = { route: "human-best-of-n", approvedBy: "test-reviewer", approvedAt: "2026-09-01T00:00:00.000Z" };
+  let mixedError = null;
+  try {
+    assertKoyaHumanVoiceSelections({ manifest: koyaManifest(mixed), registry: mixed, projectDir: "/work/ws", jobId: JOB_ID, jobProjectDir: "/work/jobs" });
+  } catch (error) {
+    mixedError = error;
+  }
+  assert.match(mixedError.message, /Record a human selection in this project for yamada-hanako/u);
+  assert.match(mixedError.message, /voice-library-audition --project-dir \/work\/ws --episode-id global --character-ids yamada-hanako/u);
+  assert.match(mixedError.message, /Then resume the same Video Harness Job: node scripts\/run-video-harness\.mjs resume|Then resume the same Video Harness Job so prepare rebuilds the manifest from the registry: node scripts\/run-video-harness\.mjs resume --job-id video-koya-manga-video-0123456789abcdef --project-dir \/work\/jobs --confirmed/u);
+  assert.match(mixedError.message, /come from the signed handoff bundle: sato-ken\./u);
+});
+
+// ---------------------------------------------------------------------------
+// The real Koya call sites
+
+const FIXTURE_CONFIG_DIR = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "channel-pack", "config");
+const OUTER_JOB_BINDING = createKoyaOuterJobBinding({
+  jobId: JOB_ID,
+  identityDigest: `0123456789abcdef${"0".repeat(48)}`,
+  executionIdentityDigest: "b".repeat(64),
+  resolvedProductionContractSha256: "c".repeat(64),
+});
+
+/** Same measured doctor shape the Koya production tests use for the test-only direct preflight. */
+function measuredDoctorReport(projectDir) {
+  const ids = [
+    "harness-production-route", "node", "ffmpeg", "ffprobe", "ffmpeg-capability",
+    "voice-quality-python", "tts-key", "image-key", "channel-pack",
+  ];
+  const files = ["show.json", "locations.json", "thumbnail.json"].map((path, index) => ({
+    role: ["show", "locations", "thumbnail"][index],
+    path,
+    sha256: String(index + 1).repeat(64),
+    bytes: 2,
+  }));
+  const fingerprint = { version: "koya-channel-authority-fingerprint-v1", fileCount: files.length, files };
+  return {
+    version: "harness-doctor-v1",
+    projectDir,
+    harnessId: "koya-manga-video",
+    ready: true,
+    blocking: [],
+    checks: ids.map((id) => ({
+      id,
+      required: true,
+      ok: true,
+      ...(id === "tts-key" ? {
+        kind: "voice.dialogue",
+        provider: "elevenlabs",
+        model: "eleven_v3",
+        adapterVersion: "elevenlabs-dialogue-server-v1",
+        status: "ready",
+      } : {}),
+      ...(id === "image-key" ? { host: "codex", model: "gpt-image-2-codex" } : {}),
+      ...(id === "channel-pack" ? {
+        authorityFingerprint: { ...fingerprint, sha256: sha256(JSON.stringify(fingerprint)) },
+      } : {}),
+    })),
+  };
+}
+
+// The direct preflight identity includes the doctor check time, so a fixed
+// clock keeps the manifest binding written by the test equal to the stage's.
+const FIXED_NOW_MS = Date.parse("2026-09-18T00:00:00.000Z");
+const directRuntime = (projectDir, extra = {}) => ({
+  allowDirectMeasuredDoctorForTests: true,
+  runDoctor: async () => measuredDoctorReport(projectDir),
+  now: () => FIXED_NOW_MS,
+  ...extra,
+});
+
+async function writeBoundSpeechEpisode(project, manifestInput) {
+  const runtime = directRuntime(project.projectDir);
+  const preflight = await assertKoyaFullPreflight({ projectDir: project.projectDir, episodeId: EPISODE_ID }, runtime);
+  const paths = koyaEpisodePaths(project.projectDir, EPISODE_ID);
+  await mkdir(paths.episodeDir, { recursive: true });
+  const manifest = structuredClone(manifestInput);
+  manifest.production = {
+    ...(manifest.production || {}),
+    outerJobBinding: createKoyaOuterJobBinding({
+      jobId: preflight.jobId,
+      identityDigest: preflight.identityDigest,
+      executionIdentityDigest: preflight.executionIdentityDigest,
+      resolvedProductionContractSha256: preflight.resolvedProductionContractSha256,
+    }),
+  };
+  await writeFile(paths.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  return { runtime, paths };
+}
+
+/**
+ * Runs the real dialogue runner with exactly what the Koya call site passed,
+ * except that a counting cut runner stands in for the provider.
+ */
+function observedDialogueRunner(observed) {
+  return async (args) => {
+    observed.args = args;
+    const result = await generateKoyaDialogueSpeech({
+      ...args,
+      approvedCheckpointImpl: async () => null,
+      cutRunner: async ({ cut, workerManifest }) => {
+        observed.paidCuts.push(cut.id);
+        return { manifest: workerManifest, reportRow: { cutId: cut.id, status: "complete" } };
+      },
+    });
+    // The stand-in takes have no audio; stop the caller before timing compilation.
+    return { ...result, partial: true };
+  };
+}
+
+async function readState(paths) {
+  return JSON.parse(await readFile(paths.statePath, "utf8"));
+}
+
+test("the real Koya speech call site refuses an auto-cast registry before any paid cut", async () => {
+  const registry = autoCastRegistry();
+  const project = await writeProject(registry);
+  try {
+    const { runtime, paths } = await writeBoundSpeechEpisode(project, koyaManifest(registry));
+    const registryBefore = await readFile(project.registryPath);
+    const observed = { paidCuts: [] };
+    await assert.rejects(
+      generateKoyaMangaSpeech(
+        { projectDir: project.projectDir, episodeId: EPISODE_ID, voiceQualityGate: false },
+        { ...runtime, generateDialogueSpeech: observedDialogueRunner(observed) },
+      ),
+      (error) => {
+        assert.equal(error.code, KOYA_VOICE_SELECTION_REQUIRED_CODE, error.message);
+        assert.deepEqual(error.characterIds, ["sato-ken", "yamada-hanako"]);
+        return true;
+      },
+    );
+    assert.equal(typeof observed.args.beforePaidSpeech, "function", "the call site must hand the runner the voice gate");
+    assert.deepEqual(observed.paidCuts, [], "no paid cut may start");
+    assert.equal(sha256(await readFile(project.registryPath)), sha256(registryBefore));
+    const state = await readState(paths);
+    assert.equal(state.status, "awaiting-voice-selection");
+    assert.equal(state.currentStage, "speech");
+  } finally {
+    await rm(project.projectDir, { recursive: true, force: true });
+  }
+});
+
+test("the real Koya speech call site names an unvoiced speaker instead of the bare per-line error", async () => {
+  const registry = await humanSelectedRegistry(["sato-ken"]);
+  const project = await writeProject(registry);
+  try {
+    const manifest = koyaManifest(registry);
+    assert.equal(manifest.utterances.find((entry) => entry.speakerId === "yamada-hanako").voiceId, "", "fixture: registered but never voiced");
+    const { runtime, paths } = await writeBoundSpeechEpisode(project, manifest);
+    const observed = { paidCuts: [] };
+    await assert.rejects(
+      generateKoyaMangaSpeech(
+        { projectDir: project.projectDir, episodeId: EPISODE_ID, voiceQualityGate: false },
+        { ...runtime, generateDialogueSpeech: observedDialogueRunner(observed) },
+      ),
+      (error) => {
+        assert.equal(error.code, KOYA_VOICE_SELECTION_REQUIRED_CODE);
+        assert.deepEqual(error.characterIds, ["yamada-hanako"]);
+        assert.doesNotMatch(error.message, /An approved ElevenLabs voice is required/u);
+        assert.match(error.message, /voice-library-audition .*--character-ids yamada-hanako/u);
+        return true;
+      },
+    );
+    assert.deepEqual(observed.paidCuts, []);
+    const state = await readState(paths);
+    assert.equal(state.status, "awaiting-voice-selection");
+    assert.deepEqual(state.knownRemainingIssues[0].characterIds, ["yamada-hanako"]);
+    assert.deepEqual(state.knownRemainingIssues[0].pendingCutIds, ["cut-02"]);
+  } finally {
+    await rm(project.projectDir, { recursive: true, force: true });
+  }
+});
+
+test("the real Koya speech call site lets human-selected voices reach the paid cut runner", async () => {
+  const registry = await humanSelectedRegistry();
+  const project = await writeProject(registry);
+  try {
+    const { runtime } = await writeBoundSpeechEpisode(project, koyaManifest(registry));
+    const registryBefore = await readFile(project.registryPath);
+    const observed = { paidCuts: [] };
+    const result = await generateKoyaMangaSpeech(
+      { projectDir: project.projectDir, episodeId: EPISODE_ID, voiceQualityGate: false },
+      { ...runtime, generateDialogueSpeech: observedDialogueRunner(observed) },
+    );
+    assert.equal(result.partial, true);
+    assert.deepEqual(observed.paidCuts, ["cut-01", "cut-02"]);
+    assert.equal(sha256(await readFile(project.registryPath)), sha256(registryBefore));
+  } finally {
+    await rm(project.projectDir, { recursive: true, force: true });
+  }
+});
+
+const FAKE_SOURCE_FACE_DETECTOR = [
+  "import { mkdirSync, writeFileSync } from \"node:fs\";",
+  "import { dirname } from \"node:path\";",
+  "const output = process.argv[process.argv.indexOf(\"--output\") + 1];",
+  "mkdirSync(dirname(output), { recursive: true });",
+  "writeFileSync(output, JSON.stringify({ pass: true, rows: [], knownRemainingIssues: [] }));",
+].join("\n");
+
+async function writePreparableProject(registry) {
+  const project = await writeProject(registry);
+  await cp(FIXTURE_CONFIG_DIR, join(project.projectDir, "config"), { recursive: true });
+  const paths = koyaEpisodePaths(project.projectDir, EPISODE_ID);
+  await writeFile(paths.imagePlanPath, `${JSON.stringify({
+    sourceScript: { text: SCRIPT },
+    manifest: { title: "喫茶店の朝" },
+    pages: [{ cutId: "cut-01", utteranceId: "cut-01-u01", outputPath: project.imagePath }],
+    production: {
+      generatorProvenance: { role: "generator", host: "claude", id: "fixture-generator", contextId: "fixture-generator-context" },
+    },
+  }, null, 2)}\n`);
+  const detectorPath = join(project.projectDir, "fake-source-face-detector.mjs");
+  await writeFile(detectorPath, `${FAKE_SOURCE_FACE_DETECTOR}\n`);
+  return {
+    ...project,
+    paths,
+    // Stands in for the Python face detector so prepare reaches the manifest builder.
+    pythonRuntime: { command: process.execPath, args: [detectorPath], ok: true },
+  };
+}
+
+/** Records what the Koya call site asks of the shared builder, then builds with a usable catalog. */
+function observedManifestBuilder(observed) {
+  return async (args) => {
+    observed.push({ autoCastVoices: args.autoCastVoices, persistVoiceCasting: args.persistVoiceCasting });
+    // With a catalog, a call site that re-enabled casting would cast (and write) here without any network.
+    return createEpisodeManifest({ ...args, voiceCatalog: CATALOG });
+  };
+}
+
+test("the real Koya prepare call site keeps casting off and stops on an unvoiced protagonist", async () => {
+  const uncast = normalizeCharacterRegistry({ characters: castMembers(), voices: [] });
+  const project = await writePreparableProject(uncast);
+  try {
+    const before = await readFile(project.registryPath);
+    const observed = [];
+    await assert.rejects(
+      createKoyaEpisodeManifest({
+        projectDir: project.projectDir,
+        episodeId: EPISODE_ID,
+        protagonistSpeakerId: "佐藤健",
+        outerJobBinding: OUTER_JOB_BINDING,
+        pythonRuntime: project.pythonRuntime,
+        jobProjectDir: "/work/jobs",
+      }, { createEpisodeManifest: observedManifestBuilder(observed) }),
+      (error) => {
+        assert.equal(error.code, KOYA_VOICE_SELECTION_REQUIRED_CODE, error.message);
+        assert.deepEqual(error.characterIds, ["sato-ken", "yamada-hanako"]);
+        assert.match(error.message, /resume --job-id video-koya-manga-video-0123456789abcdef --project-dir \/work\/jobs --confirmed/u);
+        return true;
+      },
+    );
+    assert.deepEqual(observed, [{ autoCastVoices: false, persistVoiceCasting: false }]);
+    assert.equal(sha256(await readFile(project.registryPath)), sha256(before), "the Koya path must not write the registry");
+    const state = await readState(project.paths);
+    assert.equal(state.status, "awaiting-voice-selection");
+    assert.equal(state.currentStage, "prepare");
+  } finally {
+    await rm(project.projectDir, { recursive: true, force: true });
+  }
+});
+
+test("the real Koya prepare call site stops when any other speaker has no voice", async () => {
+  const registry = await humanSelectedRegistry(["sato-ken"]);
+  const project = await writePreparableProject(registry);
+  try {
+    const before = await readFile(project.registryPath);
+    const observed = [];
+    await assert.rejects(
+      createKoyaEpisodeManifest({
+        projectDir: project.projectDir,
+        episodeId: EPISODE_ID,
+        protagonistSpeakerId: "佐藤健",
+        outerJobBinding: OUTER_JOB_BINDING,
+        pythonRuntime: project.pythonRuntime,
+      }, { createEpisodeManifest: observedManifestBuilder(observed) }),
+      (error) => {
+        assert.equal(error.code, KOYA_VOICE_SELECTION_REQUIRED_CODE, error.message);
+        assert.deepEqual(error.characterIds, ["yamada-hanako"]);
+        assert.match(error.message, /yamada-hanako \(山田花子\): no voice is assigned to every line/u);
+        return true;
+      },
+    );
+    assert.deepEqual(observed, [{ autoCastVoices: false, persistVoiceCasting: false }]);
+    assert.equal(sha256(await readFile(project.registryPath)), sha256(before));
+    const state = await readState(project.paths);
+    assert.equal(state.status, "awaiting-voice-selection");
+    assert.equal(state.currentStage, "prepare");
+    assert.deepEqual(state.knownRemainingIssues[0].characterIds, ["yamada-hanako"]);
+  } finally {
+    await rm(project.projectDir, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The full run pauses (exit 3) instead of failing the outer Job
+
+async function writeScript(project) {
+  const scriptPath = join(project.projectDir, "script.txt");
+  await writeFile(scriptPath, `${SCRIPT}\n`);
+  return scriptPath;
+}
+
+test("Koya full stops a fresh episode before paid images when a voice is not human-selected", async () => {
+  const project = await writeProject(autoCastRegistry());
+  try {
+    const scriptPath = await writeScript(project);
+    const registryBefore = await readFile(project.registryPath);
+    const paths = koyaEpisodePaths(project.projectDir, EPISODE_ID);
+    // No image stub: the default wiring must run the check before the real
+    // image runner, which here would stop at its own outer-Job preflight.
+    const result = await runKoyaMangaFullProduction(
+      { projectDir: project.projectDir, episodeId: EPISODE_ID, scriptPath, protagonistSpeakerId: "佐藤健" },
+      directRuntime(project.projectDir, {
+        generateSpeech: async () => { throw new Error("speech must not start"); },
+      }),
+    );
+    assert.equal(result.exitCode, 3);
+    assert.equal(result.payload.status, "awaiting-voice-selection");
+    assert.equal(result.payload.stage, "before-images");
+    assert.equal(result.payload.waiting, true);
+    assert.equal(result.payload.checkpoint, paths.statePath);
+    assert.deepEqual(result.payload.characterIds, ["sato-ken", "yamada-hanako"]);
+    assert.equal(result.payload.knownRemainingIssues[0], "voice-selection-required: sato-ken, yamada-hanako");
+    assert.match(result.payload.knownRemainingIssues[1], /voice-library-audition/u);
+    assert.equal(sha256(await readFile(project.registryPath)), sha256(registryBefore));
+    const state = await readState(paths);
+    assert.equal(state.status, "awaiting-voice-selection");
+    assert.equal(state.currentStage, "voice-selection");
+    await assert.rejects(access(paths.imagePlanPath), { code: "ENOENT" }, "no image plan was started");
+  } finally {
+    await rm(project.projectDir, { recursive: true, force: true });
+  }
+});
+
+test("Koya full lets human-selected voices through to the image runner", async () => {
+  const project = await writeProject(await humanSelectedRegistry());
+  try {
+    const scriptPath = await writeScript(project);
+    let imageCalls = 0;
+    const result = await runKoyaMangaFullProduction(
+      { projectDir: project.projectDir, episodeId: EPISODE_ID, scriptPath, protagonistSpeakerId: "佐藤健" },
+      directRuntime(project.projectDir, {
+        checkVoiceSelectionsBeforeImages: assertKoyaVoiceSelectionsBeforeImages,
+        generateImages: async (options) => {
+          imageCalls += 1;
+          return { episodeId: options.episodeId, waiting: true, failed: false, state: { status: "awaiting-character-approval", knownRemainingIssues: [] } };
+        },
+      }),
+    );
+    assert.equal(imageCalls, 1);
+    assert.equal(result.exitCode, 3);
+    assert.equal(result.payload.status, "awaiting-character-approval");
+    await assert.rejects(access(koyaEpisodePaths(project.projectDir, EPISODE_ID).statePath), { code: "ENOENT" }, "a passing check writes nothing");
+  } finally {
+    await rm(project.projectDir, { recursive: true, force: true });
+  }
+});
+
+test("Koya full turns a prepare or speech voice refusal into a pause and still throws other errors", async () => {
+  const projectDir = await mkdtemp(join(tmpdir(), "koya-voice-pause-"));
+  try {
+    const refusal = () => Object.assign(new Error("voice selection required (fixture)"), {
+      code: KOYA_VOICE_SELECTION_REQUIRED_CODE,
+      characterIds: ["yamada-hanako"],
+    });
+    for (const stage of ["prepare", "speech"]) {
+      const calls = [];
+      const result = await runKoyaMangaFullProduction(
+        { projectDir, episodeId: EPISODE_ID, scriptPath: "/fixture/script.txt" },
+        directRuntime(projectDir, {
+          generateImages: async (options) => ({ episodeId: options.episodeId, waiting: false, failed: false }),
+          prepareManifest: async () => {
+            calls.push("prepare");
+            if (stage === "prepare") throw refusal();
+            return { waiting: false };
+          },
+          generateSpeech: async () => {
+            calls.push("speech");
+            throw refusal();
+          },
+          renderVideo: async () => { throw new Error("render must not start"); },
+        }),
+      );
+      assert.equal(result.exitCode, 3, stage);
+      assert.equal(result.payload.status, "awaiting-voice-selection", stage);
+      assert.equal(result.payload.stage, stage);
+      assert.deepEqual(result.payload.characterIds, ["yamada-hanako"]);
+      assert.deepEqual(calls, stage === "prepare" ? ["prepare"] : ["prepare", "speech"]);
+    }
+    await assert.rejects(
+      runKoyaMangaFullProduction(
+        { projectDir, episodeId: EPISODE_ID, scriptPath: "/fixture/script.txt" },
+        directRuntime(projectDir, {
+          generateImages: async (options) => ({ episodeId: options.episodeId, waiting: false, failed: false }),
+          prepareManifest: async () => ({ waiting: false }),
+          generateSpeech: async () => { throw new Error("provider exploded"); },
+        }),
+      ),
+      /provider exploded/u,
+    );
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("the outer Job adapter keeps a voice-selection pause resumable", async () => {
+  const refusal = Object.assign(new Error("Koya speech stopped before any paid request (fixture)"), {
+    code: KOYA_VOICE_SELECTION_REQUIRED_CODE,
+    characterIds: ["yamada-hanako"],
+  });
+  const paused = koyaVoiceSelectionPauseResult(refusal, {
+    preflight: null,
+    projectDir: "/work/jobs/workspace",
+    episodeId: EPISODE_ID,
+    stage: "speech",
+  });
+  assert.equal(koyaVoiceSelectionPauseResult(new Error("other"), { projectDir: "/work", episodeId: EPISODE_ID }), null);
+  const job = {
+    id: JOB_ID,
+    harness: { id: "koya-manga-video" },
+    projectDir: "/work/jobs",
+    script: { path: "/work/jobs/script.txt" },
+    options: {
+      episodeId: EPISODE_ID,
+      protagonistSpeakerId: "sato-ken",
+      characterBiblePath: "/work/jobs/character-bible.json",
+      storyReviewPath: "/work/jobs/story-review.json",
+    },
+    stages: [],
+  };
+  const outcome = await executeVideoHarnessAdapter({
+    job,
+    runChild: async () => ({ code: paused.exitCode, signal: null, stdout: `${JSON.stringify(paused.payload, null, 2)}\n`, stderr: "" }),
+  });
+  // awaiting-human-review is not terminal, so a later resume runs the adapter again.
+  assert.equal(outcome.status, "awaiting-human-review");
+  assert.deepEqual(outcome.knownRemainingIssues, [
+    "voice-selection-required: yamada-hanako",
+    "Koya speech stopped before any paid request (fixture)",
+  ]);
+  assert.equal(outcome.result.status, "awaiting-voice-selection");
+  // What the previous commit produced: a thrown refusal, exit 1, no JSON, so the Job failed for good.
+  await assert.rejects(
+    executeVideoHarnessAdapter({
+      job,
+      runChild: async () => ({ code: 1, signal: null, stdout: "", stderr: refusal.message }),
+    }),
+    (error) => error instanceof Error,
+  );
+});
+
+test("the pre-image voice check leaves resumed episodes and unevaluable inputs to their own stages", async () => {
+  const project = await writeProject(autoCastRegistry());
+  try {
+    const scriptPath = await writeScript(project);
+    const paths = koyaEpisodePaths(project.projectDir, EPISODE_ID);
+    const check = (options) => assertKoyaVoiceSelectionsBeforeImages({ projectDir: project.projectDir, episodeId: EPISODE_ID, ...options });
+    assert.equal((await check({ scriptPath: join(project.projectDir, "missing.txt"), protagonistSpeakerId: "佐藤健" })).skipped, "not-evaluable");
+    assert.equal((await check({ scriptPath })).skipped, "protagonist-unresolved", "an ambiguous protagonist is plan's refusal");
+
+    const alignmentDir = join(project.canvasDir, "audio-alignments");
+    await mkdir(alignmentDir, { recursive: true });
+    const alignment = join(alignmentDir, `${EPISODE_ID}-cut-01-u02-koya-v44.wav.json`);
+    await writeFile(alignment, "{}\n");
+    assert.equal((await check({ scriptPath, protagonistSpeakerId: "佐藤健" })).skipped, "speech-evidence-exists");
+    await rm(alignment);
+
+    await mkdir(paths.episodeDir, { recursive: true });
+    await writeFile(paths.manifestPath, "{}\n");
+    assert.equal((await check({ scriptPath, protagonistSpeakerId: "佐藤健" })).skipped, "manifest-exists", "the paid-speech gate owns a prepared episode");
+    await assert.rejects(access(paths.statePath), { code: "ENOENT" }, "skipping writes nothing");
+    await rm(paths.manifestPath);
+
+    await assert.rejects(
+      check({ scriptPath, protagonistSpeakerId: "佐藤健" }),
+      (error) => error.code === KOYA_VOICE_SELECTION_REQUIRED_CODE,
+    );
+  } finally {
+    await rm(project.projectDir, { recursive: true, force: true });
   }
 });

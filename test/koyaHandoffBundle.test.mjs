@@ -19,6 +19,11 @@ import {
   verifyKoyaHandoffBundle,
   _testing,
 } from "../lib/koyaHandoffBundle.mjs";
+import {
+  auditKoyaVoiceSelections,
+  classifyKoyaVoiceCastingRecord,
+  KOYA_HANDOFF_VOICE_SELECTION_ATTESTATION,
+} from "../lib/koyaVoiceSelectionGuard.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -187,6 +192,102 @@ test("Koya handoff exports only approved scoped data, verifies every file, and r
     const evidencePath = path.join(bundleDir, exported.manifest.files.find((entry) => entry.kind === "approved-character-evidence").path);
     await writeFile(evidencePath, "tampered");
     await assert.rejects(() => verifyKoyaHandoffBundle({ bundleDir }), /SHA-256 mismatch|size mismatch/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Koya handoff carries a human voice selection only as a sanitized record the receiving speech gate accepts", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "koya-handoff-voice-selection-"));
+  const sourceProject = path.join(root, "source");
+  const targetProject = path.join(root, "target");
+  const bundleDir = path.join(root, "bundle");
+  try {
+    await prepareProject(sourceProject, true);
+    await prepareProject(targetProject, false);
+    const sourceRegistryPath = path.join(sourceProject, "canvas", "characters.json");
+    const sourceRegistry = JSON.parse(await readFile(sourceRegistryPath, "utf8"));
+    const voice = sourceRegistry.voices.find((entry) => entry.id === "voice-fixture-primary");
+    const speaker = sourceRegistry.characters.find((entry) => entry.voiceId === voice.id);
+    // The shape the anonymous audition approval writes (selectionVersion 2).
+    voice.casting = {
+      language: "ja",
+      auditionPlanId: "private-voice-audition-plan",
+      candidateSetId: "private-voice-candidate-set",
+      selectedCandidateLabel: "B",
+      auditionCandidateCount: 3,
+      score: 71,
+      persona: { name: "private persona" },
+      previewUrl: "https://private.invalid/voice-preview.mp3",
+      previewConfirmed: true,
+      selectionReason: "private voice selection reason",
+      approvedBy: "private-voice-approver",
+      selectedAt: "2026-09-10T00:00:00.000Z",
+      selectionVersion: 2,
+    };
+    speaker.voiceCasting = structuredClone(voice.casting);
+    await writeJson(sourceRegistryPath, sourceRegistry);
+
+    await exportKoyaHandoffBundle({ projectDir: sourceProject, outputDir: bundleDir, bundleId: "handoff-voice-selection" });
+    const bundleRegistryPath = path.join(bundleDir, "project", "canvas", "characters.json");
+    const bundleRegistryText = await readFile(bundleRegistryPath, "utf8");
+    const portable = JSON.parse(bundleRegistryText).voices.find((entry) => entry.id === voice.id).casting;
+    assert.deepEqual(Object.keys(portable).sort(), [
+      "approvedBy", "attestation", "auditionCandidateCount", "candidateSetId", "previewConfirmed",
+      "selectedAt", "selectionReason", "selectionVersion", "winnerLabelRecorded",
+    ]);
+    assert.equal(portable.attestation, KOYA_HANDOFF_VOICE_SELECTION_ATTESTATION);
+    assert.equal(portable.auditionCandidateCount, 3);
+    assert.equal(portable.selectedAt, "2026-09-10T00:00:00.000Z");
+    assert.match(portable.approvedBy, /^source-approver-sha256:[a-f0-9]{64}$/u);
+    assert.match(portable.selectionReason, /^source-reason-sha256:[a-f0-9]{64}$/u);
+    assert.match(portable.candidateSetId, /^source-candidate-set-sha256:[a-f0-9]{64}$/u);
+    for (const privateValue of [
+      "private-voice-audition-plan",
+      "private-voice-candidate-set",
+      "private persona",
+      "private.invalid/voice-preview",
+      "private voice selection reason",
+      "private-voice-approver",
+    ]) assert.equal(bundleRegistryText.includes(privateValue), false, privateValue);
+    assert.equal(JSON.parse(bundleRegistryText).characters.find((entry) => entry.id === speaker.id).voiceCasting, null);
+
+    assert.equal((await verifyKoyaHandoffBundle({ bundleDir })).ok, true);
+    await restoreKoyaHandoffBundle({ projectDir: targetProject, bundleDir });
+    const targetRegistry = JSON.parse(await readFile(path.join(targetProject, "canvas", "characters.json"), "utf8"));
+    const restoredVoice = targetRegistry.voices.find((entry) => entry.id === voice.id);
+    assert.equal(classifyKoyaVoiceCastingRecord(restoredVoice.casting).kind, "human-selection");
+    const line = {
+      id: "cut-01-u01",
+      cutId: "cut-01",
+      speakerId: speaker.id,
+      speakerName: speaker.name,
+      preset: "dialogue",
+      text: "おはようございます。",
+      voiceProfileId: restoredVoice.id,
+      voiceId: restoredVoice.providerVoiceId,
+    };
+    const audit = auditKoyaVoiceSelections({ manifest: { utterances: [line] }, registry: targetRegistry });
+    assert.equal(audit.pass, true, JSON.stringify(audit.speakers));
+    assert.equal(audit.speakers[0].registrySource, "handoff-bundle");
+
+    // Raw private data smuggled back into the record is refused even after the
+    // manifest is rehashed to match the edited registry.
+    const tampered = JSON.parse(bundleRegistryText);
+    tampered.voices.find((entry) => entry.id === voice.id).casting.selectionReason = "private voice selection reason";
+    await writeJson(bundleRegistryPath, tampered);
+    const manifestPath = path.join(bundleDir, "manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    const row = manifest.files.find((entry) => entry.path === "project/canvas/characters.json");
+    row.size = (await stat(bundleRegistryPath)).size;
+    row.sha256 = sha256(await readFile(bundleRegistryPath));
+    delete manifest.digest;
+    manifest.digest = sha256(JSON.stringify(manifest));
+    await writeJson(manifestPath, manifest);
+    await assert.rejects(
+      () => verifyKoyaHandoffBundle({ bundleDir }),
+      /casting data other than a sanitized human voice-selection attestation/u,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
