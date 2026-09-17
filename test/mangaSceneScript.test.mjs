@@ -16,36 +16,36 @@ import {
 } from "../lib/mangaSceneScript.mjs";
 import { parseMangaScript } from "../lib/mangaVideoPipeline.mjs";
 import { createMangaScriptImagePlan } from "../lib/mangaScriptImagePipeline.mjs";
-import { detectMangaEyeOpenBeats } from "../lib/mangaEyeOpenBeats.mjs";
+import { detectMangaEyeOpenBeats, groupMangaEyeOpenUnits, mangaEyeOpenUnitLabels } from "../lib/mangaEyeOpenBeats.mjs";
 import {
   assertKoyaDeclaredProtagonist,
   resolveKoyaProtagonistSpeaker,
 } from "../lib/koyaMangaProductionContract.mjs";
-import { createKoyaStoryReviewDraft } from "../lib/koyaChannelGovernance.mjs";
+import { auditKoyaEyeOpenPlan, auditKoyaStory, createKoyaStoryReviewDraft } from "../lib/koyaChannelGovernance.mjs";
 import { planKoyaMangaProduction } from "../lib/koyaMangaProduction.mjs";
 
 const BOM = "\uFEFF";
 
 const SCENE_SCRIPT = `---
-タイトル: 企画書の本当の作者
+タイトル: 昼休みの弁当取り違え
 サムネ:
-  帯1行目: 企画書を奪った先輩
-  帯2行目: 記録が全部残っていた
-  テロップ: 記録
+  帯1行目: 弁当を取り違えた昼休み
+  帯2行目: 蓋の裏に名前があった
+  テロップ: 名前
   型: 2コマ
   吹き出し:
     - 話者: 佐藤健
-      文言: 記録だと!?
+      文言: 俺の弁当が!?
     - 話者: 山田花子
-      文言: 全部／残ってます
+      文言: 蓋の裏／見てください
 登場人物:
   - 名前: 山田花子
     区分: 今回限り
     主人公: はい
     性別: 女
-    年齢: 28
-    職業: 経理課の社員
-    見た目: 黒髪のボブ、眼鏡
+    年齢: 31
+    職業: 総務部の社員
+    見た目: 短い茶髪、丸い眼鏡
   - 名前: 佐藤健
     区分: 固定
     主人公: いいえ
@@ -57,20 +57,20 @@ const SCENE_SCRIPT = `---
 
 #場面 1 オフィス・昼
 
-その企画書を書いたのは私だ。三週間、毎晩残って詰めた。
+冷蔵庫を開けると、私の弁当が消えていた。朝から楽しみにしていたのに。
 
-佐藤健：この企画、俺が一から考えたものでね
-山田花子（心）：一字一句、私の文章のままだ
+佐藤健：この唐揚げ弁当、なかなかうまいな
+山田花子（心）：それ、私が作ったお弁当なんだけど
 
 #場面 2 会議室・昼
 
-鈴木：その企画書、作成者の記録を確認させてください
-佐藤健：「証拠でもあるのか」
-山田花子：記録が残っています
+鈴木：冷蔵庫の中身、持ち主ごとに確認しましょうか
+佐藤健：「俺のだと思ったんだ」
+山田花子：蓋の裏に名前を書いておきました
 
-会議室が静まり返った。
+佐藤健は黙って蓋を裏返した。
 
-佐藤健：記録だと！？
+佐藤健：本当に書いてある！？
 
 #場面 3 喫茶店・夜
 
@@ -111,28 +111,28 @@ function codesAndLines(warnings) {
 test("scene-script front matter is read as a two-level map with the thumbnail block kept verbatim", () => {
   const parsed = parseMangaScript(SCENE_SCRIPT, { registry: REGISTRY });
   assert.equal(parsed.format, "scene-script");
-  assert.equal(parsed.title, "企画書の本当の作者");
+  assert.equal(parsed.title, "昼休みの弁当取り違え");
   assert.deepEqual(parsed.frontMatter, {
-    タイトル: "企画書の本当の作者",
+    タイトル: "昼休みの弁当取り違え",
     サムネ: {
-      帯1行目: "企画書を奪った先輩",
-      帯2行目: "記録が全部残っていた",
-      テロップ: "記録",
+      帯1行目: "弁当を取り違えた昼休み",
+      帯2行目: "蓋の裏に名前があった",
+      テロップ: "名前",
       型: "2コマ",
       吹き出し: [
-        { 話者: "佐藤健", 文言: "記録だと!?" },
-        { 話者: "山田花子", 文言: "全部／残ってます" },
+        { 話者: "佐藤健", 文言: "俺の弁当が!?" },
+        { 話者: "山田花子", 文言: "蓋の裏／見てください" },
       ],
     },
     登場人物: [
-      { 名前: "山田花子", 区分: "今回限り", 主人公: "はい", 性別: "女", 年齢: "28", 職業: "経理課の社員", 見た目: "黒髪のボブ、眼鏡" },
+      { 名前: "山田花子", 区分: "今回限り", 主人公: "はい", 性別: "女", 年齢: "31", 職業: "総務部の社員", 見た目: "短い茶髪、丸い眼鏡" },
       { 名前: "佐藤健", 区分: "固定", 主人公: "いいえ" },
       { 名前: "鈴木", 区分: "固定", 主人公: "いいえ" },
     ],
     場所: "オフィス／喫茶店",
   });
   assert.deepEqual(parsed.cast, [
-    { name: "山田花子", category: "one-off", isProtagonist: true, gender: "女", age: "28", occupation: "経理課の社員", appearance: "黒髪のボブ、眼鏡" },
+    { name: "山田花子", category: "one-off", isProtagonist: true, gender: "女", age: "31", occupation: "総務部の社員", appearance: "短い茶髪、丸い眼鏡" },
     { name: "佐藤健", category: "fixed", isProtagonist: false, gender: "", age: "", occupation: "", appearance: "" },
     { name: "鈴木", category: "fixed", isProtagonist: false, gender: "", age: "", occupation: "", appearance: "" },
   ]);
@@ -140,25 +140,54 @@ test("scene-script front matter is read as a two-level map with the thumbnail bl
 });
 
 test("front matter parser mirrors the intake checker and keeps hostile keys as plain data", () => {
-  const frontMatter = parseSceneScriptFrontMatter([
+  const lines = [
     "タイトル：全角コロンの題",
     "__proto__: 汚染しない",
     "登場人物:",
     "  - 名前: 田中",
     "    区分: 準レギュラー",
     "  - ただの文字列",
+    "  - 名前：全角",
     "場所:",
     "メモ: 10:30に集合",
-  ]);
-  assert.equal(frontMatter.タイトル, "全角コロンの題");
+    "予定：10:30に集合",
+  ];
+  const frontMatter = parseSceneScriptFrontMatter(lines);
+  // The checker splits keys at the half-width colon only (str.partition(":")).
+  assert.equal(Object.prototype.hasOwnProperty.call(frontMatter, "タイトル"), false);
+  assert.equal(frontMatter["予定：10"], "30に集合");
   assert.equal(Object.getPrototypeOf(frontMatter), Object.prototype);
   assert.equal(Object.prototype.hasOwnProperty.call(frontMatter, "__proto__"), true);
   assert.equal({}.polluted, undefined);
-  // A list item without a colon becomes an empty map, exactly like the checker.
-  assert.deepEqual(frontMatter.登場人物, [{ 名前: "田中", 区分: "準レギュラー" }, {}]);
+  // A list item without a (half-width) colon becomes an empty map, exactly like the checker.
+  assert.deepEqual(frontMatter.登場人物, [{ 名前: "田中", 区分: "準レギュラー" }, {}, {}]);
   // An empty value opens a nested map, as in the checker.
   assert.deepEqual(frontMatter.場所, {});
   assert.equal(frontMatter.メモ, "10:30に集合");
+
+  // The lenient mode reads full-width keys too and names every such line.
+  const reported = [];
+  const lenient = parseSceneScriptFrontMatter(lines, { acceptFullWidthColon: true, onFullWidthColon: (index) => reported.push(index) });
+  assert.equal(lenient.タイトル, "全角コロンの題");
+  assert.deepEqual(lenient.登場人物, [{ 名前: "田中", 区分: "準レギュラー" }, {}, { 名前: "全角" }]);
+  assert.equal(lenient.予定, "10:30に集合");
+  assert.equal(lenient.メモ, "10:30に集合");
+  assert.deepEqual(reported, [0, 6, 9]);
+
+  // A scene script is read leniently, with a warning on each full-width line.
+  const fullWidth = sceneScript({
+    frontMatter: "タイトル：全角の題\n登場人物:\n  - 名前：山田花子\n    主人公: はい",
+    body: "#場面 1 会議室・朝\n山田花子：おはようございます",
+  });
+  const fullWidthParsed = parseMangaScript(fullWidth);
+  assert.equal(fullWidthParsed.title, "全角の題");
+  assert.equal(fullWidthParsed.protagonistName, "山田花子");
+  assert.equal(fullWidthParsed.utterances[0].isProtagonist, true);
+  assert.deepEqual(codesAndLines(fullWidthParsed.warnings), [
+    { code: "front-matter-full-width-colon", line: 2 },
+    { code: "front-matter-full-width-colon", line: 4 },
+  ]);
+  assert.match(fullWidthParsed.warnings[0].message, /タイトル：全角の題.*半角のコロン/u);
 
   // Unknown 区分 values are kept as given.
   const parsed = parseMangaScript(sceneScript({
@@ -190,7 +219,7 @@ test("three scenes become cuts with scene, place, and location; narration and in
       order: 1,
       speakerName: "ナレーション",
       speakerId: "narration",
-      text: "その企画書を書いたのは私だ。三週間、毎晩残って詰めた。",
+      text: "冷蔵庫を開けると、私の弁当が消えていた。朝から楽しみにしていたのに。",
       bubbleId: "bubble-cut-01-u01",
       preset: "narration",
       isProtagonist: false,
@@ -202,7 +231,7 @@ test("three scenes become cuts with scene, place, and location; narration and in
       order: 2,
       speakerName: "佐藤健",
       speakerId: "ken",
-      text: "この企画、俺が一から考えたものでね",
+      text: "この唐揚げ弁当、なかなかうまいな",
       bubbleId: "bubble-cut-01-u02",
       preset: "dialogue",
       isProtagonist: false,
@@ -214,7 +243,7 @@ test("three scenes become cuts with scene, place, and location; narration and in
       order: 3,
       speakerName: "山田花子",
       speakerId: "hanako",
-      text: "一字一句、私の文章のままだ",
+      text: "それ、私が作ったお弁当なんだけど",
       bubbleId: "bubble-cut-01-u03",
       preset: "thought",
       isProtagonist: true,
@@ -231,7 +260,8 @@ test("three scenes become cuts with scene, place, and location; narration and in
     ["ナレーション", "narration"],
     ["佐藤健", "shout"],
   ]);
-  assert.equal(scene2[1].text, "証拠でもあるのか", "dialogue unwraps outer quotes like the legacy parser");
+  assert.equal(scene2[1].text, "俺のだと思ったんだ", "dialogue unwraps outer quotes like the legacy parser");
+  assert.equal(scene2[3].text, "佐藤健は黙って蓋を裏返した。");
   assert.equal(scene2[2].isProtagonist, true);
   assert.equal(scene2[0].speakerId, speakerHash("鈴木"));
   assert.deepEqual(parsed.cuts[2].utterances.map((entry) => entry.id), ["cut-03-u01", "cut-03-u02"]);
@@ -530,6 +560,18 @@ test("format detection only switches for scene-script markers", () => {
   assert.equal(detectMangaScriptFormat("# 場面の話\n#場面 会議室"), "cut-heading");
   assert.equal(detectMangaScriptFormat("＃場面 1 会議室"), "cut-heading");
   assert.equal(detectMangaScriptFormat("---\n#場面 1 front matter の中は本文ではない\n---\n佐藤健：こんにちは"), "cut-heading");
+  // Keys are read the way the client's checker reads them: 「タイトル：…」 and
+  // 「登場人物：」 are not keys, so a legacy script that has them stays legacy
+  // and parses exactly as if it had no front matter.
+  const legacyFullWidth = "---\nタイトル：古い題\n登場人物：\n  - 名前: 悠斗\n---\n【カット1：会話】\n悠斗：行こう\n美咲：うん\n悠斗：三つ目\n美咲：四つ目\n悠斗：五つ目";
+  assert.equal(detectMangaScriptFormat(legacyFullWidth), "cut-heading");
+  const legacyFullWidthParsed = parseMangaScript(legacyFullWidth);
+  assert.deepEqual(legacyFullWidthParsed, parseMangaScript(legacyFullWidth.replace(/^---\n[\s\S]*?\n---\n/u, "")));
+  assert.equal(legacyFullWidthParsed.format, "cut-heading");
+  assert.equal(legacyFullWidthParsed.title, "漫画動画");
+  assert.deepEqual(legacyFullWidthParsed.cuts.map((cut) => [cut.id, cut.utterances.length]), [["cut-01", 5]]);
+  assert.equal(detectMangaScriptFormat("---\n登場人物：\n  - 名前：佐藤健\n---\n佐藤健：こんにちは"), "cut-heading");
+  assert.equal(detectMangaScriptFormat("---\nタイトル：題\n---\n#場面 1 会議室\n佐藤健：こんにちは"), "scene-script");
   assert.equal(detectMangaScriptFormat(""), "cut-heading");
   assert.equal(detectMangaScriptFormat(undefined), "cut-heading");
   // A legacy script parses to the legacy shape plus the format field.
@@ -766,4 +808,278 @@ test("Koya planning refuses a protagonist that disagrees with the script before 
     contractPath: resolve("config/koya-manga-production-contract.json"),
   }), /does not match the protagonist declared in the script/u);
   assert.equal(existsSync(join(projectDir, "canvas", "manga-videos", "koya-scene-script-dialogue-only")), false);
+});
+
+test("scene headings written as markdown headings still start a scene, with a warning", () => {
+  const script = sceneScript({
+    frontMatter: "登場人物:\n  - 名前: 山田花子\n    主人公: はい\n  - 名前: 佐藤健",
+    body: [
+      "# 見出しの題",
+      "#場面 1 オフィス・昼",
+      "山田花子：おはよう",
+      "# 場面 2 喫茶店・夜",
+      "佐藤健：いらっしゃい",
+      "## 場面３ 会議室・朝",
+      "山田花子：会議です",
+      "＃場面 4 屋上・昼",
+      "佐藤健：いい天気だ",
+      "# 次の日",
+      "山田花子：見出しの後の行",
+      "#場面 5 駅・夜",
+      "佐藤健：またね",
+    ].join("\n"),
+  });
+  const parsed = parseMangaScript(script);
+  assert.equal(parsed.title, "見出しの題");
+  assert.deepEqual(parsed.cuts.map((cut) => [cut.id, cut.scene.number, cut.purpose, cut.location?.name, cut.utterances.map((entry) => entry.text)]), [
+    ["cut-01", 1, "オフィス・昼", "オフィス", ["おはよう"]],
+    ["cut-02", 2, "喫茶店・夜", "喫茶店", ["いらっしゃい"]],
+    ["cut-03", 3, "会議室・朝", "会議室", ["会議です"]],
+    ["cut-04", 4, "屋上・昼", "屋上", ["いい天気だ", "見出しの後の行"]],
+    ["cut-05", 5, "駅・夜", "駅", ["またね"]],
+  ]);
+  // A markdown heading after the first scene is neither a scene nor the title;
+  // it is reported so the lines under it are not silently merged.
+  assert.deepEqual(codesAndLines(parsed.warnings), [
+    { code: "scene-heading-format", line: lineOf(script, "# 場面 2") },
+    { code: "scene-heading-format", line: lineOf(script, "## 場面３") },
+    { code: "scene-heading-format", line: lineOf(script, "＃場面 4") },
+    { code: "unrecognized-heading", line: lineOf(script, "# 次の日") },
+  ]);
+  assert.match(parsed.warnings[0].message, /「# 場面 2 喫茶店・夜」は場面見出しとして読みました/u);
+  assert.match(parsed.warnings[3].message, /前の場面の続き/u);
+
+  // Without a title, a markdown scene heading never becomes the title.
+  const untitled = parseMangaScript("#場面 1 オフィス・昼\n佐藤健：おはよう\n# 場面 2 喫茶店・夜\n佐藤健：いらっしゃい");
+  assert.equal(untitled.title, "漫画動画");
+  assert.deepEqual(untitled.cuts.map((cut) => [cut.scene.number, cut.location?.name]), [[1, "オフィス"], [2, "喫茶店"]]);
+  assert.ok(untitled.warnings.some((entry) => entry.code === "scene-heading-format" && entry.line === 3));
+  // Nor does a markdown heading that comes after the first scene.
+  const late = parseMangaScript("#場面 1 オフィス・昼\n佐藤健：おはよう\n# 後から来た見出し\n佐藤健：さようなら");
+  assert.equal(late.title, "漫画動画");
+  assert.ok(late.warnings.some((entry) => entry.code === "unrecognized-heading" && entry.line === 3));
+  // A markdown scene heading as the very first heading opens scene 1; nothing is "before the first scene".
+  const first = parseMangaScript("---\nタイトル: 題\n---\n# 場面 1 オフィス・昼\n佐藤健：おはよう");
+  assert.deepEqual(first.cuts.map((cut) => cut.scene), [{ number: 1, heading: "オフィス・昼", place: "オフィス", timeOfDay: "昼" }]);
+  assert.deepEqual(first.warnings.map((entry) => entry.code).filter((code) => code !== "protagonist-count" && code !== "undeclared-speaker"), ["scene-heading-format"]);
+  // Detection itself still follows the format rule: only 「#場面 N」 switches a script with no front matter.
+  assert.equal(detectMangaScriptFormat("# 場面 1 オフィス・昼\n佐藤健：おはよう"), "cut-heading");
+});
+
+test("declared names that end in a digit keep their lines as dialogue, even before a number", () => {
+  const script = sceneScript({
+    frontMatter: "登場人物:\n  - 名前: 山田花子\n    主人公: はい\n  - 名前: 客1\n  - 名前: 客12\n  - 名前: 男1",
+    body: [
+      "#場面 1 喫茶店・昼",
+      "客1：2つください",
+      "客1:3時に来ます",
+      "客12：10:30に来ます",
+      "客1（心）：5分待とう",
+      "男1：1つでいい",
+      "客2：3つください",
+      "ナレーション：看板には営業時間：朝7時からとあった",
+    ].join("\n"),
+  });
+  const parsed = parseMangaScript(script);
+  assert.deepEqual(parsed.utterances.map((entry) => [entry.speakerName, entry.preset, entry.innerVoice, entry.text]), [
+    ["客1", "dialogue", false, "2つください"],
+    ["客1", "dialogue", false, "3時に来ます"],
+    ["客12", "dialogue", false, "10:30に来ます"],
+    ["客1", "thought", true, "5分待とう"],
+    ["男1", "dialogue", false, "1つでいい"],
+    // Not declared: the colon between digits is read as a time.
+    ["ナレーション", "narration", false, "客2：3つください"],
+    ["ナレーション", "narration", false, "看板には営業時間：朝7時からとあった"],
+  ]);
+  // 客1 and 男1 are different speakers; slugging both to "1" would merge their voices.
+  const ids = Object.fromEntries(parsed.utterances.filter((entry) => entry.speakerId !== "narration").map((entry) => [entry.speakerName, entry.speakerId]));
+  assert.deepEqual(ids, { 客1: speakerHash("客1"), 客12: speakerHash("客12"), 男1: speakerHash("男1") });
+  assert.equal(parseMangaScript("#場面 1 会議室・昼\nKen 2：hello").utterances[0].speakerId, "ken-2", "all-ASCII names keep the legacy readable id");
+  assert.deepEqual(codesAndLines(parsed.warnings), [
+    { code: "narration-colon", line: lineOf(script, "客2：") },
+    { code: "narration-colon", line: lineOf(script, "ナレーション：看板") },
+  ]);
+  assert.match(parsed.warnings[0].message, /数字に挟まれている.*登場人物欄/u);
+  assert.match(parsed.warnings[1].message, /ナレーションの中にコロン/u);
+  assert.doesNotMatch(parsed.warnings[1].message, /数字/u);
+});
+
+test("a scene split into several cuts keeps eye-open to the end of the scene and counts as one scene", async () => {
+  const script = sceneScript({
+    frontMatter: "タイトル: 分割された場面\n登場人物:\n  - 名前: 山田花子\n    主人公: はい\n  - 名前: 佐藤健",
+    body: [
+      "#場面 1 喫茶店・夜",
+      "佐藤健が静かに開眼した。",
+      "山田花子：一",
+      "山田花子：二",
+      "山田花子：三",
+      "佐藤健：四",
+      "山田花子：五",
+      "佐藤健：六",
+      "#場面 2 会議室・朝",
+      "山田花子：おはよう",
+      "佐藤健：おはよう",
+    ].join("\n"),
+  });
+  const parsed = parseMangaScript(script);
+  assert.deepEqual(parsed.cuts.map((cut) => [cut.id, cut.scene.number, cut.utterances.length]), [["cut-01", 1, 3], ["cut-02", 1, 4], ["cut-03", 2, 2]]);
+  const candidates = [{ characterId: "ken", names: ["佐藤健"] }];
+  const { beats, unresolved } = detectMangaEyeOpenBeats({ cuts: parsed.cuts, candidates });
+  assert.deepEqual(unresolved, []);
+  assert.deepEqual(beats.map((beat) => [beat.utteranceId, beat.cutId]), [
+    ...parsed.cuts[0].utterances.map((entry) => [entry.id, "cut-01"]),
+    ...parsed.cuts[1].utterances.map((entry) => [entry.id, "cut-02"]),
+  ]);
+  assert.ok(beats.every((beat) => beat.cue === "佐藤健が静かに開眼した"));
+
+  // A cue in the second cut of a scene opens from that line on, never earlier.
+  const lateCue = parseMangaScript(script.replace("佐藤健が静かに開眼した。\n", "").replace("山田花子：五", "佐藤健が静かに開眼した。\n山田花子：五"));
+  assert.deepEqual(lateCue.cuts.map((cut) => cut.utterances.length), [3, 4, 2]);
+  assert.deepEqual(detectMangaEyeOpenBeats({ cuts: lateCue.cuts, candidates }).beats.map((beat) => beat.utteranceId), ["cut-02-u02", "cut-02-u03", "cut-02-u04"]);
+
+  // A later cut of the scene that does not show the character gets no beat
+  // (the image plan refuses a beat for a character the cut does not show);
+  // the eyes are still open when the character is back in a later cut.
+  const absent = parseMangaScript(sceneScript({
+    frontMatter: "登場人物:\n  - 名前: 山田花子\n    主人公: はい\n  - 名前: 佐藤健",
+    body: ["#場面 1 喫茶店・夜", "佐藤健が静かに開眼した。", ...["一", "二", "三", "四", "五", "六"].map((text) => `山田花子：${text}`), "佐藤健：九", "山田花子：十"].join("\n"),
+  }));
+  assert.deepEqual(absent.cuts.map((cut) => cut.utterances.map((entry) => entry.speakerName)), [
+    ["ナレーション", "山田花子", "山田花子"],
+    ["山田花子", "山田花子", "山田花子"],
+    ["山田花子", "佐藤健", "山田花子"],
+  ]);
+  assert.deepEqual(detectMangaEyeOpenBeats({ cuts: absent.cuts, candidates }).beats.map((beat) => beat.utteranceId), [
+    "cut-01-u01", "cut-01-u02", "cut-01-u03", "cut-03-u01", "cut-03-u02", "cut-03-u03",
+  ]);
+
+  // Cuts without `scene` (the legacy format) keep the per-cut boundary.
+  const withoutScene = parsed.cuts.map(({ scene, ...cut }) => cut);
+  assert.deepEqual(detectMangaEyeOpenBeats({ cuts: withoutScene, candidates }).beats.map((beat) => beat.cutId), ["cut-01", "cut-01", "cut-01"]);
+  // Two consecutive scenes are never merged, even with the same heading.
+  const twoScenes = parseMangaScript("#場面 1 喫茶店・夜\n佐藤健が静かに開眼した。\n#場面 2 喫茶店・夜\n佐藤健：まだだ");
+  assert.deepEqual(detectMangaEyeOpenBeats({ cuts: twoScenes.cuts, candidates }).beats.map((beat) => beat.cutId), ["cut-01"]);
+
+  assert.deepEqual(groupMangaEyeOpenUnits(parsed.cuts).map((unit) => [unit.label, unit.cuts.map((cut) => cut.id)]), [
+    ["scene 1 (cut-01..cut-02)", ["cut-01", "cut-02"]],
+    ["scene 2 (cut-03)", ["cut-03"]],
+  ]);
+  assert.deepEqual([...mangaEyeOpenUnitLabels(withoutScene)], [["cut-01", "cut-01"], ["cut-02", "cut-02"], ["cut-03", "cut-03"]]);
+
+  // The overuse warning counts scenes, not machine-chosen cuts.
+  const boundIn = (cutIds, cuts) => auditKoyaEyeOpenPlan({
+    policy: { candidates: [{ characterId: "ken", memberId: "member-ken" }] },
+    eyeOpenPlan: { source: "script-cue", beats: [], boundImages: cutIds.map((cutId) => ({ cutId, characterId: "ken" })) },
+    cuts,
+  });
+  assert.deepEqual(boundIn(["cut-01", "cut-02", "cut-03"], parsed.cuts).warnings, []);
+  assert.match(boundIn(["cut-01", "cut-02", "cut-03"], withoutScene).warnings[0], /member-ken opens their eyes in 3 scenes \(cut-01, cut-02, cut-03\)/u);
+  assert.match(boundIn(["cut-01", "cut-02", "cut-03"]).warnings[0], /in 3 scenes/u, "without cuts every cut still counts");
+
+  // Story review draft and story audit use the same scene count. Members are
+  // picked from the synthetic fixture by rule, so no cast name enters the test.
+  const showBible = JSON.parse(await readFile(resolve("test/fixtures/channel-pack/config/koya-show-bible.json"), "utf8"));
+  const recurring = showBible.cast.find((entry) => entry.id === showBible.storyGrammar.castSemantics.recurringEyeOpen.castId);
+  const memberName = recurring.hiddenName || recurring.name;
+  const eyeScript = (sceneCount) => sceneScript({
+    frontMatter: "タイトル: 開眼の場面\n登場人物:\n  - 名前: 山田花子\n    主人公: はい",
+    body: Array.from({ length: sceneCount }, (_, index) => [
+      `#場面 ${index + 1} 喫茶店・夜`,
+      `${memberName}の糸目が開いた。`,
+      ...(index === 0 ? ["一", "二", "三", "四"].map((text) => `山田花子：${memberName}さん、${text}`) : ["山田花子：はい"]),
+    ].join("\n")).join("\n"),
+  });
+  const twoText = eyeScript(2);
+  const twoParsed = parseMangaScript(twoText);
+  assert.deepEqual(twoParsed.cuts.map((cut) => cut.scene.number), [1, 1, 2]);
+  const twoDraft = createKoyaStoryReviewDraft({ showBible, scriptText: twoText, parsed: twoParsed });
+  assert.equal(new Set(twoDraft.eyeOpenBeats.map((entry) => entry.utteranceId)).size, twoParsed.utterances.length);
+  assert.deepEqual(twoDraft.eyeOpenBeatWarnings, [], "three cuts in two scenes are two scenes");
+  const threeText = eyeScript(3);
+  const threeParsed = parseMangaScript(threeText);
+  const threeDraft = createKoyaStoryReviewDraft({ showBible, scriptText: threeText, parsed: threeParsed });
+  assert.deepEqual(threeDraft.eyeOpenBeatWarnings.map((message) => message.split(". ")[0]), [
+    `${recurring.id} opens their eyes in 3 scenes (scene 1 (cut-01..cut-02), scene 2 (cut-03), scene 3 (cut-04))`,
+  ]);
+  const review = (scriptText, eyeOpenBeats) => ({
+    version: "koya-story-review-v1",
+    scriptSha256: createHash("sha256").update(scriptText).digest("hex"),
+    reviewer: { host: "codex", id: "reviewer-1", contextId: "review-task-1" },
+    reviewedAt: "2026-09-18T00:00:00.000Z",
+    protagonistSpeakerId: "山田花子",
+    beats: {},
+    checks: {},
+    ...(eyeOpenBeats === undefined ? {} : { eyeOpenBeats }),
+  });
+  const storyWarnings = (scriptText, parsedScript, eyeOpenBeats) => auditKoyaStory({ scriptText, parsed: parsedScript, showBible, storyReview: review(scriptText, eyeOpenBeats), enforce: true })
+    .warnings.filter((message) => /opens their eyes/u.test(message));
+  assert.deepEqual(storyWarnings(twoText, twoParsed, undefined), []);
+  assert.equal(storyWarnings(threeText, threeParsed, undefined).length, 1);
+  const reviewed = twoParsed.utterances.map((entry) => ({ utteranceId: entry.id, castId: recurring.id }));
+  assert.deepEqual(storyWarnings(twoText, twoParsed, reviewed), [], "reviewed beats are counted per scene too");
+});
+
+test("the image plan binds eye-open sheets across a split scene and its report counts the scene once", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "scene-script-eye-open-plan-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const asset = (role, file) => ({ id: `${role}-${file}`, role, path: `assets/${file}`, sha256: "a".repeat(64), storyStage: "" });
+  const registry = {
+    characters: [
+      {
+        id: "ken",
+        name: "佐藤健",
+        kind: "character",
+        role: "fixed",
+        status: "approved",
+        referenceAssets: [asset("identity-face", "ken-face.png"), asset("turnaround", "ken-turnaround.png"), asset("expression", "ken-expressions.png"), asset("eye-open", "ken-eyes-open.png")],
+      },
+      { id: "hanako", name: "山田花子", kind: "character", role: "fixed", status: "approved", referenceAssets: [asset("identity-face", "hanako-face.png")] },
+    ],
+  };
+  const policy = { candidates: [{ characterId: "ken", memberId: "member-ken" }], reviewedBeats: null };
+  const planFor = (lines) => createMangaScriptImagePlan({
+    scriptText: sceneScript({
+      frontMatter: "タイトル: 開眼の計画\n登場人物:\n  - 名前: 山田花子\n    主人公: はい\n  - 名前: 佐藤健",
+      body: lines.join("\n"),
+    }),
+    episodeId: "scene-script-eye-open-plan",
+    registry,
+    canvasDir: root,
+    assetDir: join(root, "assets"),
+    eyeOpen: policy,
+  });
+  const scene = (number, cueLine, speakers) => [
+    `#場面 ${number} 喫茶店・夜`,
+    ...(cueLine ? ["佐藤健が静かに開眼した。"] : []),
+    ...speakers.map((name, index) => `${name}：${number}の${index + 1}`),
+  ];
+  const eyeSheet = /ken-eyes-open\.png$/u;
+  const jobsWithSheet = (plan) => plan.jobs
+    .filter((job) => job.kind === "scene-image" && job.referenceImagePaths.some((path) => eyeSheet.test(path)))
+    .map((job) => job.id)
+    .sort();
+
+  // 佐藤健 speaks in the second cut of scene 1: the sheet follows him there.
+  const shown = planFor(scene(1, true, ["山田花子", "山田花子", "山田花子", "山田花子", "佐藤健", "佐藤健"]));
+  assert.deepEqual(shown.manifest.cuts.map((cut) => [cut.id, cut.scene.number, cut.utterances.length]), [["cut-01", 1, 3], ["cut-02", 1, 4]]);
+  assert.deepEqual([...new Set(shown.eyeOpen.boundImages.map((entry) => entry.cutId))], ["cut-01", "cut-02"]);
+  assert.ok(shown.eyeOpen.boundImages.some((entry) => entry.utteranceId === "cut-02-u04"));
+  assert.ok(jobsWithSheet(shown).some((id) => id.includes("cut-02-u04")), "the eyes-open sheet reaches the later cut of the scene");
+
+  // He is absent from the second cut: the plan does not stop, and that cut keeps default eyes.
+  const hidden = planFor(scene(1, true, ["山田花子", "山田花子", "山田花子", "山田花子", "山田花子", "山田花子"]));
+  assert.deepEqual([...new Set(hidden.eyeOpen.boundImages.map((entry) => entry.cutId))], ["cut-01"]);
+  assert.ok(jobsWithSheet(hidden).every((id) => id.includes("cut-01-")));
+
+  // The plan report counts scenes: two split scenes plus one more is three
+  // scenes, not five cuts; two split scenes alone raise no warning.
+  const report = (plan) => auditKoyaEyeOpenPlan({ policy, eyeOpenPlan: plan.eyeOpen, cuts: plan.manifest.cuts }).warnings;
+  const busy = (sceneCount) => planFor(Array.from({ length: sceneCount }, (_, index) => scene(index + 1, true, ["山田花子", "佐藤健", "山田花子", "佐藤健", "山田花子"])).flat());
+  const twoScenes = busy(2);
+  assert.deepEqual([...new Set(twoScenes.eyeOpen.boundImages.map((entry) => entry.cutId))], ["cut-01", "cut-02", "cut-03", "cut-04"]);
+  assert.deepEqual(report(twoScenes), []);
+  assert.match(auditKoyaEyeOpenPlan({ policy, eyeOpenPlan: twoScenes.eyeOpen }).warnings[0], /in 4 scenes/u, "without the cuts every cut would count");
+  assert.deepEqual(report(busy(3)).map((message) => message.split(". ")[0]), [
+    "member-ken opens their eyes in 3 scenes (scene 1 (cut-01..cut-02), scene 2 (cut-03..cut-04), scene 3 (cut-05..cut-06))",
+  ]);
 });
