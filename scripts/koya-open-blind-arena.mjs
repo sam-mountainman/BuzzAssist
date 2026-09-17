@@ -9,14 +9,10 @@
 // path (`character-approve` / `character-style-select` / recordBlindCandidateVerdict),
 // never through the judge UI's own state — bon is the viewer, not the record.
 import { createHash } from "node:crypto";
-import { execFile as execFileCallback } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import process from "node:process";
-import { promisify } from "node:util";
-
-const execFile = promisify(execFileCallback);
-const BON_CLI = process.env.BON_CLI || "~/まさお/bestofn-repo/bin/bon.js";
+import { runBestOfN } from "../lib/bestOfNRuntime.mjs";
 
 function usage() {
   console.error("usage: koya-open-blind-arena.mjs --public <public-packet.json> [--serve] [--prompt TEXT]");
@@ -71,14 +67,14 @@ for (const candidate of candidates) {
 }
 
 const prompt = args.prompt || `${packet.setId}: どれが一番良いですか（出所は伏せています）`;
-const { stdout } = await execFile("node", [BON_CLI, "ask", "--spec", prompt, ...files], {
+const { stdout } = await runBestOfN(["ask", "--spec", prompt, ...files], {
   cwd: process.cwd(),
   maxBuffer: 16 * 1024 * 1024,
 });
 const tournamentId = (stdout.match(/\b\d{8}T\d{6}-[a-z0-9]+\b/i) || [])[0];
 if (!tournamentId) throw new Error(`could not read tournament id from bon output: ${stdout.slice(0, 200)}`);
 
-if (args.serve) await execFile("node", [BON_CLI, "serve", "-d", "--open"], { cwd: process.cwd() });
+if (args.serve) await runBestOfN(["serve", "-d", "--open"], { cwd: process.cwd() });
 
 console.log(JSON.stringify({
   status: "arena-opened",

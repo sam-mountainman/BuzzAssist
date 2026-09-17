@@ -4,31 +4,95 @@
 
 隣の `SKILL.md` が正本で、**矛盾したときは SKILL.md が優先**します。
 ここは運用上の補助指示であって、**監査・承認・合否の証跡には使えません**。
+根拠は逐語ではなく sha256 先頭12桁の digest だけを載せます（このファイルは配布物に
+同梱されるため）。逐語は `node scripts/harness-learn.mjs status` で id から引けます。
 
-- **Codex built-in imagegenのreferenced_image_pathsは1呼び出し最大5パス。漫画シーンではlocationを1枠予約し、同時に可視化する固定キャラは最大4人に抑え、各人のidentity-faceをsecondary referenceより先に必ず入れる。5人以上のcutは有料生成前にfail closedし、台本またはcutを分割する。**（2回指摘）
-  - 根拠: 2026-08-31 thread 01a057eb-f048-7dc3-996f-8705c8c879b4 session JSONL ordinal 16: referenced_image_paths 7件で ; 5件へ手動縮退後にimagegen開始。lib/mangaScriptImagePipeline.mjsを上限5・overfull hard failへ修正し29 tests pass.
-  - 根拠: 2026-08-31 thread 01a057eb-f048-7dc3-996f-8705c8c879b4 session JSONL ordinal 16: referenced_image_paths 7件で must contain at most 5 paths と失敗。5件へ縮退後にimagegen開始。lib/mangaScriptImagePipeline.mjsを上限5・overfull hard failへ修正し29 tests pass。
-  - 種別: fact / 初回: 2026-08-31 / id: `0e71978746a3`
 - **台本から固定キャストを検出できないことを、番組ルールの免除として扱わない。どのハーネスを使うかは上位のルーターが決めることなので、キャスト未検出は免除ではなく失敗にする**
-  - 根拠: lib/koyaChannelGovernance.mjs で、話者名の表記ゆれひとつで18の番組ルールが全部無効化される状態だった（Codex g1レビュー項目16）
+  - 根拠digest: `ac07e5434d00`
   - 種別: correction / 初回: 2026-08-28 / id: `e4bfed5416e8`
 - **漫画動画の固定キャラ衣装には『一瞬しか映らない背景レベルの服』という区分は存在しない（1カット数秒ホールドのため服は必ず目立つ）。台本上ベース服が不適切なシーン（プール→水着等）は、シーンごとの逐次承認ではなく、plan段階で全シーン×固定キャラの服装適合を一括照合→不適合スロットを一括候補生成→1話1回の承認パケットで番号選択→SHA凍結してワードローブ蓄積、が正しいゲート形（wardrobe-readiness）。承認済み服の再登場は凍結シート参照のみ。例外はモブ・エキストラのみ都度生成。**
-  - 根拠: 2026-08-30ユーザー訂正（『一瞬しか映らない背景レベルの服なんてなくない？』『台本渡したら最初に候補出すようにするんじゃないの？』）。設計記録: channel-packs/koya/docs/koya-client-reply-2026-08-30.md 長期ワードローブ設計の節
+  - 根拠digest: `1c093efe812c`
   - 種別: correction / 初回: 2026-08-30 / id: `963ccdec443e`
 - **設定画19枚バッチの人手検品で見つかった6件のNGのうち、機械検出へ昇格できるものが2型ある: ①背景混入（白背景標準のシートにシーン背景が出る）はシート外周の白色率チェックで検出可能 ②3/4ビューの向き重複（左右2セルが同方向）は片方を左右反転したpHash同士の距離で検出可能。また③衣装シート生成は承認元シートを衣装の正参照として必ず画像で渡す（『オフィスの装い』等の一般語記述だと別の服に変質する。実例: <private-term>OLがカーディガン→ブレザー化）。①②は character-attribute-gate への追加候補、③はプロンプト規則。**
-  - 根拠: canvas/character-reviews/setting-sheet-human-qa-findings-2026-08-30.json のfindings 6件（ema-outfit-office-wrong-garment-and-background / <private-term>-expressions-background-contamination / ema-turnaround-duplicate-34-direction ほか）
+  - 根拠digest: `85bbb0d28a20`
   - 種別: fact / 初回: 2026-08-30 / id: `bfccffc4ae54`
+- **Codex built-in imagegenのreferenced_image_pathsは1呼び出し最大5パス。漫画シーンではlocationを1枠予約し、同時に可視化する固定キャラは最大4人に抑え、各人のidentity-faceをsecondary referenceより先に必ず入れる。5人以上のcutは有料生成前にfail closedし、台本またはcutを分割する。**
+  - 根拠digest: `82bdccdbf430`, `492c44080a28`
+  - 種別: fact / 初回: 2026-08-31 / id: `0e71978746a3`
 - **画像生成の機械QAは、構図や描画品質が高くても、台本の小規模な地域催事場を高級ホテルのロビーへ置換した意味ずれを通過させることがある。台本由来の会場種別・規模・設備・明示的な禁止例を、背景参照と全シーンの生成プロンプトだけでなくブラインドQAのハード失敗条件にも同一契約として渡し、代表画像を人間が知覚確認する。**
-  - 根拠: manga-approved-eight-canary-002 の reference-environment-primary-location.png と cut-03-u01.png を実見。台本は番組固有の町の商店会が開く小さな催事場だが、生成物は大理石床・コンシェルジュ台・都市眺望を備えた高級ホテルロビーで、旧QAは合格。lib/mangaScriptImagePipeline.mjs の setting fidelity contract と回帰テストで対処。
+  - 根拠digest: `78e1ac3d6f72`
   - 種別: fact / 初回: 2026-08-31 / id: `86a0f746b4e5`
 - **複数話者を含む同一カットでは、cut-level castNames の先頭を各utteranceの話者として扱ってはいけない。各画像ジョブにutterance由来のactiveSpeakerIdとactiveSpeakerNameを保存し、生成プロンプトとブラインドQAの両方でその人物を発話者として固定する。聞き手だけが発話中に見える画像はハード失敗にする。**
-  - 根拠: 2人会話カットの2行目で、旧QAがcastNames[0]の1人目を発話者と誤認し、再生成画像でも聞き手側の口だけが開いた。lib/mangaScriptImagePipeline.mjs と test/mangaScriptImagePipeline.test.mjs で修正し、回帰テスト31件合格。
+  - 根拠digest: `27adf0d29275`
   - 種別: fact / 初回: 2026-08-31 / id: `7009e9e5c53f`
 - **公開施設・職場・街路という場所カテゴリだけを根拠に背景モブを許可してはいけない。背景人物はその正確なbeatが群衆・同級生・同僚・来場者などを明示した場合だけ許可し、承認キャラの複製や同一identityの反復は生成プロンプトとブラインドQAのハード失敗にする。**
-  - 根拠: 開場前の2人対決カットで、公共の催事場という理由だけから複数の背景人物と承認キャラの複製が生成された。lib/mangaSceneComposition.mjs、lib/mangaScriptImagePipeline.mjsと回帰テスト39件で対処。
+  - 根拠digest: `2d10db525a95`
   - 種別: fact / 初回: 2026-08-31 / id: `e722b47c28f8`
+- **終幕の一つのナレーションに複数人物の独立した決着動作が含まれる場合、単一のobject-action契約を当てずresolution-montageとして扱う。主結果と各人物の終状態は一枚で読ませ、同時に静止できない途中の微細な身体動作はナレーションに担わせる。単一の明確な物体移動は引き続きobject-actionで厳密評価する。**
+  - 根拠digest: `4f548ecc8c96`
+  - 種別: fact / 初回: 2026-08-31 / id: `2ff78e3c84b9`
+- **音声生成前に、character bibleのcast内pronunciation/pronunciationMapだけでなくトップレベルpronunciationsもmanifest.speech.pronunciationsへ統合する。表示文は変えず、TTS入力とCERの期待読みに同じ確定読みを使う。**
+  - 根拠digest: `af0e64c7ed74`
+  - 種別: fact / 初回: 2026-08-31 / id: `e90e362408cd`
+- **90文字以上の長いナレーションは、句点を含む単一のtext-to-dialogue入力でも文の順序入れ替えや固有名詞の誤読が起き得る。表示上は一つの発話のまま、文境界で50文字以下の複数provider入力へ分割し、各部分をCER/UTMOS判定してから同じ論理発話へ再結合する。**
+  - 根拠digest: `d5bfe8e69757`
+  - 種別: fact / 初回: 2026-08-31 / id: `c4b46449f39f`
+- **強い感情タグは台詞が正しくても音声自然さを一貫して下げる場合がある。8テイクすべてが発音精度をほぼ満たしながらUTMOS未達なら、閾値を下げず、エピソードの文字列IDに結び付いた明示的speechDirectionで追加タグだけを外し、台詞の語気と句読点に演技を委ねて再生成する。**
+  - 根拠digest: `89e1dce1a494`
+  - 種別: fact / 初回: 2026-08-31 / id: `f74c7dfa9007`
+- **複数話者を連結した対話音源の全体UTMOSは、正当な話者切替だけで2.7未満になることがある。異なるvoiceIdを含むカットでは全体値を警告として保持し、同じ2.7基準を各発話区間すべてへ適用してfail-closed判定する。区間UTMOSが一つでも欠測なら合格にしない。**
+  - 根拠digest: `8b5ca6948291`
+  - 種別: fact / 初回: 2026-08-31 / id: `32614ba1944b`
+- **具体的な場面説明を含む長い導入ナレーションを自動で白・黒・空色の編集プレートへ置換してはいけない。数秒を超える導入は、台本に対応する人物・場所・行動を描いた本画、必要ならキャストを分割した複数パネルで表現する。**
+  - 根拠digest: `377f5c36af07`
+  - 種別: fact / 初回: 2026-08-31 / id: `4057b24c50ea`
+- **時間分割された日本語吹き出しの後続セグメントを、句点・読点・感嘆符・疑問符などの閉じ句読点から開始してはいけない。句読点は必ず直前の語句に保持し、自然境界監査でも拒否する。**
+  - 根拠digest: `001456edc5a8`
+  - 種別: fact / 初回: 2026-08-31 / id: `fdd0ce24a66f`
+- **ナレーションが証拠物の動作や決着後の具体的アクションを描く場合、その専用画像を隣接台詞の代表画像へ吸収して隠してはいけない。object-action、scene-establishing、resolution-montageは専用ビジュアルとして保持する。**
+  - 根拠digest: `f59ee078186a`
+  - 種別: fact / 初回: 2026-08-31 / id: `b775a8490d88`
+- **Intl.Segmenterの単語境界をそのまま時限吹き出しに使うと、戻|った、派手|な、切り欠|き、送り|ました、スポンサー|契約、いつ|だってのような形態素・複合語分断が実MP4に残る。純ひらがな活用断片、ナ形容詞→名詞、文字種をまたぐ複合語を不可境界にし、方向格助詞へ後は文節境界として許容したうえで全24発話を再監査する。**
+  - 根拠digest: `3bece3c93028`
+  - 種別: fact / 初回: 2026-09-01 / id: `5c9e59882b26`
+- **承認済み音声チェックポイントを再利用するときも、reviewer向けcut-voice-quality.jsonへselectedTakeIndex、selectedSourcePath、全byTakeを再同期する。適応生成で選ばれたtake 5がmanifestにはあっても古いper-cut証跡がtake 1-3だけだと独立レビューが追跡不能になる。**
+  - 根拠digest: `dfeb8f24989b`
+  - 種別: fact / 初回: 2026-09-01 / id: `9cd3924e61b3`
+- **SVG撮影用Chromeのuser-data-dirが異常終了後に.render-work/.chrome-*として残ると、357ディレクトリ・約737MBまで増え、最終2カットでENOSPCになる。撮影終了時のfinally cleanupと、再開前のepisode限定stale-profile掃除を必須にする。**
+  - 根拠digest: `5ca837c3c928`
+  - 種別: fact / 初回: 2026-09-01 / id: `4d93db7bf25b`
+- **設定画のsourceとgeneratedでグリッド配置が異なる場合、同一normalized hair ROIは衣服や別セルを比較し得る。髪色hard gateは各シートの対応人物セルを明示し、そのセル上部の前景を比較する。衣装別シートは各outfit stage authorityを参照し、閾値自体は変更しない。**
+  - 根拠digest: `c23738b1ef54`
+  - 種別: fact / 初回: 2026-09-01 / id: `cfd98c2c43e9`
+- **ロケーション背景の flat_fill が参考chの帯（PNG基準 ≥0.36）に届かない主因は、画風宣言の medium にあった『filled with flat colour by hand』で、モデルが石畳・漆喰の面に雲状の wash を塗る（原寸で石畳パッチの高域L標準偏差 4.17）。medium を『perfectly uniform flat digital colour — solid cel fills』に改め、sharedIdiom/forbidden で wash・むら・エアブラシ・紙目・微小ノイズを明示禁止し、桟を3x3以下の太い格子に限定し、面の色を hex 目安で固定したところ、apparecho-night アンカーの機械合格率が 0/8→0/10→0/12→7/14 に上がった。照明の明度も『白の0.40前後』と言葉で言うより色の目安（石畳 #C9BFAD 等）で与える方が効いた。**
+  - 根拠digest: `5cd3462c1b86`
+  - 種別: fact / 初回: 2026-09-04 / id: `aac115a6b339`
+- **夜の路地アンカーの明るさを幅を広げて稼いではいけない。明るいが広い路地は、暗いが狭い路地と同じく不合格。機械判定は画面下端帯（下10%）の路面の連続幅（canvas/reference-style-lovekoimanga/alley-width.py の bottom_run）を、レビュー済みの狭いアンカー（0.550）の +15%（0.633）以内、灯りだまりを含む loose cover ≤0.667、両端の壁 ≥0.12 で判定し、そのうえで『人が両手を広げれば両壁に届くか』を目視する。tone ゲート AT_TARGET だけで採用しない。昼夜の対応表ルールがアンカーへ漏れて左右2分割の絵になることがあるので、左右半分の明度差 >0.15 は diptych として弾く。**
+  - 根拠digest: `73f27f2e3e86`
+  - 種別: constraint / 初回: 2026-09-04 / id: `8c313f6338c5`
+- **show bible の artStyle（medium・sharedIdiom・environmentIdiom・styleReference）を変えると、全ロケーションのアンカー prompt SHA が変わり、既存の SHA 拘束アンカーレビューは location-anchor-audit で『prompt or anchor binding is invalid』になって無効化される。人が承認済みのアンカーがあるロケーションでも、画風宣言を触った時点で continuity と register は通らなくなるので、画風を変える前に全ロケーションの再レビューコストを見積もり、報告に明記する。今回は yamatani の承認済みアンカー（sha 8b93d727、v1 prompt）が v2 への改訂で既に無効化されていた。**
+  - 根拠digest: `748c3f0bddc7`
+  - 種別: fact / 初回: 2026-09-04 / id: `c16da288755c`
+- **本編外の文字入り画像では、文字の『在り処』と『一発描き』だけを指示すると、モデルは最も安価な可読文字（既定ゴシック・朱ベタ・薄枠の平板）を出す。書法（江戸文字系の筆文字／太細の抑揚／とめ・はね・はらい／かすれ／詰めた字間）、墨色＋差し色1点、担体が形のある物であること、既定書体・均一線幅・平板長方形の禁止、『文字が帯の中で最も設計された要素であること』を名指しすると、6案36枚すべてが設計された看板文字として出た。**
+  - 根拠digest: `82f8f8f8e0a1`
+  - 種別: correction / 初回: 2026-09-04 / id: `86b858191c47`
 - **複数人物のscene-image参照は、人物ごとの全参照を単純連結してslice(0,8)してはいけない。後方の人物が0枚になるため、まず画面内の全人物へidentity anchorを1枚ずつ配り、残枠だけ追加参照と背景へ割り当てる。**
-  - 根拠: manga-approved-eight-canary-001のplan実測。cut-12は<private-term>・（固定キャストの1人）・（固定キャストの1人）の参照で8枠を使い、台本にいる（固定キャストの1人）の参照が0枚。lib/mangaScriptImagePipeline.mjsのunique([...characterRefs,...locationRefs]).slice(0,8)が原因。
+  - 根拠digest: `2c692f0acf6d`
   - 種別: fact / 初回: 2026-08-31 / id: `1e781555b959`
+- **長時間の有料生成ラウンド（identity pack一括生成・レンダー）を開始する前にディスク空き容量を点検する（目安10GB未満なら掃除してから開始）。ENOSPC中断はレンダー(2026-09-01 canary-004)とidentity pack生成(2026-09-01 設定画ラウンド)で2回発生。安全な掃除先: <machine-path>**
+  - 根拠digest: `d0c437a0c651`
+  - 種別: fact / 初回: 2026-09-01 / id: `46aefc1b9b41`
+- **character-register の実務手順3点: ①顔検出なしセル（横顔・背面・俯きなど）は manualFaceRegion [x,y,w,h] と faceRegionReviewed:true の両方が必要（bbox最小16px・面積0.05%以上）。②register/reconcileは登録本体成功後に show-bible 昇格で例外を投げることがある — 'Node.js' で終わるスタックトレースを見たら registry (canvas/characters.json) の approvedAt と identityReviewSha256 を実測してから失敗と判断する。③show-bible昇格は designStatus=client-approved-awaiting-official-import からのみ。クライアント確定の証跡を根拠に show bible を遷移させてから character-registration-reconcile を打つ。register には --episode-id（キャスト用擬似エピソード <private-term> 等）が必須。**
+  - 根拠digest: `737422535750`
+  - 種別: fact / 初回: 2026-09-01 / id: `2c0e6ecb25ef`
+- **三面図シートから全身1体を切り出すときの正しい方法。①等分グリッド前提(幅//列数, 高さ//行数)は使えない: 全身列の下端はシートごとに数十px違い、公称セル境界で切ると足が欠け、下端を延ばすと下段の顔セルを巻き込む。②同一キャラでも版によってレイアウトが違い、セルごとの枠線矩形を持つ版がある。枠の縦線はセル高さぶんしかないため『列の暗画素密度>閾値』のフィルタをすり抜け、bboxが枠まで広がる。③binary_openingだけで枠を消すと、明色の髪や細い部位、非人型の被写体まで消える。④正解: 長く細い直線をrun-lengthで枠と判定して画素単位で除去((水平run>120 かつ 垂直厚<=8) または その逆)し、連結成分ラベリングで上段の最大成分を主体とし、主体の0.6倍未満の高さかつ近接(縦12px/横25px以内)の小成分だけを併合する(手持ち小道具やアホ毛は拾い、隣セルの別図は拾わない)。⑤完成後は必ず機械検証: 各図の足元13px帯に画素があるか、頭頂12px帯に画素があるか、貼り付けy座標が期待値(接地線 - 実寸*スケール)と一致するか。目視だけで完成と判断しない。**
+  - 根拠digest: `2d26b64ef2ea`
+  - 種別: fact / 初回: 2026-09-01 / id: `010746edff15`
+- **三面図(turnaround)と表情シートのプロンプトは、ポーズ・手持ち小道具・衣装の着方について明示指示を持たなければならない。指示がないと、参照画の決めポーズや小道具をそのまま引き継ぐ個体と、中立直立へ描き直される個体が同じキャスト内で混在する。三面図は本編各カットの身元参照として毎回モデルへ渡るため、手に持った小道具が焼き込まれていると無関係なカットへ漏れる。必要な3段落: ①中立姿勢(直立・両腕を体側へ下ろす・手は空。手に持つ物は除去し、身に着けている物はアクセサリ継続規則で保持。非人型は種に応じた姿勢) ②優先順位の明示(この姿勢規則は、人物説明文・承認デザイン軸・維持すべき特徴一覧に現れるいかなる姿勢/所持物の記述よりも優先する。それらは『誰で何を着ているか』の正本であって『どう立ち何を持つか』の正本ではない) ③着装忠実性(片肩だけ外した上着、羽織っただけの上着、前を開けた上着、まくった袖などは、その着方と左右をそのまま再現する。きちんと着せ直さない)。②が特に重要で、②が無いと後段の『スマートフォンを維持する』のような承認済み不変条件と真っ向から衝突して出力が不安定になる。**
+  - 根拠digest: `97c09ef1a792`
+  - 種別: constraint / 初回: 2026-09-01 / id: `6c35b11653d8`
+- **登録済みキャラの三面図・表情シートだけを差し替える character-identity-refresh は、そのキャラのidentity packが三面図＋表情シートのみで構成される場合しか使えない。開眼差分や2種以上の衣装シートを持つキャラでは allJobs.length!==2 のガードで停止する。これは恣意的な制限ではなくデータ損失防止で、staging は渡されたジョブだけでidentity packを組み直すため、三面図だけ渡すと既存の開眼差分・衣装シートがnullになる。修復ルート character-identity-repair / repack も awaiting-identity-qa 状態が前提のため、登録済みキャラには使えない。生成インポートマップは『公式ジョブを全件ちょうど1回ずつ写像する』ことを要求するので、一部roleだけインポートして残りを生成する使い方もできない。したがって登録済みの多role キャラの三面図を差し替える正規経路は、全roleを網羅したインポートマップ付きの character-approve による再承認のみで、衣装シートの承認拘束をやり直す覚悟が要る。着手前に character-bootstrap-status と identity pack の role 構成を確認し、対象がこの制約に当たるかを判定すること。**
+  - 根拠digest: `b154078e7d15`
+  - 種別: fact / 初回: 2026-09-01 / id: `2c250740435c`
 
-_最終更新: 2026-08-31T17:01:41.872Z_
+_最終更新: 2026-09-05T17:09:39.198Z_

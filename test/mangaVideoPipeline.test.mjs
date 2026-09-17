@@ -43,6 +43,19 @@ test("natural timed segmentation never emits a whitespace-only replacement", () 
   assert.ok(segments.length > 1);
   assert.equal(segments.join(""), source);
   assert.ok(segments.every((segment) => segment.trim().length > 0));
+  assert.ok(segments.every((segment) => !/^[！!、。？，,.]/u.test(segment.trimStart())));
+});
+
+test("timed bubble boundaries keep closing punctuation with the preceding phrase", () => {
+  const source = "その札は偽物です！ 記録にも、残っていません。";
+  const segments = naturalBubbleSegmentsForLimit(source, 9);
+  assert.ok(segments.length > 1);
+  assert.equal(segments.join(""), source);
+  assert.ok(segments.every((segment) => !/^[！!、。？，,.]/u.test(segment.trimStart())));
+  assert.equal(
+    auditBubbleSegmentNaturalness(source, ["その札は偽物です", "！ 記録にも、", "残っていません。"]).pass,
+    false,
+  );
 });
 
 test("Koya bubble display text removes only terminal Japanese periods", () => {
@@ -78,6 +91,32 @@ test("Japanese bubble replacement boundaries reject names, compounds, and inflec
     "けれど、券売機の記録には毎週金曜日、同じ区間の回数券が使われています",
     ["けれど、券売機の記録に", "は毎週金曜日、", "同じ区間の回数券が使われています"],
   ).pass, false);
+
+  const rejectedProductionSplits = [
+    ["湿気で凹みが戻っただけだ！", ["湿気で凹みが戻", "っただけだ！"]],
+    ["あの男の派手な腕時計には", ["あの男の派手", "な腕時計には"]],
+    ["あの男の派手な腕時計には", ["あの男の派手な", "腕時計には"]],
+    ["専用の切り欠きしか読みません", ["専用の切り", "欠きしか読みません"]],
+    ["専用の切り欠きしか読みません", ["専用の切り欠", "きしか読みません"]],
+    ["予約名簿を匿名で送りました", ["予約名簿を匿名で送り", "ました"]],
+    ["偽の席を作ったスポンサー契約こそ", ["偽の席を作ったスポンサー", "契約こそ"]],
+    ["声を上げるのは、いつだって人間の役目なのだ", ["声を上げるのは、いつ", "だって人間の役目なのだ"]],
+  ];
+  for (const [source, segments] of rejectedProductionSplits) {
+    assert.equal(
+      auditBubbleSegmentNaturalness(source, segments).pass,
+      false,
+      `${segments.join("|")} must not be a timed replacement boundary`,
+    );
+  }
+  assert.equal(
+    auditBubbleSegmentNaturalness(
+      "別の読み取り専用装置へ残します",
+      ["別の読み取り専用装置へ", "残します"],
+    ).pass,
+    true,
+    "directional へ may close a bunsetsu before the predicate",
+  );
 });
 
 test("manual bubble clearance offsets translate transparent overlays without wraparound", () => {
@@ -641,6 +680,27 @@ test("story-three layout exposes a left panel and two diagonal alpha masks", () 
   assert.match(layout.slots[2].alphaExpression, /^if\(gte/);
   assert.ok(layout.slots[1].height < 1080);
   assert.ok(layout.slots[2].y > 0);
+});
+
+test("story-three grid layout preserves three complete 16:9 source panels without diagonal face cuts", () => {
+  const layout = normalizePanelLayout({
+    enabled: true,
+    type: "story-3",
+    layoutVariant: "grid-3",
+    gutter: 28,
+    panels: [
+      { imagePath: "/tmp/a.png" },
+      { imagePath: "/tmp/b.png" },
+      { imagePath: "/tmp/c.png" },
+    ],
+  }, 1920, 1080, "/tmp/fallback.png");
+  assert.equal(layout.layoutVariant, "grid-3");
+  assert.deepEqual(layout.slots, [
+    { x: 0, y: 0, width: 946, height: 526 },
+    { x: 974, y: 0, width: 946, height: 526 },
+    { x: 487, y: 554, width: 946, height: 526 },
+  ]);
+  assert.ok(layout.slots.every((slot) => Math.abs(slot.width / slot.height - 16 / 9) < 0.03));
 });
 
 test("split panels freeze their crops, flatten once, and use one whole-page camera", () => {

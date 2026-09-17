@@ -29,22 +29,44 @@ JSON契約が実行設定の正本、要求台帳が理由の正本である。�
 
 ## 唯一の制作入口
 
-新規作品は必ず次だけを使う。
+運営者が新規作品を作る入口は、Claude Code / Codexのどちらでも上位Video Harnessだけである。
 
 ```bash
-node scripts/koya-manga-video.mjs <action> ...
+# まず署名済みChannel Packを検証し、耐久JobとCanvas Runを作る。有料APIはまだ呼ばない。
+node scripts/run-video-harness.mjs start \
+  --harness koya-manga-video \
+  --script-path /absolute/script.txt \
+  --channel-pack /absolute/signed-channel-pack-envelope \
+  --episode-id manga-<new-id> \
+  --protagonist-speaker-id <話者IDまたは完全一致名>
+
+# Jobのpreflight・人間判断を確認した後だけ、同じJobを実行・再開する。
+node scripts/run-video-harness.mjs resume \
+  --job-id <startが返したJob ID> \
+  --project-dir /absolute/project \
+  --confirmed
 ```
 
-`scripts/build-manga-video.mjs`の`full`/`speech`、`apply-manga-v*`、`finalize-manga-v*`、`generate-manga-v*`は新規作品へ使用しない。これらは`config/koya-manga-legacy-migrations.json`に隔離されたベンチマーク移行である。
+明示的に有料実行まで確認済みなら、最初の`start`へ`--confirmed`を付けてもよい。
+上位入口は、署名済みChannel Pack、制作契約の実ファイルSHA、durable Job、doctor、
+再開/取消、共通RunReceipt、実MP4全decode、BuzzAssist Canvas投影を一つのidentityへ
+拘束する。ホストがMCPを使える場合の`run_video_harness`も同じServiceを呼ぶ同等入口である。
 
-新規制作の基本形:
+`node scripts/koya-manga-video.mjs`は、上位Jobが検証済みworkspace内で呼ぶ**唯一の内部Koya runner**である。
+`plan`、`full`、`speech`、`render`、個別repair/audit actionを直接実行するのは、上位Jobに
+紐づいた保守・診断、またはfixture/benchmarkだけに限る。新作を直接`plan/full`で開始して、
+上位Job、署名Pack、RunReceipt、Canvasを迂回してはならない。
 
-```bash
-node scripts/koya-manga-video.mjs plan --script-path /absolute/script.txt --episode-id manga-<new-id> --protagonist-speaker-id <話者IDまたは完全一致名>
-node scripts/koya-manga-video.mjs full --script-path /absolute/script.txt --episode-id manga-<new-id> --protagonist-speaker-id <話者IDまたは完全一致名>
-```
+`scripts/build-manga-video.mjs`の`full`/`speech`、`apply-manga-v*`、`finalize-manga-v*`、
+`generate-manga-v*`は新規作品へ使用しない。これらは
+`config/koya-manga-legacy-migrations.json`に隔離されたベンチマーク移行である。
 
-`full`は再開可能である。終了コード2または3は完成ではない。`koya-production-state.json`を読み、承認待ち・利用上限・失敗箇所から、合格済み成果を再生成せず再開する。
+内部`full`の終了コード2または3、または上位Jobの`completed`以外は完成ではない。
+`run-video-harness.mjs status`でJobを読み、承認待ち・利用上限・失敗箇所から、合格済み
+artifactを再生成せず同じJob IDで再開する。
+
+以下に出てくる`koya-manga-video.mjs`の個別actionは、上位Jobに拘束済みのworkspaceを
+検査・修復するための内部手順であり、新規制作の入口ではない。
 
 ## 品質ゲート（2026-08-28 追加。Claude Code / Codex 共通）
 
@@ -107,7 +129,7 @@ node scripts/koya-blind-review.mjs record --set <spec.json> --winner A --reviewe
 
 ## 制作手順
 
-1. 台本を省略・要約せず解析し、時系列、人物、読み、感情曲線、発話、画面上の証拠を固定する。`koya-story-review-v1`へ攻撃1/2/3、イブキの号砲、証拠、主人公本人のとどめ、登場時だけタツの退路封鎖1行を実発話IDで記録し、実在地名/ブランド、暴力美化、悪役コメディ、酒語彙抑制を確認する。`story-audit`合格後の同じreviewを`plan/full --story-review-path`へ渡す。台本変更後の古いreviewは使わない。
+1. 台本を省略・要約せず解析し、時系列、人物、読み、感情曲線、発話、画面上の証拠を固定する。`koya-story-review-v1`へ攻撃1/2/3、show bible `storyGrammar.castSemantics.reversalSignal`のキャスト（castIdで参照）による号砲、証拠、主人公本人のとどめ、`exitBlocker`のキャストが登場する回だけ退路封鎖1行を実発話IDで記録し、実在地名/ブランド、暴力美化、悪役コメディ、酒語彙抑制を確認する。`story-audit`合格後の同じreviewを`plan/full --story-review-path`へ渡す。台本変更後の古いreviewは使わない。
 2. 有料生成前に主人公を一意に決め、`--protagonist-speaker-id`を渡す。複数候補なら推測せず停止する。
 3. 判断を`機械で一意に検証可能 / 単一案へ赤入れ / 複数軸から選択`へ分類する。機械判定可能なことを人へ聞かない。単一案の曖昧点は3±1問、複数案は2〜5個の異なる軸を匿名比較し、高コスト・ブランド・好みの判断は人間が理由付きで決める。公開packetにはA〜E、匿名化した実artifact、SHA-256だけを置き、provider・内部ID・生成順・variationAxisの対応表は別のprivate mappingへ隔離する。
 4. 年齢段階、顔、髪、体格、服、色、装飾、感情域、禁止差分を持つキャラクターバイブルを作る。新キャラクターは候補承認まで停止し、`character-approve`へ`--candidate-label`と具体的な`--approval-reason`を渡す。内部candidate IDやindexでの承認は禁止する。
@@ -154,12 +176,34 @@ node scripts/koya-manga-video.mjs audit --episode-id <episode-id>
 
 監査で作った実MP4由来contact sheet、代表フレーム、音声区間、全編MP4を実際に確認し、`references/final-review-ja.md`の形式でレビュー記録JSONを作る。契約digest、実MP4/contact sheet/代表フレームのSHA-256、全編確認範囲、冒頭・中盤・終端の音声確認範囲を実値で記録した後だけ署名する。
 
+署名には reviewer 本人の Ed25519 秘密鍵が必須である。鍵・信頼リスト・失効・fail-closed の
+規則は`../platform-craft/SKILL.md`の「独立レビューの署名（reviewer attestation）」が正本で、
+ここには繰り返さない。鍵が無ければ先に`reviewer-key-create`で作り、公開鍵の`trustEntry`を
+owner へ渡して信頼リストへ登録してもらう（同じ端末の同じ主体が信頼リストも書ける構成にしない）。
+
 ```bash
-node scripts/koya-manga-video.mjs signoff --episode-id <episode-id> --reviewer claude --reviewer-context-id <実Claude-session-id> --review-notes-path /absolute/review.json --pass
-# または --reviewer codex
+node scripts/koya-manga-video.mjs signoff --episode-id <episode-id> \
+  --reviewer claude --reviewer-context-id <実Claude-session-id> \
+  --review-notes-path /absolute/review.json \
+  --reviewer-key-path /secure/outside-repo/reviewer-ed25519.pem \
+  --pass
+# または --reviewer codex --reviewer-context-id <実Codex-task-id>
+# 信頼リストは監査側の BUZZASSIST_REVIEWER_TRUST（path）で解決する。明示するなら --reviewer-trust-path JSON
 node scripts/koya-manga-video.mjs audit --episode-id <episode-id>
 ```
 
-完了は、契約の完了status、全必須監査PASS、`knownRemainingIssues=[]`、実MP4の全デコード、MP4 hashに結び付いたClaude/Codex署名がすべて揃ったときだけ宣言する。報告には絶対MP4パス、尺、解像度、fps、容量、主要監査、残課題0件を含める。
-`quality-harness-final`は空の品質ループ状態や事前ゲートだけでは合格しない。独立contextの全rubric採点を含む完了roundが最低1回必要である。自分自身を除く全必須監査の結果・実在証拠SHA-256・契約digest・実MP4 SHA-256・証拠Merkle rootを集約した`final-decision.json`が`passed`であることを確認する。失敗監査は永続incident ledgerへ記録し、再発時の指示/hard-gate昇格を次の新規台本へ引き継ぐ。
+MCP を使える host では、同じ工程を `run_koya_manga_pipeline`（`action: "signoff"` /
+`action: "reviewer-key-create"`、`confirmed: true`必須。引数は `reviewerKeyPath`, `reviewerContextId`,
+任意 `reviewerTrustPath` の camelCase）で呼ぶ。鍵・信頼リストは path だけを受け、中身は拒否される。
+鍵の作成は両ハーネス共通の `create_video_harness_reviewer_key` でもよいが、narrated 専用の
+`signoff_video_harness_job` へ Koya Job を渡すと拒否される。上位
+`run-video-harness.mjs start|resume --reviewer-trust-path JSON`（MCP `reviewerTrustPath`）は照合用で、
+一致した path は上位 Job から `koya-manga-video.mjs full` へも同じ値で渡される。信頼アンカー・失敗コード・
+復旧の正本は `../platform-craft/SKILL.md`。
 
+`--reviewer-key-path`が無い signoff は新仕様では必ず失敗する。`audit`は signoff 内の
+`reviewerAttestation`を信頼リストで再検証し、鍵が未登録・失効済み・別 subject・信頼リスト
+未設定のどれでも不合格にする。同じ検証は RunReceipt 側でも走る。
+
+完了は、契約の完了status、全必須監査PASS、`knownRemainingIssues=[]`、実MP4の全デコード、MP4 hashに結び付き信頼済み reviewer 鍵で署名されたClaude/Codex署名がすべて揃ったときだけ宣言する。報告には絶対MP4パス、尺、解像度、fps、容量、主要監査、残課題0件を含める。
+`quality-harness-final`は空の品質ループ状態や事前ゲートだけでは合格しない。独立contextの全rubric採点を含む完了roundが最低1回必要である。自分自身を除く全必須監査の結果・実在証拠SHA-256・契約digest・実MP4 SHA-256・証拠Merkle rootを集約した`final-decision.json`が`passed`であることを確認する。失敗監査は永続incident ledgerへ記録し、再発時の指示/hard-gate昇格を次の新規台本へ引き継ぐ。

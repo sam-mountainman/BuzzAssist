@@ -10,12 +10,14 @@ const requireResolver = () => ({ resolveChannelPackPath });
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
 
 import {
   applyKoyaCharacterBibleSpeechDirectives,
   applyKoyaValidationCanaryVoiceProfiles,
+  assertKoyaFullPreflight,
+  createKoyaUpstreamPreflightBinding,
   dialogueShotRequiresAnchoredPullout,
   buildKoyaIdentityPackJobInput,
   generateKoyaIdentityPackAssets,
@@ -32,9 +34,22 @@ import {
   reuseKoyaApprovedAudio,
   assertKoyaStylingSequence,
   runSourceFacePlacement,
+  runKoyaMangaFullProduction,
   sourceAvoidRegionsInOverlaySpace,
+  synchronizeKoyaValidationCanaryVoiceCasting,
 } from "../lib/koyaMangaProduction.mjs";
-import { readKoyaChannelAuthority } from "../lib/koyaChannelGovernance.mjs";
+import {
+  fingerprintKoyaChannelAuthority,
+  readKoyaChannelAuthority,
+} from "../lib/koyaChannelGovernance.mjs";
+import {
+  assertKoyaOuterJobBinding,
+  createKoyaOuterJobBinding,
+} from "../lib/koyaOuterJobBinding.mjs";
+import {
+  createVideoHarnessExecutionIdentityDigest,
+  resolvedProductionContractSha256,
+} from "../lib/videoHarnessExecutionIdentity.mjs";
 import { renderEditorialPlatePng } from "../lib/mangaScriptImagePipeline.mjs";
 import { requireArtifacts, requireChannelPack } from "./helpers/requirePrerequisites.mjs";
 
@@ -56,6 +71,596 @@ async function installChannelPack(projectDir) {
   await cp(source, join(projectDir, "channel-packs"), { recursive: true });
   return true;
 }
+
+function measuredDoctorReport(projectDir, overrides = {}) {
+  const ids = [
+    "harness-production-route", "node", "ffmpeg", "ffprobe", "ffmpeg-capability",
+    "voice-quality-python", "tts-key", "image-key", "channel-pack",
+  ];
+  const authorityFiles = ["show.json", "locations.json", "thumbnail.json"].map((path, index) => ({
+    role: ["show", "locations", "thumbnail"][index],
+    path,
+    sha256: String(index + 1).repeat(64),
+    bytes: 2,
+  }));
+  const authorityPayload = {
+    version: "koya-channel-authority-fingerprint-v1",
+    fileCount: authorityFiles.length,
+    files: authorityFiles,
+  };
+  const authorityFingerprint = {
+    ...authorityPayload,
+    sha256: createHash("sha256").update(JSON.stringify(authorityPayload)).digest("hex"),
+  };
+  return {
+    version: "harness-doctor-v1",
+    projectDir,
+    harnessId: "koya-manga-video",
+    ready: true,
+    blocking: [],
+    checks: ids.map((id) => ({
+      id,
+      required: true,
+      ok: true,
+      ...(id === "tts-key" ? {
+        kind: "voice.dialogue",
+        provider: "elevenlabs",
+        model: "eleven_v3",
+        adapterVersion: "elevenlabs-dialogue-server-v1",
+        status: "ready",
+      } : {}),
+      ...(id === "image-key" ? { host: "codex", model: "gpt-image-2-codex" } : {}),
+      ...(id === "channel-pack" ? { authorityFingerprint } : {}),
+    })),
+    ...overrides,
+  };
+}
+
+function mediaReceiptForFull(cutId, takeIndex) {
+  const digest = (value) => createHash("sha256").update(value).digest("hex");
+  return {
+    version: "paid-media-job-receipt-v1",
+    jobId: `job-${cutId}-${takeIndex}`,
+    requestKey: `koya:${cutId}:take:${takeIndex + 1}:${digest(`${cutId}:${takeIndex}`)}`,
+    status: "completed",
+    kind: "voice.dialogue",
+    provider: "elevenlabs",
+    adapterVersion: "elevenlabs-dialogue-server-v1",
+    model: "eleven_v3",
+    inputHash: digest(`input:${cutId}:${takeIndex}`),
+    artifact: { sha256: digest(`artifact:${cutId}:${takeIndex}`), mimeType: "audio/wav", bytes: 128 },
+  };
+}
+
+async function createUpstreamPreflightFixture(projectDir, nowMs = Date.parse("2026-09-01T00:00:00.000Z")) {
+  const runDir = join(projectDir, "canvas", "harness-runs", "video-koya-manga-video-aaaaaaaaaaaaaaaa");
+  const jobPath = join(runDir, "job.json");
+  const entrypointPath = resolve(process.cwd(), "scripts/koya-manga-video.mjs");
+  const entrypointSha256 = createHash("sha256").update(await readFile(entrypointPath)).digest("hex");
+  await mkdir(runDir, { recursive: true });
+  const configDir = join(projectDir, "config");
+  await mkdir(configDir, { recursive: true });
+  const authorityPaths = {
+    show: join(configDir, "koya-show-bible.json"),
+    locations: join(configDir, "koya-location-bible.json"),
+    thumbnail: join(configDir, "koya-thumbnail-contract.json"),
+  };
+  await Promise.all(Object.entries(authorityPaths).map(([id, path]) => writeFile(path, `${JSON.stringify({ id })}\n`)));
+  const authority = {
+    source: "project",
+    projectDir,
+    root: projectDir,
+    paths: authorityPaths,
+    stylingSpecs: [],
+  };
+  const authorityFingerprint = await fingerprintKoyaChannelAuthority(authority);
+  const doctorEvidence = measuredDoctorReport(projectDir);
+  doctorEvidence.checks.find((check) => check.id === "channel-pack").authorityFingerprint = authorityFingerprint;
+  // Channel Pack 復元後に一度だけ固定される「解決済み制作契約」。実行識別子は
+  // これと Job identity から導かれるので、fixture 側でも同じ導出を通す。
+  // ここを手打ちの定数にすると、契約が固定されていることの検証が空洞になる。
+  const resolvedProductionContract = {
+    version: "buzzassist-resolved-production-contract-v1",
+    harnessId: "koya-manga-video",
+    episodeId: "",
+    contractVersion: "koya-manga-production-fixture-v1",
+    contractDigest: "f".repeat(64),
+    contractPath: join(configDir, "koya-manga-production-contract.json"),
+    contractFileSha256: "9".repeat(64),
+    contractSource: "fixture",
+    episodeOverridePath: "",
+    episodeOverrideFileSha256: "",
+  };
+  // 信頼鍵で検証済みの Channel Pack も実行識別子の入力。pack を差し替えて
+  // 同じ Job を名乗る道を、契約固定と同じ層で塞ぐ。
+  const channelPackVerification = {
+    harnessId: "koya-manga-video",
+    payloadKind: "koya-handoff",
+    payloadSha256: "c".repeat(64),
+    fileCount: 4,
+    signerKeyId: "signer-key",
+    trustedPublicKeyId: "trusted-key",
+  };
+  const job = {
+    id: "video-koya-manga-video-aaaaaaaaaaaaaaaa",
+    identityDigest: "a".repeat(64),
+    executionIdentityDigest: createVideoHarnessExecutionIdentityDigest({
+      jobId: "video-koya-manga-video-aaaaaaaaaaaaaaaa",
+      identityDigest: "a".repeat(64),
+      resolvedProductionContract,
+      channelPackVerification,
+    }),
+    resolvedProductionContract,
+    revision: 7,
+    status: "running",
+    runDir,
+    executionProjectDir: projectDir,
+    harness: { id: "koya-manga-video" },
+    deployment: { entrypointPath, entrypointSha256 },
+    canonicalIdentity: {
+      deployment: { entrypointPath, entrypointSha256 },
+      productionDependencies: {
+        version: "buzzassist-production-dependency-tree-v1",
+        runtime: {
+          version: "buzzassist-production-dependency-tree-v1",
+          scope: "runtime",
+          digest: "d".repeat(64),
+          fileCount: 1,
+        },
+        deployment: {
+          version: "buzzassist-production-dependency-tree-v1",
+          scope: "deployment",
+          digest: "e".repeat(64),
+          fileCount: 1,
+        },
+      },
+    },
+    channelPack: { sha256: "b".repeat(64), fileCount: 4 },
+    channelPackVerification,
+    stages: [{
+      id: "doctor",
+      status: "pass",
+      finishedAt: new Date(nowMs - 1_000).toISOString(),
+      evidence: doctorEvidence,
+    }],
+  };
+  const write = async () => writeFile(jobPath, `${JSON.stringify(job, null, 2)}\n`);
+  await write();
+  const options = () => ({
+    projectDir,
+    upstreamJobPath: jobPath,
+    upstreamJobId: job.id,
+    upstreamJobRevision: job.revision,
+    upstreamPreflightBinding: createKoyaUpstreamPreflightBinding(job),
+  });
+  const runtime = {
+    readKoyaChannelAuthority: async () => authority,
+    fingerprintKoyaChannelAuthority,
+  };
+  return { job, jobPath, nowMs, options, write, authority, authorityPaths, runtime };
+}
+
+test("Koya full stops before both paid runners when the canonical doctor blocks", async () => {
+  let imageCalls = 0;
+  let speechCalls = 0;
+  await assert.rejects(
+    runKoyaMangaFullProduction({
+      projectDir: process.cwd(),
+      episodeId: "preflight-blocked",
+      scriptPath: "/fixture/script.txt",
+    }, {
+      allowDirectMeasuredDoctorForTests: true,
+      runDoctor: async () => measuredDoctorReport(process.cwd(), {
+        ready: false,
+        blocking: ["ffmpeg-capability", "image-key"],
+      }),
+      generateImages: async () => { imageCalls += 1; },
+      generateSpeech: async () => { speechCalls += 1; },
+    }),
+    /preflight failed.*ffmpeg-capability, image-key/iu,
+  );
+  assert.equal(imageCalls, 0, "image runner must not start after failed preflight");
+  assert.equal(speechCalls, 0, "speech runner must not start after failed preflight");
+});
+
+test("doctor ready=true cannot bypass a missing exact TTS or image capability", async () => {
+  for (const missingId of ["tts-key", "image-key", "ffmpeg-capability", "voice-quality-python"]) {
+    let paidCalls = 0;
+    const report = measuredDoctorReport(process.cwd());
+    report.checks.find((check) => check.id === missingId).ok = false;
+    await assert.rejects(
+      runKoyaMangaFullProduction({
+        projectDir: process.cwd(),
+        episodeId: `preflight-exact-${missingId}`,
+        scriptPath: "/fixture/script.txt",
+      }, {
+        allowDirectMeasuredDoctorForTests: true,
+        runDoctor: async () => report,
+        generateImages: async () => { paidCalls += 1; },
+        generateSpeech: async () => { paidCalls += 1; },
+      }),
+      new RegExp(`passing required check: ${missingId}`, "u"),
+    );
+    assert.equal(paidCalls, 0, `${missingId}: no paid runner may start`);
+  }
+});
+
+test("a legacy raw-key-style TTS pass cannot start Koya images without the exact Media Job identity", async () => {
+  const report = measuredDoctorReport(process.cwd());
+  const tts = report.checks.find((check) => check.id === "tts-key");
+  Object.assign(tts, {
+    kind: undefined,
+    provider: undefined,
+    model: undefined,
+    adapterVersion: undefined,
+    status: undefined,
+    detail: "設定あり",
+  });
+  let paidCalls = 0;
+  await assert.rejects(
+    runKoyaMangaFullProduction({
+      projectDir: process.cwd(),
+      episodeId: "preflight-legacy-raw-key",
+      scriptPath: "/fixture/script.txt",
+    }, {
+      allowDirectMeasuredDoctorForTests: true,
+      runDoctor: async () => report,
+      generateImages: async () => { paidCalls += 1; },
+      generateSpeech: async () => { paidCalls += 1; },
+    }),
+    /not the exact paid adapter/iu,
+  );
+  assert.equal(paidCalls, 0);
+});
+
+test("production Koya full cannot fall back to a direct doctor or reach paid runners", async () => {
+  let paidCalls = 0;
+  await assert.rejects(
+    runKoyaMangaFullProduction({
+      projectDir: process.cwd(),
+      episodeId: "preflight-direct-forbidden",
+      scriptPath: "/fixture/script.txt",
+    }, {
+      runDoctor: async () => measuredDoctorReport(process.cwd()),
+      generateImages: async () => { paidCalls += 1; },
+      generateSpeech: async () => { paidCalls += 1; },
+    }),
+    (error) => error?.code === "KOYA_OUTER_JOB_REQUIRED",
+  );
+  assert.equal(paidCalls, 0);
+});
+
+test("explicit test-only direct Koya full uses the measured doctor exactly once before mocked images", async () => {
+  const calls = [];
+  const result = await runKoyaMangaFullProduction({
+    projectDir: process.cwd(),
+    episodeId: "preflight-direct",
+    scriptPath: "/fixture/script.txt",
+  }, {
+    allowDirectMeasuredDoctorForTests: true,
+    runDoctor: async (input) => {
+      calls.push(["doctor", input]);
+      return measuredDoctorReport(process.cwd());
+    },
+    generateImages: async () => {
+      calls.push(["images"]);
+      return {
+        episodeId: "preflight-direct",
+        waiting: true,
+        failed: false,
+        state: { status: "awaiting-character-approval", knownRemainingIssues: ["fixture"] },
+        paths: { statePath: "/fixture/state.json" },
+      };
+    },
+    generateSpeech: async () => { calls.push(["speech"]); },
+  });
+  assert.equal(result.preflight.mode, "direct-measured-doctor");
+  assert.equal(result.exitCode, 3);
+  assert.deepEqual(calls.map(([name]) => name), ["doctor", "images"]);
+  assert.equal(calls[0][1].harnessId, "koya-manga-video");
+});
+
+test("Koya full returns every paid speech take and exact final signoff binding to the common adapter", async () => {
+  const jobs = [mediaReceiptForFull("cut-01", 0), mediaReceiptForFull("cut-01", 1)];
+  const result = await runKoyaMangaFullProduction({
+    projectDir: process.cwd(),
+    episodeId: "preflight-full-receipt",
+    scriptPath: "/fixture/script.txt",
+  }, {
+    allowDirectMeasuredDoctorForTests: true,
+    runDoctor: async () => measuredDoctorReport(process.cwd()),
+    generateImages: async () => ({ episodeId: "preflight-full-receipt", waiting: false, failed: false }),
+    prepareManifest: async () => ({ waiting: false }),
+    generateSpeech: async () => ({ waiting: false, partial: false, report: { mediaJobs: jobs } }),
+    renderVideo: async () => ({
+      outputPath: "/fixture/final.mp4",
+      paths: { manifestPath: "/fixture/manifest.json" },
+    }),
+    auditFinal: async () => ({
+      report: { pass: true, failedAuditIds: [], knownRemainingIssues: [] },
+      reportPath: "/fixture/audit.json",
+      contactSheetPath: "/fixture/contact-sheet.jpg",
+      signoffPath: "/fixture/signoff.json",
+      signoffSha256: "f".repeat(64),
+      runReceiptPath: "/fixture/genre-receipt.json",
+    }),
+  });
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(result.payload.mediaJobs, jobs);
+  assert.equal(result.payload.visualSignoffPath, "/fixture/signoff.json");
+  assert.equal(result.payload.visualSignoffSha256, "f".repeat(64));
+});
+
+test("two direct Koya full coordinators for one episode cannot race shared paid work", async () => {
+  const projectDir = await mkdtemp(join(tmpdir(), "koya-full-lock-"));
+  let releaseImages;
+  let enteredImages;
+  const entered = new Promise((resolveEntered) => { enteredImages = resolveEntered; });
+  const release = new Promise((resolveRelease) => { releaseImages = resolveRelease; });
+  let imageCalls = 0;
+  const runtime = {
+    allowDirectMeasuredDoctorForTests: true,
+    runDoctor: async () => measuredDoctorReport(projectDir),
+    generateImages: async () => {
+      imageCalls += 1;
+      enteredImages();
+      await release;
+      return {
+        episodeId: "single-coordinator",
+        waiting: true,
+        failed: false,
+        state: { status: "images-paused", knownRemainingIssues: [] },
+      };
+    },
+  };
+  try {
+    const options = { projectDir, episodeId: "single-coordinator", scriptPath: "/fixture/script.txt" };
+    const first = runKoyaMangaFullProduction(options, runtime);
+    await entered;
+    await assert.rejects(
+      runKoyaMangaFullProduction(options, runtime),
+      /Timed out waiting for canvas write lock/iu,
+    );
+    assert.equal(imageCalls, 1, "the rejected coordinator must not reach paid image work");
+    releaseImages();
+    const result = await first;
+    assert.equal(result.exitCode, 3);
+  } finally {
+    releaseImages?.();
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("partial upstream evidence fails closed before any paid runner", async () => {
+  let paidCalls = 0;
+  await assert.rejects(
+    runKoyaMangaFullProduction({
+      projectDir: process.cwd(),
+      episodeId: "partial-upstream",
+      scriptPath: "/fixture/script.txt",
+      upstreamJobPath: "/fixture/job.json",
+    }, {
+      runDoctor: async () => { throw new Error("must not silently fall back"); },
+      generateImages: async () => { paidCalls += 1; },
+      generateSpeech: async () => { paidCalls += 1; },
+    }),
+    /Partial upstream preflight evidence/u,
+  );
+  assert.equal(paidCalls, 0);
+});
+
+test("fresh upstream doctor evidence skips the duplicate doctor only for the exact bound Job", async () => {
+  const projectDir = await mkdtemp(join(tmpdir(), "koya-upstream-preflight-"));
+  try {
+    const fixture = await createUpstreamPreflightFixture(projectDir);
+    let identityChecks = 0;
+    const result = await assertKoyaFullPreflight(fixture.options(), {
+      ...fixture.runtime,
+      now: () => fixture.nowMs,
+      verifyJobIdentity: async (job) => {
+        identityChecks += 1;
+        assert.equal(job.id, fixture.job.id);
+      },
+      runDoctor: async () => { throw new Error("duplicate doctor must be skipped"); },
+    });
+    assert.equal(result.mode, "verified-common-job");
+    assert.equal(result.jobRevision, 7);
+    assert.equal(result.channelPackPayloadSha256, "c".repeat(64));
+    assert.equal(identityChecks, 1);
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("verified outer Job identity is propagated unchanged to every Koya full stage", async () => {
+  const projectDir = await mkdtemp(join(tmpdir(), "koya-outer-job-propagation-"));
+  try {
+    const fixture = await createUpstreamPreflightFixture(projectDir);
+    const observed = {};
+    const result = await runKoyaMangaFullProduction({
+      ...fixture.options(),
+      episodeId: "outer-job-propagation",
+      scriptPath: "/fixture/script.txt",
+    }, {
+      ...fixture.runtime,
+      now: () => fixture.nowMs,
+      verifyJobIdentity: async () => true,
+      runDoctor: async () => { throw new Error("verified upstream must not rerun doctor"); },
+      generateImages: async (options) => {
+        observed.images = options.outerJobBinding;
+        return { episodeId: options.episodeId, waiting: false, failed: false };
+      },
+      prepareManifest: async (options) => {
+        observed.prepare = options.outerJobBinding;
+        return { waiting: false };
+      },
+      generateSpeech: async (options) => {
+        observed.speech = options.outerJobBinding;
+        return { waiting: false, partial: false, report: { mediaJobs: [mediaReceiptForFull("cut-01", 0)] } };
+      },
+      renderVideo: async (options) => {
+        observed.render = options.outerJobBinding;
+        return { outputPath: "/fixture/final.mp4", paths: { manifestPath: "/fixture/manifest.json" } };
+      },
+      auditFinal: async (options) => {
+        observed.audit = options.outerJobBinding;
+        return {
+          report: { pass: true, failedAuditIds: [], knownRemainingIssues: [] },
+          reportPath: "/fixture/audit.json",
+          contactSheetPath: "/fixture/contact-sheet.jpg",
+          signoffPath: "/fixture/signoff.json",
+          signoffSha256: "f".repeat(64),
+          runReceiptPath: "/fixture/genre-receipt.json",
+        };
+      },
+    });
+    const expected = createKoyaOuterJobBinding({
+      jobId: fixture.job.id,
+      identityDigest: fixture.job.identityDigest,
+      executionIdentityDigest: fixture.job.executionIdentityDigest,
+      resolvedProductionContractSha256: resolvedProductionContractSha256(fixture.job.resolvedProductionContract),
+    });
+    assert.equal(result.exitCode, 0);
+    for (const stage of ["images", "prepare", "speech", "render", "audit"]) {
+      assert.deepEqual(assertKoyaOuterJobBinding(observed[stage], { required: true }), expected, stage);
+    }
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("upstream evidence rejects TOCTOU tamper, stale doctor, another Job, and another Channel Pack before paid work", async () => {
+  const cases = [
+    {
+      name: "tampered-after-launch",
+      mutate: (fixture) => { fixture.job.stages[0].evidence.checks[0].ok = false; },
+      keepOriginalBinding: true,
+      expected: /changed after the parent launched/iu,
+    },
+    {
+      name: "stale-doctor",
+      mutate: (fixture) => { fixture.job.stages[0].finishedAt = new Date(fixture.nowMs - 16 * 60_000).toISOString(); },
+      expected: /stale/iu,
+    },
+    {
+      name: "another-job",
+      mutate: (fixture) => { fixture.job.revision += 1; },
+      keepOriginalOptions: true,
+      expected: /stale or belongs to another Job/iu,
+    },
+    {
+      // 検証済み pack は実行識別子の入力なので、pack だけ差し替えると識別子が合わない。
+      name: "another-channel-pack",
+      mutate: (fixture) => { fixture.job.channelPackVerification.payloadKind = "narrated-story-channel-pack"; },
+      expected: /execution identity does not match/iu,
+    },
+    {
+      name: "another-channel-pack-payload",
+      mutate: (fixture) => { fixture.job.channelPackVerification.payloadSha256 = "9".repeat(64); },
+      expected: /execution identity does not match/iu,
+    },
+    {
+      // 所有者が Job ごと書き換えて識別子を辻褄合わせしても、Koya 用 pack の
+      // 意味ゲートは別に立っている。hash は所有者への対抗手段ではない。
+      name: "consistent-rewrite-to-another-harness-pack",
+      mutate: (fixture) => {
+        fixture.job.channelPackVerification.payloadKind = "narrated-story-channel-pack";
+        fixture.job.executionIdentityDigest = createVideoHarnessExecutionIdentityDigest({
+          jobId: fixture.job.id,
+          identityDigest: fixture.job.identityDigest,
+          resolvedProductionContract: fixture.job.resolvedProductionContract,
+          channelPackVerification: fixture.job.channelPackVerification,
+        });
+      },
+      expected: /trusted Koya Channel Pack/iu,
+    },
+    {
+      name: "contract-override-changed-after-identity",
+      mutate: (fixture) => { fixture.job.resolvedProductionContract.episodeOverrideFileSha256 = "1".repeat(64); },
+      expected: /execution identity does not match/iu,
+    },
+    {
+      name: "execution-identity-missing",
+      mutate: (fixture) => { delete fixture.job.executionIdentityDigest; },
+      expected: /execution identity is missing/iu,
+    },
+    {
+      name: "execution-identity-upper-cased",
+      mutate: (fixture) => { fixture.job.executionIdentityDigest = fixture.job.executionIdentityDigest.toUpperCase(); },
+      expected: /not a canonical lowercase SHA-256/iu,
+    },
+    {
+      name: "execution-identity-trailing-space",
+      mutate: (fixture) => { fixture.job.executionIdentityDigest = `${fixture.job.executionIdentityDigest} `; },
+      expected: /not a canonical lowercase SHA-256/iu,
+    },
+    {
+      name: "deployment-bytes",
+      mutate: (fixture) => { fixture.job.deployment.entrypointSha256 = "d".repeat(64); },
+      expected: /deployment bytes changed/iu,
+    },
+  ];
+  for (const item of cases) {
+    const projectDir = await mkdtemp(join(tmpdir(), `koya-upstream-${item.name}-`));
+    try {
+      const fixture = await createUpstreamPreflightFixture(projectDir);
+      const originalOptions = fixture.options();
+      item.mutate(fixture);
+      await fixture.write();
+      const options = item.keepOriginalOptions
+        ? originalOptions
+        : {
+          ...fixture.options(),
+          ...(item.keepOriginalBinding ? { upstreamPreflightBinding: originalOptions.upstreamPreflightBinding } : {}),
+        };
+      let paidCalls = 0;
+      await assert.rejects(
+        runKoyaMangaFullProduction({
+          ...options,
+          episodeId: `preflight-${item.name}`,
+          scriptPath: "/fixture/script.txt",
+        }, {
+          now: () => fixture.nowMs,
+          ...fixture.runtime,
+          verifyJobIdentity: async () => true,
+          generateImages: async () => { paidCalls += 1; },
+          generateSpeech: async () => { paidCalls += 1; },
+        }),
+        item.expected,
+        item.name,
+      );
+      assert.equal(paidCalls, 0, `${item.name}: no paid runner may start`);
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("upstream evidence rejects restored authority-byte tamper before any paid runner", async () => {
+  const projectDir = await mkdtemp(join(tmpdir(), "koya-upstream-authority-tamper-"));
+  try {
+    const fixture = await createUpstreamPreflightFixture(projectDir);
+    await writeFile(fixture.authorityPaths.show, `${JSON.stringify({ id: "show", changed: true })}\n`);
+    let paidCalls = 0;
+    await assert.rejects(
+      runKoyaMangaFullProduction({
+        ...fixture.options(),
+        episodeId: "preflight-authority-tamper",
+        scriptPath: "/fixture/script.txt",
+      }, {
+        ...fixture.runtime,
+        now: () => fixture.nowMs,
+        verifyJobIdentity: async () => true,
+        generateImages: async () => { paidCalls += 1; },
+        generateSpeech: async () => { paidCalls += 1; },
+      }),
+      /authority bytes changed after the common doctor/iu,
+    );
+    assert.equal(paidCalls, 0);
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});
 
 
 /**
@@ -110,12 +715,29 @@ test("validation canary assigns provisional voices without mutating the fixed ch
   assert.equal(output.utterances[1].voiceId, "provider-ibuki");
   assert.equal(output.utterances[2].voiceId, undefined);
   assert.equal(output.production.validationCanary.publicationEligible, false);
+  assert.equal(output.speech.voiceCasting.status, "validation-canary-provisional");
+  assert.deepEqual(output.speech.voiceCasting.assignments.map((entry) => entry.voiceId), ["provider-reiji", "provider-ibuki"]);
   assert.equal(registry.characters[0].voiceId, "");
 
   assert.throws(() => applyKoyaValidationCanaryVoiceProfiles(manifest, {
     ...canary,
     provisionalVoiceProfileByCastId: { reiji: "voice-reiji", ibuki: "voice-reiji" },
   }, registry, showBible), /cannot reuse provider voice/iu);
+});
+
+test("validation canary casting ledger follows the protagonist voice used by narration", () => {
+  const output = synchronizeKoyaValidationCanaryVoiceCasting({
+    production: { validationCanary: { active: true } },
+    speech: { voiceCasting: { status: "stale-auto-cast" } },
+    utterances: [
+      { speakerId: "hero", speakerName: "主人公", voiceProfileId: "hero-profile", voiceId: "hero-voice", voiceName: "Hero" },
+      { speakerId: "narration", speakerName: "ナレーション", preset: "narration", voiceProfileId: "hero-profile", voiceId: "hero-voice", voiceName: "Hero", voiceSourceSpeakerId: "hero" },
+    ],
+  });
+  assert.equal(output.speech.voiceCasting.status, "validation-canary-provisional");
+  assert.equal(output.speech.voiceCasting.assignments.length, 2);
+  assert.equal(output.speech.voiceCasting.assignments[1].characterId, "narration");
+  assert.equal(output.speech.voiceCasting.assignments[1].voiceSourceSpeakerId, "hero");
 });
 
 
@@ -409,6 +1031,41 @@ test("source-face placement never accepts a stale passing report after the detec
   await assert.rejects(() => readFile(reportPath), /ENOENT/u);
 });
 
+test("source-face placement preserves Windows launcher arguments from the resolved runtime", async () => {
+  const projectDir = await mkdtemp(join(tmpdir(), "koya-windows-source-face-"));
+  const scriptsDir = join(projectDir, "scripts");
+  const dataDir = join(scriptsDir, "data");
+  const episodeDir = join(projectDir, "episode");
+  const reportPath = join(episodeDir, "source-face-placement.json");
+  const planPath = join(projectDir, "plan.json");
+  await Promise.all([
+    mkdir(dataDir, { recursive: true }),
+    mkdir(episodeDir, { recursive: true }),
+  ]);
+  await writeFile(join(scriptsDir, "detect-koya-manga-source-faces.py"), "# fixture\n");
+  await writeFile(join(dataDir, "lbpcascade_animeface.xml"), "fixture\n");
+  await writeFile(planPath, "{}\n");
+  let invocation;
+  const result = await runSourceFacePlacement(
+    { projectDir, sourceFaceReportPath: reportPath },
+    planPath,
+    "",
+    {
+      pythonRuntime: { ok: true, command: "py.exe", args: ["-3"], source: "test" },
+      runCommand: async (command, args, options) => {
+        invocation = { command, args, options };
+        await writeFile(reportPath, `${JSON.stringify({ pass: true, rows: [] })}\n`);
+        return { stdout: "", stderr: "" };
+      },
+    },
+  );
+  assert.equal(result.report.pass, true);
+  assert.equal(invocation.command, "py.exe");
+  assert.equal(invocation.args[0], "-3");
+  assert.equal(invocation.args[1], join(scriptsDir, "detect-koya-manga-source-faces.py"));
+  assert.equal(invocation.options.cwd, projectDir);
+});
+
 const script = `# 契約テスト\n\n## CUT 1: 教室\nナレーション: 放課後の教室だった。\n悠斗: 絶対に諦めない！\n\n## CUT 2: 廊下\n美咲: 本当に大丈夫？\n悠斗: ありがとう。\n`;
 
 test("character-bible readings become deterministic STT pronunciation aliases", () => {
@@ -479,7 +1136,7 @@ test("Koya styling rounds must follow every show-bible spec in order with immuta
   }
   const complete = await assertKoyaStylingSequence(authority, member, { stylingVariationRounds: selectedRounds });
   assert.equal(complete.complete, true);
-  assert.equal(complete.selectedRounds.length, 3);
+  assert.equal(complete.selectedRounds.length, expected.length);
 });
 
 test("wide Koya source views use a semantic pull-out instead of a fake direction", () => {
@@ -523,6 +1180,25 @@ test("pacing groups narration with a concrete dialogue page without assigning di
   assert.equal(groups[0].representativePage.outputPath, "/dialogue.png");
   assert.equal(groups[0].speakerId, "hero");
   assert.equal(groups[1].representativePage.outputPath, "/reply.png");
+});
+
+test("episode pacing can hold a dialogue pair on the chosen evidence frame while preserving dedicated action inserts", () => {
+  const utterances = new Map([
+    ["u1", { id: "u1", speakerId: "accuser" }],
+    ["u2", { id: "u2", speakerId: "hero" }],
+    ["u3", { id: "u3", speakerId: "narration", text: "猫が偽パスを床へ落とした。" }],
+    ["u4", { id: "u4", speakerId: "accuser" }],
+  ]);
+  const groups = groupPagesForPacing([
+    { cutId: "c1", utteranceId: "u1", outputPath: "/attack.png", pacing: { holdGroup: "proof-pair" } },
+    { cutId: "c1", utteranceId: "u2", outputPath: "/proof.png", pacing: { holdGroup: "proof-pair", preferAsRepresentative: true } },
+    { cutId: "c2", utteranceId: "u3", outputPath: "/cat-action.png", pacing: { dedicatedVisual: true } },
+    { cutId: "c2", utteranceId: "u4", outputPath: "/excuse.png" },
+  ], utterances);
+  assert.deepEqual(groups.map((group) => group.utteranceIds), [["u1", "u2"], ["u3"], ["u4"]]);
+  assert.equal(groups[0].representativePage.outputPath, "/proof.png");
+  assert.equal(groups[0].speakerId, "hero");
+  assert.equal(groups[1].representativePage.outputPath, "/cat-action.png");
 });
 
 test("successive narration facts retain their own purpose-built semantic images", () => {

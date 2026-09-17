@@ -15,6 +15,7 @@ import {
   findWorkflowCast,
   getCharacterWorkflow,
   markCharacterStylingVariationsGenerating,
+  isUnselectedCharacterStylingConsolidation,
   prepareCharacterWorkflow,
   readCharacterWorkflowStore,
   recordFailedCharacterStylingReview,
@@ -23,6 +24,16 @@ import {
   updateCharacterWorkflow,
   validateCharacterStylingReview,
 } from "../lib/characterPipeline.mjs";
+
+test("later unselected styling consolidation preserves an earlier selected styling round", () => {
+  const target = { stylingSelection: { roundId: "earlier-outfit", optionId: "approved" } };
+  const supersededRound = { id: "later-hair", status: "awaiting-selection", selectedOptionId: "" };
+  assert.equal(isUnselectedCharacterStylingConsolidation({ target, supersededRound }), true);
+  assert.equal(isUnselectedCharacterStylingConsolidation({
+    target: { stylingSelection: { roundId: "later-hair", optionId: "already-selected" } },
+    supersededRound,
+  }), false);
+});
 
 function testRaster(seed = 0, width = 64, height = 48) {
   const colors = [[190, 45, 45], [45, 170, 70], [45, 80, 195], [210, 135, 30], [145, 55, 175]];
@@ -210,6 +221,11 @@ test("styling variations generate independent sheets, require per-option QA, and
     assert.match(identityJobs[0].prompt, /species-appropriate four-legged stance/u);
     assert.doesNotMatch(identityJobs[0].prompt, /full-body standing views/u);
     assert.doesNotMatch(identityJobs[0].prompt, /旧案の灰色髪|スカジャン/u);
+    const versionedIdentityJobs = buildApprovedIdentityPackJobs(selectedWorkflow, selectedCast, effective, {
+      fileNameSuffix: "approval-context-r2",
+    });
+    assert.ok(versionedIdentityJobs.every((job) => job.fileName.includes("approval-context-r2")));
+    assert.ok(versionedIdentityJobs.every((job) => !identityJobs.some((prior) => prior.fileName === job.fileName)));
   } finally {
     await rm(f.projectDir, { recursive: true, force: true });
   }
@@ -535,6 +551,99 @@ test("an all-pass unselected styling round can be atomically superseded by an ex
     assert.equal(superseded.supersededByRoundId, replacement.round.id);
     assert.match(superseded.supersedeReason, /一つの比較/u);
     assert.equal(unified.status, "generating");
+  } finally {
+    await rm(f.projectDir, { recursive: true, force: true });
+  }
+});
+
+test("an exact selected styling round can be correctively superseded while preserving prior approval evidence", async () => {
+  const f = await fixture();
+  try {
+    let { workflow, cast } = await load(f);
+    const oldSpec = {
+      version: "koya-character-styling-spec-v1",
+      kind: "outfit",
+      minimumPassingCandidates: 2,
+      options: [
+        { id: "old-office", description: "旧確定のオフィス衣装" },
+        { id: "old-private", description: "旧確定の私服" },
+      ],
+    };
+    const old = await buildCharacterStylingVariationJobs(workflow, cast.id, "A", oldSpec, {
+      roundId: "old-selected-round",
+      selectionReason: "旧クライアント確定",
+      generatorHost: "claude",
+      generatorId: "old-generator",
+      generatorContextId: "old-generator-context",
+    });
+    await markCharacterStylingVariationsGenerating({ ...f, castId: cast.id }, workflow.id, old.round);
+    const results = [];
+    for (const [index] of old.jobs.entries()) {
+      const assetFile = path.join(f.assetDir, `old-selected-${index + 1}.png`);
+      await writeFile(assetFile, testRaster(index));
+      results.push({ assetFile });
+    }
+    const recorded = await recordCharacterStylingVariationResults({ ...f, castId: cast.id }, workflow.id, old.round.id, old.jobs, results);
+    await passingReview(recorded.reviewDraftPath);
+    await composeCharacterStylingReviewSheet({ ...f, workflowId: workflow.id, castId: cast.id, roundId: old.round.id, reviewPath: recorded.reviewDraftPath });
+    await selectCharacterStylingVariation({ ...f, workflowId: workflow.id, castId: cast.id, roundId: old.round.id, optionId: "old-office", reason: "旧確定を記録" });
+    await updateCharacterWorkflow(f, workflow.id, (current) => {
+      current.cast = current.cast.map((entry) => entry.id === cast.id ? {
+        ...entry,
+        status: "awaiting-identity-qa",
+        selectedCandidateId: entry.candidates[0].id,
+        approval: { route: "human-best-of-n", reason: "旧承認", stylingRoundId: old.round.id, stylingOptionId: "old-office" },
+        identityPack: {
+          selectedFace: { assetFile: results[0].assetFile },
+          turnaround: { assetFile: results[1].assetFile },
+          expression: { assetFile: results[0].assetFile },
+          generatorContextId: "old-generator-context",
+        },
+      } : entry);
+      return current;
+    });
+
+    ({ workflow, cast } = await load(f));
+    const planningWorkflow = {
+      ...workflow,
+      cast: workflow.cast.map((entry) => entry.id === cast.id ? {
+        ...entry,
+        selectedCandidateId: "",
+        stylingSelection: null,
+        approval: null,
+        identityPack: null,
+        stylingVariationRounds: entry.stylingVariationRounds.map((round) => round.id === old.round.id ? { ...round, status: "superseded" } : round),
+      } : entry),
+    };
+    const replacement = await buildCharacterStylingVariationJobs(planningWorkflow, cast.id, "A", {
+      ...oldSpec,
+      options: [
+        { id: "new-office", description: "後日確定の新しいオフィス衣装" },
+        { id: "new-private", description: "後日確定の新しい私服" },
+      ],
+    }, {
+      roundId: "corrective-round",
+      selectionReason: "2026-09-01の後日クライアント確定で旧承認を訂正",
+      generatorHost: "legacy-migration",
+      generatorId: "client-final-import",
+      generatorContextId: "client-final-context",
+    });
+    await markCharacterStylingVariationsGenerating({
+      ...f,
+      castId: cast.id,
+      supersedeStylingRoundId: old.round.id,
+      correctiveSupersedeReason: "2026-09-01の後日クライアント確定で旧承認を訂正",
+    }, workflow.id, replacement.round);
+    ({ cast } = await load(f));
+    assert.equal(cast.stylingSelection, null);
+    assert.equal(cast.approval, null);
+    assert.equal(cast.identityPack, null);
+    assert.equal(cast.status, "awaiting-approval");
+    assert.equal(findStylingVariationRound(cast, old.round.id).status, "superseded");
+    assert.equal(cast.correctiveSupersedeHistory.length, 1);
+    assert.equal(cast.correctiveSupersedeHistory[0].roundId, old.round.id);
+    assert.equal(cast.correctiveSupersedeHistory[0].stylingSelection.optionId, "old-office");
+    assert.equal(cast.correctiveSupersedeHistory[0].approval.reason, "旧承認");
   } finally {
     await rm(f.projectDir, { recursive: true, force: true });
   }

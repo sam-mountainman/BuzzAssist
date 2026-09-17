@@ -31,6 +31,29 @@ test("inventory expands into per-asset checks plus one set-wide duplicate check"
   assert.deepEqual(unintended.allowedRegions, [[0, 0, 0.5, 0.5]]);
 });
 
+test("inventory forwards distinct image/reference cells for setting-sheet hair checks", () => {
+  const checks = buildAttributeChecksFromInventory({
+    castId: "horo",
+    reference: "/selected-face.png",
+    assets: [{
+      id: "turnaround",
+      file: "/turnaround.png",
+      base: "/selected-face.png",
+      cleanReference: "/selected-face.png",
+      hairColorReference: "/approved-outfit.png",
+      hairColorImageCell: [0, 0, 0.25, 0.5],
+      hairColorReferenceCell: [0, 0, 0.25, 1],
+      hairColorCellTopFraction: 0.15,
+    }],
+  }, "/base");
+  const hair = checks.find((check) => check.type === "hairColorDelta");
+  assert.equal(hair.image, "/turnaround.png");
+  assert.equal(hair.reference, "/approved-outfit.png");
+  assert.deepEqual(hair.imageCell, [0, 0, 0.25, 0.5]);
+  assert.deepEqual(hair.referenceCell, [0, 0, 0.25, 1]);
+  assert.equal(hair.hairCellTopFraction, 0.15);
+});
+
 test("coverage is per asset: another asset's check cannot satisfy a missing one", () => {
   const partial = {
     checks: [

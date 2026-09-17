@@ -75,6 +75,63 @@ test("script planner covers strict plates, thought focus, split pages, and camer
   assert.ok(Array.isArray(montagePage.fallbackReferenceImagePaths));
 });
 
+test("episode visual plan replaces long opening plates and distributes eight approved identities across a three-panel montage", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-visual-plan-"));
+  const registry = {
+    characters: [
+      ["c1", "人物一"], ["c2", "人物二"], ["c3", "人物三"], ["c4", "人物四"],
+      ["c5", "人物五"], ["c6", "人物六"], ["c7", "人物七"], ["c8", "人物八"],
+    ].map(([id, name]) => ({ id, name, kind: "character", status: "approved", referenceImagePaths: [] })),
+  };
+  const scriptText = [
+    "【カット1：開場前】",
+    "ナレーション：人物三は受付で、大切な席を守る準備をしていた。",
+    "【カット2：八人の準備】",
+    "ナレーション：人物一、人物二、人物三、人物四、人物五、人物六、人物七、人物八が催事の準備を進めた。",
+  ].join("\n");
+  const visualPlanOverrides = {
+    version: "test-visual-plan-v1",
+    byUtterance: {
+      "cut-01-u01": {
+        disableEditorialPlate: true,
+        cameraMode: "right-then-pullout",
+        visualDirective: "Show an illustrated reception establishing shot.",
+      },
+      "cut-02-u01": {
+        disableEditorialPlate: true,
+        splitType: "story-3",
+        splitLayout: "grid-3",
+        requireAllCutCastAcrossPanels: true,
+        panels: [
+          { cast: ["人物一", "人物二", "人物三"], visibleAction: "prepare the reception" },
+          { cast: ["人物四", "人物五", "人物六"], visibleAction: "prepare cups and records" },
+          { cast: ["人物七", "人物八"], visibleAction: "prepare the entrance" },
+        ],
+      },
+    },
+  };
+  const plan = createMangaScriptImagePlan({
+    scriptText,
+    episodeId: "visual-plan-test",
+    registry,
+    canvasDir: root,
+    assetDir: join(root, "assets"),
+    protagonistSpeakerId: "c3",
+    visualPlanOverrides,
+  });
+  const openingPage = plan.pages.find((entry) => entry.utteranceId === "cut-01-u01");
+  assert.equal(openingPage.editorial.editorialPlate.recommended, false);
+  assert.equal(openingPage.cameraMode, "right-then-pullout");
+  assert.match(plan.jobs.find((entry) => entry.id === "image:cut-01-u01").prompt, /illustrated reception establishing shot/u);
+  const panels = plan.jobs.filter((entry) => entry.id.startsWith("panel:cut-02-u01:"));
+  assert.equal(panels.length, 3);
+  assert.deepEqual(panels.map((entry) => entry.characterIds.length), [3, 3, 2]);
+  assert.deepEqual(new Set(panels.flatMap((entry) => entry.characterIds)), new Set(registry.characters.map((entry) => entry.id)));
+  assert.ok(panels.every((entry) => entry.characterIds.length <= 4));
+  assert.equal(plan.jobs.find((entry) => entry.id === "split-page:cut-02-u01").layoutVariant, "grid-3");
+  assert.equal(plan.visualPlan.version, "test-visual-plan-v1");
+});
+
 test("narration jobs carry the approved protagonist identity into first-person visual beats", async () => {
   const root = await mkdtemp(join(tmpdir(), "buzzassist-narration-protagonist-"));
   const registry = {

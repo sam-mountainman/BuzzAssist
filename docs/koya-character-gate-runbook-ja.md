@@ -74,9 +74,11 @@ inventory の書き方:
 匿名で比較したいときは公式パケットのビューアを使う:
 
 ```bash
-node scripts/koya-open-blind-arena.mjs --public <judge-packet.json>
-node ~/まさお/bestofn-repo/bin/bon.js serve -d --open
+node scripts/koya-open-blind-arena.mjs --public <judge-packet.json> --serve
 ```
+
+`bon` がPATHに無い開発環境だけ、`BON_CLI`へ `bin/bon.js` の絶対パスを渡す。
+動画制作ハーネスは「まさお」フォルダの配置を前提にしない。
 
 **アリーナは閲覧用**。採用の記録は公式CLI（`character-approve` /
 `character-style-select` に `--selection-reason`）に残す。二重帳簿を作らない。

@@ -1,11 +1,19 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import { runKoyaCharacterAttributeGate } from "../lib/koyaCharacterAttributeAudit.mjs";
 import { auditKoyaMangaFinal, writeKoyaVisualSignoff } from "../lib/koyaMangaFinalAudit.mjs";
 import {
+  REVIEWER_TRUST_ENV_GUIDANCE,
+  REVIEWER_TRUST_PATH_ENV,
+  loadReviewerTrust,
+  preflightReviewerTrust,
+  writeReviewerKeyPairFiles,
+} from "../lib/koyaReviewAttestation.mjs";
+import {
   adjustKoyaMangaUtteranceGap,
+  assertKoyaFullPreflight,
   approveKoyaCharacterCandidate,
   composeKoyaCharacterStylingReview,
   createKoyaEpisodeManifest,
@@ -25,11 +33,13 @@ import {
   repairKoyaMangaAudioOnset,
   repairKoyaMangaAudioTail,
   renderKoyaMangaVideo,
+  runKoyaMangaFullProduction,
   refreshKoyaMangaBubbles,
   standardizeKoyaMangaCut,
   syncKoyaMangaContract,
   selectKoyaCharacterStylingVariation,
 } from "../lib/koyaMangaProduction.mjs";
+import { createKoyaOuterJobBinding } from "../lib/koyaOuterJobBinding.mjs";
 import { resolveKoyaMangaProductionContract } from "../lib/koyaMangaProductionContract.mjs";
 import { disposeMediaGenerationResources } from "../lib/mediaGeneration.mjs";
 import {
@@ -67,15 +77,41 @@ import { parseMangaScript } from "../lib/mangaVideoPipeline.mjs";
 import { readCharacterRegistry } from "../lib/characterRegistry.mjs";
 import { auditKoyaCharacterRosterReview, createKoyaCharacterRosterReviewDraft } from "../lib/koyaCharacterRosterReview.mjs";
 
-function parseArgs(argv) {
+// usage() に載っていないが実装が読む flag。usage の `--flag` 一覧と合わせて既知集合を作る。
+// 上位 Job 層（videoHarnessAdapters）が full へ渡す upstream binding もここに含める。
+const EXTRA_KNOWN_FLAGS = Object.freeze([
+  "--project-dir", "--contract-path", "--override-path", "--file-name", "--render-concurrency",
+  "--reading-dictionary-path", "--candidate-rebuild-spec-path", "--reviewer-trust-path",
+  "--upstream-job-id", "--upstream-job-path", "--upstream-job-revision", "--upstream-preflight-binding",
+  "--upstream-execution-binding",
+]);
+
+function knownFlags() {
+  const flags = new Set(EXTRA_KNOWN_FLAGS);
+  for (const match of usage().matchAll(/--[a-z0-9-]+/gu)) flags.add(match[0]);
+  return flags;
+}
+
+/**
+ * 未知の flag は黙って捨てない（R6-F1 / R6-3）。以前は `full` に渡された --reviewer-trust-path が
+ * 解析はされるのに読まれず、上位が照合した信頼リスト path が子で消えていた。既存の呼び出しを壊さない
+ * よう、未知 flag は**エラーにせず stderr へ警告**し、値は従来どおり保持する。
+ */
+function parseArgs(argv, { warn = (line) => process.stderr.write(`${line}\n`) } = {}) {
   const values = { action: argv[2] || "help" };
+  const known = knownFlags();
+  const unknown = [];
   for (let index = 3; index < argv.length; index += 1) {
     const token = argv[index];
     if (!token.startsWith("--")) continue;
+    if (!known.has(token)) unknown.push(token);
     const key = token.slice(2).replace(/-([a-z])/gu, (_, letter) => letter.toUpperCase());
     const next = argv[index + 1];
     if (!next || next.startsWith("--")) values[key] = true;
     else { values[key] = next; index += 1; }
+  }
+  if (unknown.length > 0) {
+    warn(`warning: unknown option(s) ${unknown.join(", ")} — not documented in usage; check the spelling (see \`node scripts/koya-manga-video.mjs help\`).`);
   }
   return values;
 }
@@ -85,8 +121,8 @@ function usage() {
     "Koya manga video production (fail-closed)",
     "",
     "node scripts/koya-manga-video.mjs <action> [options]",
-    "actions: contract, channel-contract, character-bootstrap-status, character-registration-reconcile, character-roster-review-draft, character-roster-audit, cast-readiness, story-review-draft, story-audit, location-plan, location-generate, location-anchor-review-draft, location-anchor-audit, location-review-draft, location-register, thumbnail-plan-draft, thumbnail-audit, handoff-export, handoff-verify, handoff-restore, plan, images, character-review-refresh, character-candidate-migrate-blind, character-candidate-import, character-style-generate, character-style-import, character-style-review-refresh, character-style-record-failure, character-style-compose, character-style-select, character-attribute-gate, character-approve, character-identity-refresh, character-identity-repair, character-identity-repack, character-register, prepare, speech, adjust-gap, standard-cut, repair-onset, repair-tail, sync-contract, refresh-bubbles, render, audit, signoff, full, status",
-    "common: --project-dir DIR --episode-id ID --script-path FILE --title TITLE --protagonist-speaker-id ID_OR_EXACT_NAME --character-bible-path JSON [--story-review-path JSON] [--source-face-review-path JSON] [--generator-host codex|claude|legacy-migration] [--generator-id ID] [--generator-context-id TASK_OR_SESSION_ID] [--retry-failed] [--image-concurrency N|auto] [--qa-concurrency N] [--image-fallback-model MODEL] [--qa-fallback-provider grok]",
+    "actions: contract, channel-contract, character-bootstrap-status, character-registration-reconcile, character-roster-review-draft, character-roster-audit, cast-readiness, story-review-draft, story-audit, location-plan, location-generate, location-anchor-review-draft, location-anchor-audit, location-review-draft, location-register, thumbnail-plan-draft, thumbnail-audit, handoff-export, handoff-verify, handoff-restore, plan, images, character-review-refresh, character-candidate-migrate-blind, character-candidate-import, character-style-generate, character-style-import, character-style-review-refresh, character-style-record-failure, character-style-compose, character-style-select, character-attribute-gate, character-approve, character-identity-refresh, character-identity-repair, character-identity-repack, character-register, prepare, speech, adjust-gap, standard-cut, repair-onset, repair-tail, sync-contract, refresh-bubbles, render, audit, reviewer-key-create, signoff, full, status",
+    "common: --project-dir DIR --episode-id ID --script-path FILE --title TITLE --protagonist-speaker-id ID_OR_EXACT_NAME --character-bible-path JSON [--story-review-path JSON] [--source-face-review-path JSON] [--generator-host codex|claude|legacy-migration] [--generator-id ID] [--generator-context-id TASK_OR_SESSION_ID] [--retry-failed] [--image-concurrency N|auto] [--qa-concurrency N] [--speech-concurrency N|auto] [--image-fallback-model MODEL] [--qa-fallback-provider grok]",
     "story-audit: --script-path FILE --story-review-path JSON --protagonist-speaker-id ID_OR_EXACT_NAME (read-only; binds reversal beats and human policy checks to the exact script SHA-256)",
     "story-review-draft: --script-path FILE [--protagonist-speaker-id ID_OR_EXACT_NAME] (read-only; prints exact utterance inventory with all subjective fields unset)",
     "cast-readiness: --script-path FILE [--character-bible-path JSON] (read-only; blocks episode-local replacements for unregistered Koya fixed cast and checks required identity roles)",
@@ -103,14 +139,14 @@ function usage() {
     "thumbnail-audit: --thumbnail-plan-path JSON (read-only; blocks pending brand tokens, copy violations, and final artwork reuse)",
     "thumbnail-plan-draft: [--layout twoPanel|threePanel] (read-only; prints a fail-closed plan template)",
     "source region fallback: inspect the exact source image and pass a koya-source-region-review-v2 JSON whose annotations bind normalized face/hand/prop/evidence/text bounds to the source SHA-256 (legacy koya-source-face-review-v1 remains accepted)",
-    "audit: --video-path MP4 [--quick] [--dry-run]",
+    `audit: --video-path MP4 [--quick] [--dry-run] [--reviewer-trust-path JSON] (the reviewer trust list comes only from the operator's ${REVIEWER_TRUST_ENV_GUIDANCE}; --reviewer-trust-path is a cross-check and must match that list or the action stops with reviewer-trust-conflict, and without the environment variable it stops with reviewer-trust-unconfigured; the signoff's Ed25519 reviewer attestation is re-verified against it)`,
     "character-approve: --workflow-id ID --cast-id ID_OR_NAME --candidate-label A..E --approval-reason WHY --candidate-review-path JSON --generator-context-id TASK_OR_SESSION [--approved-by NAME] [--identity-generation-import-map-path JSON] (generates or imports a SHA/input-bound pending identity pack; does not register)",
     "character-identity-repair: --episode-id ID --workflow-id ID --cast-id ID_OR_NAME (--identity-review-path FAILED_REVIEW_JSON | --identity-findings-path FINDINGS_JSON --identity-repair-plan-path REPAIR_PLAN_JSON) --identity-repair-id UNIQUE_ID --generator-host codex|claude --generator-id ID --generator-context-id TASK_OR_SESSION [--identity-generation-import-map-path JSON] (revalidates failed evidence; findings mode applies findingId/ROI repair and SHA-bound import while preserving protected pixels)",
     "character-identity-refresh: --episode-id ID --workflow-id ID --cast-id ID_OR_NAME --identity-refresh-id UNIQUE_ID --generator-host codex|claude --generator-id ID --generator-context-id TASK_OR_SESSION [--identity-generation-import-map-path JSON] (keeps the already registered identity-face SHA frozen, regenerates or SHA/input-bound imports only turnaround/expression, and stages fresh QA without face reapproval)",
-    "character-identity-repack: --episode-id ID --workflow-id ID --cast-id ID_OR_NAME --identity-review-path FAILED_REVIEW_JSON --identity-repair-id UNIQUE_ID --generator-context-id TASK_OR_SESSION (for turnaround/expression boundary failures: archives the failed review, redraws nothing, extracts existing views from actual white gutters, and contains them in exact 4x2/4x3 cells with 8% clearance before fresh QA)",
+    "character-identity-repack: --episode-id ID --workflow-id ID --cast-id ID_OR_NAME (--identity-review-path FAILED_REVIEW_JSON | --identity-findings-path FINDINGS_JSON --identity-repair-plan-path REPAIR_PLAN_JSON) --identity-repair-id UNIQUE_ID --generator-context-id TASK_OR_SESSION (for turnaround/expression/eye-open boundary failures: archives or binds the failure evidence, redraws nothing, extracts existing views from actual white gutters, and contains them in exact cells with 8% clearance before fresh QA)",
     "character-review-refresh: --workflow-id ID [--cast-id ID_OR_NAME] --generator-host legacy-migration --generator-context-id MIGRATION_ID (rebuilds v2 review drafts from existing anonymous artifacts; no paid generation and no auto-approval)",
     "character-candidate-migrate-blind: --workflow-id ID --cast-id ID --candidate-labels A,B,C[,D,E] [--retired-candidate-labels F] --migration-reason WHY --generator-host legacy-migration --generator-id ID --generator-context-id ID (rebuilds a published-label A-E packet from existing canvas assets, retires explicitly excluded legacy extras, and never auto-approves)",
-    "character-candidate-import: --workflow-id ID --cast-id ID --candidate-import-map-path JSON --generator-host codex|claude --generator-id ID --generator-context-id ID (imports newly generated SHA-bound candidate images, archives the superseded packet, rebuilds anonymous artifacts, and requires fresh independent review)",
+    "character-candidate-import: --workflow-id ID --cast-id ID --candidate-import-map-path JSON --generator-host codex|claude|legacy-migration --generator-id ID --generator-context-id ID (imports SHA-bound candidate images, supports per-entry source generators for archival mixed-origin migration, archives the superseded packet, rebuilds anonymous artifacts, and requires fresh independent review)",
     "character-candidate-qa-sheet: --workflow-id ID --cast-id ID (writes a non-authoritative A/B/C original-scale comparison sheet before independent review)",
     "character-style-generate: --episode-id ID --workflow-id ID --cast-id ID_OR_NAME --base-candidate-label A..E --candidate-review-path JSON --styling-spec-path JSON --selection-reason WHY --generator-host codex|claude --generator-context-id TASK_OR_SESSION [--styling-round-id STABLE_ID] [--styling-comparison-reference-paths path1,path2] [--styling-repair-source-path PASSED_OPTION] (generates each option separately; an optional repair source must be a prior SHA-bound independently passed option; exclusion references remain QA-only)",
     "character-style-import: same identity/spec/review inputs plus --styling-import-map-path JSON --styling-round-id ID --generator-host legacy-migration --generator-id ID --generator-context-id ID [--supersede-styling-round-id AWAITING_SELECTION_ID] [--corrective-supersede-reason LATER_REQUIREMENT] (imports existing SHA-bound generated sheets without auto-approval; ordinary consolidation carries old options, while a corrective supersede preserves but retires a wrong-spec round)",
@@ -128,7 +164,9 @@ function usage() {
     "sync-contract: update manifest contract metadata without changing media, then require a fresh audit",
     "refresh-bubbles: rebuild every SVG under the resolved punctuation/placement contract, then require a fresh render and audit",
     "render: [--cut-ids cut-01,cut-02] rerenders at least the named cuts; unselected cuts are reused only when their completed input hash still matches and the MP4 decodes",
-    "signoff: --reviewer claude|codex [--reviewer-id ID] [--reviewer-context-id TASK_OR_SESSION_ID] --review-notes-path /absolute/review.json --pass (the evaluator task/session must differ from the generator)",
+    `full: --episode-id ID --script-path FILE [--reviewer-trust-path JSON] (paid production runner; stops before any paid generation unless the operator's reviewer trust list from ${REVIEWER_TRUST_ENV_GUIDANCE} is configured, readable, and holds at least one active key — reviewer-trust-unconfigured / reviewer-trust-invalid; an explicit --reviewer-trust-path is only cross-checked against it — reviewer-trust-conflict)`,
+    `signoff: --reviewer claude|codex [--reviewer-id ID] [--reviewer-context-id TASK_OR_SESSION_ID] --review-notes-path /absolute/review.json --reviewer-key-path /absolute/reviewer-ed25519.pem [--reviewer-trust-path JSON] --pass (the evaluator task/session must differ from the generator; the private key is read from the file, never from argv, and must be listed as active in the operator's trust list from ${REVIEWER_TRUST_ENV_GUIDANCE}; --reviewer-trust-path only cross-checks that list and never replaces it)`,
+    "reviewer-key-create: --reviewer-key-path /absolute/outside-repo/reviewer-ed25519.pem [--reviewer-public-key-path FILE] [--reviewer-label NAME] (writes a new Ed25519 private key with mode 0600, refuses to overwrite either file, refuses paths inside this repository, --project-dir, or any git working tree, and prints the keyId plus the trust-list entry the operator registers out of band)",
     "handoff-export: [--output-dir DIR] [--bundle-id ID] [--character-ids id1,id2] [--visual-profile-ids id1] [--force] (exports only approved Koya data and SHA evidence; excludes candidate mappings, sessions and credentials)",
     "speech: R194 voice quality gate is always on; [--take-count 2..8] [--max-adaptive-takes 2..8]; --no-voice-quality-gate requires --voice-quality-gate-override-reason",
     "handoff-verify: --bundle-dir DIR (read-only full manifest/SHA/path/symlink verification)",
@@ -161,6 +199,7 @@ const common = {
   retryFailed: args.retryFailed === true,
   imageConcurrency: args.imageConcurrency,
   qaConcurrency: args.qaConcurrency,
+  speechConcurrency: args.speechConcurrency,
   imageFallbackModel: args.imageFallbackModel,
   qaFallbackProvider: args.qaFallbackProvider,
   generatorHost: args.generatorHost,
@@ -187,6 +226,10 @@ const common = {
   identityRepairPlanPath: args.identityRepairPlanPath ? resolve(args.identityRepairPlanPath) : "",
   identityRepairId: args.identityRepairId,
   identityRefreshId: args.identityRefreshId,
+  upstreamJobPath: args.upstreamJobPath ? resolve(args.upstreamJobPath) : "",
+  upstreamJobId: args.upstreamJobId || "",
+  upstreamJobRevision: args.upstreamJobRevision,
+  upstreamPreflightBinding: args.upstreamPreflightBinding || "",
 };
 
 function requireEpisodeId() {
@@ -218,7 +261,20 @@ async function auditOptions() {
     videoPath: args.videoPath ? resolve(args.videoPath) : "",
     quick: args.quick === true,
     dryRun: args.dryRun === true,
+    reviewerTrustPath: typeof args.reviewerTrustPath === "string" ? resolve(args.reviewerTrustPath) : "",
   };
+}
+
+async function canonicalOuterJobContext() {
+  const preflight = await assertKoyaFullPreflight(common);
+  const outerJobBinding = createKoyaOuterJobBinding({
+    jobId: preflight.jobId,
+    identityDigest: preflight.identityDigest,
+    executionIdentityDigest: preflight.executionIdentityDigest,
+    resolvedProductionContractSha256: preflight.resolvedProductionContractSha256,
+  });
+  if (!outerJobBinding) throw new Error("Koya canonical outer Job binding is required.");
+  return { preflight, outerJobBinding };
 }
 
 let exitCode = 0;
@@ -353,6 +409,7 @@ switch (args.action) {
     print(buildKoyaLocationBoardPlan({
       projectDir,
       locationBible: authority.locationBible,
+      showBible: authority.showBible,
       locationId: args.locationId,
       outputDir: args.outputDir ? resolve(args.outputDir) : "",
     }));
@@ -377,6 +434,7 @@ switch (args.action) {
     print(await createKoyaLocationAnchorReviewDraft({
       projectDir,
       locationBible: authority.locationBible,
+      showBible: authority.showBible,
       locationId: args.locationId,
       outputDir: args.outputDir ? resolve(args.outputDir) : "",
     }));
@@ -389,6 +447,7 @@ switch (args.action) {
     const result = await auditKoyaLocationAnchorReview({
       projectDir,
       locationBible: authority.locationBible,
+      showBible: authority.showBible,
       locationId: args.locationId,
       outputDir: args.outputDir ? resolve(args.outputDir) : "",
       review,
@@ -402,6 +461,7 @@ switch (args.action) {
     print(await createKoyaLocationReviewDraft({
       projectDir,
       locationBible: authority.locationBible,
+      showBible: authority.showBible,
       locationId: args.locationId,
       outputDir: args.outputDir ? resolve(args.outputDir) : "",
     }));
@@ -455,6 +515,7 @@ switch (args.action) {
   case "plan": {
     requireEpisodeId();
     if (!common.scriptPath) throw new Error("--script-path is required for plan.");
+    await canonicalOuterJobContext();
     const result = await planKoyaMangaProduction(common);
     print({ episodeId: result.episodeId, state: result.state, paths: result.paths });
     break;
@@ -667,7 +728,8 @@ switch (args.action) {
   case "prepare": {
     requireEpisodeId();
     const scriptPath = await scriptPathForResume();
-    const result = await createKoyaEpisodeManifest({ ...common, scriptPath });
+    const { outerJobBinding } = await canonicalOuterJobContext();
+    const result = await createKoyaEpisodeManifest({ ...common, scriptPath, outerJobBinding });
     print({ episodeId: result.episodeId, status: result.state.status, waiting: result.waiting, paths: result.paths });
     if (result.waiting) exitCode = 3;
     break;
@@ -678,8 +740,8 @@ switch (args.action) {
       throw new Error("--no-voice-quality-gate requires --voice-quality-gate-override-reason <text>");
     }
     const result = await generateKoyaMangaSpeech({ ...common, dryRun: args.dryRun === true });
-    print({ episodeId: args.episodeId, status: result.state?.status, waiting: result.waiting, reportPath: result.reportPath });
-    if (result.waiting) exitCode = 3;
+    print({ episodeId: args.episodeId, status: result.state?.status, waiting: result.waiting, partial: result.partial === true, cancelled: result.cancelled === true, reportPath: result.reportPath });
+    if (result.waiting || result.partial || result.cancelled) exitCode = 3;
     break;
   }
   case "repair-onset": {
@@ -803,6 +865,7 @@ switch (args.action) {
   }
   case "render": {
     requireEpisodeId();
+    await canonicalOuterJobContext();
     const result = await renderKoyaMangaVideo({
       ...common,
       force: args.force === true,
@@ -814,13 +877,32 @@ switch (args.action) {
   }
   case "audit": {
     const result = await auditKoyaMangaFinal(await auditOptions());
-    print({ reportPath: result.reportPath, pass: result.report.pass, failedAuditIds: result.report.failedAuditIds, knownRemainingIssues: result.report.knownRemainingIssues, contactSheetPath: result.contactSheetPath });
+    print({ reportPath: result.reportPath, pass: result.report.pass, failedAuditIds: result.report.failedAuditIds, knownRemainingIssues: result.report.knownRemainingIssues, contactSheetPath: result.contactSheetPath, runReceiptPath: result.runReceiptPath });
     if (!result.report.pass) exitCode = 2;
+    break;
+  }
+  case "reviewer-key-create": {
+    if (typeof args.reviewerKeyPath !== "string") throw new Error("reviewer-key-create requires --reviewer-key-path FILE (the private key is written there, never printed).");
+    // 共通実装（両ハーネスの CLI が同じ関数を呼ぶ）: 両 path の存在を先に検査し、
+    // リポジトリ／project 配下を拒否し、wx + 0600 で書く。鍵の中身は argv に取らない。
+    const created = await writeReviewerKeyPairFiles({
+      privateKeyPath: resolve(args.reviewerKeyPath),
+      publicKeyPath: typeof args.reviewerPublicKeyPath === "string" ? resolve(args.reviewerPublicKeyPath) : "",
+      label: typeof args.reviewerLabel === "string" ? args.reviewerLabel : "",
+      projectDir,
+    });
+    print({
+      ...created,
+      next: `Hand trustEntry to the operator (owner) out of band; the operator registers it under reviewers[] in the trust list and points ${REVIEWER_TRUST_PATH_ENV} (legacy alias BUZZASSIST_KOYA_REVIEWER_TRUST) at that file on the audit/receipt host. Only that environment variable is a trust anchor; --reviewer-trust-path is a cross-check. The private key never enters a Channel Pack, signoff, argv, MCP arguments, or Job options.`,
+    });
     break;
   }
   case "signoff": {
     const episodeId = requireEpisodeId();
     if (args.pass !== true) throw new Error("Signoff requires --pass after the contact sheet has actually been inspected.");
+    if (typeof args.reviewerKeyPath !== "string") {
+      throw new Error("Signoff requires --reviewer-key-path FILE pointing at the reviewer's Ed25519 private key (create one with reviewer-key-create; never pass key material on argv).");
+    }
     const paths = koyaEpisodePaths(projectDir, episodeId);
     const written = await writeKoyaVisualSignoff({
       projectDir,
@@ -830,46 +912,37 @@ switch (args.action) {
       reviewerId: args.reviewerId,
       reviewerContextId: args.reviewerContextId,
       reviewNotesPath: args.reviewNotesPath ? resolve(args.reviewNotesPath) : "",
+      reviewerPrivateKeyPath: resolve(args.reviewerKeyPath),
+      reviewerTrustPath: typeof args.reviewerTrustPath === "string" ? resolve(args.reviewerTrustPath) : "",
       pass: true,
     });
-    print({ episodeId, outputPath: written.outputPath, reviewerHost: written.signoff.reviewerHost, pass: true, next: `Run audit again: node scripts/koya-manga-video.mjs audit --episode-id ${episodeId}` });
+    print({
+      episodeId,
+      outputPath: written.outputPath,
+      reviewerHost: written.signoff.reviewerHost,
+      reviewerKeyId: written.signoff.reviewerAttestation?.signer?.keyId || "",
+      pass: true,
+      next: `Run audit again: node scripts/koya-manga-video.mjs audit --episode-id ${episodeId}`,
+    });
     break;
   }
   case "full": {
     requireEpisodeId();
     const scriptPath = await scriptPathForResume();
     if (!scriptPath) throw new Error("--script-path is required for a new full run; resumed runs can recover it from state.");
-    const imageResult = await generateKoyaMangaImages({ ...common, scriptPath });
-    const episodeId = imageResult.episodeId;
-    if (imageResult.waiting || imageResult.failed) {
-      print({ episodeId, status: imageResult.state.status, waiting: imageResult.waiting, checkpoint: imageResult.paths.statePath, knownRemainingIssues: imageResult.state.knownRemainingIssues });
-      exitCode = 3;
-      break;
+    // R6-F1: 上位から渡された --reviewer-trust-path を捨てず、開始前に運営者 env と照合する
+    // （不一致は reviewer-trust-conflict、env 未設定は reviewer-trust-unconfigured。規則は loadReviewerTrust の 1 箇所）。
+    const reviewerTrustPath = typeof args.reviewerTrustPath === "string" ? resolve(args.reviewerTrustPath) : "";
+    if (reviewerTrustPath) await loadReviewerTrust({ trustPath: reviewerTrustPath, env: process.env });
+    // R6-1: full は有料生成へ進む唯一の production runner。信頼アンカーが env に無い／読めない／active 鍵が
+    // 無い host では、生成後に Receipt 確定で止まるのではなく、ここで止める。
+    const trustPreflight = await preflightReviewerTrust({ trustPath: reviewerTrustPath, env: process.env });
+    if (!trustPreflight.ok) {
+      throw new Error(`${trustPreflight.code}: Koya full stopped before paid generation. ${trustPreflight.detail}`);
     }
-    const prepared = await createKoyaEpisodeManifest({ ...common, episodeId, scriptPath });
-    if (prepared.waiting) {
-      print({ episodeId, status: prepared.state.status, waiting: true, checkpoint: prepared.paths.statePath, knownRemainingIssues: prepared.state.knownRemainingIssues });
-      exitCode = 3;
-      break;
-    }
-    const speech = await generateKoyaMangaSpeech({ ...common, episodeId });
-    if (speech.waiting) {
-      print({ episodeId, status: "waiting-usage-limit", waiting: true, checkpoint: speech.paths.statePath, knownRemainingIssues: speech.report.knownRemainingIssues });
-      exitCode = 3;
-      break;
-    }
-    const rendered = await renderKoyaMangaVideo({ ...common, episodeId });
-    const audited = await auditKoyaMangaFinal({ projectDir, manifestPath: rendered.paths.manifestPath, videoPath: rendered.outputPath });
-    print({
-      episodeId,
-      status: audited.report.pass ? "final-koya-audited" : "audit-incomplete",
-      videoPath: rendered.outputPath,
-      reportPath: audited.reportPath,
-      contactSheetPath: audited.contactSheetPath,
-      failedAuditIds: audited.report.failedAuditIds,
-      knownRemainingIssues: audited.report.knownRemainingIssues,
-    });
-    if (!audited.report.pass) exitCode = 2;
+    const result = await runKoyaMangaFullProduction({ ...common, scriptPath, reviewerTrustPath });
+    print(result.payload);
+    exitCode = result.exitCode;
     break;
   }
   case "status": {

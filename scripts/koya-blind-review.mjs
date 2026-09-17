@@ -18,16 +18,10 @@
 //  "prompt": "どの髪色が一番チャンネルに合いますか",
 //  "candidates": [{"id": "akacha", "file": "canvas/assets/....png"}]}
 import { createHash, randomBytes } from "node:crypto";
-import { execFile as execFileCallback } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import process from "node:process";
-import { promisify } from "node:util";
-
-const execFile = promisify(execFileCallback);
-
-const BON_CLI = process.env.BON_CLI
-  || "~/まさお/bestofn-repo/bin/bon.js";
+import { formatBestOfNCommand, runBestOfN } from "../lib/bestOfNRuntime.mjs";
 
 function usage() {
   console.error("usage: koya-blind-review.mjs <open|record> --set <spec.json> [--winner L --reviewer NAME --note TEXT]");
@@ -84,8 +78,8 @@ if (command === "open") {
     mapping.push({ label: entry.label, id: entry.id, file, sha256: await sha256(file) });
     files.push(file);
   }
-  const { stdout } = await execFile("node", [
-    BON_CLI, "ask", "--spec", spec.prompt || `Pick the best ${spec.kind || "candidate"}`, ...files,
+  const { stdout, invocation } = await runBestOfN([
+    "ask", "--spec", spec.prompt || `Pick the best ${spec.kind || "candidate"}`, ...files,
   ], { cwd: projectDir, maxBuffer: 8 * 1024 * 1024 });
   // bon prints ids as <timestamp>-<suffix>; take the full token, not a prefix.
   const tournamentId = (stdout.match(/\b\d{8}T\d{6}-[a-z0-9]+\b/i) || [])[0];
@@ -108,7 +102,7 @@ if (command === "open") {
   console.log(JSON.stringify({
     status: "opened", setId: spec.setId, tournamentId,
     candidates: mapping.length, privateMapping: privatePath,
-    next: `node ${BON_CLI} serve -d --open   # then: koya-blind-review.mjs record --set ... --winner A --reviewer <name>`,
+    next: `${formatBestOfNCommand(invocation, ["serve", "-d", "--open"])}   # then: koya-blind-review.mjs record --set ... --winner A --reviewer <name>`,
   }));
 } else {
   if (!args.winner || !args.reviewer) usage();
