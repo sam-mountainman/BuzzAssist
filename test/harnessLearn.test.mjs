@@ -8,14 +8,28 @@ import {
   PROPOSAL_KINDS,
   buildProposal,
   clusterForConsolidation,
+  evidenceDigest,
   isActuallyApplied,
   loadTargets,
+  canonicalHasPromotionEvidence,
+  promotionMarker,
   proposalId,
+  redactForOverlay,
+  redactVocabularyDigestTokens,
   renderOverlay,
   resolveTarget,
   sanitizeForOverlay,
   summarizeProposals,
 } from "../scripts/harness-learn.mjs";
+import { buildSensitiveVocabularyDigest, parseSensitiveVocabularyDigest } from "../lib/packageTarballAudit.mjs";
+
+// テストで使う固有語はすべて合成語。実在のキャスト名・顧客識別子・端末 path を
+// テストの平文へ書かない（テストファイルも公開リポジトリに載る）。
+const SYNTHETIC_CAST = "ゼンタロウ架空";
+const SYNTHETIC_CAST_ID = "zentaro_fictional";
+const SYNTHETIC_HOME = "/Users/synthetic-operator";
+const SYNTHETIC_CLIENT = "fictional-client-xq";
+const NO_REDACTION = { terms: [], castIds: [], homeRoot: "", vocabulary: null };
 
 const NOW = "2026-08-29T00:00:00.000Z";
 const make = (over = {}) => buildProposal({
@@ -23,6 +37,7 @@ const make = (over = {}) => buildProposal({
   target: "ledger:koya",
   text: "完了報告の前に必ず実測する",
   evidence: "本日3件の自作サインオフを検出",
+  session: "test-session",
   now: NOW,
   ...over,
 });
@@ -52,6 +67,7 @@ test("種別と粒度を満たさない提案は受け取らない", () => {
   assert.throws(() => make({ text: 123 }), /短すぎます/u);
   // 日本語では短くても具体的な指摘が成立する。これは通す。
   assert.doesNotThrow(() => make({ text: "目の左右が逆" }));
+  assert.throws(() => make({ session: "" }), /session が必要/u);
 });
 
 test("同じ指摘は同じIDになり、言い回しが違えば別IDになる", () => {
@@ -63,9 +79,11 @@ test("同じ指摘は同じIDになり、言い回しが違えば別IDになる"
 });
 
 test("繰り返された指摘ほど上に来る", () => {
-  const repeated = make();
+  const repeated = make({ session: "repeat-1" });
+  const repeatedAgain = make({ session: "repeat-2" });
+  const repeatedThird = make({ session: "repeat-3" });
   const once = make({ text: "一度だけ言われたこと" });
-  const summary = summarizeProposals([repeated, once, repeated, repeated], []);
+  const summary = summarizeProposals([repeated, once, repeatedAgain, repeatedThird], []);
   assert.equal(summary[0].id, repeated.id);
   assert.equal(summary[0].occurrences, 3, "繰り返しが数えられていない");
   assert.equal(summary[1].occurrences, 1);
@@ -76,6 +94,15 @@ test("根拠は重複を除いて積み上がる", () => {
   const b = make({ evidence: "根拠B" });
   const summary = summarizeProposals([a, b, a], []);
   assert.deepEqual(summary[0].evidence, ["根拠A", "根拠B"]);
+});
+
+test("同じproposalを同じsessionで再捕捉してもoccurrenceを水増ししない", () => {
+  const a = make({ session: "session-1", evidence: "根拠A" });
+  const repeatedByHook = make({ session: "session-1", evidence: "根拠B" });
+  const independent = make({ session: "session-2", evidence: "根拠C" });
+  const summary = summarizeProposals([a, repeatedByHook, independent], []);
+  assert.equal(summary[0].occurrences, 2);
+  assert.deepEqual(summary[0].evidence, ["根拠A", "根拠B", "根拠C"]);
 });
 
 test("反映済みは未反映より後ろへ回る", () => {
@@ -151,20 +178,97 @@ test("overlay は自分が正本でないと明記する", () => {
   assert.match(out, /手で編集しないでください/u);
 });
 
-test("overlay には根拠と繰り返し回数が残る", () => {
+test("overlay には根拠の digest と繰り返し回数が残る（逐語は残らない）", () => {
   const out = renderOverlay([
     { id: "x", kind: "correction", text: "二度言われたこと", evidence: ["根拠A", "根拠B"], occurrences: 2, firstSeenAt: "2026-08-01T00:00:00Z" },
-  ], "2026-08-29T00:00:00Z");
+  ], "2026-08-29T00:00:00Z", NO_REDACTION);
   assert.match(out, /2回指摘/u);
-  assert.match(out, /根拠A/u);
-  assert.match(out, /根拠B/u);
+  assert.doesNotMatch(out, /根拠A/u, "evidence の逐語が overlay に出た");
+  assert.doesNotMatch(out, /根拠B/u, "evidence の逐語が overlay に出た");
+  assert.ok(out.includes(evidenceDigest("根拠A")), "根拠A の digest が無い");
+  assert.ok(out.includes(evidenceDigest("根拠B")), "根拠B の digest が無い");
+  assert.match(out, /根拠digest:/u);
   assert.match(out, /`x`/u);
+  // digest は sha256 の先頭12桁。台帳側の逐語と突き合わせるための鍵になる。
+  assert.match(evidenceDigest("根拠A"), /^[a-f0-9]{12}$/u);
+  assert.notEqual(evidenceDigest("根拠A"), evidenceDigest("根拠B"));
 });
 
 test("同じ入力なら同じ overlay になる（sync が毎回差分を作らない）", () => {
   const entries = [{ id: "x", kind: "fact", text: "同じ値", evidence: [], occurrences: 1, firstSeenAt: "2026-08-01T00:00:00Z" }];
   const now = "2026-08-29T00:00:00Z";
-  assert.equal(renderOverlay(entries, now), renderOverlay(entries, now));
+  assert.equal(renderOverlay(entries, now, NO_REDACTION), renderOverlay(entries, now, NO_REDACTION));
+});
+
+// --- 2026-09-05 独立レビュー D-1: overlay 経由の私的情報流出 ---
+
+test("overlay に evidence 逐語が出ない（語彙に無い固有名詞も digest 化で消える）", () => {
+  // capture 時の検査（channelTermsInSharedEntry）は Channel Pack 由来の語しか
+  // 見ないので、語彙に無い顧客識別子や端末 path は evidence に残って overlay へ
+  // 逐語で出ていた。語彙に何も無くても evidence が漏れないことが要件。
+  const evidence = `client-work/${SYNTHETIC_CLIENT}/v1/reports/review.md を ${SYNTHETIC_HOME}/scratch で確認。${SYNTHETIC_CAST}のOL衣装`;
+  const out = renderOverlay([
+    { id: "y", kind: "fact", text: "設定画バッチの検品は機械検出へ昇格する", evidence: [evidence], occurrences: 1, firstSeenAt: "2026-08-01T00:00:00Z" },
+  ], "2026-08-29T00:00:00Z", NO_REDACTION);
+  for (const leaked of [SYNTHETIC_CLIENT, SYNTHETIC_HOME, SYNTHETIC_CAST, "client-work", "reports/review.md"]) {
+    assert.ok(!out.includes(leaked), `evidence の逐語が overlay に残った: ${leaked}`);
+  }
+  assert.ok(out.includes(evidenceDigest(evidence)));
+  // 同じ evidence が複数回積まれても digest は1つ
+  const dup = renderOverlay([
+    { id: "y", kind: "fact", text: "設定画バッチの検品は機械検出へ昇格する", evidence: [evidence, evidence], occurrences: 2, firstSeenAt: "2026-08-01T00:00:00Z" },
+  ], "2026-08-29T00:00:00Z", NO_REDACTION);
+  assert.equal(dup.split(evidenceDigest(evidence)).length - 1, 1);
+});
+
+test("overlay の text 側は redactSharedLearningText と digest 語彙を通る", () => {
+  const vocabulary = parseSensitiveVocabularyDigest(
+    buildSensitiveVocabularyDigest([SYNTHETIC_CLIENT, "架空太郎"], { generatedAt: "2026-09-05T00:00:00Z" }),
+  );
+  const context = { terms: [SYNTHETIC_CAST], castIds: [SYNTHETIC_CAST_ID], homeRoot: SYNTHETIC_HOME, vocabulary };
+  const text = `${SYNTHETIC_CAST}の衣装は ${SYNTHETIC_HOME}/wardrobe に置く。${SYNTHETIC_CAST_ID} は client-work/${SYNTHETIC_CLIENT} 由来。運営者架空太郎さんの指示`;
+  const out = renderOverlay([
+    { id: "z", kind: "constraint", text, evidence: [], occurrences: 1, firstSeenAt: "2026-08-01T00:00:00Z" },
+  ], "2026-08-29T00:00:00Z", context);
+  for (const leaked of [SYNTHETIC_CAST, SYNTHETIC_CAST_ID, SYNTHETIC_HOME, SYNTHETIC_CLIENT, "架空太郎"]) {
+    assert.ok(!out.includes(leaked), `text の固有語が overlay に残った: ${leaked}`);
+  }
+  assert.match(out, /<channel-term>/u);
+  assert.match(out, /<channel-id>/u);
+  assert.match(out, /<machine-path>/u);
+  assert.match(out, /<private-term>/u);
+
+  // digest 語彙は監査と同じ tokenizer で照合する（Latin token の `-` 区切り部分、漢字連の部分列）。
+  const redacted = redactVocabularyDigestTokens(`運営者架空太郎さん / ${SYNTHETIC_CLIENT}`, vocabulary);
+  assert.ok(redacted.hits >= 2);
+  assert.ok(!redacted.text.includes("架空太郎"));
+  assert.ok(!redacted.text.includes(SYNTHETIC_CLIENT));
+  // 語彙が無ければ何もしない（digest 方式が主で、語彙は補助）
+  assert.deepEqual(redactVocabularyDigestTokens("そのまま", null), { text: "そのまま", hits: 0 });
+  // redaction 後も記法は無効化される
+  assert.ok(!redactForOverlay("a\n\n## 偽の見出し", NO_REDACTION).includes("\n"));
+});
+
+test("再生成済みの overlay に evidence 逐語の行が残っていない", async () => {
+  // sync の出力そのもの。ここが緑でも配布時の再 sync を怠れば戻るので、
+  // tarball 監査（private-term）と二重に見る。
+  const { readFileSync, existsSync, readdirSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const root = new URL("..", import.meta.url).pathname;
+  const skillsRoot = join(root, ".agents", "skills");
+  if (!existsSync(skillsRoot)) return;
+  let checked = 0;
+  for (const name of readdirSync(skillsRoot)) {
+    const overlay = join(skillsRoot, name, "references", "learned-auto.md");
+    if (!existsSync(overlay)) continue;
+    checked += 1;
+    for (const line of readFileSync(overlay, "utf8").split("\n")) {
+      assert.doesNotMatch(line, /^\s+- 根拠: /u, `${name}: evidence 逐語の行が残っている`);
+      assert.doesNotMatch(line, /\/(?:Users|home|private\/tmp|var\/folders)\//u, `${name}: 端末 path が残っている`);
+      assert.doesNotMatch(line, /client-work\//u, `${name}: 顧客作業 path が残っている`);
+    }
+  }
+  assert.ok(checked > 0, "overlay が1つも無い");
 });
 
 test("空でも overlay は成立し、内容が無いと分かる", () => {
@@ -176,18 +280,18 @@ test("空でも overlay は成立し、内容が無いと分かる", () => {
 test("記録があるだけでは反映済みにならない（正本に実在すること）", () => {
   // 以前は applied.jsonl に id が1行あれば status から消えた。
   // 正本を1文字も変えずに apply を通せてしまっていた。
-  const canon = { "docs/x.md": "ここに規則が書いてある" };
+  const canon = { "docs/x.md": "buzzassist-learning:a\nここに十分長い規則が書いてある" };
   const read = (rel) => canon[rel] ?? null;
 
   assert.equal(isActuallyApplied({ id: "a" }, read), false, "id だけで通った");
   assert.equal(isActuallyApplied({ id: "a", reviewer: "x" }, read), false, "targetPath 無しで通った");
   assert.equal(
-    isActuallyApplied({ id: "a", reviewer: "x", attestedBy: HUMAN_VERIFIED, targetPath: "docs/x.md", note: "存在しない文言" }, read),
+    isActuallyApplied({ id: "a", reviewer: "x", attestedBy: HUMAN_VERIFIED, targetPath: "docs/x.md", note: "存在していない十分長い文言" }, read),
     false,
     "正本に無い記述で通った",
   );
   assert.equal(
-    isActuallyApplied({ id: "a", reviewer: "x", attestedBy: HUMAN_VERIFIED, targetPath: "docs/x.md", note: "ここに規則が書いてある" }, read),
+    isActuallyApplied({ id: "a", reviewer: "x", attestedBy: HUMAN_VERIFIED, targetPath: "docs/x.md", note: "ここに十分長い規則が書いてある" }, read),
     true,
   );
   // 正本が後から差し戻されたら、反映済みではなくなる
@@ -199,8 +303,8 @@ test("記録があるだけでは反映済みにならない（正本に実在�
 
 test("反映が取り消されたら status に戻る", () => {
   const entry = make();
-  const record = { id: entry.id, reviewer: "taiyu", attestedBy: HUMAN_VERIFIED, targetPath: "docs/x.md", note: "書いた規則" };
-  const withRule = summarizeProposals([entry], [record], () => "書いた規則がある正本");
+  const record = { id: entry.id, reviewer: "taiyu", attestedBy: HUMAN_VERIFIED, targetPath: "docs/x.md", note: "正本へ書いた十分に長い規則本文" };
+  const withRule = summarizeProposals([entry], [record], () => `${promotionMarker(entry.id)}\n正本へ書いた十分に長い規則本文`);
   assert.equal(withRule[0].applied, true);
   // 正本から消えたら未反映へ戻る
   const withoutRule = summarizeProposals([entry], [record], () => "規則が消された正本");
@@ -222,7 +326,7 @@ test("overlay へ入る文字列は記法を無効化する", () => {
   // 実際に描画しても項目の外へ出ないこと
   const out = renderOverlay([
     { id: "x", kind: "fact", text: injected, evidence: [injected], occurrences: 1, firstSeenAt: "2026-08-01T00:00:00Z" },
-  ], "2026-08-29T00:00:00Z");
+  ], "2026-08-29T00:00:00Z", NO_REDACTION);
   const bogus = out.split("\n").filter((l) => l.startsWith("## 偽の見出し"));
   assert.equal(bogus.length, 0, "偽の見出しが立った");
 });
@@ -267,8 +371,8 @@ test("名前を変えても過去の記録が孤児にならない", () => {
 });
 
 test("保存した digest は照合に使う（保存するだけにしない）", () => {
-  const record = { id: "a", reviewer: "x", attestedBy: HUMAN_VERIFIED, targetPath: "docs/x.md", note: "書いた規則", targetSha256: "aaa" };
-  const read = () => "書いた規則がある正本";
+  const record = { id: "a", reviewer: "x", attestedBy: HUMAN_VERIFIED, targetPath: "docs/x.md", note: "正本へ書いた十分に長い規則本文", targetSha256: "aaa" };
+  const read = () => "buzzassist-learning:a\n正本へ書いた十分に長い規則本文";
   // digest が一致すれば反映済み
   assert.equal(isActuallyApplied(record, read, () => "aaa"), true);
   // 正本が変わっていれば、文言が残っていても別の版に対する記録
@@ -323,8 +427,8 @@ test("人の確認が無い記録は「反映済み」として数えない", as
   // 締め出す向きに働いていた。
   const { isActuallyApplied, summarizeProposals, HUMAN_VERIFIED } =
     await import("../scripts/harness-learn.mjs");
-  const readCanonical = () => "正本にこの一節がある";
-  const base = { id: "p1", reviewer: "someone", targetPath: "t.md", note: "正本にこの一節がある" };
+  const readCanonical = () => "buzzassist-learning:p1\n正本にこの十分長い一節が書いてある";
+  const base = { id: "p1", reviewer: "someone", targetPath: "t.md", note: "正本にこの十分長い一節が書いてある" };
 
   for (const attestedBy of ["agent-self-attested", "unverified-agent-typed", "cli-interactive-claimed", undefined, "", "でたらめ"]) {
     assert.equal(
@@ -341,6 +445,14 @@ test("人の確認が無い記録は「反映済み」として数えない", as
     JSON.stringify(machine).includes("p1"), true,
     "機械の自己申告で提案が一覧から消えてはいけない",
   );
+});
+
+test("正本への反映証跡はproposal固有markerと十分長い完全一致本文を両方要求する", () => {
+  const text = "buzzassist-learning:abc123\n同じ失敗を避けるための十分長い規則本文";
+  assert.equal(canonicalHasPromotionEvidence({ id: "abc123", note: "同じ失敗を避けるための十分長い規則本文" }, text), true);
+  assert.equal(canonicalHasPromotionEvidence({ id: "other", note: "同じ失敗を避けるための十分長い規則本文" }, text), false);
+  assert.equal(canonicalHasPromotionEvidence({ id: "abc123", note: "十分長い規則" }, text), false);
+  assert.equal(canonicalHasPromotionEvidence({ id: "abc123", note: "正本には存在しない十分長い規則本文" }, text), false);
 });
 
 test("既存の記録に、人の確認が取れていないことが残っている", async () => {
@@ -378,4 +490,62 @@ test("チャンネル宛の捕捉は、公開側の台帳へ書かれない", as
   assert.equal(ledgerPathFor(""), shared, "宛先不明は共有台帳（既定は変えない）");
   // applied 側も同じ規則で分かれること。
   assert.ok(ledgerPathFor("channel-pack:koya", "applied").includes("channel-packs"));
+  assert.notEqual(
+    ledgerPathFor("channel-pack:koya"),
+    ledgerPathFor("channel-pack:narrated-story"),
+    "active pack環境変数が別channel targetを同じ台帳へ潰してはいけない",
+  );
+});
+
+// --- 2026-09-06 再レビュー R2-L1: 語彙欠落を許可として扱わない ---
+
+test("digest 語彙が無ければ overlay の redaction 材料を作らず throw する（fail-closed）", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { overlayRedactionContext, OVERLAY_VOCABULARY_MISSING_NOTE } = await import("../scripts/harness-learn.mjs");
+  const projectDir = mkdtempSync(join(tmpdir(), "harness-learn-vocab-"));
+  try {
+    // 壊れている時は元から throw していた。無い時も同じ扱いになること。
+    assert.throws(
+      () => overlayRedactionContext({ projectDir, homeRoot: SYNTHETIC_HOME }),
+      /sensitive-vocabulary\.digest\.json/u,
+    );
+    // 明示フラグでだけ通り、返り値に印が付く
+    const allowed = overlayRedactionContext({ projectDir, homeRoot: SYNTHETIC_HOME, allowMissingVocabulary: true });
+    assert.equal(allowed.vocabularyMissing, true);
+    assert.equal(allowed.vocabulary, null);
+    // 印は overlay ヘッダへ刻まれる（空の overlay でも）
+    const empty = renderOverlay([], "2026-09-06T00:00:00Z", allowed);
+    assert.ok(empty.includes(OVERLAY_VOCABULARY_MISSING_NOTE), "空 overlay に語彙照合なしの印が無い");
+    assert.match(empty, /語彙照合なし/u);
+    const filled = renderOverlay([
+      { id: "w", kind: "fact", text: "合成語だけの提案本文です", evidence: [], occurrences: 1, firstSeenAt: "2026-08-01T00:00:00Z" },
+    ], "2026-09-06T00:00:00Z", allowed);
+    assert.match(filled, /語彙照合なし/u);
+    // 語彙があれば印は付かない
+    mkdirSync(join(projectDir, "docs", "learning"), { recursive: true });
+    writeFileSync(
+      join(projectDir, "docs", "learning", "sensitive-vocabulary.digest.json"),
+      JSON.stringify(buildSensitiveVocabularyDigest([SYNTHETIC_CLIENT], { generatedAt: "2026-09-06T00:00:00Z" })),
+    );
+    const present = overlayRedactionContext({ projectDir, homeRoot: SYNTHETIC_HOME });
+    assert.equal(present.vocabularyMissing, false);
+    assert.ok(present.vocabulary && present.vocabulary.count === 1);
+    const clean = renderOverlay([], "2026-09-06T00:00:00Z", present);
+    assert.doesNotMatch(clean, /語彙照合なし/u, "語彙がある overlay に欠落の印が付いた");
+    // テスト用の素通しコンテキスト（vocabulary: null のみ）は印を付けない
+    assert.doesNotMatch(renderOverlay([], "2026-09-06T00:00:00Z", NO_REDACTION), /語彙照合なし/u);
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("sync CLI は digest 語彙が無いと止まり、--allow-missing-vocabulary の説明が help にある", async () => {
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(new URL("../scripts/harness-learn.mjs", import.meta.url), "utf8");
+  // sync が overlayRedactionContext に allowMissingVocabulary を渡し、既定は false であること
+  assert.match(source, /overlayRedactionContext\(\{ allowMissingVocabulary \}\)/u);
+  assert.match(source, /args\.allowMissingVocabulary === true/u);
+  assert.match(source, /--allow-missing-vocabulary/u);
 });

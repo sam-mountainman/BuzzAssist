@@ -26,14 +26,22 @@
 
 import { createHash } from "node:crypto";
 import fs from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { resolveChannelPackPath } from "../lib/channelPackResolver.mjs";
+import { isDirectCli } from "../lib/cliEntrypoint.mjs";
+import { redactSharedLearningText } from "../lib/harnessFeedbackBundle.mjs";
+import {
+  digestVocabularyTerm,
+  extractVocabularyTokens,
+  normalizeVocabularyTerm,
+} from "../lib/packageTarballAudit.mjs";
+import { loadSensitiveVocabularyDigest, SENSITIVE_VOCABULARY_DIGEST_PATH } from "./audit-package-tarball.mjs";
 import { collectSensitiveSignals } from "./audit-public-surface.mjs";
 
-const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LEARN_DIR = path.join(REPO_ROOT, "docs", "learning");
-const PROPOSALS_PATH = path.join(LEARN_DIR, "proposals.jsonl");
-const APPLIED_PATH = path.join(LEARN_DIR, "applied.jsonl");
 
 /**
  * その提案をどの台帳へ書くか。
@@ -50,11 +58,29 @@ const APPLIED_PATH = path.join(LEARN_DIR, "applied.jsonl");
  */
 export function ledgerPathFor(target, kind = "proposals") {
   const name = `${kind}.jsonl`;
-  if (String(target || "").startsWith("channel-pack:")) {
-    const packPath = resolveChannelPackPath(REPO_ROOT, path.join("docs", "learning", name));
-    if (packPath) return packPath;
+  const resolvedTarget = resolveTarget(String(target || ""));
+  if (resolvedTarget.startsWith("channel-pack:")) {
+    const definition = loadTargets()[resolvedTarget] ?? {};
+    if (definition.relativeToDeployment) {
+      const deployment = resolveDeploymentRoot(definition.relativeToDeployment);
+      if (deployment) return path.resolve(REPO_ROOT, deployment, "docs", "learning", name);
+    }
+    // ambient BUZZASSIST_CHANNEL_PACK_ID を使うと、narrated-story宛の提案が
+    // たまたまactiveなKoya packへ入る。target自身をpack IDとして固定する。
+    const packId = definition.packId || resolvedTarget.slice("channel-pack:".length);
+    return path.join(REPO_ROOT, "channel-packs", packId, "docs", "learning", name);
   }
   return path.join(LEARN_DIR, name);
+}
+
+/** 共有台帳と、設定済みの各Channel Pack台帳を重複なく列挙する。 */
+export function learningLedgerPaths(kind = "proposals") {
+  const paths = new Set([path.join(LEARN_DIR, `${kind}.jsonl`)]);
+  for (const [target, definition] of Object.entries(loadTargets())) {
+    if (definition.scope !== "channel-pack") continue;
+    paths.add(ledgerPathFor(target, kind));
+  }
+  return [...paths];
 }
 
 // 提案が向かう先。ここに無いものは apply できない。
@@ -116,6 +142,8 @@ export const OVERLAY_HEADER = [
   "",
   "隣の `SKILL.md` が正本で、**矛盾したときは SKILL.md が優先**します。",
   "ここは運用上の補助指示であって、**監査・承認・合否の証跡には使えません**。",
+  "根拠は逐語ではなく sha256 先頭12桁の digest だけを載せます（このファイルは配布物に",
+  "同梱されるため）。逐語は `node scripts/harness-learn.mjs status` で id から引けます。",
   "",
 ].join("\n");
 
@@ -132,15 +160,112 @@ export function sanitizeForOverlay(value) {
     .trim();
 }
 
-export function renderOverlay(entries, now) {
+// overlay は `.agents/skills/<name>/references/learned-auto.md` に置かれ、
+// setup-agents と npm tarball の両方へ**そのまま同梱される**。以前は evidence を
+// 逐語で書いていたので、capture 時の検査（channelTermsInSharedEntry）を
+// すり抜けたキャスト名・顧客識別子・端末 path が配布物へ出ていた
+// （2026-09-05 独立レビュー D-1）。
+//
+// 語彙に頼る除去は、語彙に無い固有名詞を保証できない。だから根拠は
+// **digest だけ**を主とし、text 側は語彙ベースの redaction を補助として通す。
+// 逐語が要るときは台帳（proposals.jsonl）を id で引けばよく、overlay に
+// 逐語を置く必要は元から無かった。
+export const EVIDENCE_DIGEST_CHARS = 12;
+
+export function evidenceDigest(value) {
+  return createHash("sha256").update(String(value ?? ""), "utf8").digest("hex").slice(0, EVIDENCE_DIGEST_CHARS);
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+/**
+ * salted digest 語彙（docs/learning/sensitive-vocabulary.digest.json）に一致した
+ * token を置換する。tarball 監査（countVocabularyDigestHits）と同じ tokenizer と
+ * 正規化を使うので、ここで消したものは監査でも当たらない。語そのものは
+ * この関数の外へ出さない。
+ */
+export function redactVocabularyDigestTokens(value, vocabulary) {
+  let text = String(value ?? "");
+  if (!vocabulary || vocabulary.count === 0) return { text, hits: 0 };
+  const matched = [...extractVocabularyTokens(text)].filter((token) => {
+    const normalized = normalizeVocabularyTerm(token);
+    if (!vocabulary.lengths.has([...normalized].length)) return false;
+    return vocabulary.digests.has(digestVocabularyTerm(normalized, vocabulary.salt));
+  }).sort((left, right) => right.length - left.length);
+  let hits = 0;
+  for (const token of matched) {
+    text = text.replace(new RegExp(escapeRegExp(token), "giu"), () => { hits += 1; return "<private-term>"; });
+  }
+  return { text, hits };
+}
+
+/** 語彙照合なしで書かれた overlay のヘッダに刻む印。読む側と監査側が見分けられるようにする。 */
+export const OVERLAY_VOCABULARY_MISSING_NOTE =
+  "<!-- 語彙照合なし: sensitive-vocabulary.digest.json が無い状態で --allow-missing-vocabulary により生成。私的語の残存を検出していない。 -->";
+
+/**
+ * overlay の text 側に掛ける redaction の材料。Channel Pack 由来の語（運営者端末
+ * にしか無い）と、コミット済みの digest 語彙（CI でも効く）の両方を使う。
+ *
+ * digest ファイルが壊れていれば throw する——壊れた語彙で「除去済み」の
+ * overlay を書くより、sync が止まる方がよい。**無い場合も同じ扱いで throw する。**
+ * 以前は「壊れていれば止まる、無ければ通る」だった（2026-09-05 再レビュー R2-L1）。
+ * 語彙が無い overlay 生成は私的語の残存を検出できないのに、出力は「除去済み」と
+ * 区別が付かない。欠落を許可として扱う型（platform-craft「欠落を許可として扱う」）。
+ * 明示の `allowMissingVocabulary` でだけ通し、その場合は返り値に印を付けて
+ * overlay ヘッダへ刻む。
+ */
+export function overlayRedactionContext({
+  projectDir = REPO_ROOT,
+  homeRoot = homedir(),
+  allowMissingVocabulary = false,
+} = {}) {
+  const signals = collectSensitiveSignals(projectDir);
+  const vocabularyPath = path.join(projectDir, SENSITIVE_VOCABULARY_DIGEST_PATH);
+  const vocabulary = loadSensitiveVocabularyDigest(vocabularyPath);
+  if (vocabulary === null) {
+    if (allowMissingVocabulary !== true) {
+      throw new Error(
+        `digest 語彙が無いので overlay を生成しない: ${SENSITIVE_VOCABULARY_DIGEST_PATH}\n`
+        + "語彙無しの overlay は私的語の残存を検出できない（tarball 監査と同じ理由）。\n"
+        + "  node scripts/audit-package-tarball.mjs build-vocabulary で語彙を作るか、\n"
+        + "  開発用途に限り --allow-missing-vocabulary を付ける（overlay ヘッダに「語彙照合なし」が刻まれる）。",
+      );
+    }
+    return { terms: signals.terms, castIds: signals.castIds, homeRoot, vocabulary: null, vocabularyMissing: true };
+  }
+  return { terms: signals.terms, castIds: signals.castIds, homeRoot, vocabulary, vocabularyMissing: false };
+}
+
+export function redactForOverlay(value, context = {}) {
+  const shared = redactSharedLearningText(value, {
+    terms: context.terms || [],
+    castIds: context.castIds || [],
+    homeRoot: context.homeRoot || "",
+  });
+  const vocabulary = redactVocabularyDigestTokens(shared.text, context.vocabulary || null);
+  return sanitizeForOverlay(vocabulary.text);
+}
+
+export function renderOverlay(entries, now, context = null) {
   const lines = [OVERLAY_HEADER];
+  // 語彙照合なしで生成した overlay は、空でもヘッダで見分けられるようにする。
+  // 明示フラグ（vocabularyMissing === true）だけを見る。vocabulary: null は
+  // テスト用の素通しコンテキストでも使うので、null だけでは印を付けない。
+  if (context?.vocabularyMissing === true) lines.push(OVERLAY_VOCABULARY_MISSING_NOTE, "");
   if (entries.length === 0) {
     lines.push("_まだ自動反映された項目はありません。_", "");
   } else {
+    const redaction = context ?? overlayRedactionContext();
     for (const entry of entries) {
       const repeat = entry.occurrences > 1 ? `（${entry.occurrences}回指摘）` : "";
-      lines.push(`- **${sanitizeForOverlay(entry.text)}**${repeat}`);
-      for (const ev of entry.evidence) lines.push(`  - 根拠: ${sanitizeForOverlay(ev)}`);
+      lines.push(`- **${redactForOverlay(entry.text, redaction)}**${repeat}`);
+      const digests = [...new Set((entry.evidence || []).map((ev) => evidenceDigest(ev)))];
+      if (digests.length > 0) {
+        lines.push(`  - 根拠digest: ${digests.map((digest) => `\`${digest}\``).join(", ")}`);
+      }
       lines.push(`  - 種別: ${entry.kind} / 初回: ${String(entry.firstSeenAt).slice(0, 10)} / id: \`${entry.id}\``);
     }
     lines.push("");
@@ -185,11 +310,92 @@ function appendJsonl(filePath, entry) {
   }
 }
 
+function processIsAlive(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code !== "ESRCH";
+  }
+}
+
+function withProposalCaptureLock(filePath, action, { timeoutMs = 10_000, staleMs = 120_000 } = {}) {
+  const lockPath = `${filePath}.capture.lock`;
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const startedAt = Date.now();
+  let handle = null;
+  while (handle === null) {
+    try {
+      handle = fs.openSync(lockPath, "wx");
+      fs.writeSync(handle, `${JSON.stringify({ pid: process.pid, acquiredAt: new Date().toISOString() })}\n`);
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      let owner = null;
+      try { owner = JSON.parse(fs.readFileSync(lockPath, "utf8")); } catch { /* stale判定へ */ }
+      const age = Date.now() - (fs.statSync(lockPath, { throwIfNoEntry: false })?.mtimeMs ?? Date.now());
+      if ((owner && !processIsAlive(Number(owner.pid))) || (!owner && age > staleMs)) {
+        try { fs.rmSync(lockPath, { force: true }); } catch { /* 次のloopで再確認 */ }
+        continue;
+      }
+      if (Date.now() - startedAt >= timeoutMs) throw new Error("proposal台帳のcapture lockを取得できない。");
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
+  }
+  try {
+    return action();
+  } finally {
+    try { fs.closeSync(handle); } catch { /* cleanupを続ける */ }
+    try { fs.rmSync(lockPath, { force: true }); } catch { /* stale recoveryが扱う */ }
+  }
+}
+
+function canonicalPotentialPathSync(filePath) {
+  let current = path.resolve(filePath);
+  const missing = [];
+  while (true) {
+    try {
+      return path.join(fs.realpathSync(current), ...missing.reverse());
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      const parent = path.dirname(current);
+      if (parent === current) throw error;
+      missing.push(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
+function assertCaptureLedgerIsolation(target, ledgerPath, ledgerPathResolver) {
+  if (!String(target).startsWith("channel-pack:")) return;
+  const channel = canonicalPotentialPathSync(ledgerPath);
+  const shared = canonicalPotentialPathSync(ledgerPathResolver("platform:platform-craft", "proposals"));
+  const rel = path.relative(path.dirname(shared), channel);
+  if (rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel))) {
+    throw new Error("Channel Pack proposal台帳が共有learning台帳から分離されていない。captureを停止する。");
+  }
+}
+
 export function proposalId(entry) {
   return createHash("sha256")
     .update([entry.kind, entry.target, entry.text].join("\u001f"))
     .digest("hex")
     .slice(0, 12);
+}
+
+// 正本側へこの一意マーカーを置くことで、よくある短い語句が偶然どこかに
+// 存在しただけで別の提案を「反映済み」にできないようにする。
+export const PROMOTION_NOTE_MIN_CHARS = 12;
+
+export function promotionMarker(id) {
+  return `buzzassist-learning:${String(id || "").trim()}`;
+}
+
+export function canonicalHasPromotionEvidence(record, canonicalText) {
+  if (!record?.id || typeof canonicalText !== "string") return false;
+  const note = typeof record.note === "string" ? record.note.trim() : "";
+  if (Array.from(note).length < PROMOTION_NOTE_MIN_CHARS) return false;
+  return canonicalText.includes(promotionMarker(record.id)) && canonicalText.includes(note);
 }
 
 // 同じ指摘が何度も来るのは「まだ直っていない」という強い信号なので、
@@ -214,10 +420,9 @@ export function isActuallyApplied(record, readCanonical, hashCanonical = null) {
   if (!record.targetPath) return false;
   const text = readCanonical(record.targetPath);
   if (text === null) return false;
-  // 正本にその規則の痕跡があること。丸写しは求めないので、
-  // 記録した note か text の主要部分のどちらかが載っていればよい。
-  const needles = [record.note, record.text].filter((v) => typeof v === "string" && v.trim().length >= 5);
-  if (!needles.some((n) => text.includes(n.trim()))) return false;
+  // 一意な proposal marker と、十分な長さの exact note の両方を要求する。
+  // 「正本のどこかに5文字だけ一致」で別の変更を証拠にできた旧判定は使わない。
+  if (!canonicalHasPromotionEvidence(record, text)) return false;
   // 記録した digest は保存するだけでなく突き合わせる。保存して照合しない
   // ハッシュは、証跡があるように見えて何も担保していない。
   // 正本が変わっていれば「別の版に対する記録」なので、文言が残っていても
@@ -238,11 +443,18 @@ export function summarizeProposals(proposals, applied, readCanonical = null, has
       : applied.map((entry) => entry.id),
   );
   const byId = new Map();
+  const seenSessionOccurrences = new Set();
   for (const entry of proposals) {
     const id = entry.id ?? proposalId(entry);
+    const session = typeof entry.session === "string" ? entry.session.trim() : "";
+    const sessionOccurrence = session ? `${id}\u001f${session}` : "";
     const existing = byId.get(id);
     if (existing) {
-      existing.occurrences += 1;
+      // 同じturn/sessionでcaptureが再実行されても、独立した指摘回数にしない。
+      // session不明の旧記録は別事象か判定できないため従来どおり数える。
+      if (!sessionOccurrence || !seenSessionOccurrences.has(sessionOccurrence)) {
+        existing.occurrences += 1;
+      }
       existing.lastSeenAt = entry.capturedAt ?? existing.lastSeenAt;
       if (entry.evidence && !existing.evidence.includes(entry.evidence)) {
         existing.evidence.push(entry.evidence);
@@ -258,6 +470,7 @@ export function summarizeProposals(proposals, applied, readCanonical = null, has
         applied: appliedIds.has(id),
       });
     }
+    if (sessionOccurrence) seenSessionOccurrences.add(sessionOccurrence);
   }
   return [...byId.values()].sort((a, b) => {
     if (a.applied !== b.applied) return a.applied ? 1 : -1;
@@ -467,16 +680,46 @@ export function buildProposal({ kind, target, text, evidence, session, now }) {
   if (typeof text !== "string" || text.trim().length < 5) {
     throw new Error("text が短すぎます。何をどうすべきかが分かる形で書いてください");
   }
+  const normalizedSession = typeof session === "string" ? session.trim() : "";
+  if (!normalizedSession) {
+    throw new Error("session が必要です。同じセッション内の重複捕捉を水増ししないため --session を指定してください");
+  }
   requireTarget(target);
   const entry = {
     kind,
     target,
     text: text.trim(),
     evidence: evidence?.trim() || null,
-    session: session || null,
+    session: normalizedSession,
     capturedAt: now,
   };
   return { ...entry, id: proposalId(entry) };
+}
+
+/**
+ * capture CLI と外部collectorが共有する、proposal台帳への唯一の追記経路。
+ * 正本・overlay・applied台帳には触れない。
+ */
+export function captureLearningProposal(input, {
+  append = appendJsonl,
+  read = readJsonl,
+  ledgerPathResolver = ledgerPathFor,
+  lock = withProposalCaptureLock,
+  signals = collectSensitiveSignals(REPO_ROOT),
+} = {}) {
+  const entry = buildProposal(input);
+  const verdict = channelTermsInSharedEntry(entry, signals);
+  if (!verdict.ok) throw new Error(verdict.message);
+  const ledgerPath = ledgerPathResolver(entry.target, "proposals");
+  assertCaptureLedgerIsolation(entry.target, ledgerPath, ledgerPathResolver);
+  return lock(ledgerPath, () => {
+    const duplicate = read(ledgerPath).some((row) => {
+      const id = row?.id ?? proposalId(row);
+      return id === entry.id && row?.session === entry.session;
+    });
+    if (!duplicate) append(ledgerPath, entry);
+    return { entry, ledgerPath, appended: !duplicate };
+  });
 }
 
 function parseArgs(argv) {
@@ -500,14 +743,18 @@ function printHelp() {
     --target <${Object.keys(LEARNING_TARGETS).join("|")}>
     --text "指摘の内容を、次に読む人が判断できる粒度で"
     --evidence "根拠（ファイル:行、実測値、ユーザーの発言など）"
-    --session "セッションIDなど（任意）"
+    --session "セッションIDなど（必須。同一セッションの重複をまとめる）"
 
   status    未反映の提案を、繰り返された回数順に出す
 
   sync      **自動反映**。各スキルの references/learned-auto.md（機械が
             丸ごと所有するファイル）を書き直す。人が書く SKILL.md には
             触らないので reviewer は要らない。review-only の宛先
-            （台帳・ゲート基準）は自動反映せず保留として報告する
+            （台帳・ゲート基準）は自動反映せず保留として報告する。
+            docs/learning/sensitive-vocabulary.digest.json が無ければ止まる
+            （語彙無しでは私的語の残存を検出できない）
+    --allow-missing-vocabulary  開発用途のみ。語彙無しで生成し、overlay ヘッダに
+                                「語彙照合なし」を刻む
 
   promote   overlay の項目を人の規則へ格上げする（reviewer 必須）。
             正本にその文言が実在しないと通らない
@@ -534,8 +781,8 @@ function main() {
     process.exit(args.action ? 0 : 2);
   }
 
-  const proposals = readJsonl(PROPOSALS_PATH);
-  const applied = readJsonl(APPLIED_PATH);
+  const proposals = learningLedgerPaths("proposals").flatMap(readJsonl);
+  const applied = learningLedgerPaths("applied").flatMap(readJsonl);
   // 正本を実際に読んで反映を確かめる。記録を信じない。
   const readCanonical = (rel) => {
     const full = path.join(REPO_ROOT, rel);
@@ -551,7 +798,7 @@ function main() {
 
   switch (args.action) {
     case "capture": {
-      const entry = buildProposal({
+      const { entry } = captureLearningProposal({
         kind: args.kind,
         target: args.target,
         text: args.text,
@@ -559,14 +806,6 @@ function main() {
         session: args.session,
         now,
       });
-      {
-        // 共有層の台帳は公開リポジトリで追跡されている。書く前に見る。
-        const verdict = channelTermsInSharedEntry(entry, collectSensitiveSignals(REPO_ROOT));
-        if (!verdict.ok) throw new Error(verdict.message);
-      }
-      // 宛先の層に合った台帳へ書く。共有台帳は公開されているので、
-      // チャンネル宛のものをそこへ溜めない。
-      appendJsonl(ledgerPathFor(entry.target, "proposals"), entry);
       const repeats = proposals.filter((p) => (p.id ?? proposalId(p)) === entry.id).length;
       process.stdout.write(`記録しました: ${entry.id}\n`);
       if (repeats > 0) {
@@ -633,6 +872,17 @@ function main() {
       }
       let wrote = 0;
       const held = [];
+      // redaction の材料は1回だけ集める（Channel Pack の走査と digest 語彙の読み込み）。
+      // digest 語彙が無ければここで止まる（fail-closed）。--allow-missing-vocabulary
+      // でだけ通し、その overlay にはヘッダで印が付く。
+      const allowMissingVocabulary = args.allowMissingVocabulary === true;
+      const redaction = overlayRedactionContext({ allowMissingVocabulary });
+      if (redaction.vocabularyMissing) {
+        process.stdout.write(
+          `⚠️  ${SENSITIVE_VOCABULARY_DIGEST_PATH} が無いまま生成します（--allow-missing-vocabulary）。\n`
+          + "    overlay ヘッダに「語彙照合なし」を刻みます。配布前に語彙を作って再 sync してください。\n",
+        );
+      }
       for (const [target, def] of Object.entries(targets)) {
         // 旧IDで記録された提案も拾う
       const entries = [
@@ -647,7 +897,7 @@ function main() {
         }
         if (!def.overlay) continue;
         const full = path.join(REPO_ROOT, def.overlay);
-        const next = renderOverlay(entries, now);
+        const next = renderOverlay(entries, now, redaction);
         const before = fs.existsSync(full) ? fs.readFileSync(full, "utf8") : null;
         if (before === next) continue;
         fs.mkdirSync(path.dirname(full), { recursive: true });
@@ -703,17 +953,16 @@ function main() {
       // 見るべきは overlay ではなく **正本に書かれたか**。
       const canonicalText = fs.readFileSync(full, "utf8");
       const note = typeof args.note === "string" ? args.note.trim() : "";
-      const evidenceInCanon = [note, entry.text]
-        .filter((v) => v && v.length >= 5)
-        .some((v) => canonicalText.includes(v));
-      if (!evidenceInCanon) {
+      if (!canonicalHasPromotionEvidence({ id: entry.id, note }, canonicalText)) {
         throw new Error(
           `${rel} に該当の記述が見つかりません。\n`
-          + "promote は「正本へ書いたことの記録」です。先に人の言葉で正本へ書き、\n"
-          + "--note にその文言（正本に実在する一節）を渡してください。",
+          + "promote は「正本へ書いたことの記録」です。先に正本へ、\n"
+          + `  ${promotionMarker(entry.id)}\n`
+          + `という一意マーカーと、${PROMOTION_NOTE_MIN_CHARS}文字以上の規則本文を書き、`
+          + "--note にその本文を完全一致で渡してください。",
         );
       }
-      appendJsonl(APPLIED_PATH, {
+      appendJsonl(ledgerPathFor(entry.target, "applied"), {
         id: entry.id,
         target: entry.target,
         targetPath: rel,
@@ -723,9 +972,18 @@ function main() {
         attestedBy: attested.attestation.attestedBy,
         claimedReviewer: attested.attestation.claimedReviewer ?? undefined,
         note: typeof args.note === "string" ? args.note.trim() : "",
+        evidenceVersion: 2,
+        promotionMarker: promotionMarker(entry.id),
         promotedAt: now,
       });
-      process.stdout.write(`${entry.id} を人の規則へ昇格しました（reviewer: ${args.reviewer}）\n`);
+      if (attested.attestation.attestedBy === HUMAN_VERIFIED) {
+        process.stdout.write(`${entry.id} に人の確認記録を追加しました（reviewer: ${attested.attestation.reviewer}）\n`);
+      } else {
+        process.stdout.write(
+          `${entry.id} を機械の自己申告として記録しました。人の確認済みにはなりません`
+          + `（attestedBy: ${attested.attestation.attestedBy}）\n`,
+        );
+      }
       break;
     }
 
@@ -751,14 +1009,16 @@ function main() {
       // そちらから素通りできてしまう。
       const applyNote = typeof args.note === "string" ? args.note.trim() : "";
       const applyText = fs.readFileSync(full, "utf8");
-      if (![applyNote, entry.text].filter((v) => v && v.length >= 5).some((v) => applyText.includes(v))) {
+      if (!canonicalHasPromotionEvidence({ id: entry.id, note: applyNote }, applyText)) {
         throw new Error(
           `${rel} に該当の記述が見つかりません。\n`
-          + "apply は「正本へ書いたことの記録」です。先に書いてから、\n"
-          + "--note に正本へ実在する一節を渡してください。",
+          + "apply は「正本へ書いたことの記録」です。先に正本へ、\n"
+          + `  ${promotionMarker(entry.id)}\n`
+          + `という一意マーカーと、${PROMOTION_NOTE_MIN_CHARS}文字以上の規則本文を書き、`
+          + "--note にその本文を完全一致で渡してください。",
         );
       }
-      appendJsonl(APPLIED_PATH, {
+      appendJsonl(ledgerPathFor(entry.target, "applied"), {
         id: entry.id,
         target: entry.target,
         targetPath: rel,
@@ -768,9 +1028,18 @@ function main() {
         attestedBy: attested.attestation.attestedBy,
         claimedReviewer: attested.attestation.claimedReviewer ?? undefined,
         note: applyNote,
+        evidenceVersion: 2,
+        promotionMarker: promotionMarker(entry.id),
         appliedAt: now,
       });
-      process.stdout.write(`${entry.id} を反映済みとして記録しました（reviewer: ${args.reviewer}）\n`);
+      if (attested.attestation.attestedBy === HUMAN_VERIFIED) {
+        process.stdout.write(`${entry.id} に人の確認記録を追加しました（reviewer: ${attested.attestation.reviewer}）\n`);
+      } else {
+        process.stdout.write(
+          `${entry.id} を機械の自己申告として記録しました。人の確認済みにはなりません`
+          + `（attestedBy: ${attested.attestation.attestedBy}）\n`,
+        );
+      }
       break;
     }
 
@@ -779,8 +1048,7 @@ function main() {
   }
 }
 
-const invoked = process.argv[1] ? path.resolve(process.argv[1]) : null;
-if (invoked && invoked === path.resolve(new URL(import.meta.url).pathname)) {
+if (isDirectCli(import.meta.url)) {
   try {
     main();
   } catch (error) {

@@ -4,24 +4,47 @@
 
 隣の `SKILL.md` が正本で、**矛盾したときは SKILL.md が優先**します。
 ここは運用上の補助指示であって、**監査・承認・合否の証跡には使えません**。
+根拠は逐語ではなく sha256 先頭12桁の digest だけを載せます（このファイルは配布物に
+同梱されるため）。逐語は `node scripts/harness-learn.mjs status` で id から引けます。
 
 - **課金APIの再送は 429/5xx/ネットワーク断だけ。2xxを受けた後の失敗は再送しない（サーバは仕事を終えている＝課金済み）。再送可否は本文を読む前にステータスだけで決める——本文の読み取りが失敗すると判定の付かないまま catch へ落ち、印の無い再送が起きる**
-  - 根拠: リポジトリ内に再送実装が4つあり規則が全部違っていた（lovart: GET3回/POST1回、mediaGeneration: 一律3回、buzzassistApi: 429のみ段階、koyaDialogueSpeech: 再送なし）。lib/paidApiRetry.mjs へ集約
+  - 根拠digest: `6206426ee66e`
   - 種別: fact / 初回: 2026-08-28 / id: `6cb267bfbc38`
 - **合成 fixture を実データの正本と同じ顔で返さない。fixture へ落ちたことを source に出し、本番の入口は既定で拒否する。20か所ある呼び出し側に個別ガードを足す形だと、後から増えた1か所が素通りする**
-  - 根拠: channel-pack 分離時に入れた fixture フォールバックが source:"project" と記録され、サンプルのキャストで作った成果物に「プロジェクトの正本に準拠」と署名される状態だった
+  - 根拠digest: `d2ce213a4e9a`
   - 種別: constraint / 初回: 2026-08-28 / id: `31bbccb29245`
 - **走っていないゲートを「通った」と書けない形にする。宣言されたゲートに判定が1件でも欠けていれば finalize を失敗させ、判定には証拠の指紋を要求し、理由のない skip を拒否し、落ちたゲートがあれば pass の申告を上書きする**
-  - 根拠: このコードベースの不具合の大半は「機能が動いていない」ではなく「検証したと書いてあるのに検証していない」だった。lib/harnessRunReceipt.mjs で記録の層にも同じ規律を入れた
+  - 根拠digest: `44e0d2a05959`
   - 種別: constraint / 初回: 2026-08-28 / id: `ee09f8457193`
 - **契約は版で増減するので、記録は効力のあった契約で測る。当時存在しなかった監査を「未実施」と数えると過去の成果物が後から一斉に不合格になる。ただし契約から保証の裏づけが全部消えた場合は pass ではなく skip——契約が縮んで保証が黙って無効になるのが穴の入口**
-  - 根拠: v50のエピソードを現行v51の契約で測り、その版に存在しない audio-speaker-continuity のぶんだけ過去作3件が落ちた
+  - 根拠digest: `52809ba43fd5`
   - 種別: fact / 初回: 2026-08-28 / id: `a1f682fa6c05`
 - **既存のversioned成果物ディレクトリへ書く前に存在と監査SHAを確認し、既存版へ新成果物を混在・上書きしない。衝突時は次の新versionを作り、誤書込みは正本SHAへ復元して記録する。**
-  - 根拠: 2026-08-30 Mike image-harness-v10が既存なのを作成後に検知。scene-plan-v10 SHAとimage-harness-v10-style-benchmark/cleaned-finalから7枚を元SHAへ復元し、新修正はv11へ分離。
+  - 根拠digest: `3e23c496ce4b`
   - 種別: correction / 初回: 2026-08-29 / id: `6fc1a6d87bdd`
 - **最終化は現在のハーネス版の実MP4・plan・自動監査・contact sheet・外部review notesをSHA拘束し、旧版auditを代替証拠として受理しない。自動監査は独立目視signoffを生成せず awaiting-independent-signoff で停止する**
-  - 根拠: client-work/<private-term>/<private-term>-v1/reports/v18-integration-independent-code-review.md V18-001/V18-006; production/finalize-review-v18.mjs; production/finalize-complete-video.mjs
+  - 根拠digest: `06fabc34df86`
   - 種別: correction / 初回: 2026-08-29 / id: `85c4ff144509`
+- **複数セッションを統合監査するときは、各セッションの未解決主張を原子単位でID化し、現在実装・レビュー台帳・最終回答への三者クロスウォークを作る。Fish Audioの直接接続・課金外・Receipt未接続のような個別リスクを『<引用 ecd54596935a>』へ丸めて消さず、解決・未解決・枝差分・検証不能をそれぞれ明記する。**
+  - 根拠digest: `f870412ce476`
+  - 種別: correction / 初回: 2026-08-31 / id: `c256846f03e5`
+- **スキル整理では「端末に導入済み」「ハーネスに同梱」「本番実行時に許可」「開発・改善時に必要」を区別する。skill-creator はBuzzAssistのスキル作成・承認済み更新に必要なので不要扱いせず、運営者向け本番ホットパスから分離した管理・curation機能として位置付ける。**
+  - 根拠digest: `d010bbc317f6`
+  - 種別: correction / 初回: 2026-08-31 / id: `d2091885825a`
+- **skill-creatorは育成・正本改善のために保持し、不要物として削除しない。本番動画Jobのhot pathからだけ除外する**
+  - 根拠digest: `dffb0fb0e8cb`
+  - 種別: correction / 初回: 2026-08-31 / id: `d04c21b9b8d8`
+- **Codexデスクトップ内蔵Browserはtab.playwrightでCanvasを操作できるため、その用途だけでstandalone Playwrightを追加しない**
+  - 根拠digest: `354ee3277a3b`
+  - 種別: fact / 初回: 2026-08-31 / id: `1a29a7b76bb8`
+- **外部資産の全件監査では、過去報告やdirectory名だけで実装・同一性・採用済みを断定せず、全fileのbyte/hash、Git tree差分、各checkoutの実self-testを別々に測り、正式採用・補助・参照のみ・対象外を区別して記録する**
+  - 根拠digest: `28214e1080ac`
+  - 種別: correction / 初回: 2026-09-01 / id: `24f464298824`
+- **一時Gitリポジトリや生成fixtureを作るテストは成功・失敗の両経路で必ず後始末し、残存数と空き容量を検証して他テストをENOSPCで偽失敗させない**
+  - 根拠digest: `b72fa2be9321`
+  - 種別: fact / 初回: 2026-09-01 / id: `b44eda8caab9`
+- **台帳がSHAで拘束している成果物は、必ずその成果物そのものを開いて確認する。レンダラが落ちる等で開けないときは、代用物を作って『<引用 17a76503031c>』と記録してはいけない。巨大なdata URIを含むSVGは一般的なCLIラスタライザ(rsvg-convert等)がXMLパース段階で落ちることがあるが、ファイル自体は正常なことが多い。その場合はSVGの埋め込みbase64画像とgroupのtransformを自前で展開して描画すれば原寸確認できる。代用物で確認した場合は、何を見て何を見ていないかを検品記録に明記する。**
+  - 根拠digest: `11f8bc1ede82`
+  - 種別: constraint / 初回: 2026-09-01 / id: `8a0621b02d59`
 
-_最終更新: 2026-08-31T17:01:41.872Z_
+_最終更新: 2026-09-05T17:09:39.198Z_
