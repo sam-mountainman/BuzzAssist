@@ -63,10 +63,23 @@ async function snapshotPath(target, depth = 2) {
   return { type: "directory", mtimeMs: details.mtimeMs, entries };
 }
 
+// 実ユーザーの launchd に読み込まれている自動更新ジョブ。ファイルの比較だけでは、
+// 読み込み中のジョブが別の plist へ差し替わったことを検出できない。
+function realLaunchdUpdaterState() {
+  if (process.platform !== "darwin" || typeof process.getuid !== "function") return null;
+  const result = spawnSync("/bin/launchctl", ["print", `gui/${process.getuid()}/ai.buzzassist.plugin-updater`], { encoding: "utf8" });
+  if (result.status !== 0) return { loaded: false };
+  const plist = result.stdout.match(/^\s*path = (.+)$/mu)?.[1] ?? null;
+  return { loaded: true, plist };
+}
+
 async function snapshotRealHostState() {
-  return Object.fromEntries(await Promise.all(
-    protectedRealHostConfigPaths.map(async (target) => [target, await snapshotPath(target, 0)]),
-  ));
+  return {
+    ...Object.fromEntries(await Promise.all(
+      protectedRealHostConfigPaths.map(async (target) => [target, await snapshotPath(target, 0)]),
+    )),
+    launchdUpdater: realLaunchdUpdaterState(),
+  };
 }
 
 async function pathContainsText(target, needle, depth = 7) {
@@ -101,6 +114,27 @@ async function assertRealCachesExcludeIsolatedPath(isolatedPath) {
 
 function quoteForCmd(value) {
   return `"${String(value).replace(/"/g, '""')}"`;
+}
+
+// 自動更新の登録が呼ぶスケジューラを偽物にする。
+//
+// codex / claude は偽物にしていたのに、launchctl と systemctl は本物を呼んでいた。
+// 隔離した HOME の plist で bootout / bootstrap するので、**実ユーザーの launchd に
+// 読み込まれた ai.buzzassist.plugin-updater が、テスト後に消える一時ディレクトリを
+// 指すジョブへ置き換わっていた**（2026-09-17 に確認）。npm test を回すたびに、この Mac の
+// 自動更新が壊れる。ファイルの比較では見えないので、上の realLaunchdUpdaterState でも見る。
+// Windows の schtasks.exe は実行ファイルの偽物を置けないので対象外（CI の runner は使い捨て）。
+async function writeFakeSchedulers(binDir, logPath) {
+  if (process.platform === "win32") return;
+  for (const name of ["launchctl", "systemctl"]) {
+    const file = path.join(binDir, name);
+    // systemctl の登録確認は is-enabled / is-active の答えを見るので、それに答える。
+    const answers = name === "systemctl"
+      ? `case "$*" in\n  *is-enabled*) echo enabled ;;\n  *is-active*) echo active ;;\nesac\n`
+      : "";
+    await writeFile(file, `#!/bin/sh\nprintf '%s\\n' "${name} $*" >> ${JSON.stringify(logPath)}\n${answers}exit 0\n`);
+    await chmod(file, 0o755);
+  }
 }
 
 async function writeFakeHost(binDir, statePath, host) {
@@ -164,6 +198,8 @@ async function runHostSetup(host) {
   await mkdir(binDir, { recursive: true });
   await mkdir(projectDir, { recursive: true });
   await writeFakeHost(binDir, statePath, host);
+  const schedulerLog = path.join(tempRoot, "scheduler-calls.log");
+  await writeFakeSchedulers(binDir, schedulerLog);
   // Claude setup still runs the shared image-host doctor. Give it an isolated
   // Codex executable too, so no read-only probe can escape to the desktop
   // application's real CLI while verifying the Claude distribution path.
@@ -187,7 +223,10 @@ async function runHostSetup(host) {
       CODEX_COMMAND: path.join(binDir, process.platform === "win32" ? "codex.cmd" : "codex"),
       CLAUDE_CODE: host === "claude" ? "1" : "",
       CODEX: host === "codex" ? "1" : "",
-      BUZZASSIST_AUTO_UPDATE_SKIP_REGISTER: "1",
+      // 登録を省略すると、updater は正直に manual と報告する（確かめていない状態を
+      // 有効と言わない）。macOS / Linux は偽のスケジューラを通して実際に登録させ、
+      // 偽物を置けない Windows だけ省略する。
+      BUZZASSIST_AUTO_UPDATE_SKIP_REGISTER: process.platform === "win32" ? "1" : "",
       VOICE_QA_PYTHON: path.join(tempRoot, "missing-python"),
       ELEVENLABS_API_KEY: "",
       XI_API_KEY: "",
@@ -437,18 +476,28 @@ async function runHostSetup(host) {
     }
     await readFile(path.join(pluginRoot, "scripts", "update-current.mjs"), "utf8");
     await readFile(path.join(pluginRoot, "scripts", "verify-plugin-runtime.mjs"), "utf8");
+    if (process.platform !== "win32") {
+      // 登録は偽のスケジューラへ届いていること（本物の launchd / systemd を触らない）。
+      const calls = existsSync(schedulerLog) ? await readFile(schedulerLog, "utf8") : "";
+      const updateLines = String(result.stdout).split("\n").filter((line) => /update|AUTO_UPDATE/iu.test(line)).join("\n");
+      assert.match(calls, process.platform === "darwin" ? /launchctl bootstrap/u : /systemctl/u,
+        `自動更新の登録が偽のスケジューラを通っていない（本物を呼んでいる可能性）。setup の出力:\n${updateLines}`);
+    }
     const updaterConfig = JSON.parse(await readFile(path.join(homeDir, ".buzzassist", "updater", "config.json"), "utf8"));
-    assert.equal(updaterConfig.enabled, true);
+    if (process.platform === "win32") {
+      assert.equal(updaterConfig.scheduler?.state, "manual", "登録を省略した回を有効と報告しない");
+      assert.match(result.stdout, /BUZZASSIST_AUTO_UPDATE=manual/u);
+    } else {
+      assert.equal(updaterConfig.enabled, true);
+      assert.match(result.stdout, /BUZZASSIST_AUTO_UPDATE=enabled/u);
+    }
     assert.deepEqual(updaterConfig.hosts, [host]);
     assert.equal(updaterConfig.projectDir, projectDir);
     if (process.platform === "darwin") {
       const plist = await readFile(path.join(homeDir, "Library", "LaunchAgents", "ai.buzzassist.plugin-updater.plist"), "utf8");
       assert.match(plist, /update-current\.mjs/);
     }
-    if (process.platform === "win32") {
-      const runner = await readFile(path.join(homeDir, ".buzzassist", "updater", "run-update.cmd"), "utf8");
-      assert.match(runner, /update-current\.mjs/);
-    }
+    // Windows は登録を省略しているので、runner は書かれない（省略した回の正しい姿）。
     const hostState = JSON.parse(await readFile(statePath, "utf8"));
     assert.equal(hostState.installed, true);
     assert.ok(

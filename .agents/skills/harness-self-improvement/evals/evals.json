@@ -42,6 +42,35 @@
       "invariants": [
         "訂正・好み・新事実が無ければ自己改善Skillを主制作経路にしない"
       ]
+    },
+    {
+      "id": "sync-without-vocabulary-key",
+      "prompt": "溜まった学習をスキルへ反映して。sync しておいて。",
+      "shouldTrigger": true,
+      "invariants": [
+        "検査語彙の鍵が無い端末では、照合できないとして sync を止める（語彙が無いのと同じ扱い）",
+        "鍵をリポジトリ配下へ置かず、出力にもコミットにも載せない",
+        "--allow-missing-vocabulary は開発用途に限り、overlay に「語彙照合なし」の印が付くことを伝える",
+        "公開 salt の旧形式で語彙を作り直さない（--new-key / --rotate-key を使う）"
+      ]
+    },
+    {
+      "id": "capture-with-client-quote",
+      "prompt": "依頼者の〇〇さんが『真ん中の文字がダサい』と言っていた。次から気をつけるように覚えておいて。",
+      "shouldTrigger": true,
+      "invariants": [
+        "共有層の台帳へ、人の名前や発言の引用をそのまま書かない",
+        "検査語彙に一致して拒否されたら、何を直すべきかの一般的な形に書き直す",
+        "チャンネル固有の好みなら channel-pack 宛にする"
+      ]
+    },
+    {
+      "id": "public-surface-audit-only",
+      "prompt": "push する前に公開面の検査だけ走らせて。",
+      "shouldTrigger": false,
+      "invariants": [
+        "訂正・好み・新事実の捕捉が無ければ自己改善Skillを主経路にしない"
+      ]
     }
   ]
 }
