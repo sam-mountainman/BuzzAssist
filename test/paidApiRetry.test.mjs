@@ -17,6 +17,10 @@ test("再送してよいのは 429 と 5xx だけ", () => {
   assert.equal(isRetryableStatus(429), true);
   assert.equal(isRetryableStatus(500), true);
   assert.equal(isRetryableStatus(503), true);
+  // 408/504 can mean the upstream accepted paid work before the gateway timed
+  // out. They stop for explicit recovery rather than being blindly retried.
+  assert.equal(isRetryableStatus(408), false);
+  assert.equal(isRetryableStatus(504), false);
   // 認証も不正リクエストも、何度投げても結果は同じで課金だけ増える。
   assert.equal(isRetryableStatus(401), false);
   assert.equal(isRetryableStatus(403), false);
@@ -119,6 +123,10 @@ test("短すぎる秘密で文字列を壊さない", () => {
   assert.equal(redactSecrets("abc", [""]), "abc");
   assert.equal(redactSecrets("abc", ["ab"]), "abc", "短い値は伏せ字にしない");
   assert.equal(redactSecrets("x sk-live-0123456789 y", ["sk-live-0123456789"]), "x [redacted] y");
+  assert.equal(redactSecrets("Authorization: Bearer server-token-123456"), "Authorization: [redacted]");
+  assert.equal(redactSecrets("upstream api_key=fish-secret-123456789"), "upstream api_key=[redacted]");
+  assert.equal(redactSecrets("clientSecret=server-secret-123456"), "clientSecret=[redacted]");
+  assert.equal(redactSecrets("https://x.invalid?a=1&refresh_token=server-secret-123456"), "https://x.invalid?a=1&refresh_token=[redacted]");
 });
 
 test("Response からの例外は、本文が読めなくてもステータスで判定する", async () => {

@@ -153,6 +153,43 @@ test("missing required metrics hard-fail the take instead of passing silently", 
   );
   assert.equal(perSegment.hardFail, false);
   assert.deepEqual(perSegment.missingRequiredMetrics, []);
+
+  const multiSpeaker = voiceQualityPenalty(
+    {
+      status: "warn",
+      metrics: {
+        utmos: 2.5,
+        segmentUtmosApplied: true,
+        segments: [
+          { id: "u01", utmos: 3.2, cer: 0.01 },
+          { id: "u02", utmos: 3.0, cer: 0.02 },
+        ],
+      },
+      problems: [],
+      warnings: ["combined multi-speaker utmos below floor; segment floor enforced"],
+      unavailable: [],
+    },
+    { requiredMetrics: ["utmos", "cer"] },
+  );
+  assert.equal(multiSpeaker.hardFail, false);
+  assert.deepEqual(multiSpeaker.missingRequiredMetrics, []);
+
+  const missingSegmentUtmos = voiceQualityPenalty(
+    {
+      status: "warn",
+      metrics: {
+        utmos: 3.1,
+        segmentUtmosApplied: true,
+        segments: [{ id: "u01", utmos: 3.2, cer: 0.01 }, { id: "u02", cer: 0.02 }],
+      },
+      problems: [],
+      warnings: [],
+      unavailable: ["utmos[u02]: unavailable"],
+    },
+    { requiredMetrics: ["utmos", "cer"] },
+  );
+  assert.equal(missingSegmentUtmos.hardFail, true);
+  assert.deepEqual(missingSegmentUtmos.missingRequiredMetrics, ["utmos"]);
 });
 
 test("a forced take index that does not exist is an error, not a silent fallback", () => {
