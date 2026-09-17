@@ -231,7 +231,12 @@ def ocr_tokens(image):
     binary = shutil.which("tesseract")
     if not binary:
         return None
-    ok, encoded = cv2.imencode(".png", image)
+    # Hand tesseract a grayscale frame. On a colourful frame its own binarisation
+    # can lose plain black-on-white text entirely: "SALE 2026" drawn into a
+    # synthetic clip was never read, and the gate only failed on unrelated
+    # misreads, which differ between tesseract builds.
+    gray = image if image.ndim == 2 else cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    ok, encoded = cv2.imencode(".png", gray)
     if not ok:
         return None
     result = subprocess.run(
