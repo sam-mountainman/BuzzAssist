@@ -70,6 +70,7 @@ import {
   createKoyaStoryReviewDraft,
   createKoyaThumbnailPlanDraft,
   generateKoyaLocationBoards,
+  importKoyaLocationBoards,
   readKoyaChannelAuthority,
   registerApprovedKoyaLocation,
   resolveKoyaValidationCanary,
@@ -122,7 +123,7 @@ function usage() {
     "Koya manga video production (fail-closed)",
     "",
     "node scripts/koya-manga-video.mjs <action> [options]",
-    "actions: contract, channel-contract, character-bootstrap-status, character-registration-reconcile, character-roster-review-draft, character-roster-audit, cast-readiness, story-review-draft, story-audit, location-plan, location-generate, location-anchor-review-draft, location-anchor-audit, location-review-draft, location-register, thumbnail-plan-draft, thumbnail-audit, handoff-export, handoff-verify, handoff-restore, plan, images, character-review-refresh, character-candidate-migrate-blind, character-candidate-import, character-style-generate, character-style-import, character-style-review-refresh, character-style-record-failure, character-style-compose, character-style-select, character-attribute-gate, character-approve, character-identity-refresh, character-identity-repair, character-identity-repack, character-register, prepare, speech, video-substitute, adjust-gap, standard-cut, repair-onset, repair-tail, sync-contract, refresh-bubbles, render, audit, reviewer-key-create, signoff, full, status",
+    "actions: contract, channel-contract, character-bootstrap-status, character-registration-reconcile, character-roster-review-draft, character-roster-audit, cast-readiness, story-review-draft, story-audit, location-plan, location-generate, location-import, location-anchor-review-draft, location-anchor-audit, location-review-draft, location-register, thumbnail-plan-draft, thumbnail-audit, handoff-export, handoff-verify, handoff-restore, plan, images, character-review-refresh, character-candidate-migrate-blind, character-candidate-import, character-style-generate, character-style-import, character-style-review-refresh, character-style-record-failure, character-style-compose, character-style-select, character-attribute-gate, character-approve, character-identity-refresh, character-identity-repair, character-identity-repack, character-register, prepare, speech, video-substitute, adjust-gap, standard-cut, repair-onset, repair-tail, sync-contract, refresh-bubbles, render, audit, reviewer-key-create, signoff, full, status",
     "common: --project-dir DIR --episode-id ID --script-path FILE --title TITLE --protagonist-speaker-id ID_OR_EXACT_NAME --character-bible-path JSON [--story-review-path JSON] [--source-face-review-path JSON] [--generator-host codex|claude|legacy-migration] [--generator-id ID] [--generator-context-id TASK_OR_SESSION_ID] [--retry-failed] [--image-concurrency N|auto] [--qa-concurrency N] [--speech-concurrency N|auto] [--image-fallback-model MODEL] [--qa-fallback-provider grok]",
     "story-audit: --script-path FILE --story-review-path JSON --protagonist-speaker-id ID_OR_EXACT_NAME (read-only; binds reversal beats and human policy checks to the exact script SHA-256)",
     "story-review-draft: --script-path FILE [--protagonist-speaker-id ID_OR_EXACT_NAME] (read-only; prints exact utterance inventory with all subjective fields unset and machine-suggested eyeOpenBeats to confirm)",
@@ -133,9 +134,10 @@ function usage() {
     "character-roster-audit: [--roster-review-path JSON] (validates current identity-face/review SHA evidence and all 55 independent pair checks)",
     "location-plan: --location-id yamatani|apparecho-night [--output-dir DIR] (read-only; four independent architecture-board jobs)",
     "location-generate: --location-id ID --location-stage anchor|continuity --generator-host codex|claude --generator-id ID --generator-context-id TASK_OR_SESSION [--location-anchor-review-path JSON for continuity] [--model MODEL] [--force] (combined all-stage generation is forbidden; continuity requires a separately reviewed anchor)",
+    "location-import: --location-id ID --import-map-path FILE [--output-dir DIR] (no paid call; copies boards made in a chat-based image tool into the planned paths from a koya-location-import-map-v1 map that SHA-binds every required board's source file, generator {host,id,contextId,generatedAt}, the prompt actually used (promptText, or promptPath + promptSha256), referenceImages [{path,sha256,role anchor|style|other}] and importedBy {host,id,contextId}; continuity views must list the imported anchor as their role anchor reference; moves differing older files and the older manifest into superseded-<timestamp>/, never deletes, and never records an anchor approval; map shape: docs/examples/koya-location-import-map.example.json)",
     "location-anchor-review-draft: --location-id ID [--output-dir DIR] (read-only; hashes the generated anchor and leaves perceptual checks false)",
     "location-anchor-audit: --location-id ID --location-anchor-review-path JSON (read-only; verifies the anchor review before continuity generation)",
-    "location-review-draft: --location-id ID [--output-dir DIR] (read-only; hashes current planned files and leaves perceptual checks false)",
+    "location-review-draft: --location-id ID [--output-dir DIR] [--location-anchor-review-path JSON] (read-only; hashes current planned files and leaves perceptual checks false; imported boards bind the passed anchor review as anchorApproval)",
     "location-register: --location-id ID --location-review-path JSON (requires four SHA-bound original-scale independent reviews)",
     "thumbnail-audit: --thumbnail-plan-path JSON (read-only; blocks pending brand tokens, copy violations, and final artwork reuse)",
     "thumbnail-plan-draft: [--layout twoPanel|threePanel] (read-only; prints a fail-closed plan template)",
@@ -468,6 +470,18 @@ switch (args.action) {
     print(result);
     break;
   }
+  case "location-import": {
+    if (!args.locationId) throw new Error("--location-id is required for location-import.");
+    if (typeof args.importMapPath !== "string") throw new Error("--import-map-path is required for location-import.");
+    const result = await importKoyaLocationBoards({
+      projectDir,
+      locationId: args.locationId,
+      importMapPath: resolve(args.importMapPath),
+      outputDir: args.outputDir ? resolve(args.outputDir) : "",
+    });
+    print(result);
+    break;
+  }
   case "location-anchor-review-draft": {
     const authority = await readKoyaChannelAuthority({ projectDir });
     print(await createKoyaLocationAnchorReviewDraft({
@@ -503,6 +517,7 @@ switch (args.action) {
       showBible: authority.showBible,
       locationId: args.locationId,
       outputDir: args.outputDir ? resolve(args.outputDir) : "",
+      anchorReviewPath: args.locationAnchorReviewPath ? resolve(args.locationAnchorReviewPath) : "",
     }));
     break;
   }

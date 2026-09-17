@@ -84,6 +84,9 @@ test("Koya MCP doctor and read-only actions use the canonical CLI", async (t) =>
   assert.ok(KOYA_MCP_ACTIONS.includes("cast-readiness"));
   assert.ok(KOYA_MCP_ACTIONS.includes("location-plan"));
   assert.ok(KOYA_MCP_ACTIONS.includes("location-generate"));
+  // 取り込みは書き込みなので、確認なしで走る read-only 集合には入れない。
+  assert.ok(KOYA_MCP_ACTIONS.includes("location-import"));
+  assert.equal(READ_ONLY_ACTIONS.has("location-import"), false);
   assert.ok(KOYA_MCP_ACTIONS.includes("location-anchor-review-draft"));
   assert.ok(KOYA_MCP_ACTIONS.includes("location-anchor-audit"));
   assert.ok(KOYA_MCP_ACTIONS.includes("location-review-draft"));

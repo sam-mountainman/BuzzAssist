@@ -14,6 +14,14 @@ import {
 import { createChannelPackEnvelope, verifyChannelPackEnvelope } from "../lib/channelPackEnvelope.mjs";
 import { prepareCompleteKoyaHandoffEvidence } from "./helpers/koyaHandoffFixture.mjs";
 import {
+  CHAT_CONTEXT,
+  IMPORTER,
+  importAndRegisterSyntheticLocation,
+  readSyntheticKoyaAuthority,
+  syntheticLocationBible,
+} from "./helpers/koyaLocationFixture.mjs";
+import { createMangaScriptImagePlan } from "../lib/mangaScriptImagePipeline.mjs";
+import {
   exportKoyaHandoffBundle,
   restoreKoyaHandoffBundle,
   verifyKoyaHandoffBundle,
@@ -767,4 +775,244 @@ test("Koya handoff restore refuses an existing symlink anywhere below the destin
     () => _testing.assertNoSymlinkAncestors(project, path.join(linked, "channel.json")),
     /refuses a symlink ancestor/u,
   );
+});
+
+async function rehashBundleManifest(bundleDir) {
+  const manifestPath = path.join(bundleDir, "manifest.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const files = [];
+  for (const row of manifest.files) {
+    const filePath = path.join(bundleDir, row.path);
+    try {
+      const info = await stat(filePath);
+      files.push({ ...row, size: info.size, sha256: sha256(await readFile(filePath)) });
+    } catch { /* 攻撃者が消したファイルは行ごと落とす */ }
+  }
+  manifest.files = files;
+  delete manifest.digest;
+  manifest.digest = sha256(JSON.stringify(manifest));
+  await writeJson(manifestPath, manifest);
+  return manifest;
+}
+
+async function bundleRegistryPath(bundleDir) {
+  return path.join(bundleDir, "project", "canvas", "characters.json");
+}
+
+test("Koya handoff carries an approved location with its boards and a portable review attestation", async () => {
+  // ロケーション正本はテスト用プロジェクトの側にあるので、開発機の pack に隠されないようにする。
+  const savedPack = process.env.BUZZASSIST_CHANNEL_PACK;
+  const savedPackId = process.env.BUZZASSIST_CHANNEL_PACK_ID;
+  delete process.env.BUZZASSIST_CHANNEL_PACK;
+  delete process.env.BUZZASSIST_CHANNEL_PACK_ID;
+  const root = await mkdtemp(path.join(os.tmpdir(), "koya-handoff-location-"));
+  const sourceProject = path.join(root, "source");
+  const targetProject = path.join(root, "target");
+  const bundleDir = path.join(root, "bundle");
+  try {
+    await prepareProject(sourceProject, true);
+    await prepareProject(targetProject, false);
+    await writeJson(path.join(sourceProject, "config", "koya-location-bible.json"), syntheticLocationBible());
+    const authority = await readSyntheticKoyaAuthority(sourceProject);
+    const approved = await importAndRegisterSyntheticLocation({
+      projectDir: sourceProject,
+      authority,
+      locationId: "sample-street",
+      sourceDir: path.join(root, "downloads"),
+    });
+    const exported = await exportKoyaHandoffBundle({ projectDir: sourceProject, outputDir: bundleDir, bundleId: "handoff-location" });
+    assert.equal(exported.manifest.includes.approvedCharacters, 11);
+    assert.equal(exported.manifest.includes.approvedLocations, 1);
+    const portableRegistry = JSON.parse(await readFile(await bundleRegistryPath(bundleDir), "utf8"));
+    const portableLocation = portableRegistry.characters.find((entry) => entry.kind === "location");
+    assert.equal(portableLocation.id, "sample-street");
+    assert.deepEqual(portableLocation.aliases, ["商店街", "駅前の商店街"]);
+    assert.equal(portableLocation.referenceAssets.length, 4);
+    assert.ok(portableLocation.referenceAssets.every((asset) => asset.path.startsWith("__BUNDLE_CANVAS__/assets/locations/")));
+    assert.equal(portableLocation.approval.route, "koya-location-review-v3");
+    assert.match(portableLocation.approval.approvedBy, /^source-approver-sha256:[a-f0-9]{64}$/u);
+    const attestationPath = path.join(bundleDir, "project", "canvas", portableLocation.approval.identityReviewPath.replace(/^__BUNDLE_CANVAS__\//u, ""));
+    const attestationText = await readFile(attestationPath, "utf8");
+    const attestation = JSON.parse(attestationText);
+    assert.equal(attestation.version, "koya-handoff-location-review-attestation-v1");
+    assert.equal(attestation.sourceReview.version, "koya-location-review-v3");
+    assert.equal(attestation.snapshot.textPolicy, "fictional-signage-allowed");
+    assert.equal(attestation.snapshot.boards.length, 4);
+    assert.ok(attestation.snapshot.boards.every((board) => board.provenance === "external-import" && board.checks.readableTextFictionalOnly === true));
+    assert.match(attestation.snapshot.anchorReview.reviewerContextId, /^source-context-sha256:[a-f0-9]{64}$/u);
+    for (const privateValue of [sourceProject, IMPORTER.contextId, CHAT_CONTEXT, "session-final-reviewer", "session-anchor-reviewer", "anchor-reviewer"]) {
+      assert.equal(attestationText.includes(privateValue), false, privateValue);
+      assert.equal(JSON.stringify(portableLocation).includes(privateValue), false, privateValue);
+    }
+    assert.ok(exported.manifest.files.some((row) => row.kind === "approved-location-evidence"));
+    assert.ok(exported.manifest.files.some((row) => row.kind === "approved-location-review-attestation"));
+    assert.equal((await verifyKoyaHandoffBundle({ bundleDir })).ok, true);
+
+    const restored = await restoreKoyaHandoffBundle({ projectDir: targetProject, bundleDir });
+    assert.equal(restored.restoredCharacters, 11);
+    assert.equal(restored.restoredLocations, 1);
+    const targetRegistry = JSON.parse(await readFile(path.join(targetProject, "canvas", "characters.json"), "utf8"));
+    const restoredLocation = targetRegistry.characters.find((entry) => entry.kind === "location");
+    assert.deepEqual(restoredLocation.aliases, ["商店街", "駅前の商店街"]);
+    assert.equal(restoredLocation.referenceAssets.length, 4);
+    for (const [index, asset] of restoredLocation.referenceAssets.entries()) {
+      assert.match(asset.path, /^koya-handoff-assets\/handoff-location\/assets\/locations\/sample-street\//u);
+      assert.equal(sha256(await readFile(path.join(targetProject, "canvas", asset.path))), asset.sha256);
+      assert.equal(asset.sha256, approved.review.boards[index].sha256);
+    }
+    // 復元した作業場で、場面見出しの場所名（別名）が登録ボードに結び付く。
+    const targetCanvas = path.join(targetProject, "canvas");
+    const imagePlan = createMangaScriptImagePlan({
+      scriptText: [
+        "---",
+        "タイトル: 商店街の落とし物",
+        "登場人物:",
+        "  - 名前: 山田花子",
+        "    主人公: はい",
+        "---",
+        "",
+        "#場面 1 駅前の商店街・夜",
+        "山田花子：この財布、誰のだろう",
+      ].join("\n"),
+      registry: targetRegistry,
+      assetDir: path.join(targetCanvas, "assets", "sample-episode"),
+      canvasDir: targetCanvas,
+    });
+    const anchorBoardPath = path.join(targetCanvas, restoredLocation.referenceAssets[0].path);
+    const sceneJobs = imagePlan.jobs.filter((job) => ["scene-image", "split-panel"].includes(job.kind));
+    assert.ok(sceneJobs.length > 0);
+    assert.ok(sceneJobs.every((job) => job.referenceImagePaths.includes(anchorBoardPath)));
+    assert.equal(imagePlan.jobs.some((job) => job.kind === "environment-sheet"), false);
+
+    // 改ざん: ボードのバイト列を差し替えて両 manifest と登録簿を作り直しても、attestation が拒む。
+    const tamperedBoard = path.join(bundleDir, exported.manifest.files.find((row) => row.kind === "approved-location-evidence").path);
+    await writeFile(tamperedBoard, await readFile(path.join(sourceProject, "canvas", "characters.json")));
+    const registryPath = await bundleRegistryPath(bundleDir);
+    const bundledRegistry = JSON.parse(await readFile(registryPath, "utf8"));
+    const bundledLocation = bundledRegistry.characters.find((entry) => entry.kind === "location");
+    const tamperedToken = `__BUNDLE_CANVAS__/${path.relative(path.join(bundleDir, "project", "canvas"), tamperedBoard)}`;
+    const tamperedAsset = bundledLocation.referenceAssets.find((asset) => asset.path === tamperedToken);
+    tamperedAsset.sha256 = sha256(await readFile(tamperedBoard));
+    await writeJson(registryPath, bundledRegistry);
+    await rehashBundleManifest(bundleDir);
+    await assert.rejects(() => verifyKoyaHandoffBundle({ bundleDir }), /reviewed SHA-256 differs from the bundled board|bundled board is unreadable/u);
+  } finally {
+    if (savedPack === undefined) delete process.env.BUZZASSIST_CHANNEL_PACK; else process.env.BUZZASSIST_CHANNEL_PACK = savedPack;
+    if (savedPackId === undefined) delete process.env.BUZZASSIST_CHANNEL_PACK_ID; else process.env.BUZZASSIST_CHANNEL_PACK_ID = savedPackId;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Koya handoff rejects a location whose board or attestation is missing or altered", async () => {
+  const savedPack = process.env.BUZZASSIST_CHANNEL_PACK;
+  const savedPackId = process.env.BUZZASSIST_CHANNEL_PACK_ID;
+  delete process.env.BUZZASSIST_CHANNEL_PACK;
+  delete process.env.BUZZASSIST_CHANNEL_PACK_ID;
+  const root = await mkdtemp(path.join(os.tmpdir(), "koya-handoff-location-tamper-"));
+  const sourceProject = path.join(root, "source");
+  try {
+    await prepareProject(sourceProject, true);
+    await writeJson(path.join(sourceProject, "config", "koya-location-bible.json"), syntheticLocationBible());
+    const authority = await readSyntheticKoyaAuthority(sourceProject);
+    await importAndRegisterSyntheticLocation({
+      projectDir: sourceProject,
+      authority,
+      locationId: "sample-street",
+      sourceDir: path.join(root, "downloads"),
+    });
+    const scenarios = [
+      {
+        name: "missing board",
+        mutate: async ({ bundleDir, registry, location }) => {
+          const dropped = location.referenceAssets.pop();
+          location.referenceImagePaths = location.referenceAssets.map((asset) => asset.path);
+          await rm(path.join(bundleDir, "project", "canvas", dropped.path.replace(/^__BUNDLE_CANVAS__\//u, "")));
+          return registry;
+        },
+        match: /must carry exactly the planned boards/u,
+      },
+      {
+        name: "altered attestation judgment",
+        mutate: async ({ bundleDir, registry, location }) => {
+          const attestationPath = path.join(bundleDir, "project", "canvas", location.approval.identityReviewPath.replace(/^__BUNDLE_CANVAS__\//u, ""));
+          const attestation = JSON.parse(await readFile(attestationPath, "utf8"));
+          attestation.snapshot.boards[1].checks.readableTextFictionalOnly = false;
+          await writeJson(attestationPath, attestation);
+          location.approval.identityReviewSha256 = sha256(await readFile(attestationPath));
+          return registry;
+        },
+        match: /check 'readableTextFictionalOnly' must be true/u,
+      },
+      {
+        name: "reviewer context equal to the importer",
+        mutate: async ({ bundleDir, registry, location }) => {
+          const attestationPath = path.join(bundleDir, "project", "canvas", location.approval.identityReviewPath.replace(/^__BUNDLE_CANVAS__\//u, ""));
+          const attestation = JSON.parse(await readFile(attestationPath, "utf8"));
+          attestation.snapshot.reviewer.contextId = attestation.snapshot.boards[0].importerContextId;
+          await writeJson(attestationPath, attestation);
+          location.approval.identityReviewSha256 = sha256(await readFile(attestationPath));
+          return registry;
+        },
+        match: /must differ from every generator and importer context/u,
+      },
+      {
+        name: "missing attestation",
+        mutate: async ({ bundleDir, registry, location }) => {
+          await rm(path.join(bundleDir, "project", "canvas", location.approval.identityReviewPath.replace(/^__BUNDLE_CANVAS__\//u, "")));
+          return registry;
+        },
+        match: /location review attestation/u,
+      },
+      {
+        name: "location not declared by the bundled location bible",
+        mutate: async ({ bundleDir, registry, location }) => {
+          const biblePath = path.join(bundleDir, "project", "config", "koya-location-bible.json");
+          const bible = JSON.parse(await readFile(biblePath, "utf8"));
+          bible.locations = bible.locations.filter((entry) => entry.id !== location.id);
+          await writeJson(biblePath, bible);
+          return registry;
+        },
+        match: /bundled location bible does not declare/u,
+      },
+    ];
+    for (const scenario of scenarios) {
+      const bundleDir = path.join(root, `bundle-${scenario.name.replace(/\s+/gu, "-")}`);
+      await exportKoyaHandoffBundle({ projectDir: sourceProject, outputDir: bundleDir, bundleId: "handoff-location-tamper" });
+      const registryPath = await bundleRegistryPath(bundleDir);
+      const registry = JSON.parse(await readFile(registryPath, "utf8"));
+      const location = registry.characters.find((entry) => entry.kind === "location");
+      await scenario.mutate({ bundleDir, registry, location });
+      await writeJson(registryPath, registry);
+      await rehashBundleManifest(bundleDir);
+      await assert.rejects(() => verifyKoyaHandoffBundle({ bundleDir }), scenario.match, scenario.name);
+    }
+  } finally {
+    if (savedPack === undefined) delete process.env.BUZZASSIST_CHANNEL_PACK; else process.env.BUZZASSIST_CHANNEL_PACK = savedPack;
+    if (savedPackId === undefined) delete process.env.BUZZASSIST_CHANNEL_PACK_ID; else process.env.BUZZASSIST_CHANNEL_PACK_ID = savedPackId;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a bundle exported before locations travelled still verifies", async () => {
+  const savedPack = process.env.BUZZASSIST_CHANNEL_PACK;
+  delete process.env.BUZZASSIST_CHANNEL_PACK;
+  const root = await mkdtemp(path.join(os.tmpdir(), "koya-handoff-no-location-"));
+  const project = path.join(root, "project");
+  const bundleDir = path.join(root, "bundle");
+  try {
+    await prepareProject(project, true);
+    const exported = await exportKoyaHandoffBundle({ projectDir: project, outputDir: bundleDir, bundleId: "handoff-no-location" });
+    assert.equal(exported.manifest.includes.approvedLocations, 0);
+    // 旧版の束には approvedLocations というキー自体が無い。
+    const manifestPath = path.join(bundleDir, "manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    delete manifest.includes.approvedLocations;
+    delete manifest.digest;
+    manifest.digest = sha256(JSON.stringify(manifest));
+    await writeJson(manifestPath, manifest);
+    assert.equal((await verifyKoyaHandoffBundle({ bundleDir })).ok, true);
+  } finally {
+    if (savedPack === undefined) delete process.env.BUZZASSIST_CHANNEL_PACK; else process.env.BUZZASSIST_CHANNEL_PACK = savedPack;
+    await rm(root, { recursive: true, force: true });
+  }
 });

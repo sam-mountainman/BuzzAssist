@@ -35,7 +35,7 @@ node scripts/koya-manga-video.mjs handoff-verify \
   --bundle-dir /absolute/path/to/delivery/koya-handoff-v2
 ```
 
-この束には、show/location/thumbnail bible、キャラ微調整spec、承認済み人物台帳とその実asset、移送用review attestation、locked visual profile、contract snapshotを含めます。加えて、固定11人の同時比較sheetと、11人全員・全55ペア・原寸/サムネ縮小確認・独立reviewer contextを拘束した`koya-handoff-roster-review-attestation-v1`を必須で含めます。欠落、一部人物だけのexport、episode専用人物、古い人物assetを参照するreview、再hashされた不合格pairのいずれもexport/verifyで拒否します。attestationは元reviewのSHA-256と判断snapshotを残しつつ、送信元端末の絶対pathと生のagent/session識別子を除去します。`character-workflows.json`、候補のprivate mapping、未承認人物、他案件人物、未使用voice、セッションログ、資格情報は含めません。
+この束には、show/location/thumbnail bible、キャラ微調整spec、承認済み人物台帳とその実asset、移送用review attestation、locked visual profile、contract snapshotを含めます。承認済みロケーション（背景ボード）も同じ台帳に載せて運びます。location bibleが宣言する場所だけを対象に、4枚の実ボードと`koya-handoff-location-review-attestation-v1`（元reviewのSHA-256、審査の判断、ボードごとのSHA・寸法・出所種別を残し、絶対pathと生のreviewer/generator/importer識別子は除く）を含め、ボードやattestationの欠落・改ざんはexport/verifyで拒否します。ロケーションを持たない旧版の束はそのまま検証できます。加えて、固定11人の同時比較sheetと、11人全員・全55ペア・原寸/サムネ縮小確認・独立reviewer contextを拘束した`koya-handoff-roster-review-attestation-v1`を必須で含めます。欠落、一部人物だけのexport、episode専用人物、古い人物assetを参照するreview、再hashされた不合格pairのいずれもexport/verifyで拒否します。attestationは元reviewのSHA-256と判断snapshotを残しつつ、送信元端末の絶対pathと生のagent/session識別子を除去します。`character-workflows.json`、候補のprivate mapping、未承認人物、他案件人物、未使用voice、セッションログ、資格情報は含めません。
 
 ### 声の人選記録
 
@@ -159,7 +159,9 @@ node scripts/setup-agents.mjs --agent codex --project-dir /absolute/path/to/koya
 ## データの扱い
 
 - 人物登録は実ターンアラウンド8方向、表情12セル、必要な衣装4セル、開眼4セルのv2 reviewが通ったものだけ
-- locationは人物なし背景ボードが承認されるまで`approved`登録しない
+- locationは人物なし背景ボードが承認されるまで`approved`登録しない。登録済みロケーションは束に入り、復元先の作業場の台帳へ戻る。台本の場面見出しに書かれた場所名は、location bibleの別名（`aliases`）経由で登録ボードに結び付く
+- 公式ルートの外（チャット型の画像ツール）で作った背景ボードは`location-import`で取り込む。取り込みマップ（`koya-location-import-map-v1`）に必須ボードごとの元ファイルとSHA-256、生成に使った会話・製品・時刻、実際に使ったプロンプト、参照画像のSHA-256、取り込んだ人のcontextを書き、継続ビューは取り込むアンカーを建築参照として宣言する。取り込みはアンカー承認を書かないので、この後もアンカー審査・本審査・登録を公式ルートと同じ条件（審査者のcontextは取り込んだ人とすべての外部生成contextのどれとも異なる）で通す。既存のファイルと古いmanifestは`superseded-<日時>/`へ退避し、削除しない。マップの形は`docs/examples/koya-location-import-map.example.json`を参照する（形式例。必須ボードは4枚すべてを1回ずつ書く）
+- 架空の看板が当然にある場所は、location bibleで`textPolicy: "fictional-signage-allowed"`を宣言する。そのlocationだけ確認項目が`readableTextAbsent`から`readableTextFictionalOnly`（最小限の架空看板のみ、実在の名前・ブランドなし）へ替わる。既定は従来どおり読める文字を認めない
 - 相対パスを使い、送り手PCの絶対パスを残さない
 - 承認review原文をそのまま移送せず、`koya-handoff-review-attestation-v1`へ変換する。元review SHA・判断snapshot・全承認asset SHAを検証し、assetごとのreview linkが欠けるbundleはexport/verifyで拒否する
 - 未承認候補は人間選択待ちとして明示し、MCPやAIが勝手に採用しない
