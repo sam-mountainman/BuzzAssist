@@ -1,0 +1,24 @@
+{
+  "skill_name": "skill-creator",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "BuzzAssistの漫画動画Skillへ新しい監査ルールを追加し、Claude CodeとCodexへ同じ版を配れるようにしてください。",
+      "expected_output": "`.agents/skills`の日本語正本を起点に、評価・manifest SHA・薄いadapter・人間承認まで扱い、global/system/cacheを編集しない。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "端末にskill-creatorが複数あります。Codex内蔵版は残したままBuzzAssist版の競合と内容差を整理してください。",
+      "expected_output": "scopeと由来を分けてinventoryし、plugin namespaceの正本へ集約する。名前の一括置換でhost固有コマンドを壊さない。",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "この動画の字幕とBGMを作ってください。",
+      "expected_output": "Skill自体の保守ではないため、この管理用Skillを発火させない。",
+      "files": []
+    }
+  ]
+}
+

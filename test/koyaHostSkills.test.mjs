@@ -19,6 +19,7 @@ test("Claude and Codex skill adapters both route to one canonical skill", async 
 test("project instructions force both hosts onto the official fail-closed route", async () => {
   for (const file of ["AGENTS.md", "CLAUDE.md"]) {
     const source = await read(file);
+    assert.match(source, /operator-facing top-level entrypoint is `node scripts\/run-video-harness\.mjs`/u);
     assert.match(source, /scripts\/koya-manga-video\.mjs/u);
     assert.match(source, /knownRemainingIssues/u);
     assert.match(source, /contact-sheet/u);
@@ -32,6 +33,12 @@ test("canonical skill evals cover production, repair, and resumability", async (
   assert.ok(production.evals.length >= 3);
   assert.ok(camera.evals.length >= 2);
   const canonical = await read(".agents/skills/manga-video-production/SKILL.md");
+  assert.match(canonical, /運営者が新規作品を作る入口[^\n]*上位Video Harness/u);
+  assert.match(canonical, /run-video-harness\.mjs start/u);
+  assert.match(canonical, /--harness koya-manga-video/u);
+  assert.match(canonical, /署名済みChannel Pack/u);
+  assert.match(canonical, /唯一の内部Koya runner/u);
+  assert.match(canonical, /新作を直接`plan\/full`で開始[\s\S]{0,160}迂回してはならない/u);
   assert.match(canonical, /koya-manga-video\.mjs/u);
   assert.match(canonical, /知覚レビュー/u);
   assert.match(canonical, /主人公の承認済みVoice ID\/Profile\/設定\/モデルと完全一致/u);
