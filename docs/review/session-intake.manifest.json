@@ -12,12 +12,12 @@
     "overlappingMessageUuids": 2385,
     "uniqueAssistantTurns": 2535,
     "uniqueToolCalls": 1275,
-    "userRoleRecords": 2062,
-    "eligibleUserTurnOccurrences": 47,
-    "uniqueUserMessages": 36,
-    "duplicateUserTurnOccurrences": 11,
-    "findingIds": 46,
-    "countExplanation": "46はfindings ledgerの原子所見ID数、36はsource filterを通過した47 turn occurrenceをexact content SHA-256で重複排除したuser message数であり、同じ母集団でも1対1対応でもない。"
+    "userRoleRecords": 2343,
+    "eligibleUserTurnOccurrences": 49,
+    "uniqueUserMessages": 37,
+    "duplicateUserTurnOccurrences": 12,
+    "findingIds": 67,
+    "countExplanation": "67はfindings ledgerの原子所見ID数、37はsource filterを通過した49 turn occurrenceをexact content SHA-256で重複排除したuser message数であり、同じ母集団でも1対1対応でもない。"
   },
   "sources": [
     {
@@ -44,18 +44,19 @@
       "id": "claude-session-f4a4ec5b",
       "kind": "claude-code-session-jsonl",
       "sessionId": "f4a4ec5b-ebf0-458f-9adc-91d1affdd657",
-      "sha256": "f2fb062bdfbe6c73252c65c68e15908319bd3da64df31f8daf817203203cfc0a",
-      "byteCount": 7250284,
-      "lineCount": 3476,
+      "sha256": "a00bc2ffd9119d8d0c43c99b19903b2a7e4d1be2ac65d0c048ef4cd0879a2023",
+      "byteCount": 12139412,
+      "lineCount": 5234,
       "turnFilterStats": {
-        "userRoleRecords": 814,
-        "eligibleTurnOccurrences": 13,
-        "uniqueContentHashes": 13,
+        "userRoleRecords": 1095,
+        "eligibleTurnOccurrences": 15,
+        "uniqueContentHashes": 15,
         "excludedCounts": {
           "compact-summary": 2,
           "peer-injection": 7,
-          "tool-result": 789,
-          "task-notification": 3
+          "tool-result": 1067,
+          "task-notification": 3,
+          "meta-companion": 1
         }
       }
     },
@@ -99,13 +100,13 @@
       "deduplicationKey": "exact UTF-8 visible-text SHA-256"
     },
     "measurement": {
-      "userRoleRecords": 2062,
-      "eligibleTurnOccurrences": 47,
-      "uniqueUserMessages": 36,
-      "duplicateOccurrences": 11,
-      "findingIds": 46,
+      "userRoleRecords": 2343,
+      "eligibleTurnOccurrences": 49,
+      "uniqueUserMessages": 37,
+      "duplicateOccurrences": 12,
+      "findingIds": 67,
       "findingIdsAreNotUserMessages": true,
-      "countExplanation": "46はレビューが分解した原子finding ID数。36は2 sessionのeligible user-visible turnを本文非保存のcontent SHA-256で重複排除した数。1 turnから複数findingが生じ、同じturnが継続sessionへ複製されるため一致しない。"
+      "countExplanation": "67はレビューが分解した原子finding ID数。37は2 sessionのeligible user-visible turnを本文非保存のcontent SHA-256で重複排除した数。1 turnから複数findingが生じ、同じturnが継続sessionへ複製されるため一致しない。"
     },
     "turns": [
       {
@@ -184,7 +185,8 @@
         "contentSha256": "eca5e487618e8d9587cbab510710a102b01ad24cf3026714d7133b20eee3e555",
         "occurrences": [
           {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 10, "sourceLineNumber": 1488, "filterClass": "origin-human-string", "eventSha256": "6b8bbdeeee2a6628f0e26338731ada9a6675d94b6b175f0d519e96316c339c3e"},
-          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 23, "sourceLineNumber": 2570, "filterClass": "origin-human-string", "eventSha256": "ebd9631880f7e502a9fb842d72bafe95e4c088911da79041ef21893ad35bb7ae"}
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 23, "sourceLineNumber": 2570, "filterClass": "origin-human-string", "eventSha256": "ebd9631880f7e502a9fb842d72bafe95e4c088911da79041ef21893ad35bb7ae"},
+          {"sourceId": "claude-session-f4a4ec5b", "sourceTurnOrdinal": 15, "sourceLineNumber": 3814, "filterClass": "origin-human-string", "eventSha256": "80fc8c494dc153d944f75d9c56a1e6b88169dfa83a284c1099d9844ba3564bc6"}
         ],
         "disposition": {"code": "operational-followup", "detail": "既出作業の全面実行指示で、新しい原子要件は追加していない。"}
       },
@@ -419,9 +421,17 @@
           {"sourceId": "claude-session-f4a4ec5b", "sourceTurnOrdinal": 13, "sourceLineNumber": 3427, "filterClass": "origin-human-string", "eventSha256": "18dcad177f16561e87b8e213e4338cb29697f7cd9a8057eeb3e2225366568f28"}
         ],
         "disposition": {"code": "acknowledgement-only", "detail": "直前の依頼を開始するための了承で、新しい要件は追加していない。"}
+      },
+      {
+        "id": "ut-37",
+        "contentSha256": "a19a09a9b1fc0dcb18148b07521ff4a23af22cc0dbe68d1a74e2a93485e8262e",
+        "occurrences": [
+          {"sourceId": "claude-session-f4a4ec5b", "sourceTurnOrdinal": 14, "sourceLineNumber": 3479, "filterClass": "origin-human-string", "eventSha256": "bd024da437ec69e9194a154a001b6da92139752b62f6fa8cfcfd9ef80bf0b0d8"}
+        ],
+        "findingIds": ["cx-i1", "cx-i2", "cx-i3", "cx-i4", "cx-i5", "cx-i6", "cx-i7", "cx-i8", "cx-i9", "cx-i10", "cx-i11", "cx-i12", "cx-i13", "cx-i14", "cx-i15", "cx-i16", "cx-i17", "cx-i18", "cx-i19", "cx-i20", "cx-i21"]
       }
     ],
-    "coverageSha256": "d4149cee8e6e00f3fcd95505f83b3f065080a39299c771e63950d2052032cffa",
+    "coverageSha256": "3503a26e7a70db3ebb9d63e043bed4a0fc34a9e5db0399de4127c6c6926cb634",
     "independentAgentSignoff": {
       "status": "pending",
       "reviewerAgentId": null,
@@ -452,6 +462,14 @@
       "id": "claude-session-intake-2026-09-01",
       "sourceIds": ["claude-session-c742a064", "claude-session-f4a4ec5b", "workflow-c742-analysis", "workflow-f4-analysis"],
       "expectedFindingIds": ["cx-h1", "cx-h2", "cx-h3", "cx-h4", "cx-h5", "cx-h6", "cx-h7", "cx-h8", "cx-h9"]
+    },
+    {
+      "id": "claude-2026-09-17",
+      "sourceIds": ["claude-session-f4a4ec5b"],
+      "expectedFindingIds": [
+        "cx-i1", "cx-i2", "cx-i3", "cx-i4", "cx-i5", "cx-i6", "cx-i7", "cx-i8",
+        "cx-i9", "cx-i10", "cx-i11", "cx-i12", "cx-i13", "cx-i14", "cx-i15", "cx-i16", "cx-i17", "cx-i18", "cx-i19", "cx-i20", "cx-i21"
+      ]
     }
   ]
 }
