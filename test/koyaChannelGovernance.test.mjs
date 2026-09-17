@@ -662,7 +662,11 @@ test("Koya roster gate binds all 11 identity faces and requires 55 independent o
   assert.equal(passedAudit.pass, true, JSON.stringify(passedAudit));
 });
 
-test("Koya location registration requires four SHA-bound, independently reviewed boards", async () => {
+test("Koya location registration requires four SHA-bound, independently reviewed boards", async (t) => {
+  if (!channelPackPresent(root)) {
+    t.skip("channel pack が無い環境");
+    return;
+  }
   const projectDir = await mkdtemp(join(tmpdir(), "koya-location-"));
   await installAuthority(projectDir);
   const authority = await readKoyaChannelAuthority({ allowFixture: true, projectDir, runtimeRoot: root });
