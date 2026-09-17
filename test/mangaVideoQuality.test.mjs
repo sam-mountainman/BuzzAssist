@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { auditMangaVideoQuality, parseEbur128Summary, parseSilenceDetectLog } from "../lib/mangaVideoQuality.mjs";
+import { fullDecodeVerdict } from "../lib/fullDecodeVerdict.mjs";
 import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -44,6 +45,20 @@ async function ffmpegAvailable() {
 // 最終監査はこのステップを "full-decode" という名前で呼ぶ。以前は ffprobe で
 // メタデータを読み音声を1回解析するだけで、映像を一度もデコードしていなかった。
 // 壊れたフレームを含むMP4がそのまま合格しうる状態だった。
+test("全デコードは、終了コードが0でも誤りの報告があれば落とす", () => {
+  // ffmpeg の版によっては、デコーダーが壊れた部分を補って成功を返し、-xerror でも
+  // 0 で終わる。Ubuntu の 6.1 では、下の試験の壊した動画がこれで通った。手元の 7.1 は
+  // 終了コードで落ちるので、実動画ではこの経路を再現できない。判定そのものを確かめる。
+  assert.deepEqual(fullDecodeVerdict({ stderr: "" }), { pass: true, detail: "" });
+  assert.deepEqual(fullDecodeVerdict({ stderr: "\n  \n" }), { pass: true, detail: "" });
+  const concealed = fullDecodeVerdict({ stderr: "[h264 @ 0x1] concealing 120 DC, 120 AC, 120 MV errors in P frame\n" });
+  assert.equal(concealed.pass, false, "補って続けたデコードを合格にしないこと");
+  assert.match(concealed.detail, /concealing/u);
+  const failed = fullDecodeVerdict({ error: Object.assign(new Error("ffmpeg exited with 183"), { stderr: "Invalid NAL unit size" }) });
+  assert.equal(failed.pass, false);
+  assert.match(failed.detail, /Invalid NAL unit size/u);
+});
+
 test("full-decode は壊れた動画を落とす", async (t) => {
   if (!await ffmpegAvailable()) { t.skip("ffmpeg が無い"); return; }
   const dir = await mkdtemp(join(tmpdir(), "decode-gate-"));
