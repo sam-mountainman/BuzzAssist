@@ -1,0 +1,479 @@
+{
+  "schemaVersion": 1,
+  "reportVersion": "buzzassist-independent-final-review-v1",
+  "reviewDate": "2026-09-01",
+  "reviewerRole": "independent-review-agent",
+  "scope": {
+    "repositories": [
+      "buzzassist-core",
+      "paid-media-backend"
+    ],
+    "sourceSessions": [
+      "c742a064-52b0-463d-8ac5-5b200ab858a8",
+      "f4a4ec5b-ebf0-458f-9adc-91d1affdd657"
+    ],
+    "externalFolderLabel": "external masao source folder",
+    "excludedByUser": [
+      "YouTube Analytics integration",
+      "YouTube Reporting/Data learning loop",
+      "yt-quality-loop production integration",
+      "creation of currently unapproved Koya characters/backgrounds/voices/thumbnails"
+    ],
+    "prohibitedActionsObserved": {
+      "paidProviderCalls": 0,
+      "pluginConfigurationChanges": 0,
+      "commits": 0
+    }
+  },
+  "verdict": {
+    "status": "conditional-local-pass-not-release-ready",
+    "p0Open": 0,
+    "releaseReady": false,
+    "realProviderProductionReady": false,
+    "sameQualityAllHostsProven": false,
+    "summary": "The shared local Core now has a fail-closed raw-script production path, durable paid-media job contracts, SHA-bound receipt/signoff handling, and actual Canvas media projection. Local provider-free and contract tests pass. A final release cannot be claimed while channel-specific public-package exceptions, untracked release inputs, divergent installed host caches, absent signed operator Channel Packs, real provider/deployed-backend tests, and real Claude/Windows/Linux acceptance remain open."
+  },
+  "requirementMatrix": [
+    {
+      "id": "REQ-SHARED-JAPANESE-SKILLS",
+      "requirement": "Claude Code and Codex consume the same Japanese canonical Skill content and either host can update the shared source",
+      "status": "verified-project-scope",
+      "evidence": [
+        ".agents/skills/inventory.manifest.json",
+        ".agents/skills/profiles.manifest.json",
+        "test/skillInventory.test.mjs"
+      ],
+      "boundary": "Project canonical/adapters have zero collision or manifest issue. Host-wide parity is not proven because installed plugin caches contain divergent copies."
+    },
+    {
+      "id": "REQ-SKILL-CREATOR",
+      "requirement": "Keep skill-creator for governed maintenance without placing it in the production video hot path",
+      "status": "verified-project-scope",
+      "evidence": [
+        ".agents/skills/skill-creator/SKILL.md",
+        ".claude/skills/buzzassist-skill-creator/SKILL.md",
+        ".codex/skills/buzzassist-skill-creator/SKILL.md",
+        ".agents/skills/profiles.manifest.json"
+      ],
+      "decision": "Retained, bundled, development-only, and denied by operator-production."
+    },
+    {
+      "id": "REQ-PRODUCTION-SCOPE",
+      "requirement": "Keep Analytics and yt-quality-loop out of script-to-video production",
+      "status": "verified",
+      "evidence": [
+        ".agents/skills/profiles.manifest.json",
+        ".agents/skills/narrated-story-video/SKILL.md",
+        "test/skillInventory.test.mjs"
+      ],
+      "decision": "The terminal may still have those plugins installed, but operator-production hard-denies them and the production entrypoints do not import them."
+    },
+    {
+      "id": "REQ-RAW-SCRIPT-TO-VIDEO",
+      "requirement": "A raw Japanese script enters one common Job and produces a decoded final MP4 only after audit, signoff, receipt, and Canvas projection",
+      "status": "verified-provider-free-fixture",
+      "evidence": [
+        "test/narratedStoryVideoE2E.test.mjs",
+        "lib/videoHarnessJob.mjs",
+        "lib/videoHarnessReceipt.mjs",
+        "lib/narratedStoryPipeline.mjs"
+      ],
+      "boundary": "No live paid provider, deployed backend, or operator-specific signed narrated Channel Pack was exercised."
+    },
+    {
+      "id": "REQ-PARALLEL",
+      "requirement": "Both hosts use the same bounded parallel plan and do not corrupt shared state",
+      "status": "verified-by-local-contract-tests",
+      "evidence": [
+        ".agents/skills/harness-parallel-execution/SKILL.md",
+        "scripts/harness-parallel-run.mjs",
+        "scripts/harness-parallel-agents.mjs",
+        "docs/measurements/parallel-limits-2026-08-28.json"
+      ],
+      "boundary": "The recorded limits are measurements for known workloads, not a universal fastest setting for every machine."
+    },
+    {
+      "id": "REQ-SAFE-SELF-IMPROVEMENT",
+      "requirement": "Feedback is captured automatically but cannot silently rewrite canonical Skill rules or self-approve completion",
+      "status": "conditional-pass",
+      "evidence": [
+        "scripts/harness-learn.mjs",
+        "lib/harnessLearningCurator.mjs",
+        "lib/canvasFeedbackCollector.mjs",
+        "test/harnessLearn.test.mjs",
+        "test/harnessLearningCurator.test.mjs",
+        "test/canvasFeedbackCollector.test.mjs"
+      ],
+      "boundary": "The CLI separates machine attestation from human-verified state, but reviewer identity is procedural rather than cryptographically authenticated."
+    },
+    {
+      "id": "REQ-CANVAS-ACTUAL-MEDIA",
+      "requirement": "Canvas shows actual images, video, audio, subtitles, contact sheets, status, signoff, and feedback rather than path-only cards",
+      "status": "verified-current-macos-codex-host",
+      "evidence": [
+        "lib/canvasRunMediaProjection.mjs",
+        "lib/videoHarnessCanvasAdapter.mjs",
+        "docs/review/ui-distribution-review-2026-09-01.json",
+        "test/canvasRunMediaProjection.test.mjs",
+        "test/videoHarnessCanvasAdapter.test.mjs"
+      ],
+      "boundary": "The same fixture has not been mounted in Claude Code, Windows, or Linux."
+    },
+    {
+      "id": "REQ-PAID-MEDIA-SAFETY",
+      "requirement": "Fish Audio, ElevenLabs, and image/music generation use one durable, idempotent, credit-aware server boundary",
+      "status": "verified-local-contract-only",
+      "evidence": [
+        "lib/paidMediaJobBroker.mjs",
+        "paid-media-backend:src/lib/paidMediaJobs",
+        "paid-media-backend:convex/paidMediaJobs.ts",
+        "paid-media-backend:test/paidMediaJobs.test.mjs"
+      ],
+      "boundary": "A provider-success/process-kill gap before durable Convex receipt linkage still needs operator reconciliation."
+    },
+    {
+      "id": "REQ-MUSIC-PREFLIGHT",
+      "requirement": "The outer doctor probes the exact required BGM adapter before any paid generation",
+      "status": "verified",
+      "evidence": [
+        "lib/harnessChannelPackRuntime.mjs",
+        "lib/narratedStoryPipeline.mjs",
+        "lib/videoHarnessJob.mjs",
+        "scripts/harness-doctor.mjs",
+        "config/harnesses/narrated-story-video.harness.json",
+        "test/harnessDoctor.test.mjs"
+      ],
+      "decision": "Signed runtime and Job identity now bind image, voice, and music provider/model/adapterVersion; music-only unavailability makes doctor ready=false."
+    },
+    {
+      "id": "REQ-CROSS-OS",
+      "requirement": "The same harness works on macOS, Windows, and Linux",
+      "status": "designed-and-simulated-not-fully-proven",
+      "evidence": [
+        ".github/workflows/cross-platform.yml",
+        "lib/harnessRuntimeResolver.mjs",
+        "scripts/setup-agents.mjs",
+        "test/setupAgents.test.mjs",
+        "test/harnessRuntimeResolver.test.mjs"
+      ],
+      "boundary": "No observed CI run or real Windows/Linux UI/host acceptance is attached to this review. Clean machines also need FFmpeg, the QA Python stack/cache, provider configuration, and a signed Channel Pack."
+    },
+    {
+      "id": "REQ-SESSION-INTAKE",
+      "requirement": "All findings from both named Claude sessions remain uniquely traceable",
+      "status": "hash-and-id-complete-semantic-completeness-unproven",
+      "evidence": [
+        "docs/review/session-intake.manifest.json",
+        "docs/review/findings.jsonl",
+        "scripts/review-intake.mjs"
+      ],
+      "boundary": "Four source files verify by exact SHA and all 46 declared IDs are unique, but the declared ID set is self-authored and most findings are not bound to exact source turns."
+    },
+    {
+      "id": "REQ-MASAO-REVIEW",
+      "requirement": "Review every file in the external masao source folder and adopt only safe, relevant mechanisms",
+      "status": "verified-documentary-audit",
+      "evidence": [
+        "docs/masao-quality-harness-integration.md"
+      ],
+      "decision": "320 non-git files were classified. Akapen and Best-of-N inform optional review patterns; neither codebase is bundled. The 21 yt-quality-loop paths contain only identical placeholder CLAUDE.md files and were not adopted."
+    }
+  ],
+  "findings": [
+    {
+      "id": "IFR-P1-PUBLIC-PRIVATE-BOUNDARY",
+      "severity": "P1",
+      "status": "open-release-blocker",
+      "area": "distribution",
+      "files": [
+        "lib/koyaChannelGovernance.mjs",
+        "scripts/koya-setting-sheet-repair-round.mjs",
+        "config/public-surface-allowlist.json",
+        "package.json"
+      ],
+      "finding": "The npm audit is accepted-risk rather than clean: public runtime logic contains four private-roster IDs and a one-off Koya repair program is included by scripts/*.mjs.",
+      "reproduction": "Run node scripts/audit-package-tarball.mjs --json --require-signals and inspect accepted roster findings.",
+      "fix": "Move the four cast-ID choices into a signed private show-bible semantic mapping while preserving existing review beat and MCP names. Move the one-off repair script under a files-excluded private tool directory. Remove the two allowlist entries and require a clean tarball."
+    },
+    {
+      "id": "IFR-P1-RELEASE-STATE",
+      "severity": "P1",
+      "status": "open-release-blocker",
+      "area": "release",
+      "files": [
+        "package.json",
+        ".agents/skills/inventory.manifest.json"
+      ],
+      "finding": "Most new Core, Skill, test, and paid-media backend files are untracked. The project and installed cache both claim 0.1.25 while their content differs.",
+      "reproduction": "Run git status --short, git describe --tags --always --dirty, and compare the project inventory with --include-plugin-cache.",
+      "fix": "Review and stage the intended source set, bump a new package/plugin version, rebuild the exact release artifact, run release gates on a clean checkout, sign/publish it, and install that same artifact into both hosts."
+    },
+    {
+      "id": "IFR-P1-OPERATOR-CHANNEL-PACKS",
+      "severity": "P1",
+      "status": "external-open",
+      "area": "operator-delivery",
+      "finding": "The Koya private source folder is not an Ed25519 Channel Pack envelope, and no operator-specific signed narrated-story Channel Pack was found for Mike. A handoff integrity manifest is not a signer identity.",
+      "reproduction": "List the private Channel Pack roots and search for a signed envelope manifest/signature and narrated-story.json.",
+      "fix": "After the operator approves the remaining private policy, create and sign one pack per operator using an external trusted key, distribute the public key separately, import on the destination device, and run a provider-free acceptance before any paid generation."
+    },
+    {
+      "id": "IFR-P1-HOST-PARITY",
+      "severity": "P1",
+      "status": "open",
+      "area": "skills-and-hosts",
+      "finding": "Project scope is canonical and collision-free, but global/plugin-cache inventory reports seven collisions, eighteen divergent external hashes, and eighteen cross-scope same-name groups. Ad-hoc Claude/Codex discovery can still see different content outside the formal Job.",
+      "reproduction": "Run skill inventory with --include-global --include-plugin-cache.",
+      "fix": "Install one version-bumped stable bundle into both hosts and make zero production-relevant host-cache divergence an acceptance gate. Do not delete global tools; keep formal production resolution profile-bound."
+    },
+    {
+      "id": "IFR-P1-CROSS-HOST-OS-ACCEPTANCE",
+      "severity": "P1",
+      "status": "external-open",
+      "area": "portability",
+      "finding": "There is simulated and CI-matrix coverage but no attached real Claude Code, Windows, or Linux Canvas/media acceptance result, and no live stable-release installation result.",
+      "reproduction": "Run the valid PNG/MP4/WAV/MP3/SRT fixture and isolated setup on each real host/OS, then mount and play media in that host's in-app browser.",
+      "fix": "Record release-artifact hashes, host versions, setup output, Canvas URL check, media readyState/duration/playback, console errors, and full decode for Claude Code and Codex on the supported OS matrix."
+    },
+    {
+      "id": "IFR-P1-SESSION-SEMANTIC-COMPLETENESS",
+      "severity": "P1",
+      "status": "open",
+      "area": "review-intake",
+      "finding": "The intake verifies exact source bytes and uniqueness of a declared 46-ID set, but cannot prove that every independently meaningful source-session assertion became a finding because the expected list was authored by the same review process.",
+      "reproduction": "Run review-intake --verify-local-sources, then observe that most ledger rows bind only to a review round or source hash rather than an exact source turn/span.",
+      "fix": "Generate immutable turn/message anchors during extraction and require a source-turn-to-finding coverage report reviewed by a separate context."
+    },
+    {
+      "id": "IFR-P1-SELF-IMPROVEMENT-AUTHENTICATION",
+      "severity": "P1",
+      "status": "open-trust-boundary",
+      "area": "self-improvement",
+      "finding": "The learning CLI correctly distinguishes agent-self-attested records, but --human-verified plus a TTY and a reviewer string is not an authenticated human identity. An agent capable of editing the target and launching a PTY could still forge the procedural signal.",
+      "reproduction": "Inspect attestationFor in scripts/harness-learn.mjs and the CLI source of isInteractive/humanVerified.",
+      "fix": "Bind promotion to a user-originated Canvas/UI approval record or signed approval token containing proposal ID, exact target SHA, diff SHA, actor identity, and expiry; keep the current CLI flag advisory until then."
+    },
+    {
+      "id": "IFR-P1-PROVIDER-CONVEX-ATOMICITY",
+      "severity": "P1",
+      "status": "open-known-boundary",
+      "area": "paid-media",
+      "finding": "Provider success or Convex upload followed by a process kill before durable artifact-receipt linkage cannot be made atomic across the provider and Convex. The current safe behavior stops in recovery-required and forbids regeneration, but needs operator reconciliation.",
+      "reproduction": "Review paid-media service recovery documentation and the provider-success/storage-before-receipt fault boundary.",
+      "fix": "Add an operator-only reconciliation flow that verifies provider receipt/storage SHA, binds it to the existing requestKey/inputHash, and completes or refunds without a second generation."
+    },
+    {
+      "id": "IFR-P2-ARTIFACT-DOWNLOAD-BOUNDARY",
+      "severity": "P2",
+      "status": "open",
+      "area": "paid-media-client",
+      "files": [
+        "lib/paidMediaJobBroker.mjs"
+      ],
+      "finding": "The client downloads the server-returned artifact URL without an origin allowlist, redirect rejection, declared-size budget, or mandatory SHA requirement.",
+      "fix": "Prefer a same-origin authenticated artifact endpoint; otherwise allowlist HTTPS origins, set redirect:error, require SHA and MIME, enforce Content-Length/stream byte limits, then verify bytes before persistence."
+    },
+    {
+      "id": "IFR-P2-CANVAS-TWO-PHASE-WINDOW",
+      "severity": "P2",
+      "status": "open-repairable",
+      "area": "canvas",
+      "files": [
+        "lib/videoHarnessCanvasAdapter.mjs",
+        "lib/videoHarnessJob.mjs"
+      ],
+      "finding": "Main Canvas Run state is written before media elements. A media projection failure can transiently show the completed candidate while the durable Job correctly remains running. Resume repairs it without paid regeneration.",
+      "fix": "Add an explicit projection-intent/committed marker or a single transaction over run-state and media-scene storage; until then present the Canvas candidate as syncing until media commit completes."
+    },
+    {
+      "id": "IFR-P2-TERMINAL-CANVAS-REPAIR",
+      "severity": "P2",
+      "status": "open",
+      "area": "canvas",
+      "files": [
+        "lib/videoHarnessJob.mjs"
+      ],
+      "finding": "A terminal completed Job returns before revalidating later Canvas deletion/corruption. Crash-before-completion is repaired, but post-completion external damage is not.",
+      "fix": "Provide an explicit non-paid reproject/repair operation bound to the existing receipt and artifact SHA set."
+    },
+    {
+      "id": "IFR-P2-CANCEL-CANVAS-RACE",
+      "severity": "P2",
+      "status": "open",
+      "area": "job-state",
+      "finding": "A cancellation that wins the durable CAS after completed Canvas bytes are projected can leave Canvas briefly or persistently ahead of the cancelled Job.",
+      "fix": "On cancellation-wins, project the authoritative cancelled revision or use a projection commit token checked by both state writers."
+    },
+    {
+      "id": "IFR-P2-CHANNEL-PACK-ROLLBACK",
+      "severity": "P2",
+      "status": "open",
+      "area": "channel-pack",
+      "finding": "Signature, payload SHA, and compatibility are verified, but no per-pack monotonic version/rollback policy prevents a correctly signed older pack from being reintroduced.",
+      "fix": "Persist the highest accepted pack version or signed release counter per pack ID and require an explicit audited rollback authorization."
+    },
+    {
+      "id": "IFR-P2-REVIEWER-IDENTITY",
+      "severity": "P2",
+      "status": "open-trust-boundary",
+      "area": "signoff",
+      "finding": "Final/contact-sheet signoff is strongly bound to job, contract, current video SHA, contact-sheet SHA, decision, and distinct context string, but the named reviewer/context itself is not authenticated.",
+      "fix": "Bind signoff to a host/user-issued approval credential or signed UI event; retain the current SHA checks as content integrity."
+    },
+    {
+      "id": "IFR-P2-PROCESS-TERMINATION",
+      "severity": "P2",
+      "status": "open",
+      "area": "runtime",
+      "finding": "Child cancellation sends SIGTERM but does not show a bounded SIGKILL escalation path for a process that ignores termination.",
+      "fix": "After a grace period, kill the exact verified child/process group in a platform-aware way and record both signals in Job evidence."
+    },
+    {
+      "id": "IFR-P2-PUBLIC-POLICY-CLASSIFICATION",
+      "severity": "P2",
+      "status": "needs-owner-decision",
+      "area": "public-private-boundary",
+      "finding": "The public package intentionally contains Koya-labelled production contracts, reading dictionary shell, quality incidents, and runbooks. They do not contain current cast display names or private assets, but the scanner proves lexical leakage, not whether channel-specific policy is proprietary.",
+      "fix": "Classify every packaged Koya file as generic reusable Core or private operator policy. Move proprietary policy overrides into the signed Pack without changing the public MCP contract."
+    },
+    {
+      "id": "IFR-P2-STALE-ROADMAP",
+      "severity": "P2",
+      "status": "closed-documentation",
+      "area": "documentation",
+      "files": [
+        "docs/buzzassist-video-harness-master-roadmap-ja.md"
+      ],
+      "finding": "The roadmap retains unchecked historical work items, but its opening status banner now explicitly says that Phase checkboxes are non-authoritative history and that current acceptance is decided by Section 4, the findings ledger, and independent review evidence.",
+      "resolution": "Closed by an explicit non-authoritative-checkbox banner; the later statement that the document is the planning source of truth does not make its checkbox state an acceptance result."
+    }
+  ],
+  "verifiedClosures": [
+    {
+      "id": "IFR-CLOSED-JOB-CANVAS-CRASH",
+      "status": "closed-local-regression",
+      "evidence": "Completed is persisted only after successful Canvas projection. Pre-projection, post-projection/pre-persist, and transient projection failure recover on the same Job without rerunning the paid adapter."
+    },
+    {
+      "id": "IFR-CLOSED-SIGNOFF-NORMALIZATION",
+      "status": "closed-local-regression",
+      "evidence": "Unsigned, unapproved, wrong-contract, wrong-job, wrong-video-SHA, wrong-contact-SHA, and same-generator-context signoffs fail closed before common receipt finalization."
+    },
+    {
+      "id": "IFR-CLOSED-CANVAS-MEDIA-IDENTITY",
+      "status": "closed-local-and-current-host",
+      "evidence": "Same-byte preview/final artifacts retain separate stable element identities, contact sheet is an image element, final-audited.mp4 is final media, source paths are omitted, and content-addressed copies fully decode."
+    },
+    {
+      "id": "IFR-CLOSED-FEEDBACK-EXACTLY-ONCE",
+      "status": "closed-local-regression",
+      "evidence": "Pending-before-append journaling plus content/session-deterministic proposal IDs recovers state-write and append failures without a second physical row; stale/conflicting revisions fail closed."
+    },
+    {
+      "id": "IFR-CLOSED-PAID-DOUBLE-CHARGE",
+      "status": "closed-local-contract",
+      "evidence": "Concurrent start, lost reservation response, pre-first-HTTP restart, refund-required crash, artifact-receipt retry, and completion retry reuse one request identity/reservation in tests."
+    },
+    {
+      "id": "IFR-CLOSED-FISH-OUTPUT-PROFILE",
+      "status": "closed-local-contract",
+      "evidence": "Fish requests explicit native WAV 44.1kHz, Eleven may serve WAV48k, and the parent render graph resamples all narration to the 48k master rather than silently changing the provider request."
+    },
+    {
+      "id": "IFR-CLOSED-MUSIC-OUTER-PREFLIGHT",
+      "status": "closed-local-regression",
+      "evidence": "The signed runtime, inner outcome, durable Job identity, declaration, and outer doctor all bind and probe image, voice, and music."
+    },
+    {
+      "id": "IFR-CLOSED-ROADMAP-STATUS-BANNER",
+      "status": "closed-documentation",
+      "evidence": "The roadmap opening banner explicitly separates historical Phase checkboxes from current acceptance evidence and names the authoritative status sources."
+    }
+  ],
+  "sessionIntake": {
+    "sourceCount": 4,
+    "sourceVerification": "4/4 exact SHA-256 verified",
+    "findingCount": 46,
+    "findingStatuses": {
+      "implemented-unverified": 20,
+      "open": 26
+    },
+    "duplicateFindingIds": 0,
+    "policy": "Existing findings were not upgraded to verified by this report. This report records independent closures separately."
+  },
+  "skillAndPluginSeparation": {
+    "terminalConfiguration": {
+      "pluginBlocks": 43,
+      "enabledTrue": 42,
+      "meaning": "Terminal-global installation state, not embedded harness dependencies."
+    },
+    "projectInventory": {
+      "skillRecords": 29,
+      "plugins": 1,
+      "collisions": 0,
+      "manifestIssues": 0,
+      "adapterIssues": 0
+    },
+    "globalAndCacheObservation": {
+      "skillRecords": 452,
+      "pluginRecords": 84,
+      "collisions": 7,
+      "externalDivergentHashes": 18,
+      "exactMirrors": 56,
+      "crossScopeSameNames": 18
+    },
+    "operatorProduction": {
+      "allowedPlugins": [
+        "buzzassist:core-plugin"
+      ],
+      "skillCreator": "retained but not-in-profile",
+      "ytAnalytics": "hard-denied",
+      "ytQualityLoop": "hard-denied",
+      "coworkSuites": "hard-denied"
+    }
+  },
+  "masaoFolderReview": {
+    "totalFilesIncludingGit": 418,
+    "nonGitFiles": 320,
+    "nonGitBytes": 55065806,
+    "symlinks": 0,
+    "uniqueContentHashes": 201,
+    "duplicateHashGroups": 88,
+    "duplicateCopiesAfterFirst": 119,
+    "placeholderClaudeFiles": 33,
+    "ytQualityLoopPlaceholderPaths": 21,
+    "codeOrSkillCandidates": 10,
+    "decision": "Use principles, not an implicit runtime dependency. Akapen is reference-only; Best-of-N is an optional external viewer; analytics and yt-quality-loop are excluded."
+  },
+  "unverifiedExternalConditions": [
+    "Live Fish Audio generation and billing",
+    "Live ElevenLabs speech/dialogue/music generation and billing",
+    "Live FAL GPT Image 2 generation and billing",
+    "Deployed Convex schema/functions and production environment variables",
+    "Operator reconciliation after the cross-system receipt crash window",
+    "Real Claude Code in-app Browser Canvas acceptance",
+    "Real Windows Canvas/video/audio/subtitle acceptance",
+    "Real Linux Canvas/video/audio/subtitle acceptance",
+    "Fresh stable release installation into both Claude Code and Codex caches",
+    "Externally signed Koya and Mike Channel Packs",
+    "User/operator approval of remaining private creative policy"
+  ],
+  "commands": [],
+  "contentEvidence": [],
+  "remainingRisks": [
+    "No live provider call was authorized or made, so local contract success must not be described as live production proof.",
+    "No commit or release artifact was created; untracked working-tree code is not available from a clean clone.",
+    "The current host's manual Canvas result proves Codex/macOS only.",
+    "Signed content integrity does not authenticate a human reviewer unless approval identity is issued outside the agent process.",
+    "Cross-system exactly-once billing cannot be absolute without provider-side idempotency and an operator reconciliation path."
+  ],
+  "prohibitedClaims": [
+    "Do not claim that all work is complete.",
+    "Do not claim live paid providers or deployed billing were tested.",
+    "Do not claim Windows, Linux, or Claude Code UI parity from simulations alone.",
+    "Do not call terminal-global plugins harness-bundled dependencies.",
+    "Do not call the npm boundary clean while accepted roster findings remain.",
+    "Do not call an integrity-only handoff manifest an externally signed Channel Pack.",
+    "Do not upgrade docs/review/findings.jsonl statuses without source-bound independent evidence."
+  ]
+}

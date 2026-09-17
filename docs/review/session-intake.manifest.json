@@ -1,0 +1,457 @@
+{
+  "version": "buzzassist-review-intake-v2",
+  "generatedAt": "2026-09-01T00:00:00.000Z",
+  "policy": {
+    "rawSessionContentShipped": false,
+    "machineLocalPathsShipped": false,
+    "findingStatusVocabulary": ["open", "implemented-unverified", "verified", "accepted-risk"],
+    "notes": "原ログは端末外へ出さず、内容ハッシュ、件数、正規化したfinding IDだけを正本化する。"
+  },
+  "deduplication": {
+    "relationship": "f4a4ec5bはc742a064の末尾を複製して継続したセッション",
+    "overlappingMessageUuids": 2385,
+    "uniqueAssistantTurns": 2535,
+    "uniqueToolCalls": 1275,
+    "userRoleRecords": 2062,
+    "eligibleUserTurnOccurrences": 47,
+    "uniqueUserMessages": 36,
+    "duplicateUserTurnOccurrences": 11,
+    "findingIds": 46,
+    "countExplanation": "46はfindings ledgerの原子所見ID数、36はsource filterを通過した47 turn occurrenceをexact content SHA-256で重複排除したuser message数であり、同じ母集団でも1対1対応でもない。"
+  },
+  "sources": [
+    {
+      "id": "claude-session-c742a064",
+      "kind": "claude-code-session-jsonl",
+      "sessionId": "c742a064-52b0-463d-8ac5-5b200ab858a8",
+      "sha256": "9a066fdd19cfc577c9a48446c74c8f5fca5361ca36f8f4c6cfffd1cc9dfe9eca",
+      "byteCount": 10933467,
+      "lineCount": 6083,
+      "turnFilterStats": {
+        "userRoleRecords": 1248,
+        "eligibleTurnOccurrences": 34,
+        "uniqueContentHashes": 31,
+        "excludedCounts": {
+          "compact-summary": 2,
+          "tool-result": 1199,
+          "meta-companion": 3,
+          "task-notification": 3,
+          "peer-injection": 7
+        }
+      }
+    },
+    {
+      "id": "claude-session-f4a4ec5b",
+      "kind": "claude-code-session-jsonl",
+      "sessionId": "f4a4ec5b-ebf0-458f-9adc-91d1affdd657",
+      "sha256": "f2fb062bdfbe6c73252c65c68e15908319bd3da64df31f8daf817203203cfc0a",
+      "byteCount": 7250284,
+      "lineCount": 3476,
+      "turnFilterStats": {
+        "userRoleRecords": 814,
+        "eligibleTurnOccurrences": 13,
+        "uniqueContentHashes": 13,
+        "excludedCounts": {
+          "compact-summary": 2,
+          "peer-injection": 7,
+          "tool-result": 789,
+          "task-notification": 3
+        }
+      }
+    },
+    {
+      "id": "workflow-c742-analysis",
+      "kind": "claude-code-cross-session-workflow",
+      "workflowId": "wf_a7e0d344-f7f",
+      "status": "completed",
+      "agentCount": 5,
+      "synthesisPresent": true,
+      "sha256": "4cf356ebf546188c9b81aadb8e89cae170fbe1f69c2d661f59ff30718c4a3ec1",
+      "byteCount": 43295
+    },
+    {
+      "id": "workflow-f4-analysis",
+      "kind": "claude-code-cross-session-workflow",
+      "workflowId": "wf_37121acb-eed",
+      "status": "completed",
+      "agentCount": 10,
+      "synthesisPresent": false,
+      "acceptedIssueFindingId": "cx-h9",
+      "sha256": "891bd4f4604bbcd3138b77c3988c870cfac8d2c1e8ea12134aab69403718077d",
+      "byteCount": 46220
+    }
+  ],
+  "userTurnCoverage": {
+    "version": "buzzassist-user-turn-coverage-v1",
+    "sourceFilter": {
+      "version": "claude-user-turn-filter-v1",
+      "included": [
+        "origin.kind=human and scalar string content",
+        "non-meta single text-block control records visible in the transcript"
+      ],
+      "excluded": [
+        "tool_result records",
+        "compact summaries",
+        "tool companions and other meta records",
+        "peer injections",
+        "task notifications"
+      ],
+      "deduplicationKey": "exact UTF-8 visible-text SHA-256"
+    },
+    "measurement": {
+      "userRoleRecords": 2062,
+      "eligibleTurnOccurrences": 47,
+      "uniqueUserMessages": 36,
+      "duplicateOccurrences": 11,
+      "findingIds": 46,
+      "findingIdsAreNotUserMessages": true,
+      "countExplanation": "46はレビューが分解した原子finding ID数。36は2 sessionのeligible user-visible turnを本文非保存のcontent SHA-256で重複排除した数。1 turnから複数findingが生じ、同じturnが継続sessionへ複製されるため一致しない。"
+    },
+    "turns": [
+      {
+        "id": "ut-01",
+        "contentSha256": "4d1caece66c16cb1b028d0a607fe3d73419cd4a6a2ef02eec4a9e9dda4108437",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 1, "sourceLineNumber": 366, "filterClass": "origin-human-string", "eventSha256": "c772c25570609db0419396755bc56ef5a49da1da72b20d59b3f03255892d3b96"}
+        ],
+        "disposition": {"code": "operational-followup", "detail": "既に完了した別タスクの確認依頼で、新しい恒久要件は追加していない。"}
+      },
+      {
+        "id": "ut-02",
+        "contentSha256": "eb8814ce2facab8324c3737dace4fa9851ac5a5c6018118ffe633df2ac9803bb",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 2, "sourceLineNumber": 471, "filterClass": "origin-human-string", "eventSha256": "9e0437009fa5a2079a4cab73f4fdf314c2e520a6d9d4c71742bf36aaa5f98997"},
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 6, "sourceLineNumber": 1153, "filterClass": "origin-human-string", "eventSha256": "70e5d3c15007014bf07671ea478b1c401de51d03f136376a07654624841bebc5"}
+        ],
+        "findingIds": ["cx-g2", "cx-h9"]
+      },
+      {
+        "id": "ut-03",
+        "contentSha256": "0102ff7f22ed8ca0dff632b69a060826430d3e5a8d91c1eb9a1ec0ed0e9f6907",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 3, "sourceLineNumber": 623, "filterClass": "origin-human-string", "eventSha256": "d7823a3707f5b6c07d27d6e533d68a2d3554fe59546994ba89635621440f475c"}
+        ],
+        "findingIds": [
+          "cx-a1", "cx-a2", "cx-a3", "cx-a4", "cx-a5", "cx-a6",
+          "cx-b1", "cx-b2", "cx-b3", "cx-b4", "cx-b5", "cx-b6", "cx-b7", "cx-b8", "cx-b9", "cx-b10", "cx-b11",
+          "cx-c1", "cx-c2", "cx-c3", "cx-d1", "cx-d2", "cx-d3",
+          "cx-e1", "cx-e2", "cx-e3", "cx-e4", "cx-e5", "cx-e6", "cx-e7", "cx-e8",
+          "cx-f1", "cx-f2", "cx-g1", "cx-g2", "cx-g3", "cx-g4"
+        ]
+      },
+      {
+        "id": "ut-04",
+        "contentSha256": "b7fb8170f967a2d419b855c0a9444776d3c90d8c59bb8500f9f8fa8be874db5e",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 4, "sourceLineNumber": 658, "filterClass": "origin-human-string", "eventSha256": "fc122ce70f3fc7df26f209c91cdcddee48c5f51841c03f7f75ef8b3ba660bd7a"}
+        ],
+        "findingIds": ["cx-a1", "cx-a2", "cx-a3", "cx-a4", "cx-a5", "cx-a6", "cx-d3", "cx-e1", "cx-e2", "cx-f2", "cx-g1", "cx-g2", "cx-g3", "cx-g4", "cx-h5", "cx-h6"]
+      },
+      {
+        "id": "ut-05",
+        "contentSha256": "555e362563fda3d1fc8d07787879683b30e013e82c8a993ce3e963fff2337907",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 5, "sourceLineNumber": 698, "filterClass": "origin-human-string", "eventSha256": "9157c6eda1b392afad67600603e327c5f39e5ed44be09a3f214e176708c5dfa5"}
+        ],
+        "findingIds": ["cx-g2", "cx-h9"]
+      },
+      {
+        "id": "ut-06",
+        "contentSha256": "05d1ea18e90aaec5fd9ea6c9aa8ae0beb5c6ed289460a8a30241c8b7ee443619",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 7, "sourceLineNumber": 1158, "filterClass": "origin-human-string", "eventSha256": "3674e1c120f652a77cd56398e07b54d6d63efe45adc85fff54ed6d6069b9390e"}
+        ],
+        "findingIds": ["cx-e1", "cx-e2", "cx-e3", "cx-e4", "cx-e5", "cx-e6", "cx-e7", "cx-e8", "cx-h1", "cx-h2", "cx-h3", "cx-h4", "cx-h5", "cx-h6", "cx-h7", "cx-h9"]
+      },
+      {
+        "id": "ut-07",
+        "contentSha256": "0ab01681a1ab3ea595207d533f853cee171c6961cf2a114a802bd5c1c2421e4e",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 8, "sourceLineNumber": 1225, "filterClass": "origin-human-string", "eventSha256": "99a608312276e41f41608ff47f8c8abc53b49345bc512352f62672fb92372f21"}
+        ],
+        "findingIds": ["cx-e1", "cx-e2", "cx-e3", "cx-e4", "cx-e5", "cx-e6", "cx-e7", "cx-e8", "cx-h1", "cx-h2", "cx-h3", "cx-h4", "cx-h5", "cx-h6", "cx-h7", "cx-h9"]
+      },
+      {
+        "id": "ut-08",
+        "contentSha256": "92ff14e5d2734cf5a648541566a14a614d449c3fa72b418885e83e19c965f72e",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 9, "sourceLineNumber": 1255, "filterClass": "origin-human-string", "eventSha256": "28337a8e899d638ba564ced7c3b35c52911ee000ac648a5085f4735624d3eb09"}
+        ],
+        "findingIds": ["cx-f2", "cx-h6"]
+      },
+      {
+        "id": "ut-09",
+        "contentSha256": "eca5e487618e8d9587cbab510710a102b01ad24cf3026714d7133b20eee3e555",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 10, "sourceLineNumber": 1488, "filterClass": "origin-human-string", "eventSha256": "6b8bbdeeee2a6628f0e26338731ada9a6675d94b6b175f0d519e96316c339c3e"},
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 23, "sourceLineNumber": 2570, "filterClass": "origin-human-string", "eventSha256": "ebd9631880f7e502a9fb842d72bafe95e4c088911da79041ef21893ad35bb7ae"}
+        ],
+        "disposition": {"code": "operational-followup", "detail": "既出作業の全面実行指示で、新しい原子要件は追加していない。"}
+      },
+      {
+        "id": "ut-10",
+        "contentSha256": "e6ef802ca88a44f9007651c5960a4f6257bbe8ade85b81b1cc4154f3b8887e6e",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 11, "sourceLineNumber": 1627, "filterClass": "origin-human-string", "eventSha256": "c641d358b0bda9a7fa42c44b3ac2ea08ffe6ffa17e3c868ab64d1d6c653026a9"}
+        ],
+        "findingIds": ["cx-a1", "cx-a2", "cx-a3", "cx-a4", "cx-a5", "cx-a6", "cx-d3", "cx-g1", "cx-g2", "cx-g3", "cx-g4"]
+      },
+      {
+        "id": "ut-11",
+        "contentSha256": "67cb50dee9d4ec457011a6b352d2e2359f12d841470cf65de9332fdb2320db98",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 12, "sourceLineNumber": 1788, "filterClass": "origin-human-string", "eventSha256": "301a4aed78d7091686eaf59378271733fda76c333f27f96fd7f695f122428116"}
+        ],
+        "findingIds": ["cx-a1", "cx-a2", "cx-a3", "cx-a4", "cx-a5", "cx-a6", "cx-d3", "cx-g1", "cx-g2", "cx-g3", "cx-g4"]
+      },
+      {
+        "id": "ut-12",
+        "contentSha256": "29f854e5c07bd9928adb30853d7c226d88b34a02d846bcdb5d218725583b1f63",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 13, "sourceLineNumber": 1853, "filterClass": "origin-human-string", "eventSha256": "de7b35d92c73a0acc0061f668835cd2da960106b8472dcdbc65de63996f04c06"}
+        ],
+        "findingIds": ["cx-a1", "cx-a2", "cx-a3", "cx-a4", "cx-a5", "cx-a6", "cx-d3", "cx-g1", "cx-g2", "cx-g3", "cx-g4", "cx-h5", "cx-h6"]
+      },
+      {
+        "id": "ut-13",
+        "contentSha256": "d81d5db97eb3229eaadeb41c364b4765011af18053ce866d0e66dc0f9bab5d24",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 14, "sourceLineNumber": 1987, "filterClass": "origin-human-string", "eventSha256": "8abbdec9b49e6c84deaf8296d4ee0b45e41df39ef140008431867b3f4372dd14"}
+        ],
+        "disposition": {"code": "runtime-status-query", "detail": "実行中タスクの稼働確認で、新しい成果物要件は追加していない。"}
+      },
+      {
+        "id": "ut-14",
+        "contentSha256": "4ce721c71cbdd1f3b22748758eaccf253577e5836b428e3ab06a8d2cb781c843",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 15, "sourceLineNumber": 2040, "filterClass": "origin-human-string", "eventSha256": "61ab6b45b82213cba51c24d66dbdde5c4d9ebf8673e72e89b201140d77d16a2a"}
+        ],
+        "disposition": {"code": "runtime-status-query", "detail": "実行中タスクの稼働確認で、新しい成果物要件は追加していない。"}
+      },
+      {
+        "id": "ut-15",
+        "contentSha256": "663270e9ba9d532e0e4c1035545bb9adf704039ccd5edb5ec0688e4d713eefc8",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 16, "sourceLineNumber": 2066, "filterClass": "origin-human-string", "eventSha256": "b6c30490f9ce411775d9e450448c418328fd0768d43e71b4c8ec8ec17c29b86a"}
+        ],
+        "disposition": {"code": "runtime-status-query", "detail": "進捗確認のみで、新しい成果物要件は追加していない。"}
+      },
+      {
+        "id": "ut-16",
+        "contentSha256": "e5acedafc788dbbf7522d93f6f864b241a1ab72d9830658c2e35555e19f88332",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 17, "sourceLineNumber": 2084, "filterClass": "origin-human-string", "eventSha256": "fd93c1a12382ac712e5726ad9d2c4313897e3764045fd40279100544fd8e707a"}
+        ],
+        "findingIds": ["cx-e2", "cx-e3", "cx-h5"]
+      },
+      {
+        "id": "ut-17",
+        "contentSha256": "0110d35005aa61d667f70c2741808fcc3bf5f08c2c788818dbb23a73c4f40761",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 18, "sourceLineNumber": 2105, "filterClass": "origin-human-string", "eventSha256": "950eb471f122499cd1437d23a3ecf7bde1932ef61d7337b32fc314f1aa352a4b"}
+        ],
+        "findingIds": ["cx-a1", "cx-a2", "cx-a3", "cx-a4", "cx-a5", "cx-a6", "cx-d3", "cx-e1", "cx-e2", "cx-e3", "cx-e4", "cx-e5", "cx-e6", "cx-e7", "cx-e8", "cx-g1", "cx-g2", "cx-g3", "cx-g4", "cx-h1", "cx-h2", "cx-h3", "cx-h4", "cx-h5", "cx-h6", "cx-h7"]
+      },
+      {
+        "id": "ut-18",
+        "contentSha256": "992c8148884f2b5aa028df215e1382671ef7d103988303fb0979302465cd5c32",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 19, "sourceLineNumber": 2196, "filterClass": "origin-human-string", "eventSha256": "038bafdadfcd6714bac617a85558acf685ed600758c9150a38ba6155b1387db1"}
+        ],
+        "disposition": {"code": "runtime-status-query", "detail": "進捗確認のみで、新しい成果物要件は追加していない。"}
+      },
+      {
+        "id": "ut-19",
+        "contentSha256": "0b7366dd0d928d7d2ddcca13d8239e9dc93915221ade9dc64755a6d63e61ec90",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 20, "sourceLineNumber": 2210, "filterClass": "origin-human-string", "eventSha256": "7e3719ca18a612477b5b2d3fcd1188d6d18fa1b56a61f903be48bedc8c44c053"}
+        ],
+        "disposition": {"code": "runtime-status-query", "detail": "進捗確認のみで、新しい成果物要件は追加していない。"}
+      },
+      {
+        "id": "ut-20",
+        "contentSha256": "acd4183431f140b6a400648f0aa05799bf33565990b2f6e175b872db2ecb010f",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 21, "sourceLineNumber": 2258, "filterClass": "origin-human-string", "eventSha256": "6a5830e6f95b5d0a6862de4860d2a2b52e9a9672b2b0124f473359863b9fc172"}
+        ],
+        "findingIds": ["cx-g2", "cx-g3", "cx-h9"]
+      },
+      {
+        "id": "ut-21",
+        "contentSha256": "3359dbfd1ac532cf962a3ff08eff64c9a0a80ad7226dc7a014f507979d1b90ee",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 22, "sourceLineNumber": 2312, "filterClass": "origin-human-string", "eventSha256": "91cce4bdda84e82e6e02605e1a11c0e3adafaf47a9d075430be45829ec4fc06b"}
+        ],
+        "disposition": {"code": "operational-followup", "detail": "既出作業の全面実行指示で、新しい原子要件は追加していない。"}
+      },
+      {
+        "id": "ut-22",
+        "contentSha256": "198fe0e6ad0e540bfd8f9800f7e33f172d234c0a61360063f5ef079456d81f95",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 24, "sourceLineNumber": 5444, "filterClass": "origin-human-string", "eventSha256": "5dbdcf112969f026fd53d9516b1396d85455d6d78b3f11a2a7d7bdd67d628da0"},
+          {"sourceId": "claude-session-f4a4ec5b", "sourceTurnOrdinal": 1, "sourceLineNumber": 1911, "filterClass": "origin-human-string", "eventSha256": "ee1c99865c1c7e20ada9fb4ed302d20172a72d2f20ecd69fc7855ed8af024030"}
+        ],
+        "findingIds": ["cx-e1", "cx-e2", "cx-e3", "cx-e4", "cx-e5", "cx-e6", "cx-e7", "cx-e8", "cx-g2", "cx-h1", "cx-h2", "cx-h3", "cx-h4", "cx-h5", "cx-h6", "cx-h7", "cx-h8"]
+      },
+      {
+        "id": "ut-23",
+        "contentSha256": "912b8949a9769c035d212002d8e068ec70a52976e937df258797a9779a9a5fcd",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 25, "sourceLineNumber": 5543, "filterClass": "origin-human-string", "eventSha256": "455e3786367368fb43dd0fea4397cf34dc429a04eb514dbd9249e53e2884b6d2"},
+          {"sourceId": "claude-session-f4a4ec5b", "sourceTurnOrdinal": 2, "sourceLineNumber": 1988, "filterClass": "origin-human-string", "eventSha256": "9b93d01c939eae5e94f07a0c85e8d9254fd863ef5c521f3c4603db88e1e8f388"}
+        ],
+        "findingIds": ["cx-h1", "cx-h2", "cx-h3", "cx-h7"]
+      },
+      {
+        "id": "ut-24",
+        "contentSha256": "cf11dda79cecf049efd081a479a61a98eed9ebdcabf5ceabbbe215a79dcb7fe4",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 26, "sourceLineNumber": 5581, "filterClass": "origin-human-string", "eventSha256": "589d8ffba31645971c1c01a9e4a2b9f4670eaac0ff0c01ae18e0ad2beba1c6e0"},
+          {"sourceId": "claude-session-f4a4ec5b", "sourceTurnOrdinal": 3, "sourceLineNumber": 2014, "filterClass": "origin-human-string", "eventSha256": "a4c4f32251cd0aaa6c9879911531f6de4e4e10d6d96a5316516fc31f7053ce96"}
+        ],
+        "findingIds": ["cx-h2", "cx-h3"]
+      },
+      {
+        "id": "ut-25",
+        "contentSha256": "e401f516a3116ddf5da6922a95ed8d7cd3c255f8af06eb4a04263fdd6f5abba7",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 27, "sourceLineNumber": 5609, "filterClass": "origin-human-string", "eventSha256": "50c1cf9a047342638c77257fca8111e5de67602af16179fe7f6b34badb6cfde5"},
+          {"sourceId": "claude-session-f4a4ec5b", "sourceTurnOrdinal": 4, "sourceLineNumber": 2035, "filterClass": "origin-human-string", "eventSha256": "eb9713f3de9387215ccee7b4ff7f4597799cfc3fafc9197d2176707975e3adab"}
+        ],
+        "findingIds": ["cx-h1", "cx-h3"]
+      },
+      {
+        "id": "ut-26",
+        "contentSha256": "996abe530bcdd97e48958e7ab0788e11b5d5157376b8503f782223532ae42600",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 28, "sourceLineNumber": 5636, "filterClass": "origin-human-string", "eventSha256": "6fddb52198f04e840c14f4fc3bbd09f19c48e6fec9731f51194dd7d800f64800"},
+          {"sourceId": "claude-session-f4a4ec5b", "sourceTurnOrdinal": 5, "sourceLineNumber": 2055, "filterClass": "origin-human-string", "eventSha256": "8366fa60e4ea7218afaee9e147c056d22aa0684e85131ca04a6b7da23b38c17b"}
+        ],
+        "findingIds": ["cx-h3"]
+      },
+      {
+        "id": "ut-27",
+        "contentSha256": "da95af5d820f785049ee9dd0cd4da28a73d48bbfec8b8be36abef503e6af4961",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 29, "sourceLineNumber": 5673, "filterClass": "origin-human-string", "eventSha256": "c4a549497ab79550afabf025ce7db96d77647e74f810e63921caa752b54ef0a9"},
+          {"sourceId": "claude-session-f4a4ec5b", "sourceTurnOrdinal": 6, "sourceLineNumber": 2085, "filterClass": "origin-human-string", "eventSha256": "97b132537a7a063cd908f28e5114eef3b6c06f371b2edba4f884598ae19a9dbf"}
+        ],
+        "findingIds": ["cx-h8"]
+      },
+      {
+        "id": "ut-28",
+        "contentSha256": "a288246872d8b4e1e26201b47f57307fba58647907b1b74bb2bbab35b7c3e449",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 30, "sourceLineNumber": 5923, "filterClass": "origin-human-string", "eventSha256": "c3afca5e809e5bbfee568eda4287cc7e3bcb099c1d634ca86f77f301a791d64f"},
+          {"sourceId": "claude-session-f4a4ec5b", "sourceTurnOrdinal": 7, "sourceLineNumber": 2283, "filterClass": "origin-human-string", "eventSha256": "31e9055db085affb1cf283cc17158082b837b8882727f4c4714d432a04019256"}
+        ],
+        "findingIds": ["cx-h8"]
+      },
+      {
+        "id": "ut-29",
+        "contentSha256": "ebe6fef99a2547217ef9769907a1f615a0821639a8e2ceab699f3f5d82bf027a",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 31, "sourceLineNumber": 6038, "filterClass": "origin-human-string", "eventSha256": "22b6fe51341fe5968410ef90a81fc53906143382fbebb3d5cfd33a7716e651ae"},
+          {"sourceId": "claude-session-f4a4ec5b", "sourceTurnOrdinal": 8, "sourceLineNumber": 2371, "filterClass": "origin-human-string", "eventSha256": "91dfc6a063cac35e623949bd2c01c138c2ddfd0cb012c53b8cb04b53bd624568"}
+        ],
+        "findingIds": ["cx-h8"]
+      },
+      {
+        "id": "ut-30",
+        "contentSha256": "34e75dfae7d467f23144260ae182e45ea6cdc97edfc45dc0c2a20c99bafb4e61",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 32, "sourceLineNumber": 6072, "filterClass": "origin-human-string", "eventSha256": "44609c3a2339bfc8e11a6fb1309a39ec49ccf2ce5f35d0ee462ba40a18b5e936"}
+        ],
+        "findingIds": ["cx-h8"]
+      },
+      {
+        "id": "ut-31",
+        "contentSha256": "537b0a1dcbd6cd3aca54b52cc75b25a994abc303bd7afe8ef665bb545ef013b6",
+        "occurrences": [
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 33, "sourceLineNumber": 6075, "filterClass": "plain-text-control", "eventSha256": "ebaa125a1007fccc2aad446cc07f2137f528d9c0bea213760c8600f7993f3351"},
+          {"sourceId": "claude-session-c742a064", "sourceTurnOrdinal": 34, "sourceLineNumber": 6081, "filterClass": "plain-text-control", "eventSha256": "acc03b3aa10d6e7d5b06ca1432565d3e5fcd8e580ee8777e5c294354a8500072"}
+        ],
+        "disposition": {"code": "host-control-marker", "detail": "ホストが記録した中断マーカーで、意味上のユーザー要件ではない。"}
+      },
+      {
+        "id": "ut-32",
+        "contentSha256": "aadb1883baa1534061a1ab02558a7408cdc6f98f4d983e04fc406e53f74b792a",
+        "occurrences": [
+          {"sourceId": "claude-session-f4a4ec5b", "sourceTurnOrdinal": 9, "sourceLineNumber": 2391, "filterClass": "origin-human-string", "eventSha256": "edf939cf01b2a5a69a8b8345de59daaf23ad9f2328cedadd348c3e597b8efb0e"}
+        ],
+        "findingIds": [
+          "cx-a1", "cx-a2", "cx-a3", "cx-a4", "cx-a5", "cx-a6",
+          "cx-b1", "cx-b2", "cx-b3", "cx-b4", "cx-b5", "cx-b6", "cx-b7", "cx-b8", "cx-b9", "cx-b10", "cx-b11",
+          "cx-c1", "cx-c2", "cx-c3", "cx-d1", "cx-d2", "cx-d3",
+          "cx-e1", "cx-e2", "cx-e3", "cx-e4", "cx-e5", "cx-e6", "cx-e7", "cx-e8",
+          "cx-f1", "cx-f2", "cx-g1", "cx-g2", "cx-g3", "cx-g4",
+          "cx-h1", "cx-h2", "cx-h3", "cx-h4", "cx-h5", "cx-h6", "cx-h7", "cx-h8", "cx-h9"
+        ]
+      },
+      {
+        "id": "ut-33",
+        "contentSha256": "14b0215cb3d782e4826da63874fa3566c34d164a2a0a29d762bebb1c0cd32c2f",
+        "occurrences": [
+          {"sourceId": "claude-session-f4a4ec5b", "sourceTurnOrdinal": 10, "sourceLineNumber": 2574, "filterClass": "origin-human-string", "eventSha256": "feb3b107c8732cf768581b74bab67aa12c2dccaa09b05d5279b5698b4510f9d4"}
+        ],
+        "disposition": {"code": "metadata-query", "detail": "現在のセッション識別子だけを尋ねたメタデータ照会。"}
+      },
+      {
+        "id": "ut-34",
+        "contentSha256": "53fa924869159ee68a37f94a83186f4449656617984cf3795d45864f3b13473a",
+        "occurrences": [
+          {"sourceId": "claude-session-f4a4ec5b", "sourceTurnOrdinal": 11, "sourceLineNumber": 2601, "filterClass": "origin-human-string", "eventSha256": "fb6b5ff41c4e35cca179c8a05f4576fbac4c93284f7d49f564f283be9a2264f0"}
+        ],
+        "findingIds": ["cx-g2", "cx-h1", "cx-h2", "cx-h3", "cx-h4", "cx-h5", "cx-h6", "cx-h7", "cx-h8", "cx-h9"]
+      },
+      {
+        "id": "ut-35",
+        "contentSha256": "510b84137541cf4b785e6d2a9430fa96906a1d5e1f6247b29db87125db82fb75",
+        "occurrences": [
+          {"sourceId": "claude-session-f4a4ec5b", "sourceTurnOrdinal": 12, "sourceLineNumber": 3143, "filterClass": "origin-human-string", "eventSha256": "568e11c22cb9eb1d091b55acd0e6b84de9aa55105552683b395a9eb2584e59bb"}
+        ],
+        "findingIds": ["cx-g2", "cx-h1", "cx-h2", "cx-h3", "cx-h4", "cx-h5", "cx-h6", "cx-h7", "cx-h8", "cx-h9"]
+      },
+      {
+        "id": "ut-36",
+        "contentSha256": "c5c3df248eaaa492712e0f65960e8e3f3bae2552ee807a4132574534c88f64c7",
+        "occurrences": [
+          {"sourceId": "claude-session-f4a4ec5b", "sourceTurnOrdinal": 13, "sourceLineNumber": 3427, "filterClass": "origin-human-string", "eventSha256": "18dcad177f16561e87b8e213e4338cb29697f7cd9a8057eeb3e2225366568f28"}
+        ],
+        "disposition": {"code": "acknowledgement-only", "detail": "直前の依頼を開始するための了承で、新しい要件は追加していない。"}
+      }
+    ],
+    "coverageSha256": "d4149cee8e6e00f3fcd95505f83b3f065080a39299c771e63950d2052032cffa",
+    "independentAgentSignoff": {
+      "status": "pending",
+      "reviewerAgentId": null,
+      "reviewedAt": null,
+      "reviewedCoverageSha256": null,
+      "verdict": null
+    }
+  },
+  "rounds": [
+    {
+      "id": "codex-2026-08-31",
+      "sourceIds": ["claude-session-c742a064", "claude-session-f4a4ec5b"],
+      "expectedFindingIds": [
+        "cx-a1", "cx-a2", "cx-a3", "cx-a4", "cx-a5", "cx-a6",
+        "cx-b1", "cx-b2", "cx-b3", "cx-b4", "cx-b5", "cx-b6", "cx-b7", "cx-b8", "cx-b9", "cx-b10", "cx-b11",
+        "cx-c1", "cx-c2", "cx-c3", "cx-d1", "cx-d2", "cx-d3"
+      ]
+    },
+    {
+      "id": "codex-2026-09-01",
+      "sourceIds": ["claude-session-c742a064", "claude-session-f4a4ec5b"],
+      "expectedFindingIds": [
+        "cx-e1", "cx-e2", "cx-e3", "cx-e4", "cx-e5", "cx-e6", "cx-e7", "cx-e8",
+        "cx-f1", "cx-f2", "cx-g1", "cx-g2", "cx-g3", "cx-g4"
+      ]
+    },
+    {
+      "id": "claude-session-intake-2026-09-01",
+      "sourceIds": ["claude-session-c742a064", "claude-session-f4a4ec5b", "workflow-c742-analysis", "workflow-f4-analysis"],
+      "expectedFindingIds": ["cx-h1", "cx-h2", "cx-h3", "cx-h4", "cx-h5", "cx-h6", "cx-h7", "cx-h8", "cx-h9"]
+    }
+  ]
+}
