@@ -56,23 +56,37 @@ const commands = [
 ];
 
 // ビルドは node ではなく npm 経由なので別枠。
-const buildCommand = { command: "npm", args: ["run", "build"], label: "vite build" };
+// Windows の npm は npm.cmd で、.cmd はシェルを通さないと起動できない。
+// "npm" のままシェルなしで呼んでいたので、Windows の CI は 2026-08-29 から
+// ビルドの手前（spawnSync npm ENOENT）で止まり、テストが1件も走っていなかった。
+const isWindows = process.platform === "win32";
+const buildCommand = { command: isWindows ? "npm.cmd" : "npm", args: ["run", "build"], label: "vite build" };
 
 let skipped = [];
+// process.exit() は書きかけの stdout を捨てる。CI のログはパイプで、捕まえた
+// テスト出力（数 MB）を書いている途中で exit していたので、GitHub Actions の
+// ログは macOS で 265件目、Linux で 246件目の途中で切れ、それより後の失敗と
+// 集計が見えなかった。手元ではファイルへ出していた（同期書き込み）ので切れない。
+// 終了コードだけ決め、残りの工程を飛ばし、書き終わるのを待って自然に終わる。
+let stopped = false;
+let skipsCounted = false;
 
 {
   const build = spawnSync(buildCommand.command, buildCommand.args, {
-    cwd: rootDir, env: process.env, stdio: "inherit", shell: false,
+    // 引数は固定の2語だけなので、シェルを通しても展開される文字は無い。
+    cwd: rootDir, env: process.env, stdio: "inherit", shell: isWindows,
   });
   if (build.error) throw build.error;
   if (build.status !== 0) {
     process.stdout.write(`\n${buildCommand.label} が失敗しました。UI のテストは App.jsx を`
       + "レンダーしないので、ビルドが通らない状態でも大半が緑になります。\n");
-    process.exit(build.status ?? 1);
+    process.exitCode = build.status ?? 1;
+    stopped = true;
   }
 }
 
 for (const { args, countsSkips } of commands) {
+  if (stopped) break;
   // skip を数える回だけ出力を捕まえる。捕まえたぶんはそのまま流し直すので、
   // 見え方は変わらない。
   const result = spawnSync(process.execPath, args, {
@@ -87,11 +101,18 @@ for (const { args, countsSkips } of commands) {
     const output = String(result.stdout || "");
     process.stdout.write(output);
     skipped.push(...parseTapSkips(output));
+    skipsCounted = true;
   }
-  if (result.status !== 0) process.exit(result.status ?? 1);
+  if (result.status !== 0) {
+    process.exitCode = result.status ?? 1;
+    stopped = true;
+  }
 }
 
-if (skipped.length > 0) {
+if (!skipsCounted) {
+  // テストの手前（ビルド）で止まった。skip を数えていないので、skip の集計も
+  // 許可リストの判定も出さない——出すと「skip なし」「全項目が stale」と誤って読める。
+} else if (skipped.length > 0) {
   process.stdout.write(`\n前提が無くて走らなかった検査 ${skipped.length}件:\n`);
   for (const entry of skipped) process.stdout.write(`  - ${entry.name}\n      ${entry.reason}\n`);
   // 理由の無い skip は、何を用意すれば走るのか誰にも分からないまま残る。
