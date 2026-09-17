@@ -138,13 +138,13 @@ test("Koya story review binds ordered reversal beats to the exact script and pro
 【カット1：攻撃】
 ${villain}: お前には無理だ。
 ${villain}: 証拠などない。
-${villain}: 見本5c89・試験用
+${villain}: 見本37の試験文言の
 
 【カット2：逆転】
-${signal}: 見本a16a・試験用の合成。
+${signal}: 見本36の試験文言の試験文。
 ナレーション: 改ざん前の記録が映し出された。
 ${protagonist}: 私の仕事は、あなたの嘘では消えません。
-${elder}: 見本19b1。
+${elder}: 見本38の試。
 `;
   const parsed = parseMangaScript(scriptText);
   const ids = parsed.utterances.map((row) => row.id);
@@ -218,7 +218,7 @@ test("Koya fixed cast cannot be replaced by episode-local candidates and must ca
     const member = memberFor("nodoka");
     return member.hiddenName || member.name;
   })();
-  const parsed = parseMangaScript(`${horoName}: 見本fb54・試験用の合成`);
+  const parsed = parseMangaScript(`${horoName}: 見本35の試験文言の試験文`);
   const baseCharacter = {
     id: "horo",
     name: horoName,
@@ -378,7 +378,7 @@ test("eye-open beats are drafted from the script, reviewed per member and varian
   const nameOf = (member) => member.hiddenName || member.name;
   const scriptText = `タイトル: 開眼の確認
 【カット1：対面】
-${nameOf(occasional)}: 見本19b1。
+${nameOf(occasional)}: 見本38の試。
 ナレーション: ${nameOf(recurring)}の糸目が、すっと開いた。
 ${nameOf(recurring)}: ほな、いこか。`;
   const parsed = parseMangaScript(scriptText);
