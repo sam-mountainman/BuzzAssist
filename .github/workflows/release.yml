@@ -43,8 +43,12 @@ jobs:
         run: npm ci
       - name: Install python QA dependencies for attribute gates
         # 人物の同一性チェック（scripts/audit-koya-character-identity.py）は cv2・numpy・PIL を読む。
-        # PIL が無いと下書き作成の9件が「Python実行環境を解決できない」で落ちる。
-        run: python -m pip install opencv-python-headless numpy pillow
+        # PIL が無いと下書き作成の23件が「Python実行環境を解決できない」で落ちる。
+        # OpenCV 5 は cv2.CascadeClassifier を本体から外したので 4 系に固定する。
+        run: python -m pip install "opencv-python-headless<5" numpy pillow
+      # 動画のレンダーと実MP4の監査は ffmpeg / ffprobe に乗っている（cross-platform.yml と同じ理由）。
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - name: Verify tag and plugin versions
         run: npm run release:verify -- "$GITHUB_REF_NAME"
       - name: Run full validation
