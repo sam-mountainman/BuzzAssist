@@ -42,7 +42,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Install python QA dependencies for attribute gates
-        run: python -m pip install opencv-python-headless numpy
+        # 人物の同一性チェック（scripts/audit-koya-character-identity.py）は cv2・numpy・PIL を読む。
+        # PIL が無いと下書き作成の9件が「Python実行環境を解決できない」で落ちる。
+        run: python -m pip install opencv-python-headless numpy pillow
       - name: Verify tag and plugin versions
         run: npm run release:verify -- "$GITHUB_REF_NAME"
       - name: Run full validation
