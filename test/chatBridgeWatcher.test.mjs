@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
@@ -24,7 +24,7 @@ test("ディレクトリ監視が失敗しても、MCP のプロセスは落ち�
 
   // 子プロセスで bridge を起動し、watcher に error を投げてから生存を確認する。
   const program = `
-    import { startChatBridgeWorker } from ${JSON.stringify(join(root, "lib/chatBridge.mjs"))};
+    import { startChatBridgeWorker } from ${JSON.stringify(pathToFileURL(join(root, "lib/chatBridge.mjs")).href)};
     const stop = startChatBridgeWorker({ canvasDir: ${JSON.stringify(dir)} });
     if (!stop.watcher) { console.log("NO_WATCHER"); process.exit(3); }
     // EMFILE 相当を非同期に投げる。リスナーが無ければここでプロセスが死ぬ。
