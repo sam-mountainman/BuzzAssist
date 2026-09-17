@@ -21,7 +21,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
-import { redactForPlatform } from "../lib/harnessRunReceipt.mjs";
+import { isGateNotInForce, redactForPlatform } from "../lib/harnessRunReceipt.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_RECEIPT_DIR = path.join(REPO_ROOT, "docs", "learning", "receipts");
@@ -77,8 +77,11 @@ export function rollup(entries, { harnessId = null } = {}) {
     if (receipt.outcome === "pass") bucket.passed += 1; else bucket.failed += 1;
     if (receipt.outcomeOverridden) bucket.outcomeOverridden += 1;
     for (const [gateId, gate] of Object.entries(receipt.gates || {})) {
-      const stat = bucket.gates[gateId] || (bucket.gates[gateId] = { pass: 0, fail: 0, skip: 0 });
-      if (stat[gate.verdict] !== undefined) stat[gate.verdict] += 1;
+      const stat = bucket.gates[gateId] || (bucket.gates[gateId] = { pass: 0, fail: 0, skip: 0, notInForce: 0 });
+      // 当時の契約にまだ無かった保証は、この版の弱点ではない。skip に混ぜると、
+      // 過去作を記録し直しただけで「測れていないゲート」の上位に並ぶ。
+      const key = isGateNotInForce(gate) ? "notInForce" : gate.verdict;
+      if (stat[key] !== undefined) stat[key] += 1;
     }
     for (const skill of Object.values(receipt.harnessBuild?.genreSkills || {})) {
       if (skill.learnedOverlay) bucket.skillOverlays.add(skill.learnedOverlay.slice(0, 12));
