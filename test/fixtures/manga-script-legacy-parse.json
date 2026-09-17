@@ -1,0 +1,1172 @@
+{
+  "purpose": "parseMangaScript output for the legacy cut-heading format, generated at bf85e67 (before the scene-script format existed). `expected` is the full output without options; `digests` are sha256 of JSON.stringify (key order included) for the other option variants; `locationIds` are createMangaScriptImagePlan cut locations.",
+  "registry": {
+    "characters": [
+      {
+        "id": "tanaka",
+        "name": "田中 悠斗",
+        "aliases": [
+          "田中"
+        ],
+        "status": "approved"
+      },
+      {
+        "id": "kurokawa",
+        "name": "黒川 部長",
+        "aliases": [
+          "黒川"
+        ],
+        "status": "approved"
+      },
+      {
+        "id": "sato",
+        "name": "佐藤 誠司",
+        "aliases": [
+          "佐藤"
+        ],
+        "status": "approved"
+      }
+    ],
+    "voices": []
+  },
+  "scripts": [
+    {
+      "path": "examples/manga-character-pipeline/script.txt",
+      "scriptSha256": "6458dfb953eb71598224ed159d808c91055f62085dec4153203d99b6243904a7",
+      "expected": {
+        "title": "契約書の罠を見抜いた助っ人",
+        "cuts": [
+          {
+            "id": "cut-01",
+            "number": 1,
+            "purpose": "夜のオフィス",
+            "utterances": [
+              {
+                "id": "cut-01-u01",
+                "cutId": "cut-01",
+                "order": 1,
+                "speakerName": "ナレーション",
+                "speakerId": "narration",
+                "text": "時計は午後10時。誰もいない営業部で、田中悠斗だけが契約書を直していた。",
+                "bubbleId": "bubble-cut-01-u01",
+                "preset": "narration"
+              },
+              {
+                "id": "cut-01-u02",
+                "cutId": "cut-01",
+                "order": 2,
+                "speakerName": "田中 悠斗",
+                "speakerId": "speaker-82a09b65f5",
+                "text": "また僕だけ残業か……。でも、明日の契約だけは失敗できない",
+                "bubbleId": "bubble-cut-01-u02",
+                "preset": "dialogue"
+              }
+            ]
+          },
+          {
+            "id": "cut-02",
+            "number": 2,
+            "purpose": "黒川が契約書を投げる",
+            "utterances": [
+              {
+                "id": "cut-02-u01",
+                "cutId": "cut-02",
+                "order": 1,
+                "speakerName": "黒川 部長",
+                "speakerId": "speaker-c9efab257e",
+                "text": "田中、この条件のまま今夜中に先方へ送れ。余計な確認はするな",
+                "bubbleId": "bubble-cut-02-u01",
+                "preset": "dialogue"
+              },
+              {
+                "id": "cut-02-u02",
+                "cutId": "cut-02",
+                "order": 2,
+                "speakerName": "田中 悠斗",
+                "speakerId": "speaker-82a09b65f5",
+                "text": "ですが部長、この違約金の数字、昨日の資料と違います",
+                "bubbleId": "bubble-cut-02-u02",
+                "preset": "dialogue"
+              }
+            ]
+          },
+          {
+            "id": "cut-03",
+            "number": 3,
+            "purpose": "田中の不安",
+            "utterances": [
+              {
+                "id": "cut-03-u01",
+                "cutId": "cut-03",
+                "order": 1,
+                "speakerName": "田中 悠斗",
+                "speakerId": "speaker-82a09b65f5",
+                "text": "もし僕の名前で送ったら、責任まで全部押しつけられるんじゃ……",
+                "bubbleId": "bubble-cut-03-u01",
+                "preset": "thought"
+              }
+            ]
+          },
+          {
+            "id": "cut-04",
+            "number": 4,
+            "purpose": "黒川の圧力",
+            "utterances": [
+              {
+                "id": "cut-04-u01",
+                "cutId": "cut-04",
+                "order": 1,
+                "speakerName": "黒川 部長",
+                "speakerId": "speaker-c9efab257e",
+                "text": "口答えする暇があるなら送信しろ。君の評価を決めるのは私だぞ",
+                "bubbleId": "bubble-cut-04-u01",
+                "preset": "dialogue"
+              }
+            ]
+          },
+          {
+            "id": "cut-05",
+            "number": 5,
+            "purpose": "助っ人が現れる",
+            "utterances": [
+              {
+                "id": "cut-05-u01",
+                "cutId": "cut-05",
+                "order": 1,
+                "speakerName": "佐藤 誠司",
+                "speakerId": "speaker-94e8287880",
+                "text": "その契約書、送る前に三分だけ私に見せてもらえませんか",
+                "bubbleId": "bubble-cut-05-u01",
+                "preset": "dialogue"
+              },
+              {
+                "id": "cut-05-u02",
+                "cutId": "cut-05",
+                "order": 2,
+                "speakerName": "黒川 部長",
+                "speakerId": "speaker-c9efab257e",
+                "text": "佐藤さん、これは営業部の案件です。部外者は黙っていてください",
+                "bubbleId": "bubble-cut-05-u02",
+                "preset": "dialogue"
+              }
+            ]
+          },
+          {
+            "id": "cut-06",
+            "number": 6,
+            "purpose": "契約書の確認",
+            "utterances": [
+              {
+                "id": "cut-06-u01",
+                "cutId": "cut-06",
+                "order": 1,
+                "speakerName": "佐藤 誠司",
+                "speakerId": "speaker-94e8287880",
+                "text": "この修正履歴を見る限り、違約金を書き換えたのは今日の午後8時12分です",
+                "bubbleId": "bubble-cut-06-u01",
+                "preset": "dialogue"
+              },
+              {
+                "id": "cut-06-u02",
+                "cutId": "cut-06",
+                "order": 2,
+                "speakerName": "田中 悠斗",
+                "speakerId": "speaker-82a09b65f5",
+                "text": "僕が受け取った後だ……",
+                "bubbleId": "bubble-cut-06-u02",
+                "preset": "dialogue"
+              }
+            ]
+          },
+          {
+            "id": "cut-07",
+            "number": 7,
+            "purpose": "証拠を示す",
+            "utterances": [
+              {
+                "id": "cut-07-u01",
+                "cutId": "cut-07",
+                "order": 1,
+                "speakerName": "佐藤 誠司",
+                "speakerId": "speaker-94e8287880",
+                "text": "田中さん、元の見積書とメールを開いてください。二つを並べれば改ざんが証明できます",
+                "bubbleId": "bubble-cut-07-u01",
+                "preset": "dialogue"
+              },
+              {
+                "id": "cut-07-u02",
+                "cutId": "cut-07",
+                "order": 2,
+                "speakerName": "田中 悠斗",
+                "speakerId": "speaker-82a09b65f5",
+                "text": "はい。これなら僕が変更していないと分かります",
+                "bubbleId": "bubble-cut-07-u02",
+                "preset": "dialogue"
+              }
+            ]
+          },
+          {
+            "id": "cut-08",
+            "number": 8,
+            "purpose": "三人の対峙",
+            "utterances": [
+              {
+                "id": "cut-08-u01",
+                "cutId": "cut-08",
+                "order": 1,
+                "speakerName": "黒川 部長",
+                "speakerId": "speaker-c9efab257e",
+                "text": "勝手な推測で私を疑うのか！",
+                "bubbleId": "bubble-cut-08-u01",
+                "preset": "shout"
+              },
+              {
+                "id": "cut-08-u02",
+                "cutId": "cut-08",
+                "order": 2,
+                "speakerName": "佐藤 誠司",
+                "speakerId": "speaker-94e8287880",
+                "text": "推測ではありません。変更記録と送信指示の時刻が一致しています",
+                "bubbleId": "bubble-cut-08-u02",
+                "preset": "dialogue"
+              },
+              {
+                "id": "cut-08-u03",
+                "cutId": "cut-08",
+                "order": 3,
+                "speakerName": "田中 悠斗",
+                "speakerId": "speaker-82a09b65f5",
+                "text": "部長、このまま監査室へ提出します",
+                "bubbleId": "bubble-cut-08-u03",
+                "preset": "dialogue"
+              }
+            ]
+          },
+          {
+            "id": "cut-09",
+            "number": 9,
+            "purpose": "黒川の動揺",
+            "utterances": [
+              {
+                "id": "cut-09-u01",
+                "cutId": "cut-09",
+                "order": 1,
+                "speakerName": "黒川 部長",
+                "speakerId": "speaker-c9efab257e",
+                "text": "ま、待て。話し合えば分かる。田中、送信は取り消してやる",
+                "bubbleId": "bubble-cut-09-u01",
+                "preset": "dialogue"
+              }
+            ]
+          },
+          {
+            "id": "cut-10",
+            "number": 10,
+            "purpose": "解決",
+            "utterances": [
+              {
+                "id": "cut-10-u01",
+                "cutId": "cut-10",
+                "order": 1,
+                "speakerName": "田中 悠斗",
+                "speakerId": "speaker-82a09b65f5",
+                "text": "佐藤さん、ありがとうございました。怖かったけど、証拠を残しておいてよかったです",
+                "bubbleId": "bubble-cut-10-u01",
+                "preset": "dialogue"
+              },
+              {
+                "id": "cut-10-u02",
+                "cutId": "cut-10",
+                "order": 2,
+                "speakerName": "佐藤 誠司",
+                "speakerId": "speaker-94e8287880",
+                "text": "違和感を放置しなかったのは田中さんです。次は、最初から一人で抱え込まないでください",
+                "bubbleId": "bubble-cut-10-u02",
+                "preset": "dialogue"
+              }
+            ]
+          }
+        ],
+        "utterances": [
+          {
+            "id": "cut-01-u01",
+            "cutId": "cut-01",
+            "order": 1,
+            "speakerName": "ナレーション",
+            "speakerId": "narration",
+            "text": "時計は午後10時。誰もいない営業部で、田中悠斗だけが契約書を直していた。",
+            "bubbleId": "bubble-cut-01-u01",
+            "preset": "narration"
+          },
+          {
+            "id": "cut-01-u02",
+            "cutId": "cut-01",
+            "order": 2,
+            "speakerName": "田中 悠斗",
+            "speakerId": "speaker-82a09b65f5",
+            "text": "また僕だけ残業か……。でも、明日の契約だけは失敗できない",
+            "bubbleId": "bubble-cut-01-u02",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-02-u01",
+            "cutId": "cut-02",
+            "order": 1,
+            "speakerName": "黒川 部長",
+            "speakerId": "speaker-c9efab257e",
+            "text": "田中、この条件のまま今夜中に先方へ送れ。余計な確認はするな",
+            "bubbleId": "bubble-cut-02-u01",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-02-u02",
+            "cutId": "cut-02",
+            "order": 2,
+            "speakerName": "田中 悠斗",
+            "speakerId": "speaker-82a09b65f5",
+            "text": "ですが部長、この違約金の数字、昨日の資料と違います",
+            "bubbleId": "bubble-cut-02-u02",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-03-u01",
+            "cutId": "cut-03",
+            "order": 1,
+            "speakerName": "田中 悠斗",
+            "speakerId": "speaker-82a09b65f5",
+            "text": "もし僕の名前で送ったら、責任まで全部押しつけられるんじゃ……",
+            "bubbleId": "bubble-cut-03-u01",
+            "preset": "thought"
+          },
+          {
+            "id": "cut-04-u01",
+            "cutId": "cut-04",
+            "order": 1,
+            "speakerName": "黒川 部長",
+            "speakerId": "speaker-c9efab257e",
+            "text": "口答えする暇があるなら送信しろ。君の評価を決めるのは私だぞ",
+            "bubbleId": "bubble-cut-04-u01",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-05-u01",
+            "cutId": "cut-05",
+            "order": 1,
+            "speakerName": "佐藤 誠司",
+            "speakerId": "speaker-94e8287880",
+            "text": "その契約書、送る前に三分だけ私に見せてもらえませんか",
+            "bubbleId": "bubble-cut-05-u01",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-05-u02",
+            "cutId": "cut-05",
+            "order": 2,
+            "speakerName": "黒川 部長",
+            "speakerId": "speaker-c9efab257e",
+            "text": "佐藤さん、これは営業部の案件です。部外者は黙っていてください",
+            "bubbleId": "bubble-cut-05-u02",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-06-u01",
+            "cutId": "cut-06",
+            "order": 1,
+            "speakerName": "佐藤 誠司",
+            "speakerId": "speaker-94e8287880",
+            "text": "この修正履歴を見る限り、違約金を書き換えたのは今日の午後8時12分です",
+            "bubbleId": "bubble-cut-06-u01",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-06-u02",
+            "cutId": "cut-06",
+            "order": 2,
+            "speakerName": "田中 悠斗",
+            "speakerId": "speaker-82a09b65f5",
+            "text": "僕が受け取った後だ……",
+            "bubbleId": "bubble-cut-06-u02",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-07-u01",
+            "cutId": "cut-07",
+            "order": 1,
+            "speakerName": "佐藤 誠司",
+            "speakerId": "speaker-94e8287880",
+            "text": "田中さん、元の見積書とメールを開いてください。二つを並べれば改ざんが証明できます",
+            "bubbleId": "bubble-cut-07-u01",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-07-u02",
+            "cutId": "cut-07",
+            "order": 2,
+            "speakerName": "田中 悠斗",
+            "speakerId": "speaker-82a09b65f5",
+            "text": "はい。これなら僕が変更していないと分かります",
+            "bubbleId": "bubble-cut-07-u02",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-08-u01",
+            "cutId": "cut-08",
+            "order": 1,
+            "speakerName": "黒川 部長",
+            "speakerId": "speaker-c9efab257e",
+            "text": "勝手な推測で私を疑うのか！",
+            "bubbleId": "bubble-cut-08-u01",
+            "preset": "shout"
+          },
+          {
+            "id": "cut-08-u02",
+            "cutId": "cut-08",
+            "order": 2,
+            "speakerName": "佐藤 誠司",
+            "speakerId": "speaker-94e8287880",
+            "text": "推測ではありません。変更記録と送信指示の時刻が一致しています",
+            "bubbleId": "bubble-cut-08-u02",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-08-u03",
+            "cutId": "cut-08",
+            "order": 3,
+            "speakerName": "田中 悠斗",
+            "speakerId": "speaker-82a09b65f5",
+            "text": "部長、このまま監査室へ提出します",
+            "bubbleId": "bubble-cut-08-u03",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-09-u01",
+            "cutId": "cut-09",
+            "order": 1,
+            "speakerName": "黒川 部長",
+            "speakerId": "speaker-c9efab257e",
+            "text": "ま、待て。話し合えば分かる。田中、送信は取り消してやる",
+            "bubbleId": "bubble-cut-09-u01",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-10-u01",
+            "cutId": "cut-10",
+            "order": 1,
+            "speakerName": "田中 悠斗",
+            "speakerId": "speaker-82a09b65f5",
+            "text": "佐藤さん、ありがとうございました。怖かったけど、証拠を残しておいてよかったです",
+            "bubbleId": "bubble-cut-10-u01",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-10-u02",
+            "cutId": "cut-10",
+            "order": 2,
+            "speakerName": "佐藤 誠司",
+            "speakerId": "speaker-94e8287880",
+            "text": "違和感を放置しなかったのは田中さんです。次は、最初から一人で抱え込まないでください",
+            "bubbleId": "bubble-cut-10-u02",
+            "preset": "dialogue"
+          }
+        ]
+      },
+      "digests": {
+        "emptyRegistry": "980617e8a5e4c979557b03bd89d6d70c5de36cf8472cf962ac91ceccfdbbea8d",
+        "exampleRegistry": "286f1cfb287233101fb1dadb1e3f805a7337f0d7ee2d8cf8748881045394c454",
+        "title": "e937a8df6ea2df7413a73342d5ff71a22df6d67e94e81eb8e4a21db5ef1f8323",
+        "crlfBom": "980617e8a5e4c979557b03bd89d6d70c5de36cf8472cf962ac91ceccfdbbea8d"
+      },
+      "locationIds": [
+        "office",
+        "primary-location",
+        "primary-location",
+        "primary-location",
+        "primary-location",
+        "primary-location",
+        "primary-location",
+        "primary-location",
+        "primary-location",
+        "primary-location"
+      ]
+    },
+    {
+      "path": "examples/reference-scripts/03-faded-photo-homecoming.original.md",
+      "scriptSha256": "df1c26feda6d032e8c4f0e92812829bd86d46dc2f85f2fb29b714eb517b6417f",
+      "expected": {
+        "title": "消えかけた写真に、帰る場所が写っていた",
+        "cuts": [
+          {
+            "id": "cut-01",
+            "number": 1,
+            "purpose": "雨の写真店",
+            "utterances": [
+              {
+                "id": "cut-01-u01",
+                "cutId": "cut-01",
+                "order": 1,
+                "speakerName": "ナレーション",
+                "speakerId": "narration",
+                "text": "写真は、光がそこにあったことを証明する。",
+                "bubbleId": "bubble-cut-01-u01",
+                "preset": "narration"
+              },
+              {
+                "id": "cut-01-u02",
+                "cutId": "cut-01",
+                "order": 2,
+                "speakerName": "ナレーション",
+                "speakerId": "narration",
+                "text": "けれど、写した人の名前まで守ってくれるわけではない。",
+                "bubbleId": "bubble-cut-01-u02",
+                "preset": "narration"
+              },
+              {
+                "id": "cut-01-u03",
+                "cutId": "cut-01",
+                "order": 3,
+                "speakerName": "高瀬 蓮",
+                "speakerId": "speaker-f97fa33a62",
+                "text": "雨、強くなったな。閉店前に、この現像だけ終わらせよう",
+                "bubbleId": "bubble-cut-01-u03",
+                "preset": "dialogue"
+              }
+            ]
+          },
+          {
+            "id": "cut-02",
+            "number": 2,
+            "purpose": "思い出を直す仕事",
+            "utterances": [
+              {
+                "id": "cut-02-u01",
+                "cutId": "cut-02",
+                "order": 1,
+                "speakerName": "ナレーション",
+                "speakerId": "narration",
+                "text": "商店街の古い写真店で、蓮は色あせた家族写真を一枚ずつ補修していた。",
+                "bubbleId": "bubble-cut-02-u01",
+                "preset": "narration"
+              },
+              {
+                "id": "cut-02-u02",
+                "cutId": "cut-02",
+                "order": 2,
+                "speakerName": "高瀬 蓮",
+                "speakerId": "speaker-f97fa33a62",
+                "text": "思い出は新品にできません。でも、もう一度見える形には戻せます",
+                "bubbleId": "bubble-cut-02-u02",
+                "preset": "dialogue"
+              }
+            ]
+          },
+          {
+            "id": "cut-03",
+            "number": 3,
+            "purpose": "十年ぶりの再会",
+            "utterances": [
+              {
+                "id": "cut-03-u01",
+                "cutId": "cut-03",
+                "order": 1,
+                "speakerName": "水野 澪",
+                "speakerId": "speaker-9cdd4901f7",
+                "text": "その言い方、昔と変わらないね。蓮",
+                "bubbleId": "bubble-cut-03-u01",
+                "preset": "dialogue"
+              },
+              {
+                "id": "cut-03-u02",
+                "cutId": "cut-03",
+                "order": 2,
+                "speakerName": "高瀬 蓮",
+                "speakerId": "speaker-f97fa33a62",
+                "text": "澪なのか？　東京にいるはずじゃ……",
+                "bubbleId": "bubble-cut-03-u02",
+                "preset": "thought"
+              },
+              {
+                "id": "cut-03-u03",
+                "cutId": "cut-03",
+                "order": 3,
+                "speakerName": "水野 澪",
+                "speakerId": "speaker-9cdd4901f7",
+                "text": "帰ってきたの。行く場所はあるのに、帰りたい場所が分からなくなって",
+                "bubbleId": "bubble-cut-03-u03",
+                "preset": "dialogue"
+              }
+            ]
+          },
+          {
+            "id": "cut-04",
+            "number": 4,
+            "purpose": "奪われた写真",
+            "utterances": [
+              {
+                "id": "cut-04-u01",
+                "cutId": "cut-04",
+                "order": 1,
+                "speakerName": "水野 澪",
+                "speakerId": "speaker-9cdd4901f7",
+                "text": "私が撮った写真を、恋人だった神谷さんが自分の作品として発表したの",
+                "bubbleId": "bubble-cut-04-u01",
+                "preset": "dialogue"
+              },
+              {
+                "id": "cut-04-u02",
+                "cutId": "cut-04",
+                "order": 2,
+                "speakerName": "高瀬 蓮",
+                "speakerId": "speaker-f97fa33a62",
+                "text": "元データか、撮影した日を証明できるものは？",
+                "bubbleId": "bubble-cut-04-u02",
+                "preset": "dialogue"
+              },
+              {
+                "id": "cut-04-u03",
+                "cutId": "cut-04",
+                "order": 3,
+                "speakerName": "水野 澪",
+                "speakerId": "speaker-9cdd4901f7",
+                "text": "全部向こうに預けたまま。信じていたから",
+                "bubbleId": "bubble-cut-04-u03",
+                "preset": "dialogue"
+              }
+            ]
+          },
+          {
+            "id": "cut-05",
+            "number": 5,
+            "purpose": "追ってきた男",
+            "utterances": [
+              {
+                "id": "cut-05-u01",
+                "cutId": "cut-05",
+                "order": 1,
+                "speakerName": "神谷 玲司",
+                "speakerId": "speaker-6514294bb2",
+                "text": "連絡を無視するから迎えに来た。君は僕の助手だ。勝手に帰られると困る",
+                "bubbleId": "bubble-cut-05-u01",
+                "preset": "dialogue"
+              },
+              {
+                "id": "cut-05-u02",
+                "cutId": "cut-05",
+                "order": 2,
+                "speakerName": "高瀬 蓮",
+                "speakerId": "speaker-f97fa33a62",
+                "text": "彼女の作品を、あなたの名前で出したんですか",
+                "bubbleId": "bubble-cut-05-u02",
+                "preset": "dialogue"
+              },
+              {
+                "id": "cut-05-u03",
+                "cutId": "cut-05",
+                "order": 3,
+                "speakerName": "神谷 玲司",
+                "speakerId": "speaker-6514294bb2",
+                "text": "世に出したのは僕だ。名前なんて、売れる側のものだろう",
+                "bubbleId": "bubble-cut-05-u03",
+                "preset": "dialogue"
+              }
+            ]
+          },
+          {
+            "id": "cut-06",
+            "number": 6,
+            "purpose": "居場所を否定する言葉",
+            "utterances": [
+              {
+                "id": "cut-06-u01",
+                "cutId": "cut-06",
+                "order": 1,
+                "speakerName": "水野 澪",
+                "speakerId": "speaker-9cdd4901f7",
+                "text": "私は戻らない。あの写真は、祖母の最後の夏を撮った大切な記録なの",
+                "bubbleId": "bubble-cut-06-u01",
+                "preset": "dialogue"
+              },
+              {
+                "id": "cut-06-u02",
+                "cutId": "cut-06",
+                "order": 2,
+                "speakerName": "神谷 玲司",
+                "speakerId": "speaker-6514294bb2",
+                "text": "感情で仕事を失うつもりか？　この町に君の居場所なんてない",
+                "bubbleId": "bubble-cut-06-u02",
+                "preset": "dialogue"
+              }
+            ]
+          },
+          {
+            "id": "cut-07",
+            "number": 7,
+            "purpose": "残されていた証拠",
+            "utterances": [
+              {
+                "id": "cut-07-u01",
+                "cutId": "cut-07",
+                "order": 1,
+                "speakerName": "高瀬 蓮",
+                "speakerId": "speaker-f97fa33a62",
+                "text": "ある。澪が十年前に預けたネガです",
+                "bubbleId": "bubble-cut-07-u01",
+                "preset": "dialogue"
+              },
+              {
+                "id": "cut-07-u02",
+                "cutId": "cut-07",
+                "order": 2,
+                "speakerName": "高瀬 蓮",
+                "speakerId": "speaker-f97fa33a62",
+                "text": "去年複製したデータも、作成日時も、依頼票も残っています",
+                "bubbleId": "bubble-cut-07-u02",
+                "preset": "dialogue"
+              },
+              {
+                "id": "cut-07-u03",
+                "cutId": "cut-07",
+                "order": 3,
+                "speakerName": "神谷 玲司",
+                "speakerId": "speaker-6514294bb2",
+                "text": "そんな古い記録が、何になる",
+                "bubbleId": "bubble-cut-07-u03",
+                "preset": "dialogue"
+              }
+            ]
+          },
+          {
+            "id": "cut-08",
+            "number": 8,
+            "purpose": "名前を取り戻す",
+            "utterances": [
+              {
+                "id": "cut-08-u01",
+                "cutId": "cut-08",
+                "order": 1,
+                "speakerName": "水野 澪",
+                "speakerId": "speaker-9cdd4901f7",
+                "text": "展示の主催者へ送る。撮影者が誰か、私の名前で確かめてもらう",
+                "bubbleId": "bubble-cut-08-u01",
+                "preset": "dialogue"
+              },
+              {
+                "id": "cut-08-u02",
+                "cutId": "cut-08",
+                "order": 2,
+                "speakerName": "ナレーション",
+                "speakerId": "narration",
+                "text": "翌週、展示は中止され、神谷との契約も解除された。",
+                "bubbleId": "bubble-cut-08-u02",
+                "preset": "narration"
+              },
+              {
+                "id": "cut-08-u03",
+                "cutId": "cut-08",
+                "order": 3,
+                "speakerName": "ナレーション",
+                "speakerId": "narration",
+                "text": "彼が借りた光は、彼自身を照らし返した。",
+                "bubbleId": "bubble-cut-08-u03",
+                "preset": "narration"
+              }
+            ]
+          },
+          {
+            "id": "cut-09",
+            "number": 9,
+            "purpose": "子供の頃の約束",
+            "utterances": [
+              {
+                "id": "cut-09-u01",
+                "cutId": "cut-09",
+                "order": 1,
+                "speakerName": "少女の澪",
+                "speakerId": "speaker-e21966d676",
+                "text": "私が遠くに行っても、写真を捨てないでね",
+                "bubbleId": "bubble-cut-09-u01",
+                "preset": "dialogue"
+              },
+              {
+                "id": "cut-09-u02",
+                "cutId": "cut-09",
+                "order": 2,
+                "speakerName": "少年の蓮",
+                "speakerId": "speaker-b6f0011ba7",
+                "text": "捨てない。いつか帰ってきたら、ちゃんと返す",
+                "bubbleId": "bubble-cut-09-u02",
+                "preset": "dialogue"
+              },
+              {
+                "id": "cut-09-u03",
+                "cutId": "cut-09",
+                "order": 3,
+                "speakerName": "ナレーション",
+                "speakerId": "narration",
+                "text": "子供の約束は未来を縛らず、帰る道に小さな灯りを残すことがある。",
+                "bubbleId": "bubble-cut-09-u03",
+                "preset": "narration"
+              }
+            ]
+          },
+          {
+            "id": "cut-10",
+            "number": 10,
+            "purpose": "新しい一枚目",
+            "utterances": [
+              {
+                "id": "cut-10-u01",
+                "cutId": "cut-10",
+                "order": 1,
+                "speakerName": "水野 澪",
+                "speakerId": "speaker-9cdd4901f7",
+                "text": "店の二階、空いてるよね。ここで写真スタジオを始めたい",
+                "bubbleId": "bubble-cut-10-u01",
+                "preset": "dialogue"
+              },
+              {
+                "id": "cut-10-u02",
+                "cutId": "cut-10",
+                "order": 2,
+                "speakerName": "水野 澪",
+                "speakerId": "speaker-9cdd4901f7",
+                "text": "それから……今度は、蓮の隣にいたい",
+                "bubbleId": "bubble-cut-10-u02",
+                "preset": "dialogue"
+              },
+              {
+                "id": "cut-10-u03",
+                "cutId": "cut-10",
+                "order": 3,
+                "speakerName": "高瀬 蓮",
+                "speakerId": "speaker-f97fa33a62",
+                "text": "おかえり。仕事も、その先も、ゆっくり一緒に決めよう",
+                "bubbleId": "bubble-cut-10-u03",
+                "preset": "dialogue"
+              },
+              {
+                "id": "cut-10-u04",
+                "cutId": "cut-10",
+                "order": 4,
+                "speakerName": "ナレーション",
+                "speakerId": "narration",
+                "text": "雨上がりの商店街で、二人の新しい一枚目が静かに現像されていった。",
+                "bubbleId": "bubble-cut-10-u04",
+                "preset": "narration"
+              }
+            ]
+          }
+        ],
+        "utterances": [
+          {
+            "id": "cut-01-u01",
+            "cutId": "cut-01",
+            "order": 1,
+            "speakerName": "ナレーション",
+            "speakerId": "narration",
+            "text": "写真は、光がそこにあったことを証明する。",
+            "bubbleId": "bubble-cut-01-u01",
+            "preset": "narration"
+          },
+          {
+            "id": "cut-01-u02",
+            "cutId": "cut-01",
+            "order": 2,
+            "speakerName": "ナレーション",
+            "speakerId": "narration",
+            "text": "けれど、写した人の名前まで守ってくれるわけではない。",
+            "bubbleId": "bubble-cut-01-u02",
+            "preset": "narration"
+          },
+          {
+            "id": "cut-01-u03",
+            "cutId": "cut-01",
+            "order": 3,
+            "speakerName": "高瀬 蓮",
+            "speakerId": "speaker-f97fa33a62",
+            "text": "雨、強くなったな。閉店前に、この現像だけ終わらせよう",
+            "bubbleId": "bubble-cut-01-u03",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-02-u01",
+            "cutId": "cut-02",
+            "order": 1,
+            "speakerName": "ナレーション",
+            "speakerId": "narration",
+            "text": "商店街の古い写真店で、蓮は色あせた家族写真を一枚ずつ補修していた。",
+            "bubbleId": "bubble-cut-02-u01",
+            "preset": "narration"
+          },
+          {
+            "id": "cut-02-u02",
+            "cutId": "cut-02",
+            "order": 2,
+            "speakerName": "高瀬 蓮",
+            "speakerId": "speaker-f97fa33a62",
+            "text": "思い出は新品にできません。でも、もう一度見える形には戻せます",
+            "bubbleId": "bubble-cut-02-u02",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-03-u01",
+            "cutId": "cut-03",
+            "order": 1,
+            "speakerName": "水野 澪",
+            "speakerId": "speaker-9cdd4901f7",
+            "text": "その言い方、昔と変わらないね。蓮",
+            "bubbleId": "bubble-cut-03-u01",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-03-u02",
+            "cutId": "cut-03",
+            "order": 2,
+            "speakerName": "高瀬 蓮",
+            "speakerId": "speaker-f97fa33a62",
+            "text": "澪なのか？　東京にいるはずじゃ……",
+            "bubbleId": "bubble-cut-03-u02",
+            "preset": "thought"
+          },
+          {
+            "id": "cut-03-u03",
+            "cutId": "cut-03",
+            "order": 3,
+            "speakerName": "水野 澪",
+            "speakerId": "speaker-9cdd4901f7",
+            "text": "帰ってきたの。行く場所はあるのに、帰りたい場所が分からなくなって",
+            "bubbleId": "bubble-cut-03-u03",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-04-u01",
+            "cutId": "cut-04",
+            "order": 1,
+            "speakerName": "水野 澪",
+            "speakerId": "speaker-9cdd4901f7",
+            "text": "私が撮った写真を、恋人だった神谷さんが自分の作品として発表したの",
+            "bubbleId": "bubble-cut-04-u01",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-04-u02",
+            "cutId": "cut-04",
+            "order": 2,
+            "speakerName": "高瀬 蓮",
+            "speakerId": "speaker-f97fa33a62",
+            "text": "元データか、撮影した日を証明できるものは？",
+            "bubbleId": "bubble-cut-04-u02",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-04-u03",
+            "cutId": "cut-04",
+            "order": 3,
+            "speakerName": "水野 澪",
+            "speakerId": "speaker-9cdd4901f7",
+            "text": "全部向こうに預けたまま。信じていたから",
+            "bubbleId": "bubble-cut-04-u03",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-05-u01",
+            "cutId": "cut-05",
+            "order": 1,
+            "speakerName": "神谷 玲司",
+            "speakerId": "speaker-6514294bb2",
+            "text": "連絡を無視するから迎えに来た。君は僕の助手だ。勝手に帰られると困る",
+            "bubbleId": "bubble-cut-05-u01",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-05-u02",
+            "cutId": "cut-05",
+            "order": 2,
+            "speakerName": "高瀬 蓮",
+            "speakerId": "speaker-f97fa33a62",
+            "text": "彼女の作品を、あなたの名前で出したんですか",
+            "bubbleId": "bubble-cut-05-u02",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-05-u03",
+            "cutId": "cut-05",
+            "order": 3,
+            "speakerName": "神谷 玲司",
+            "speakerId": "speaker-6514294bb2",
+            "text": "世に出したのは僕だ。名前なんて、売れる側のものだろう",
+            "bubbleId": "bubble-cut-05-u03",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-06-u01",
+            "cutId": "cut-06",
+            "order": 1,
+            "speakerName": "水野 澪",
+            "speakerId": "speaker-9cdd4901f7",
+            "text": "私は戻らない。あの写真は、祖母の最後の夏を撮った大切な記録なの",
+            "bubbleId": "bubble-cut-06-u01",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-06-u02",
+            "cutId": "cut-06",
+            "order": 2,
+            "speakerName": "神谷 玲司",
+            "speakerId": "speaker-6514294bb2",
+            "text": "感情で仕事を失うつもりか？　この町に君の居場所なんてない",
+            "bubbleId": "bubble-cut-06-u02",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-07-u01",
+            "cutId": "cut-07",
+            "order": 1,
+            "speakerName": "高瀬 蓮",
+            "speakerId": "speaker-f97fa33a62",
+            "text": "ある。澪が十年前に預けたネガです",
+            "bubbleId": "bubble-cut-07-u01",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-07-u02",
+            "cutId": "cut-07",
+            "order": 2,
+            "speakerName": "高瀬 蓮",
+            "speakerId": "speaker-f97fa33a62",
+            "text": "去年複製したデータも、作成日時も、依頼票も残っています",
+            "bubbleId": "bubble-cut-07-u02",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-07-u03",
+            "cutId": "cut-07",
+            "order": 3,
+            "speakerName": "神谷 玲司",
+            "speakerId": "speaker-6514294bb2",
+            "text": "そんな古い記録が、何になる",
+            "bubbleId": "bubble-cut-07-u03",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-08-u01",
+            "cutId": "cut-08",
+            "order": 1,
+            "speakerName": "水野 澪",
+            "speakerId": "speaker-9cdd4901f7",
+            "text": "展示の主催者へ送る。撮影者が誰か、私の名前で確かめてもらう",
+            "bubbleId": "bubble-cut-08-u01",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-08-u02",
+            "cutId": "cut-08",
+            "order": 2,
+            "speakerName": "ナレーション",
+            "speakerId": "narration",
+            "text": "翌週、展示は中止され、神谷との契約も解除された。",
+            "bubbleId": "bubble-cut-08-u02",
+            "preset": "narration"
+          },
+          {
+            "id": "cut-08-u03",
+            "cutId": "cut-08",
+            "order": 3,
+            "speakerName": "ナレーション",
+            "speakerId": "narration",
+            "text": "彼が借りた光は、彼自身を照らし返した。",
+            "bubbleId": "bubble-cut-08-u03",
+            "preset": "narration"
+          },
+          {
+            "id": "cut-09-u01",
+            "cutId": "cut-09",
+            "order": 1,
+            "speakerName": "少女の澪",
+            "speakerId": "speaker-e21966d676",
+            "text": "私が遠くに行っても、写真を捨てないでね",
+            "bubbleId": "bubble-cut-09-u01",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-09-u02",
+            "cutId": "cut-09",
+            "order": 2,
+            "speakerName": "少年の蓮",
+            "speakerId": "speaker-b6f0011ba7",
+            "text": "捨てない。いつか帰ってきたら、ちゃんと返す",
+            "bubbleId": "bubble-cut-09-u02",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-09-u03",
+            "cutId": "cut-09",
+            "order": 3,
+            "speakerName": "ナレーション",
+            "speakerId": "narration",
+            "text": "子供の約束は未来を縛らず、帰る道に小さな灯りを残すことがある。",
+            "bubbleId": "bubble-cut-09-u03",
+            "preset": "narration"
+          },
+          {
+            "id": "cut-10-u01",
+            "cutId": "cut-10",
+            "order": 1,
+            "speakerName": "水野 澪",
+            "speakerId": "speaker-9cdd4901f7",
+            "text": "店の二階、空いてるよね。ここで写真スタジオを始めたい",
+            "bubbleId": "bubble-cut-10-u01",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-10-u02",
+            "cutId": "cut-10",
+            "order": 2,
+            "speakerName": "水野 澪",
+            "speakerId": "speaker-9cdd4901f7",
+            "text": "それから……今度は、蓮の隣にいたい",
+            "bubbleId": "bubble-cut-10-u02",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-10-u03",
+            "cutId": "cut-10",
+            "order": 3,
+            "speakerName": "高瀬 蓮",
+            "speakerId": "speaker-f97fa33a62",
+            "text": "おかえり。仕事も、その先も、ゆっくり一緒に決めよう",
+            "bubbleId": "bubble-cut-10-u03",
+            "preset": "dialogue"
+          },
+          {
+            "id": "cut-10-u04",
+            "cutId": "cut-10",
+            "order": 4,
+            "speakerName": "ナレーション",
+            "speakerId": "narration",
+            "text": "雨上がりの商店街で、二人の新しい一枚目が静かに現像されていった。",
+            "bubbleId": "bubble-cut-10-u04",
+            "preset": "narration"
+          }
+        ]
+      },
+      "digests": {
+        "emptyRegistry": "df42373c7d1cfc9a7cf5913e9ae790374b55b9fd8bb67646051f93974758667f",
+        "exampleRegistry": "df42373c7d1cfc9a7cf5913e9ae790374b55b9fd8bb67646051f93974758667f",
+        "title": "2690529ea6fa9677ad57a4935fa66ff9970d8067abc8268226a8ae92b4113e26",
+        "crlfBom": "df42373c7d1cfc9a7cf5913e9ae790374b55b9fd8bb67646051f93974758667f"
+      },
+      "locationIds": [
+        "photo-shop",
+        "photo-shop",
+        "primary-location",
+        "primary-location",
+        "primary-location",
+        "primary-location",
+        "primary-location",
+        "primary-location",
+        "primary-location",
+        "photo-shop"
+      ]
+    }
+  ]
+}
