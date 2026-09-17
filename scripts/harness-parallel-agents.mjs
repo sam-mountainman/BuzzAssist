@@ -196,7 +196,10 @@ export async function selectEngine(requested, options = {}) {
         `エンジン ${requested} は read-only を保証できません。--read-only では codex を使ってください`,
       );
     }
-    const probe = await probeEngine(requested, options);
+    // テストや呼び出し側がプローブを差し替えられるようにする。本物のプローブは
+    // エンジンの CLI を起動してモデルに応答させるので、テストから呼ぶと
+    // ログイン済みの機械では**毎回実際のモデル呼び出しが走っていた**。
+    const probe = await (options.probe ?? probeEngine)(requested, options);
     if (!probe.available) {
       throw new Error(`エンジン ${requested} は使えません: ${probe.reason}`);
     }
@@ -209,7 +212,7 @@ export async function selectEngine(requested, options = {}) {
       probes.push({ engineId: id, available: false, reason: "read-only を保証できません" });
       continue;
     }
-    const probe = await probeEngine(id, options);
+    const probe = await (options.probe ?? probeEngine)(id, options);
     probes.push(probe);
     if (probe.available) return probe;
   }
