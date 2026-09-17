@@ -42,6 +42,23 @@ const hostControlFileNames = new Set([
   "settings.json",
 ]);
 
+// まだ存在しないファイルも realpath と同じ形にする（存在する一番近い祖先を正規化し、
+// 残りをつなぐ）。Windows の短い名前と長い名前を揃えるため。
+async function canonicalPathOfPossiblyMissing(target) {
+  const missing = [];
+  let current = path.resolve(target);
+  for (;;) {
+    try {
+      return path.join(await realpath(current), ...missing);
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) return path.resolve(target);
+      missing.unshift(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
 async function snapshotPath(target, depth = 2) {
   let details;
   try { details = await lstat(target); } catch (error) {
@@ -346,13 +363,18 @@ async function runHostSetup(host) {
     );
     const narratedFeedbackLedger = learningRuntime.ledgerPathFor("channel-pack:narrated-story", "proposals");
     const canonicalPluginRoot = await realpath(pluginRoot);
+    // 比べる両方を同じ形に揃える。Windows の一時ディレクトリは短い名前
+    // （RUNNER~1）で返り、realpath は長い名前を返すので、片方だけ正規化すると
+    // 中にある台帳まで「外」と判定し、逆に同じファイルでも「別」と判定してしまう。
+    const canonicalLedger = await canonicalPathOfPossiblyMissing(narratedFeedbackLedger);
     assert.notEqual(
-      path.resolve(narratedFeedbackLedger),
+      canonicalLedger,
       path.join(canonicalPluginRoot, "docs", "learning", "proposals.jsonl"),
       "narrated operator feedback must never resolve to the shared plugin learning ledger",
     );
+    const ledgerInsidePack = path.relative(path.join(canonicalPluginRoot, "channel-packs", "narrated-story"), canonicalLedger);
     assert.equal(
-      path.resolve(narratedFeedbackLedger).startsWith(`${path.join(canonicalPluginRoot, "channel-packs", "narrated-story")}${path.sep}`),
+      ledgerInsidePack !== "" && ledgerInsidePack !== ".." && !ledgerInsidePack.startsWith(`..${path.sep}`) && !path.isAbsolute(ledgerInsidePack),
       true,
       `narrated operator feedback ledger escaped its private Channel Pack root: ${narratedFeedbackLedger}`,
     );
@@ -500,10 +522,18 @@ async function runHostSetup(host) {
     // Windows は登録を省略しているので、runner は書かれない（省略した回の正しい姿）。
     const hostState = JSON.parse(await readFile(statePath, "utf8"));
     assert.equal(hostState.installed, true);
-    assert.ok(
-      !hostState.marketplace || path.resolve(hostState.marketplace).startsWith(`${path.resolve(homeDir)}${path.sep}`),
-      `${host} marketplace escaped isolated home: ${hostState.marketplace}`,
-    );
+    if (hostState.marketplace) {
+      // 短い名前と長い名前（Windows）を揃えてから、隔離した HOME の中にあるかを見る。
+      const marketplaceInsideHome = path.relative(
+        await canonicalPathOfPossiblyMissing(homeDir),
+        await canonicalPathOfPossiblyMissing(hostState.marketplace),
+      );
+      assert.ok(
+        marketplaceInsideHome !== "" && marketplaceInsideHome !== ".."
+          && !marketplaceInsideHome.startsWith(`..${path.sep}`) && !path.isAbsolute(marketplaceInsideHome),
+        `${host} marketplace escaped isolated home: ${hostState.marketplace}`,
+      );
+    }
     await assertRealCachesExcludeIsolatedPath(tempRoot);
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
