@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { resolveChannelPackPath } from "../lib/channelPackResolver.mjs";
+import { channelPackPresent, resolveChannelPackPath } from "../lib/channelPackResolver.mjs";
 
 const require = createRequire(import.meta.url);
 const requireResolver = () => ({ resolveChannelPackPath });
@@ -76,6 +76,9 @@ function testRaster(seed = 1, width = 96, height = 72) {
 // 暗黙に借りていた。それは開発機でしか成立しない上に、本番でやると
 // 別チャンネルの番組ルールで走ることになるので、本番の入口が拒むようにした。
 // テストも借りるのをやめ、使う pack を明示する。
+// 私有 Channel Pack の有無を見る基準。installChannelPack と同じくリポジトリ直下。
+const root = process.cwd();
+
 async function installChannelPack(projectDir) {
   const { cp } = await import("node:fs/promises");
   const source = join(process.cwd(), "channel-packs");
@@ -854,7 +857,11 @@ test("registered identity refresh reads finalized review evidence from the workf
   }), null);
 });
 
-test("registered character reconciliation promotes only a ready SHA-bound client-approved show member", async () => {
+test("registered character reconciliation promotes only a ready SHA-bound client-approved show member", async (t) => {
+  if (!channelPackPresent(root)) {
+    t.skip("channel pack が無い環境");
+    return;
+  }
   const projectDir = await mkdtemp(join(tmpdir(), "koya-registration-reconcile-"));
   try {
     assert.equal(await installChannelPack(projectDir), true);
@@ -1333,7 +1340,11 @@ test("legacy replanning recovers approved audio only from an exact bound alignme
   assert.deepEqual(await recoverKoyaApprovedAudioFromAlignments(mismatched, projectDir), []);
 });
 
-test("Koya production planning writes a contract snapshot and resumable state without paid calls", async () => {
+test("Koya production planning writes a contract snapshot and resumable state without paid calls", async (t) => {
+  if (!channelPackPresent(root)) {
+    t.skip("channel pack が無い環境");
+    return;
+  }
   const projectDir = await mkdtemp(join(tmpdir(), "koya-plan-"));
   await mkdir(join(projectDir, "config"), { recursive: true });
   await writeFile(join(projectDir, "script.txt"), script);
@@ -1382,7 +1393,11 @@ test("Koya production planning writes a contract snapshot and resumable state wi
   assert.equal(result.plan.production.incidentLedger.promotedIncidentCount, 1);
 });
 
-test("Koya planning refuses to overwrite an episode id owned by another script", async () => {
+test("Koya planning refuses to overwrite an episode id owned by another script", async (t) => {
+  if (!channelPackPresent(root)) {
+    t.skip("channel pack が無い環境");
+    return;
+  }
   const projectDir = await mkdtemp(join(tmpdir(), "koya-plan-collision-"));
   const scriptPath = join(projectDir, "script.txt");
   const options = {

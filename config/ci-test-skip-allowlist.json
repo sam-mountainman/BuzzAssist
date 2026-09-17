@@ -72,6 +72,97 @@
       "category": "platform-limitation",
       "platforms": ["win32"],
       "justification": "Windows runnerのsymlink作成権限だけを除外する。署名・秘密file・別Harness拒否はskip宣言より前に同じ試験で実行する。"
+    },
+    {
+      "name": "registered character reconciliation promotes only a ready SHA-bound client-approved show member",
+      "reason": "channel pack が無い環境",
+      "category": "private-channel-pack",
+      "platforms": ["linux", "darwin", "win32"],
+      "justification": "登録済みキャストと show bible の名前の対応を見る試験で、名前は私有 pack から引く。合成名では「宣言されていない」で落ちるため、実データが要る。"
+    },
+    {
+      "name": "Koya production planning writes a contract snapshot and resumable state without paid calls",
+      "reason": "channel pack が無い環境",
+      "category": "private-channel-pack",
+      "platforms": ["linux", "darwin", "win32"],
+      "justification": "本番のプラン生成は、実データ前提の工程に合成 fixture を使わない設計（fixture を読めるのは明言した契約テストだけ）。pack 無しではプラン生成そのものが止まる。"
+    },
+    {
+      "name": "Koya planning refuses to overwrite an episode id owned by another script",
+      "reason": "channel pack が無い環境",
+      "category": "private-channel-pack",
+      "platforms": ["linux", "darwin", "win32"],
+      "justification": "同上。プラン生成が私有 pack を要するため、pack 無しの公開 clone では走らない。"
+    },
+    {
+      "name": "Koya location registration requires four SHA-bound, independently reviewed boards",
+      "reason": "channel pack が無い環境",
+      "category": "private-channel-pack",
+      "platforms": ["linux", "darwin", "win32"],
+      "justification": "画風参照の画像は私有 pack にだけある。参照が無いとプロンプトに画風参照の指示が出ないため、合成 fixture では検査対象そのものが生じない。"
+    },
+    {
+      "name": "editorial audit measures real image holds and passes the approved benchmark edit",
+      "reason": "編集品質の実測監査には運営者の手元にしかない成果物が要る: canvas/manga-videos/manga-photo-homecoming-001/episode-manifest.json",
+      "category": "external-report",
+      "platforms": ["linux", "darwin", "win32"],
+      "justification": "運営者の手元にしかない成果物（ignore された canvas/ や運営者固有の設定）を公開 clone へ同梱しない。判定の仕組みは合成データの試験で別に検査する。"
+    },
+    {
+      "name": "editorial audit rejects contextless inserts and unassigned dialogue",
+      "reason": "編集品質の実測監査には運営者の手元にしかない成果物が要る: canvas/manga-videos/manga-photo-homecoming-001/episode-manifest.json",
+      "category": "external-report",
+      "platforms": ["linux", "darwin", "win32"],
+      "justification": "運営者の手元にしかない成果物（ignore された canvas/ や運営者固有の設定）を公開 clone へ同梱しない。判定の仕組みは合成データの試験で別に検査する。"
+    },
+    {
+      "name": "editorial audit rejects conditional split-page lead-ins and image churn",
+      "reason": "編集品質の実測監査には運営者の手元にしかない成果物が要る: canvas/manga-videos/manga-photo-homecoming-001/episode-manifest.json",
+      "category": "external-report",
+      "platforms": ["linux", "darwin", "win32"],
+      "justification": "運営者の手元にしかない成果物（ignore された canvas/ や運営者固有の設定）を公開 clone へ同梱しない。判定の仕組みは合成データの試験で別に検査する。"
+    },
+    {
+      "name": "Koya styling rounds must follow every show-bible spec in order with immutable spec bytes",
+      "reason": "styling round の順序検証には Channel Pack が要る（channel-packs/<id>/ を配置するか BUZZASSIST_CHANNEL_PACK を指定）",
+      "category": "private-channel-pack",
+      "platforms": ["linux", "darwin", "win32"],
+      "justification": "私有 Channel Pack を公開 clone へ同梱しない。pack 無しで検証できる部分は合成 fixture の試験が別に走る。"
+    },
+    {
+      "name": "Koya MCP doctor and read-only actions use the canonical CLI",
+      "reason": "doctor の正本チェックには Channel Pack が要る（channel-packs/<id>/ を配置するか BUZZASSIST_CHANNEL_PACK を指定）",
+      "category": "private-channel-pack",
+      "platforms": ["linux", "darwin", "win32"],
+      "justification": "私有 Channel Pack を公開 clone へ同梱しない。pack 無しで検証できる部分は合成 fixture の試験が別に走る。"
+    },
+    {
+      "name": "Koya MCP doctor refuses an empty recipient until its signed pack is restored locally",
+      "reason": "doctor の正本チェックには Channel Pack が要る（channel-packs/<id>/ を配置するか BUZZASSIST_CHANNEL_PACK を指定）",
+      "category": "private-channel-pack",
+      "platforms": ["linux", "darwin", "win32"],
+      "justification": "私有 Channel Pack を公開 clone へ同梱しない。pack 無しで検証できる部分は合成 fixture の試験が別に走る。"
+    },
+    {
+      "name": "Arano's long-form source review inventories the missed cut-07-u04 protagonist head",
+      "reason": "原画レビューの棚卸しには運営者の手元にしかない成果物が要る: config/koya-manga-source-face-reviews",
+      "category": "external-report",
+      "platforms": ["linux", "darwin", "win32"],
+      "justification": "運営者の手元にしかない成果物（ignore された canvas/ や運営者固有の設定）を公開 clone へ同梱しない。判定の仕組みは合成データの試験で別に検査する。"
+    },
+    {
+      "name": "Arano's reflected and foreground heads are separate hard source-image inventory",
+      "reason": "原画レビューの棚卸しには運営者の手元にしかない成果物が要る: config/koya-manga-source-face-reviews",
+      "category": "external-report",
+      "platforms": ["linux", "darwin", "win32"],
+      "justification": "運営者の手元にしかない成果物（ignore された canvas/ や運営者固有の設定）を公開 clone へ同梱しない。判定の仕組みは合成データの試験で別に検査する。"
+    },
+    {
+      "name": "V4 artwork is preferred over earlier cut assets",
+      "reason": "V4 原画の優先選択には運営者の手元にしかない成果物が要る: canvas/manga-videos/manga-photo-homecoming-001/episode-manifest.json",
+      "category": "external-report",
+      "platforms": ["linux", "darwin", "win32"],
+      "justification": "運営者の手元にしかない成果物（ignore された canvas/ や運営者固有の設定）を公開 clone へ同梱しない。判定の仕組みは合成データの試験で別に検査する。"
     }
   ]
 }
