@@ -252,8 +252,13 @@ function gitList(args, cwd) {
  * なので既定では、`git add -A` が拾うもの（追跡下＋未追跡かつ ignore 外）を
  * 全部見る。ignore されているものは commit されないので対象外でよい。
  */
-export function filesInScope({ stagedOnly = false, projectDir = REPO_ROOT } = {}) {
+export function filesInScope({ stagedOnly = false, projectDir = REPO_ROOT, revision = "" } = {}) {
   const cwd = path.resolve(projectDir);
+  // push 前の検査は、作業ツリーではなく**そのコミットが持ち込む中身**を見る。
+  // --root は親の無いコミットでもファイルを列挙させるため。
+  if (revision) {
+    return gitList(["diff-tree", "--no-commit-id", "-r", "--root", "--diff-filter=AMR", "--name-only", "-z", revision], cwd);
+  }
   if (stagedOnly) return gitList(["diff", "--cached", "--name-only", "-z"], cwd);
   return [
     ...gitList(["ls-files", "-z"], cwd),
@@ -269,11 +274,12 @@ export function filesInScope({ stagedOnly = false, projectDir = REPO_ROOT } = {}
  * 直った方を読み、commit には秘密入りの版が入る。差分の検査を名乗るなら
  * 差分の中身を読むこと。
  */
-function readCandidate(relative, { stagedOnly, projectDir }) {
+function readCandidate(relative, { stagedOnly, projectDir, revision = "" }) {
   const cwd = path.resolve(projectDir);
-  if (stagedOnly) {
+  if (stagedOnly || revision) {
     try {
-      const out = execFileSync("git", ["show", `:${relative}`], { cwd, maxBuffer: 64 * 1024 * 1024 });
+      const spec = revision ? `${revision}:${relative}` : `:${relative}`;
+      const out = execFileSync("git", ["show", spec], { cwd, maxBuffer: 64 * 1024 * 1024 });
       return { text: out.toString("utf8"), bytes: out.length };
     } catch {
       // index から消えた（削除の stage）。中身は無いので検査対象にならない。
@@ -370,14 +376,14 @@ function splitByAllowlist(findings, allowed) {
   return { unresolved, accepted, stale };
 }
 
-export function auditPublicSurface({ projectDir = REPO_ROOT, stagedOnly = false } = {}) {
+export function auditPublicSurface({ projectDir = REPO_ROOT, stagedOnly = false, revision = "" } = {}) {
   const root = path.resolve(projectDir);
   const { terms, castIds } = collectSensitiveSignals(root);
   const packAvailable = channelPackPresent(root);
   let files = [];
   let enumerationError = "";
   try {
-    files = filesInScope({ stagedOnly, projectDir: root });
+    files = filesInScope({ stagedOnly, projectDir: root, revision });
   } catch (error) {
     // git 作業ツリーでない場所を渡された。例外で落とすと呼び出し側は
     // 結果を得られず、「検査した」とも「していない」とも言えなくなる。
@@ -398,7 +404,7 @@ export function auditPublicSurface({ projectDir = REPO_ROOT, stagedOnly = false 
   const scanIncomplete = [];
   const homeRoot = homedir();
   for (const relative of files) {
-    const candidate = readCandidate(relative, { stagedOnly, projectDir: root });
+    const candidate = readCandidate(relative, { stagedOnly, projectDir: root, revision });
     if (candidate.absent) continue;
     if (candidate.tooLarge) {
       scanIncomplete.push({ file: relative, why: `${Math.round(candidate.bytes / 1024)}KiB は上限超で未検査`, bytes: candidate.bytes });
@@ -455,7 +461,9 @@ export function auditPublicSurface({ projectDir = REPO_ROOT, stagedOnly = false 
   // exit 0 を返していた——落ちる理由と通す理由が食い違っていた。
   // 見ていない区分は、合格でも不合格でもなく「未検査」。
   const signalDependent = { roster: packAvailable, term: packAvailable, path: true, pathLeak: true };
-  const stale = [
+  // 1コミット分の検査では、許容一覧の大半は「そのコミットが触っていない」
+  // だけで、直ったわけではない。stale は全体走査のときだけ数える。
+  const stale = revision ? [] : [
     ...(signalDependent.roster ? roster.stale : []),
     ...(signalDependent.term ? term.stale : []),
     ...pathLeak.stale,
@@ -487,7 +495,7 @@ export function auditPublicSurface({ projectDir = REPO_ROOT, stagedOnly = false 
 
   return {
     version: "public-surface-audit-v3",
-    scope: stagedOnly ? "staged" : "tracked+untracked",
+    scope: revision ? `commit:${revision.slice(0, 12)}` : stagedOnly ? "staged" : "tracked+untracked",
     projectDir: root,
     fileCount: files.length,
     // 語が引けなかったことを「問題なし」と報告しない。
@@ -516,6 +524,45 @@ export function auditPublicSurface({ projectDir = REPO_ROOT, stagedOnly = false 
     // 未検査であることは status と出力に必ず出す。
     gateOk: status !== "failed",
   };
+}
+
+const ZERO_SHA = /^0+$/u;
+
+/**
+ * push される範囲の、全コミットを検査する。
+ *
+ * pre-push フックは作業ツリーを検査していた。**push されるのは作業ツリーでは
+ * なくコミット**なので、作業ツリーが clean な状態で漏洩入りのブランチを push
+ * すると素通りした。実際、作業ツリーを丸ごと保存した snapshot ブランチ3本と
+ * 作業ブランチ2本が、番組設定の写し・全キャストの名簿・開発機のパスを
+ * コミットとして抱えていた。
+ *
+ * もう一つの理由は、**語彙は後から増える**こと。コミットした時点では pack に
+ * 無かった地名が後から登録され、16日前に clean と確認したコミットが、push
+ * する時点では漏洩になっていた。だから検査は push の瞬間に、現在の語彙で行う。
+ *
+ * 途中のコミットで入れて次のコミットで消した漏洩も、履歴として push される
+ * ので、先端だけでなく範囲内の全コミットを見る。
+ */
+export function auditPushRefs(lines, { projectDir = REPO_ROOT } = {}) {
+  const root = path.resolve(projectDir);
+  const results = [];
+  for (const raw of lines) {
+    const [localRef, localSha, remoteRef, remoteSha] = String(raw).trim().split(/\s+/u);
+    if (!localSha || ZERO_SHA.test(localSha)) continue; // 削除の push
+    const rangeArgs = remoteSha && !ZERO_SHA.test(remoteSha)
+      ? [localSha, `^${remoteSha}`]
+      : [localSha, "--not", "--remotes"]; // 新しいブランチ: どの remote にも無いコミット
+    const commits = execFileSync("git", ["rev-list", "--reverse", ...rangeArgs], { cwd: root, maxBuffer: 64 * 1024 * 1024 })
+      .toString().split("\n").filter(Boolean);
+    for (const sha of commits) {
+      const report = auditPublicSurface({ projectDir: root, revision: sha });
+      results.push({ localRef, remoteRef, sha, report });
+    }
+  }
+  const failed = results.filter((entry) => entry.report.status === "failed");
+  const incomplete = results.filter((entry) => entry.report.status === "incomplete");
+  return { commitCount: results.length, results, failed, incomplete };
 }
 
 const STATUS_LABEL = {
@@ -608,7 +655,25 @@ if (isDirectCli(import.meta.url)) {
   const asJson = process.argv.includes("--json");
   const stagedOnly = process.argv.includes("--staged");
   const requireSignals = process.argv.includes("--require-signals");
-  const report = auditPublicSurface({ stagedOnly });
+  if (process.argv.includes("--push-stdin")) {
+    // git の pre-push は「<local ref> <local sha> <remote ref> <remote sha>」を
+    // 1行ずつ stdin へ渡す。
+    const input = readFileSync(0, "utf8").split("\n").filter((line) => line.trim());
+    const range = auditPushRefs(input);
+    for (const entry of range.failed) {
+      process.stdout.write(`\n✗ ${entry.localRef} ${entry.sha.slice(0, 12)}\n${render(entry.report)}\n`);
+    }
+    process.stdout.write(`\npush 範囲のコミット ${range.commitCount} 件を検査: `
+      + `failed ${range.failed.length} / incomplete ${range.incomplete.length}\n`);
+    if (range.failed.length > 0) process.exitCode = 2;
+    else if (requireSignals && range.incomplete.length > 0) {
+      process.stdout.write("--require-signals: 未検査の区分があるコミットを通しません。\n");
+      process.exitCode = 3;
+    }
+  } else {
+  const revisionIndex = process.argv.indexOf("--revision");
+  const revision = revisionIndex > 0 ? String(process.argv[revisionIndex + 1] || "") : "";
+  const report = auditPublicSurface({ stagedOnly, revision });
   process.stdout.write(asJson ? `${JSON.stringify(report, null, 2)}\n` : `${render(report)}\n`);
   // ゲートは「一覧に無い新しい検出」で判定する。常に 2 を返す検査は
   // CI にも pre-commit にも載せられず、手で叩いたときしか働かない。
@@ -618,5 +683,6 @@ if (isDirectCli(import.meta.url)) {
   if (requireSignals && report.status !== "clean" && report.status !== "accepted-risk") {
     process.stdout.write("\n--require-signals: 未検査の区分があるので通しません。\n");
     process.exitCode = 3;
+  }
   }
 }
