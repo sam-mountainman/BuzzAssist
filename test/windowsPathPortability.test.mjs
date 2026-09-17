@@ -18,6 +18,8 @@ const FORBIDDEN = [
   { id: "file URL の pathname", pattern: /startsWith\("file:\/\/"\)\s*\?\s*new URL\([^()]*\)\.pathname/u },
   // ディレクトリの包含を "/" 付きの前方一致で見ると、Windows では中のファイルまで外になる。
   { id: "/ 決め打ちの包含判定", pattern: /startsWith\(`\$\{\w*(?:Dir|Root|Path)\}\/`\)/u },
+  // Windows の npm は npm.cmd で、シェルなしでは起動できない（spawnSync npm ENOENT）。
+  { id: "npm のシェルなし起動", pattern: /\b(?:spawn|execFile)(?:Sync)?\(\s*["']npm["']/u },
 ];
 
 function sourceFiles(dir, { recursive = false, filter = () => true } = {}) {
@@ -89,6 +91,8 @@ test("検査の型は、実際に壊れていた書き方を見つける", () =>
     'const filePath = raw.startsWith("file://") ? new URL(raw).pathname : raw;',
     "if (!sourcePath.startsWith(`${projectDir}/`) || !await exists(sourcePath)) {",
     "if (outPath !== outputDir && !outPath.startsWith(`${outputDir}/`)) {",
+    'const run = spawnSync("npm", ["pack", "--dry-run"], { cwd: root });',
+    "const stdout = execFileSync('npm', ['pack']);",
   ];
   for (const line of broken) {
     assert.ok(FORBIDDEN.some(({ pattern }) => pattern.test(line)), `見逃した: ${line}`);
@@ -99,6 +103,7 @@ test("検査の型は、実際に壊れていた書き方を見つける", () =>
     'if (endpoint.pathname === "/") endpoint.pathname = "/v1/feedback/bundles";',
     "if (!parsed.mimeType.startsWith(`${kind}/`)) {",
     "if (layer.route && pathname !== layer.route && !pathname.startsWith(`${layer.route}/`)) {",
+    'const run = spawnSync(isWindows ? "npm.cmd" : "npm", ["pack"], { shell: isWindows });',
   ];
   for (const line of fine) {
     assert.equal(FORBIDDEN.some(({ pattern }) => pattern.test(line)), false, `誤検出: ${line}`);

@@ -494,3 +494,18 @@ test("英数字の識別子は、区切りの後ろに接尾辞が続いても�
   const tokens = extractVocabularyTokens("a-b-c");
   for (const expected of ["a", "b", "c", "a-b", "b-c", "a-b-c"]) assert.ok(tokens.has(expected), expected);
 });
+
+test("tarball を作る npm の起動は、Windows でもシェル経由で起動でき、空白を含むパスを壊さない", async () => {
+  // "npm" をシェルなしで起動していたので、Windows の CI で spawnSync npm ENOENT になった。
+  const { npmInvocation } = await import("../scripts/audit-package-tarball.mjs");
+  assert.deepEqual(
+    npmInvocation(["pack", "--pack-destination", "C:\\Users\\A B\\Temp"], { env: {}, platform: "win32" }),
+    { command: "npm.cmd", args: ['"pack"', '"--pack-destination"', '"C:\\Users\\A B\\Temp"'], shell: true },
+  );
+  assert.deepEqual(
+    npmInvocation(["pack"], { env: { npm_execpath: "C:\\npm\\bin\\npm-cli.js" }, platform: "win32", execPath: "C:\\node.exe" }),
+    { command: "C:\\node.exe", args: ["C:\\npm\\bin\\npm-cli.js", "pack"], shell: false },
+    "npm run から呼ばれたときは npm 本体をシェルを通さずに起動する",
+  );
+  assert.deepEqual(npmInvocation(["pack"], { env: {}, platform: "linux" }), { command: "npm", args: ["pack"], shell: false });
+});

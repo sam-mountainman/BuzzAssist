@@ -69,14 +69,26 @@ function parseArgs(argv) {
   return out;
 }
 
+// npm をどう起動するか。npm run から呼ばれたときは npm 本体の JS を node で直接
+// 起動する（シェルを通さないので引数のパスに空白があっても壊れない）。直接呼ばれた
+// Windows では npm.cmd をシェル経由で起動するので、引数を二重引用符で囲む。
+// "npm" をシェルなしで起動していたので、Windows の CI で spawnSync npm ENOENT になった。
+export function npmInvocation(args, { env = process.env, platform = process.platform, execPath = process.execPath } = {}) {
+  const cli = String(env.npm_execpath || "");
+  if (/\.(?:c?js|mjs)$/u.test(cli)) return { command: execPath, args: [cli, ...args], shell: false };
+  if (platform === "win32") {
+    return { command: "npm.cmd", args: args.map((value) => `"${String(value).replaceAll("\"", "\"\"")}"`), shell: true };
+  }
+  return { command: "npm", args, shell: false };
+}
+
 function createTarball(projectDir) {
   const destination = mkdtempSync(join(tmpdir(), "buzzassist-package-audit-"));
   try {
-    const stdout = execFileSync(
-      "npm",
-      ["pack", "--json", "--ignore-scripts", "--pack-destination", destination],
-      { cwd: projectDir, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
-    );
+    const npm = npmInvocation(["pack", "--json", "--ignore-scripts", "--pack-destination", destination]);
+    const stdout = execFileSync(npm.command, npm.args, {
+      cwd: projectDir, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, shell: npm.shell,
+    });
     const manifest = JSON.parse(stdout)[0];
     if (!manifest?.filename) throw new Error("npm packがfilenameを返さなかった。");
     return { bytes: readFileSync(join(destination, basename(manifest.filename))), cleanup: () => rmSync(destination, { recursive: true, force: true }) };
