@@ -22,6 +22,7 @@ import {
   renderPublicProposalCatalog,
 } from "../lib/harnessLearningCurator.mjs";
 import { loadHarnessFeedbackImportLedger } from "../lib/harnessFeedbackIngest.mjs";
+import { createCanonicalReaders } from "./harness-learn.mjs";
 import { loadReceipts } from "./harness-receipts.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -126,33 +127,21 @@ async function main() {
       ? path.resolve(args.feedbackIngestRoot)
       : path.join(REPO_ROOT, "var", "feedback-ingest"),
   });
+  const { readCanonical, hashCanonical } = createCanonicalReaders({ repoRoot: REPO_ROOT });
   const report = buildHarnessCuratorReport({
     proposals,
     applied,
     receipts: loadReceipts(receiptsDir),
     approvedFeedbackImports: importLedger.approved,
     revokedFeedbackImports: importLedger.revokedAfterApproval,
-    readCanonical: (relativePath) => {
-      const full = path.resolve(REPO_ROOT, relativePath);
-      return fs.existsSync(full) ? fs.readFileSync(full, "utf8") : null;
-    },
-    hashCanonical: (relativePath) => {
-      const full = path.resolve(REPO_ROOT, relativePath);
-      if (!fs.existsSync(full)) return null;
-      return (awaitImportCryptoHash(fs.readFileSync(full)));
-    },
+    // harness-learn の status と同じ読み手。channel-pack 宛の記録は、promote / apply が
+    // 印を探して sha256 を取ったのと同じく Channel Pack 側を先に読む（ops-7）。
+    readCanonical,
+    hashCanonical,
     similarityThreshold: args.similarityThreshold ? Number(args.similarityThreshold) : undefined,
   });
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 }
-
-function awaitImportCryptoHash(bytes) {
-  // sync CLIのread-only scanなので、依存を先頭で明示せず遅延させる必要はない。
-  // createHashは下のstatic importから来る（関数化してtest時の注入面を小さくする）。
-  return createHash("sha256").update(bytes).digest("hex");
-}
-
-import { createHash } from "node:crypto";
 
 if (isDirectCli(import.meta.url)) {
   main().catch((error) => {

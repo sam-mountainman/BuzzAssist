@@ -29,7 +29,11 @@ import fs from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveChannelPackPath } from "../lib/channelPackResolver.mjs";
+import {
+  channelPackRootEntries,
+  resolveChannelPackPath,
+  resolveChannelPackSource,
+} from "../lib/channelPackResolver.mjs";
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
 import { loadHarnessDeployments } from "../lib/harnessDeploymentResolver.mjs";
 import { redactSharedLearningText } from "../lib/harnessFeedbackBundle.mjs";
@@ -97,7 +101,7 @@ export function ledgerPathFor(target, kind = "proposals") {
     }
     // ambient BUZZASSIST_CHANNEL_PACK_ID を使うと、narrated-story宛の提案が
     // たまたまactiveなKoya packへ入る。target自身をpack IDとして固定する。
-    const packId = definition.packId || resolvedTarget.slice("channel-pack:".length);
+    const packId = packIdForTarget(resolvedTarget, definition);
     return path.join(REPO_ROOT, "channel-packs", packId, "docs", "learning", name);
   }
   return path.join(LEARN_DIR, name);
@@ -147,6 +151,11 @@ export function loadTargets(targetsPath = TARGETS_PATH) {
   return raw.targets ?? {};
 }
 
+/** repoRoot 基準の targets.json。既定のリポジトリなら TARGETS_PATH と同じ。 */
+function loadTargetsFor(repoRoot = REPO_ROOT) {
+  return loadTargets(path.resolve(repoRoot) === REPO_ROOT ? TARGETS_PATH : path.join(repoRoot, "docs", "learning", "targets.json"));
+}
+
 // 宛先の名前空間を platform: / genre: / channel-pack: の3層へ変えたとき、
 // 既に記録した提案は旧IDのまま残る。捨てるとその指摘が無かったことに
 // なるので、読むときに翻訳する。提案IDは kind+target+text から作るため、
@@ -163,6 +172,15 @@ export const TARGET_ALIASES = {
 
 export function resolveTarget(target) {
   return TARGET_ALIASES[target] ?? target;
+}
+
+function isChannelPackTarget(target) {
+  return String(target || "").startsWith("channel-pack:");
+}
+
+/** target 自身が pack ID を決める（ambient な BUZZASSIST_CHANNEL_PACK_ID には頼らない）。 */
+function packIdForTarget(target, definition = {}) {
+  return definition?.packId || String(target).slice("channel-pack:".length);
 }
 
 export const OVERLAY_HEADER = [
@@ -449,7 +467,9 @@ export function isActuallyApplied(record, readCanonical, hashCanonical = null) {
   // 人の確認を締め出していた。
   if (record.attestedBy !== HUMAN_VERIFIED) return false;
   if (!record.targetPath) return false;
-  const text = readCanonical(record.targetPath);
+  // 記録そのものも渡す。channel-pack 宛は同じ相対パスでも pack 側が正本で、
+  // 相対パスだけでは「どちらの写しを読むか」を決められない（ops-7）。
+  const text = readCanonical(record.targetPath, record);
   if (text === null) return false;
   // 一意な proposal marker と、十分な長さの exact note の両方を要求する。
   // 「正本のどこかに5文字だけ一致」で別の変更を証拠にできた旧判定は使わない。
@@ -459,7 +479,7 @@ export function isActuallyApplied(record, readCanonical, hashCanonical = null) {
   // 正本が変わっていれば「別の版に対する記録」なので、文言が残っていても
   // その記録は現在の版を保証しない。
   if (record.targetSha256 && typeof hashCanonical === "function") {
-    const current = hashCanonical(record.targetPath);
+    const current = hashCanonical(record.targetPath, record);
     if (current && current !== record.targetSha256) return false;
   }
   return true;
@@ -541,61 +561,140 @@ export function clusterForConsolidation(summary) {
 // 既定）のが正しく、配布シミュレーションもそれを確かめている。
 //
 // リポジトリ内の配置は相対で返す（記録に端末の絶対パスを残さない）。
-function resolveDeploymentRoot(harnessId) {
-  const operatorMap = path.join(REPO_ROOT, "config", "harness-deployments.json");
+function resolveDeploymentRoot(harnessId, repoRoot = REPO_ROOT) {
+  const operatorMap = path.join(repoRoot, "config", "harness-deployments.json");
   if (!fs.existsSync(operatorMap)) return null;
   let deployment;
   try {
-    deployment = loadHarnessDeployments({ repoRoot: REPO_ROOT, deploymentPath: operatorMap }).get(harnessId);
+    deployment = loadHarnessDeployments({ repoRoot, deploymentPath: operatorMap }).get(harnessId);
   } catch {
     return null;
   }
   if (!deployment) return null;
-  const rel = path.relative(REPO_ROOT, deployment.root);
+  const rel = path.relative(repoRoot, deployment.root);
   if (rel === "") return ".";
   return rel.startsWith("..") || path.isAbsolute(rel) ? deployment.root : rel;
 }
 
-function requireTarget(rawTarget) {
+/** 正本をどこから読んだかの表示名。出力と applied 記録（targetSource）で使う。 */
+export const CANONICAL_SOURCE_LABELS = Object.freeze({
+  "channel-pack": "Channel Pack",
+  "channel-pack-env": "Channel Pack（BUZZASSIST_CHANNEL_PACK）",
+  deployment: "配置先（config/harness-deployments.json）",
+  repository: "リポジトリ",
+});
+
+function sameFile(left, right) {
+  try {
+    return fs.realpathSync(left) === fs.realpathSync(right);
+  } catch {
+    return path.resolve(left) === path.resolve(right);
+  }
+}
+
+/**
+ * channel-pack 宛の正本を「Channel Pack を先に見る」順で解決する（ops-7）。
+ *
+ * 以前はリポジトリの docs/ を先に見て、そこに無いときだけ pack を見ていた。
+ * docs/ には pack へ移す前の写しが git 管理外のまま残りうる（.gitignore 済みで
+ * 誰も気づかない）。**古い写しがあると、それが本物の pack より優先され、
+ * promote / apply は古い写しで印を探し、古い写しの sha256 を記録した**。
+ * status の読み取り側（readCanonical / hashCanonical）は pack をまったく見て
+ * いなかったので、書く側と読む側で別のファイルを比べることもあった。
+ *
+ * 探す順は共通の解決器（lib/channelPackResolver.mjs）に任せる:
+ * BUZZASSIST_CHANNEL_PACK → <repo>/channel-packs/<packId>/ → リポジトリ直下。
+ * 合成 fixture は承認記録の材料にならないので候補から外す。リポジトリ直下は
+ * pack 側に正本が無いときだけ使い、どちらを使ったかを呼び出し側へ返す。
+ */
+export function resolvePackFirstCanonical(relativePath, { repoRoot = REPO_ROOT, packId } = {}) {
+  const found = resolveChannelPackSource(repoRoot, relativePath, packId, { includeFixture: false });
+  const repoPath = path.resolve(repoRoot, relativePath);
+  if (found.kind !== "legacy") {
+    const shadowed = fs.existsSync(repoPath) && !sameFile(repoPath, found.path);
+    return {
+      full: found.path,
+      source: found.kind === "env" ? "channel-pack-env" : "channel-pack",
+      missing: false,
+      packRoot: found.root,
+      // pack が勝ったので読まなかったリポジトリ側の写し。出力で知らせる。
+      ignoredRepoCopy: shadowed ? repoPath : null,
+      packRootWithoutCanonical: null,
+    };
+  }
+  // pack 側のどこにも正本が無い。ここで初めてリポジトリ直下（従来の配置）を使う。
+  const presentRoot = channelPackRootEntries(repoRoot, packId)
+    .find((entry) => entry.kind !== "fixture" && fs.existsSync(entry.root));
+  return {
+    full: repoPath,
+    source: "repository",
+    missing: !fs.existsSync(repoPath),
+    packRoot: null,
+    ignoredRepoCopy: null,
+    packRootWithoutCanonical: presentRoot ? presentRoot.root : null,
+  };
+}
+
+/**
+ * target の正本の置き場を解決する。requireTarget / promote / apply / status の
+ * 表示が同じ規則を使う。
+ *
+ * - channel-pack 宛（配置先相対でないもの）: pack を先に見る。
+ * - channel-pack 宛で配置先相対: 運営者が宣言した配置先がそのチャンネルの置き場。
+ * - それ以外（platform / genre）: 従来どおり。リポジトリを先に見る。
+ */
+export function resolveCanonicalTarget(rawTarget, {
+  repoRoot = REPO_ROOT,
+  targets = undefined,
+  deploymentRootFor = undefined,
+} = {}) {
   const target = resolveTarget(rawTarget);
-  if (!LEARNING_TARGETS[target]) {
+  const targetMap = targets ?? loadTargetsFor(repoRoot);
+  const def = targetMap[target];
+  if (!def?.canonical) {
     throw new Error(
       `未知の target: ${target}\n使えるのは:\n`
-        + Object.keys(LEARNING_TARGETS).map((key) => `  ${key}`).join("\n"),
+        + Object.keys(targetMap).map((key) => `  ${key}`).join("\n"),
     );
   }
-  const def = loadTargets()[target];
   let rel = def.canonical;
   if (def.relativeToDeployment) {
-    const root = resolveDeploymentRoot(def.relativeToDeployment);
+    const root = (deploymentRootFor ?? ((id) => resolveDeploymentRoot(id, repoRoot)))(def.relativeToDeployment);
     if (!root) {
       // 捕捉は「あとで判断するための記録」なので、配置先が未設定でも受け取る
       // （下の「正本が手元に無い」と同じ扱い）。ここで投げていたので、配置表を持たない
       // 環境（CI・clone 直後）では pack 宛の捕捉が、台帳の隔離の検査より前に落ちていた。
       // 書き込む工程（requireWritableTarget）だけが配置先を要求する。
-      return { rel, full: null, missing: true, missingDeployment: def.relativeToDeployment };
+      return { target, rel, full: null, missing: true, missingDeployment: def.relativeToDeployment, source: "deployment" };
     }
     rel = path.join(root, rel);
+    const full = path.resolve(repoRoot, rel);
+    return { target, rel, full, missing: !fs.existsSync(full), source: "deployment" };
   }
-  // channel-pack の正本は Channel Pack 側にある。pack を持たない環境
-  // （リポジトリを clone しただけの人、CI）でも解決を試みる。
-  let full = path.resolve(REPO_ROOT, rel);
+  if (isChannelPackTarget(target)) {
+    // 捕捉は正本が手元に無くても受け取る（missing を返すだけ）。書き込む工程
+    // （promote / apply）だけが requireWritableTarget で実在を要求する。
+    return { target, rel, ...resolvePackFirstCanonical(rel, { repoRoot, packId: packIdForTarget(target, def) }) };
+  }
+  // platform / genre は従来どおり: リポジトリに無いときだけ pack 側を試す。
+  let full = path.resolve(repoRoot, rel);
   if (!fs.existsSync(full)) {
-    const viaPack = resolveChannelPackPath(REPO_ROOT, rel);
+    const viaPack = resolveChannelPackPath(repoRoot, rel);
     if (fs.existsSync(viaPack)) full = viaPack;
   }
-  if (!fs.existsSync(full)) {
-    // 捕捉は「あとで判断するための記録」なので、正本が手元に無くても
-    // 受け取る。書き込む工程（sync / promote）だけが正本の実在を要求する
-    // ——ここで拒否すると、pack を持たない人は指摘を残すことすらできない。
-    return { rel, full, missing: true };
-  }
-  return { rel, full, missing: false };
+  // 捕捉は「あとで判断するための記録」なので、正本が手元に無くても
+  // 受け取る。書き込む工程（sync / promote）だけが正本の実在を要求する
+  // ——ここで拒否すると、pack を持たない人は指摘を残すことすらできない。
+  return { target, rel, full, missing: !fs.existsSync(full), source: "repository" };
+}
+
+function requireTarget(rawTarget) {
+  return resolveCanonicalTarget(rawTarget);
 }
 
 /** 書き込む工程だけが要求する。読むだけの工程は missing を許す。 */
-function requireWritableTarget(rawTarget) {
-  const resolved = requireTarget(rawTarget);
+export function requireWritableTarget(rawTarget, options = {}) {
+  const resolved = resolveCanonicalTarget(rawTarget, options);
   if (resolved.missingDeployment) {
     throw new Error(
       `${resolveTarget(rawTarget)} は ${resolved.missingDeployment} の配置先が要ります。`
@@ -606,11 +705,113 @@ function requireWritableTarget(rawTarget) {
   if (resolved.missing) {
     throw new Error(
       `target の正本がこの環境にありません: ${resolved.rel}\n`
+      + (resolved.packRootWithoutCanonical
+        ? `  Channel Pack（${resolved.packRootWithoutCanonical}）にもリポジトリ側にも見つかりません。\n`
+        : "")
       + "Channel Pack を配置するか BUZZASSIST_CHANNEL_PACK を指定してください"
       + "（捕捉はできますが、書き込みは正本が要ります）",
     );
   }
   return resolved;
+}
+
+/**
+ * applied 記録の targetPath を、記録した target の規則で読む場所へ解決する。
+ * status / curator が「反映済みか」を判定するときの読み先。promote / apply が
+ * 印を探して sha256 を取ったのと同じファイルを指さなければ、照合が意味を持たない。
+ *
+ * record が無い（相対パスだけで呼ばれた）ときと共有層宛は、従来どおりリポジトリ基準。
+ */
+export function resolveRecordedCanonical(record, {
+  repoRoot = REPO_ROOT,
+  targets = undefined,
+} = {}) {
+  const rel = record?.targetPath;
+  if (typeof rel !== "string" || rel === "") return null;
+  const target = resolveTarget(String(record?.target || ""));
+  if (!isChannelPackTarget(target)) {
+    const full = path.resolve(repoRoot, rel);
+    return { full, source: "repository", missing: !fs.existsSync(full) };
+  }
+  const def = (targets ?? loadTargetsFor(repoRoot))[target] ?? {};
+  if (def.relativeToDeployment) {
+    // 記録の targetPath は配置先を含む形で残っている。配置先がそのチャンネルの置き場。
+    const full = path.resolve(repoRoot, rel);
+    return { full, source: "deployment", missing: !fs.existsSync(full) };
+  }
+  return resolvePackFirstCanonical(rel, { repoRoot, packId: packIdForTarget(target, def) });
+}
+
+/**
+ * summarizeProposals / isActuallyApplied へ渡す読み手。readCanonical(rel, record) の
+ * 第2引数で記録の target を受け取り、channel-pack 宛なら pack を先に読む。
+ */
+export function createCanonicalReaders({ repoRoot = REPO_ROOT, targets = undefined } = {}) {
+  // targets.json は記録ごとに読み直さない。共有層宛しか無ければ読みもしない。
+  let targetMap = targets;
+  const locate = (rel, record = null) => {
+    const target = String(record?.target || "");
+    const packTarget = isChannelPackTarget(resolveTarget(target));
+    if (packTarget) targetMap ??= loadTargetsFor(repoRoot);
+    return resolveRecordedCanonical({ target, targetPath: rel }, { repoRoot, targets: packTarget ? targetMap : {} });
+  };
+  return {
+    locate,
+    readCanonical: (rel, record = null) => {
+      const location = locate(rel, record);
+      return location && !location.missing ? fs.readFileSync(location.full, "utf8") : null;
+    },
+    hashCanonical: (rel, record = null) => {
+      const location = locate(rel, record);
+      return location && !location.missing
+        ? createHash("sha256").update(fs.readFileSync(location.full)).digest("hex")
+        : null;
+    },
+  };
+}
+
+function displayCanonicalPath(full, repoRoot = REPO_ROOT) {
+  if (!full) return "(未解決)";
+  const rel = path.relative(repoRoot, full);
+  return rel && !rel.startsWith("..") && !path.isAbsolute(rel) ? rel : full;
+}
+
+/**
+ * channel-pack 宛の正本をどこから読んだかを、人が読める行にする。
+ * 共有層宛は従来の出力を変えないので空配列を返す。
+ */
+export function describeCanonicalResolution(resolved, { repoRoot = REPO_ROOT, indent = "  " } = {}) {
+  if (!resolved || !isChannelPackTarget(resolved.target)) return [];
+  if (resolved.missingDeployment) {
+    return [`${indent}正本: 配置先が未設定（${resolved.missingDeployment}。config/harness-deployments.json）`];
+  }
+  const label = CANONICAL_SOURCE_LABELS[resolved.source] ?? resolved.source;
+  const lines = [
+    resolved.missing
+      ? `${indent}正本: 見つかりません（${label} を探した: ${displayCanonicalPath(resolved.full, repoRoot)}）`
+      : `${indent}正本: ${displayCanonicalPath(resolved.full, repoRoot)}（${label}）`,
+  ];
+  if (resolved.ignoredRepoCopy) {
+    lines.push(`${indent}  リポジトリ側の同名ファイルは読みません（pack 側が優先）: ${displayCanonicalPath(resolved.ignoredRepoCopy, repoRoot)}`);
+  }
+  if (resolved.packRootWithoutCanonical) {
+    lines.push(`${indent}  Channel Pack（${displayCanonicalPath(resolved.packRootWithoutCanonical, repoRoot)}）に正本が無いので、リポジトリ側を使います`);
+  }
+  return lines;
+}
+
+/** promote / apply の失敗文に添える「実際に読んだファイル」。共有層宛は従来の文面のまま。 */
+function checkedCanonicalNote(resolved) {
+  const lines = describeCanonicalResolution(resolved, { indent: "  " });
+  return lines.length === 0 ? "" : `${lines.join("\n")}\n`;
+}
+
+/**
+ * applied 記録に残す「どの写しの sha256 か」。channel-pack 宛だけに付ける
+ * （共有層宛の記録の形は変えない）。絶対パスは残さない。
+ */
+function recordedCanonicalSource(resolved) {
+  return isChannelPackTarget(resolved?.target) ? resolved.source : undefined;
 }
 
 /**
@@ -856,6 +1057,10 @@ function printHelp() {
   apply     提案を反映済みとして記録する
     --id <提案ID>  --reviewer <名前>  --note "何をどう書いたか"
 
+  channel-pack 宛の正本は Channel Pack（BUZZASSIST_CHANNEL_PACK →
+  channel-packs/<id>/）を先に読み、pack 側に無いときだけリポジトリ直下を読む。
+  どれを読んだかは status / review / promote / apply の出力に出る。
+
   なぜこの形か: 捕捉は書き換えない、review は既定 dry-run、apply には
   reviewer 名が要る。自動で正本を書き換える作りにすると、「スクリプトが
   自分で自分に合格を出す」のと同じ構造になるため。
@@ -874,17 +1079,23 @@ function main() {
   const proposals = learningLedgerPaths("proposals").flatMap(readJsonl);
   const applied = learningLedgerPaths("applied").flatMap(readJsonl);
   // 正本を実際に読んで反映を確かめる。記録を信じない。
-  const readCanonical = (rel) => {
-    const full = path.join(REPO_ROOT, rel);
-    return fs.existsSync(full) ? fs.readFileSync(full, "utf8") : null;
-  };
-  const hashCanonical = (rel) => {
-    const full = path.join(REPO_ROOT, rel);
-    return fs.existsSync(full)
-      ? createHash("sha256").update(fs.readFileSync(full)).digest("hex")
-      : null;
-  };
+  // channel-pack 宛は promote / apply と同じく pack を先に読む（ops-7）。
+  const { readCanonical, hashCanonical } = createCanonicalReaders();
   const summary = summarizeProposals(proposals, applied, readCanonical, hashCanonical);
+  // channel-pack 宛の正本をどこから読んだかを出す。共有層宛の出力は変えない。
+  // 記録に残った古い target（定義から消えたもの）で表示が落ちないようにする。
+  const resolutionLinesFor = (id, indent = "  ") => {
+    if (!isChannelPackTarget(resolveTarget(id))) return [];
+    try {
+      return describeCanonicalResolution(resolveCanonicalTarget(id), { indent });
+    } catch {
+      return [`${indent}正本: 未知の target（${resolveTarget(id)}）`];
+    }
+  };
+  const canonicalResolutionLines = (targetIds) => [...new Set(targetIds.map((id) => resolveTarget(id)))]
+    .filter((id) => isChannelPackTarget(id))
+    .sort()
+    .flatMap((id) => [`  ${id}`, ...resolutionLinesFor(id, "    ")]);
 
   switch (args.action) {
     case "capture": {
@@ -904,13 +1115,21 @@ function main() {
         );
       }
       process.stdout.write(`  反映先候補: ${LEARNING_TARGETS[entry.target]}\n`);
+      for (const line of resolutionLinesFor(entry.target)) process.stdout.write(`${line}\n`);
       break;
     }
 
     case "status": {
       const pending = summary.filter((entry) => !entry.applied);
+      // 反映済みの判定に使った正本の読み先（channel-pack 宛だけ）。
+      const resolution = canonicalResolutionLines(summary.map((entry) => entry.target));
+      const writeResolution = () => {
+        if (resolution.length === 0) return;
+        process.stdout.write(`\n正本の読み先（channel-pack 宛は Channel Pack を先に見る）\n${resolution.join("\n")}\n`);
+      };
       if (pending.length === 0) {
         process.stdout.write("未反映の提案はありません\n");
+        writeResolution();
         break;
       }
       process.stdout.write(`未反映 ${pending.length} 件（繰り返し回数順）\n\n`);
@@ -920,6 +1139,7 @@ function main() {
         process.stdout.write(`      ${entry.text}\n`);
         for (const ev of entry.evidence) process.stdout.write(`      根拠: ${ev}\n`);
       }
+      writeResolution();
       break;
     }
 
@@ -932,6 +1152,8 @@ function main() {
       process.stdout.write("統合案（dry-run。ここでは何も書き換えていません）\n\n");
       for (const cluster of clusters) {
         process.stdout.write(`▼ ${cluster.target} → ${LEARNING_TARGETS[cluster.target]}\n`);
+        // 書き足す先を取り違えないよう、実際に読む（promote / apply が照合する）ファイルを出す。
+        for (const line of resolutionLinesFor(cluster.target)) process.stdout.write(`${line}\n`);
         process.stdout.write(`  ${cluster.recommendation}\n`);
         for (const entry of cluster.entries) {
           const repeat = entry.occurrences > 1 ? ` ×${entry.occurrences}` : "";
@@ -1037,15 +1259,19 @@ function main() {
       const entry = summary.find((item) => item.id === args.id);
       if (!entry) throw new Error(`提案が見つかりません: ${args.id}`);
       if (entry.applied) throw new Error(`${args.id} は既に昇格済みです`);
-      const { rel, full } = requireWritableTarget(entry.target);
+      const resolvedTarget = requireWritableTarget(entry.target);
+      const { rel, full } = resolvedTarget;
       // overlay に載っているのは sync の当然の結果なので、それを拒否の
       // 条件にすると promote が永久に通らなくなる（実際そうなっていた）。
       // 見るべきは overlay ではなく **正本に書かれたか**。
-      const canonicalText = fs.readFileSync(full, "utf8");
+      // 印を探したバイト列と sha256 を取るバイト列を同じにする。
+      const canonicalBytes = fs.readFileSync(full);
+      const canonicalText = canonicalBytes.toString("utf8");
       const note = typeof args.note === "string" ? args.note.trim() : "";
       if (!canonicalHasPromotionEvidence({ id: entry.id, note }, canonicalText)) {
         throw new Error(
           `${rel} に該当の記述が見つかりません。\n`
+          + checkedCanonicalNote(resolvedTarget)
           + "promote は「正本へ書いたことの記録」です。先に正本へ、\n"
           + `  ${promotionMarker(entry.id)}\n`
           + `という一意マーカーと、${PROMOTION_NOTE_MIN_CHARS}文字以上の規則本文を書き、`
@@ -1056,7 +1282,8 @@ function main() {
         id: entry.id,
         target: entry.target,
         targetPath: rel,
-        targetSha256: createHash("sha256").update(fs.readFileSync(full)).digest("hex"),
+        targetSha256: createHash("sha256").update(canonicalBytes).digest("hex"),
+        targetSource: recordedCanonicalSource(resolvedTarget),
         text: entry.text,
         reviewer: attested.attestation.reviewer,
         attestedBy: attested.attestation.attestedBy,
@@ -1066,6 +1293,7 @@ function main() {
         promotionMarker: promotionMarker(entry.id),
         promotedAt: now,
       });
+      for (const line of describeCanonicalResolution(resolvedTarget)) process.stdout.write(`${line}\n`);
       if (attested.attestation.attestedBy === HUMAN_VERIFIED) {
         process.stdout.write(`${entry.id} に人の確認記録を追加しました（reviewer: ${attested.attestation.reviewer}）\n`);
       } else {
@@ -1094,14 +1322,17 @@ function main() {
       const entry = summary.find((item) => item.id === args.id);
       if (!entry) throw new Error(`提案が見つかりません: ${args.id}`);
       if (entry.applied) throw new Error(`${args.id} は既に反映済みです`);
-      const { rel, full } = requireWritableTarget(entry.target);
+      const resolvedTarget = requireWritableTarget(entry.target);
+      const { rel, full } = resolvedTarget;
       // apply も promote と同じ検証を通す。緩い経路を1つでも残すと、
       // そちらから素通りできてしまう。
       const applyNote = typeof args.note === "string" ? args.note.trim() : "";
-      const applyText = fs.readFileSync(full, "utf8");
+      const applyBytes = fs.readFileSync(full);
+      const applyText = applyBytes.toString("utf8");
       if (!canonicalHasPromotionEvidence({ id: entry.id, note: applyNote }, applyText)) {
         throw new Error(
           `${rel} に該当の記述が見つかりません。\n`
+          + checkedCanonicalNote(resolvedTarget)
           + "apply は「正本へ書いたことの記録」です。先に正本へ、\n"
           + `  ${promotionMarker(entry.id)}\n`
           + `という一意マーカーと、${PROMOTION_NOTE_MIN_CHARS}文字以上の規則本文を書き、`
@@ -1112,7 +1343,8 @@ function main() {
         id: entry.id,
         target: entry.target,
         targetPath: rel,
-        targetSha256: createHash("sha256").update(fs.readFileSync(full)).digest("hex"),
+        targetSha256: createHash("sha256").update(applyBytes).digest("hex"),
+        targetSource: recordedCanonicalSource(resolvedTarget),
         text: entry.text,
         reviewer: attested.attestation.reviewer,
         attestedBy: attested.attestation.attestedBy,
@@ -1122,6 +1354,7 @@ function main() {
         promotionMarker: promotionMarker(entry.id),
         appliedAt: now,
       });
+      for (const line of describeCanonicalResolution(resolvedTarget)) process.stdout.write(`${line}\n`);
       if (attested.attestation.attestedBy === HUMAN_VERIFIED) {
         process.stdout.write(`${entry.id} に人の確認記録を追加しました（reviewer: ${attested.attestation.reviewer}）\n`);
       } else {
