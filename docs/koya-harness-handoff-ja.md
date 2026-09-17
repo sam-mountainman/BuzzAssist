@@ -29,15 +29,89 @@ MCPは「受領側AIがどの公式処理を呼べるか」を提供する操作
 ```bash
 node scripts/koya-manga-video.mjs handoff-export \
   --project-dir /absolute/path/to/koya-project \
-  --output-dir /absolute/path/to/delivery/koya-handoff-v1
+  --output-dir /absolute/path/to/delivery/koya-handoff-v2
 
 node scripts/koya-manga-video.mjs handoff-verify \
-  --bundle-dir /absolute/path/to/delivery/koya-handoff-v1
+  --bundle-dir /absolute/path/to/delivery/koya-handoff-v2
 ```
 
-この束には、show/location/thumbnail bible、キャラ微調整spec、承認済み人物台帳とその実asset、移送用review attestation、locked visual profile、contract snapshotを含めます。attestationは元reviewのSHA-256と判断snapshotを残しつつ、送信元端末の絶対pathを除去します。`character-workflows.json`、候補のprivate mapping、未承認人物、他案件人物、未使用voice、セッションログ、資格情報は含めません。転送時はフォルダを通常のZIPへ圧縮して構いませんが、受領側では展開後に必ず`handoff-verify`を通します。
+この束には、show/location/thumbnail bible、キャラ微調整spec、承認済み人物台帳とその実asset、移送用review attestation、locked visual profile、contract snapshotを含めます。加えて、固定11人の同時比較sheetと、11人全員・全55ペア・原寸/サムネ縮小確認・独立reviewer contextを拘束した`koya-handoff-roster-review-attestation-v1`を必須で含めます。欠落、一部人物だけのexport、episode専用人物、古い人物assetを参照するreview、再hashされた不合格pairのいずれもexport/verifyで拒否します。attestationは元reviewのSHA-256と判断snapshotを残しつつ、送信元端末の絶対pathと生のagent/session識別子を除去します。`character-workflows.json`、候補のprivate mapping、未承認人物、他案件人物、未使用voice、セッションログ、資格情報は含めません。
+
+内側の`manifest.json`のdigestと各file SHA-256は完全性検査であり、送り手の本人性を証明する署名ではありません。本番用には、この検証済みbundle全体を既存のEd25519 Channel Pack envelopeへ入れます。秘密鍵は送信側だけに置き、公開鍵はbundleとは別経路で受領側へ渡します。
+
+```bash
+node scripts/channel-pack.mjs sign \
+  --source-dir /absolute/path/to/delivery/koya-handoff-v2 \
+  --output-dir /absolute/path/to/delivery/koya-signed-envelope \
+  --id operator-channel-pack \
+  --version 1.0.0 \
+  --harness koya-manga-video \
+  --payload-kind koya-handoff \
+  --private-key /secure/path/to/ed25519-private.pem
+
+node scripts/channel-pack.mjs verify \
+  --bundle-dir /absolute/path/to/delivery/koya-signed-envelope \
+  --public-key /trusted/path/to/ed25519-public.pem \
+  --harness koya-manga-video
+```
+
+`run-video-harness`は外側の署名と全payload SHAを検証した後、内側のhandoff manifestとroster attestationを再検証します。手動転送で通常のZIPを使う場合も、受領側の`handoff-verify`は省略できません。
 
 MCPからは`run_koya_manga_pipeline`へ`action: "handoff-export" | "handoff-verify" | "handoff-restore"`を渡して同じ公式処理を呼べます。export/restoreは書き込みなので`confirmed: true`が必要です。MCP専用の別実装はありません。
+
+## reviewer 信頼リストの受け渡し
+
+最終監査とRunReceiptは、contact-sheet signoffのEd25519 reviewer attestationを信頼リスト
+（`koya-reviewer-trust-v1`）で再検証します。規則の正本は
+`.agents/skills/platform-craft/SKILL.md`の「独立レビューの署名（reviewer attestation）」です。
+引き渡しで守ること:
+
+- 信頼リストは**生成を行う端末・エージェントとは別の主体（owner）だけが設定**し、監査・Receiptを
+  実行する側へ`BUZZASSIST_REVIEWER_TRUST`（JSON fileのpath）として別経路で配ります。
+  **この env が唯一の信頼アンカー**です。Channel Pack bundleやhandoff bundleの中に入れず、
+  signoff内の鍵も信頼しません。旧名`BUZZASSIST_KOYA_REVIEWER_TRUST`は互換で読みますが、
+  新旧で内容が違えば`reviewer-trust-invalid:env-ambiguous`で拒否されます
+- CLI / MCP / Job実行時引数の`--reviewer-trust-path`（`reviewerTrustPath`）は**照合用**です。
+  env の信頼リストと内容（正規化sha256）が一致しなければ`reviewer-trust-conflict`で止まり、
+  env が未設定なら明示pathがあっても`reviewer-trust-unconfigured`で止まります。受領側の
+  生成端末が自分でpathを指して信頼アンカーを立てることはできません。Job `options`に
+  `reviewerTrustPath`や`reviewerPrivateKeyPem`を書くとJob作成前に拒否されます
+- reviewer秘密鍵はリポジトリ外に置き、送付物・bundle・canvas・Job workspaceへ含めません。
+  中身をargv・MCP引数・Job optionsへ載せず、`--reviewer-key-path`のpathだけを渡します。
+  受領側で新しいreviewerを立てるときは`reviewer-key-create`（CLI: `koya-manga-video.mjs` /
+  `narrated-story-video.mjs`、MCP: `create_video_harness_reviewer_key`、`confirmed: true`必須）で
+  鍵を作り、出力された`trustEntry`（公開鍵だけ）をownerへ渡して登録してもらいます。signoffの
+  MCP入口はKoya Jobが`run_koya_manga_pipeline action=signoff`、narrated Jobが
+  `signoff_video_harness_job`で、引数名（`reviewerKeyPath`, `reviewerContextId`, `reviewerTrustPath`）は
+  共通です
+- MCP hostへの信頼リストの届け方: MCPサーバーはhostが起動する子processで、届くenvはhostごとに違います
+  （実測: Claude Codeはhostのprocess envを全部継承、Codexは最小envのみで、サーバー定義の`env_vars`に
+  名前を挙げた変数だけを転送）。setupは`~/plugins/buzzassist/plugin/.mcp.json`の`buzzassist_mcp`と各hostの
+  `mcpServers`登録へ`env_vars`（信頼リストenvの**名前だけ**）を自動で付けます。**値はCodex / Claude Codeを
+  起動するシェル・launcherのenvにownerが置き**、設定fileの`env`へは書きません（書くとsetupが
+  `reviewer-trust-in-config`で拒否し、再生成で消えます）。置いた後はhostを再起動します。手順の正本は
+  `.agents/skills/platform-craft/SKILL.md`の「MCP host へ信頼リストを届ける」
+- 失効はownerが`status: "revoked"`＋`revokedAt`＋`reason`に変えて配り直します。
+  失効鍵の署名は署名日時に関係なく拒否されます
+- 信頼リスト未設定の環境ではsignoffは不合格になります（fail-closed）。「設定が無いので
+  検証を省いた」状態は存在しません
+
+## Receipt確定で止まったJobの復旧
+
+有料生成が終わった後に、信頼リスト未設定・conflict・attestation欠落などの設定/証跡側の失敗で
+RunReceiptが確定できない場合、Jobは`failed`（terminal）にならず、**`awaiting-human-review`に
+`pendingReceiptFinalization`を持って止まります**。成果物・Media Job・課金は済んでいるので、
+`node scripts/run-video-harness.mjs resume --job-id ID --project-dir DIR --confirmed`
+（MCPは`resume_video_harness_job`、`confirmed: true`必須）は**Receiptの確定だけ**を再試行し、
+何も再生成・再課金しません。`start` / `resume` の `--reviewer-trust-path JSON`（MCPの
+`reviewerTrustPath`）は照合用で、上位Jobから子CLIへも同じpathが渡ります。
+
+| blocker / エラー | 復旧 |
+|---|---|
+| `reviewer-trust-unconfigured` | ownerが実行側endの`BUZZASSIST_REVIEWER_TRUST`を設定してから`resume`。MCP経由ならhostを起動するenvに置いてhostを再起動（設定fileの`env`には書かない） |
+| `reviewer-trust-conflict` | 実行時引数の`--reviewer-trust-path`を外す（またはenvと同じ内容を指す）。envは書き換えない |
+| `run-receipt-artifact-drift` | 確定待ちの間に成果物SHAが変わった。productionは自動再実行されず、`resume`は同じblockerで止まり続ける。**唯一の出口は、宣言（`config/harnesses/<id>.harness.json`）と成果物を直したうえで新しいJobを作る**こと。旧Jobは`awaiting-human-review`のまま証跡として残す。課金は`requestKey` journal（同じinput/provider/model/voice/paramsは同じrequest key）で再利用され、済んだMedia Jobを再submitしない |
+| `reviewer-attestation-unsupported-harness` | harness宣言（`config/harnesses/<id>.harness.json`）に`reviewAttestation.subject`が無い／未知。**宣言を直してから新しいJobを作る**。resumeでは直らない |
 
 ## Claude Codeへ導入
 
@@ -61,7 +135,7 @@ node scripts/setup-agents.mjs --agent codex --project-dir /absolute/path/to/koya
 
 1. `koya_manga_doctor`を呼ぶ
 2. 展開した案件データ束を`handoff-verify`する
-3. `handoff-restore --bundle-dir ...`、またはMCPの同actionで案件データを復元する。導入済みproduction contractとsnapshotが違えば停止する
+3. `handoff-restore --bundle-dir ...`、またはMCPの同actionで案件データを復元する。導入済みproduction contractとsnapshotが違えば停止する。復元は隔離stageで正本と11人/55ペアreviewを監査してから一括適用し、受領先での再監査が失敗した場合は変更対象をrollbackする
 4. `open_buzzassist_canvas`で案件canvasを開く
 5. `run_koya_manga_pipeline`の`contract`を呼び、contract validationがpassであることを確認
 6. `channel-contract`を呼び、show/location/thumbnailの3正本が`source=project`かつ全validation passであることを確認
@@ -87,13 +161,13 @@ node scripts/setup-agents.mjs --agent codex --project-dir /absolute/path/to/koya
 - 髪型・髪色・衣装などのすり合わせは`character-style-generate`→個別原寸QA→`character-style-compose`→人間選択→`character-style-select`。styling review v2で合格案の全ペアに指定軸の可視差・非重複take・同一人物性・変更対象外一致・原寸確認を記録する。同じ設計のtake違いを候補数に数えず、比較シートを人物参照へ使わない
 - `character-style-generate`には安定した`--styling-round-id`を付ける。途中停止後は同じspec・generator context・round IDで再実行し、入力SHAが一致するoptionのatomic画像とworkflow checkpointを再利用する。生成済みSHAの変異、別context、別promptでの「再開」は拒否する
 - 既存の有料生成済みsheetを再利用する場合は`koya-character-styling-import-v1` mapでoption IDとsource manifest entryを人間が対応付け、`character-style-import --generator-host legacy-migration`を使う。source/output/prompt/model/time/spec/mapをSHA拘束できず、現specの最低候補数を満たさない素材は取り込まない。importは合格や選択を意味せず、通常どおり別contextの原寸reviewが必要
-  mapの形は`docs/examples/koya-character-styling-import-map.example.json`を参照する。これは形式例であり、ももの正式選択結果ではない。実行前に各`optionId`と実画像を人間が原寸で対応確認する
+  mapの形は`docs/examples/koya-character-styling-import-map.example.json`を参照する。これは形式例であり、特定キャストの正式選択結果ではない。実行前に各`optionId`と実画像を人間が原寸で対応確認する
 - 独立QAを通過していても、後から判明した運営者の明示要件とspecが食い違う場合は、旧合格を削除せず`correctiveSupersedeReason`付き後継roundへ置き換える。旧roundのasset/SHA/review/supersede理由を残し、仕様違反の旧案を採用候補へ戻さない
-- 複数属性は1roundで同時決定しない。前roundの人間選択assetを次roundの唯一の基準にする。ももは`horo-refinement-v5`仕様の現行v6合格round（髪型と共通服形状）→`horo-hair-color-v1`（髪色だけ）→`horo-jersey-color-v1`（ジャージ色だけ）の順
-- styling roundはshow bibleの宣言順、spec path/SHA、characterIdへ拘束し、全round選択済みになるまでidentity packへ進めない。エマは採用顔に加えてoffice/private-casual/private-dressyの3衣装シートを登録する
+- 複数属性は1roundで同時決定しない。前roundの人間選択assetを次roundの唯一の基準にする。roundの順序はChannel Packのshow bibleにある各キャストの`stylingSpecPaths`配列順が正本（例: 髪型と共通服形状のround→髪色だけのround→衣装色だけのround）
+- styling roundはshow bibleの宣言順、spec path/SHA、characterIdへ拘束し、全round選択済みになるまでidentity packへ進めない。`kind: "outfit"`のstyling specを持つキャストは、採用顔に加えてそのspecが列挙する全衣装のシートを登録する
 - `hairColor` roundはラベルやreview文だけで色差を認めない。`character-style-review-refresh`で同じnormalized ROIのmedian CIE Labを実画像から再計測し、全ペアのDelta E 76がspec閾値を満たすことと、別contextの肉眼差を両方要求する。保存値の手編集や画像差し替えは再計測で拒否する
 - `character-approve`の有料identity pack生成は人物単位のcheckpointへ、候補SHA、参照SHA、prompt/model/size、generator context、各出力SHAを保存する。停止後は同じ引数・同じcontextで再実行し、一致する生成済み画像だけを再利用する。既存画像だけ、別context、入力変更、digest不一致は再開扱いにしない
-- レイジのように既存作品人物への非類似確認が必要なroundは、比較参照を`canvas/`内へ保存して`--styling-comparison-reference-paths`へ渡す。path/SHAと候補別の原寸非類似チェックが揃わなければ合格しない。比較参照は画像生成入力へ混ぜない
+- 非類似確認の要件はshow bibleではなく、そのキャストのstyling spec（`stylingSpecPaths`が指すJSON）の`comparisonEvidenceRequired: true`と`comparisonRequirements`が正本である。要件が立っているroundは、比較参照を`canvas/`内へ保存して`--styling-comparison-reference-paths`へ渡す。path/SHAと候補別の原寸非類似チェックが揃わなければ合格しない。比較参照は画像生成入力へ混ぜない
 - 固定11人を個別登録しただけで本編制作を許可しない。`character-roster-review-draft`で11人を同一縮尺とサムネ縮小へ並べ、11人個別と全55ペアについてシルエット、顔/年齢/役柄、髪/衣装色衝突、縮小識別性を生成contextと別のreviewerが確認する。`character-roster-audit`がpassするまで`plan/full`を遮断する
 - 新規台本は`story-audit`で実台本SHAと逆転beat reviewを固定してから、同じ`--story-review-path`を`plan/full`へ渡す
 - 背景は`location-plan`→anchor生成→別contextのSHA拘束anchor review→そのreview pathを必須入力にしたcontinuity生成へ分ける。`all`一括生成は禁止。公式generation manifestにanchor承認、生成context、prompt/anchor/画像SHAを保存し、全生成contextと異なるreviewerが全画像SHA・原寸・人物/文字/実在ロゴ0・建築連続性を通したreviewだけを`location-register`する
