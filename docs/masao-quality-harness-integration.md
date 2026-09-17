@@ -4,22 +4,24 @@
 
 - 対象: `~/まさお`
 - 容量: 54 MB
-- `.git` 内部を除く物理ファイル: 318件（2026-08-12再集計。55,004,124 bytes）
-- Markdown: 74件をすべて末尾まで読了。SHA-256で重複を照合すると本文は35種類、複製は39件。
+- `.git` 内部を除く物理ファイル: 320件（2026-09-01独立再集計。55,065,806 bytes）
+- Markdown: 76件をすべて末尾まで読み、SHA-256で本文37種類、複製39件（重複hash groupは8）を確認。
 - YouTube調査素材: 動画情報65件（うち1件はプレイリスト情報）、実動画64本、VTT 130件（日本語64組128件＋英語2件）。64組の`.ja.vtt`と`.ja-orig.vtt`は全組で完全一致。
 - JSON: 78件を全件読み込み・構文検証し、78件すべて有効。
-- その他: HTML 4、JavaScript 2、Python 1、テキスト9、PNG 2、拡張子なし18。全ファイルをバイト単位で読み、SHA-256で198種類の実内容と89個の複製グループを確認。JSON 78件は全件構文有効。
+- その他: HTML 4、JavaScript 2、Python 1、テキスト9、PNG 2、拡張子なし18。全320ファイルをバイト単位で読み、SHA-256で201種類の実内容、88個の重複hash group、先頭コピーを除く複製119件を確認。symlinkは0件。
 
 ## Markdownで得た共通原則
 
-74件のMarkdownは次の群に分かれる。
+76件のMarkdownは次の群に分かれる。
 
-1. `1.md`〜`20.md`, `84.md`〜`88.md`: AI制作、YouTube運用、評価、改善ループ、外部記憶、チェックリスト化。
-2. `X記事_ハーネスエンジニアリング.md`: ハーネス設計の長文統合資料。
-3. `akapen-*`: 高コストで曖昧な判断だけを人間へ聞き、推奨既定値と判断証拠を残す方式。
-4. `bestofn-*`: 複数候補、明示的な変化軸、匿名化、採用後の対応表開示。
-5. `.fable/last-plan.md`: 動画の理解を助ける比喩、ループ構造、人間の役割の設計。
-6. 多数の `CLAUDE.md`: 33件は同一のプレースホルダー。実装内容はなく、配置・パッケージ構造の証拠として扱った。
+1. `1.md`〜`18.md`と`.hiroya_obsidian_work/backups/{19,20}.md`: AI制作、YouTube運用、評価、改善ループ、外部記憶、チェックリスト化に関する元のnote記事。
+2. 現在のroot `19.md`・`20.md`: `vtt_to_markdown.py`で上書きされた調査動画1本目・2本目の字幕変換物。元のnote記事ではない。
+3. `84.md`〜`88.md`: 他者記事の調査コピー。
+4. `X記事_ハーネスエンジニアリング.md`: ハーネス設計の長文統合資料。
+5. `akapen-*`: 高コストで曖昧な判断だけを人間へ聞き、推奨既定値と判断証拠を残す方式。
+6. `bestofn-*`: 複数候補、明示的な変化軸、匿名化、採用後の対応表開示。
+7. `.fable/last-plan.md`: 動画の理解を助ける比喩、ループ構造、人間の役割の設計。
+8. 多数の `CLAUDE.md`: 33件はすべて同じSHA-256の169-byteプレースホルダー。そのうち`yt-quality-loop`または`yt-loop`をpathに含む21件も全て169 bytesの`CLAUDE.md`だけで、実行コードや有効なSkill本文はない。
 
 文書全体で一貫していた原則は以下。
 
@@ -44,10 +46,11 @@
 - 2026-07-03 01:07以降: YouTubeプレイリスト情報、64動画分の情報JSON、日本語字幕64組と英語字幕2件が`.hiroya_obsidian_work/`へ収集された。
 - 2026-07-03〜07-04: `84.md`〜`87.md`と作業用バックアップが追加された。
 - 2026-07-06〜07-07: `.fable/last-plan.md`、Claude/Codex/Cursor/Antigravity向け`yt-quality-loop`配置試験、E2E痕跡、各階層の`CLAUDE.md`プレースホルダーが作られた。実装本体よりも、複数hostへ同じループを配る構造検討の証拠が中心である。
-- 2026-07-12 21:37:58: 同梱Git履歴で`akapen v0.1.0`（commit `a6a8277`）と`bestofn v0.4.0`（commit `59b6ba8`）がそれぞれ単一commitとして確定した。`*-main`と`*-repo`は内容重複なので一組ずつとして分析した。
-- 2026-07-23: `19.md`と`20.md`が追加された。
+- 2026-07-12 21:37:58: `akapen-repo`はcommit `a6a8277`のみ。`.git`と`.DS_Store`を除く`akapen-main`と`akapen-repo`の実体は完全一致する。`bestofn-main`は当時のcommit `59b6ba8`に対応するが、`bestofn-repo`は2026-08-28に2 commit追加され、HEADは`dca527a`。実体差分は`bin/bon.js`のみ（52行追加・1行削除）で、音声再生とその2 self-test gateが追加されている。
+- 2026-07-23: 元のnote記事`19.md`・`20.md`が保存された。現物は`.hiroya_obsidian_work/backups/`に残る。
 - 2026-07-24: `X記事_ハーネスエンジニアリング.md`が追加され、外部状態、生成/評価分離、停止条件、人間判断の設計が長文で統合された。
 - 2026-08-10〜08-12: 実質的な本文追加は確認できず、更新は主にFinderの`.DS_Store`だった。
+- 2026-08-28: `vtt_to_markdown.py`がrootの`19.md`・`20.md`を調査動画1本目・2本目の字幕変換物で上書きした。元のnote記事はbackupに残るが、root版は差し戻されていない。同日、`bestofn-repo`に音声対応の2 commitが追加された。
 
 ## 調査動画64本との照合
 
@@ -62,7 +65,7 @@ VTTはYouTubeのローリング字幕で重複行が多いため、出現回数�
 - 3±1問に絞る。
 - 推奨選択肢を先頭に置く。
 - 回答途中をローカル保存する。
-- 自由記述をサニタイズし、回答を証拠として残す。
+- 回答はDOMの`textarea.value`として組み立て、クリップボード失敗時もtextareaに残す。下書きは`localStorage`に残るが、外部台帳への証跡保存や機密情報のサニタイズを自動で行う実装ではない。
 
 このプロジェクトでは、人間への質問UIを直接コピーせず、品質ループの終了理由を `human-review` へ限定し、機械ゲート通過前に人へ聞かない設計へ置き換えた。
 
@@ -73,7 +76,7 @@ VTTはYouTubeのローリング字幕で重複行が多いため、出現回数�
 - 採用ラベル確定前に秘密対応表を評価者へ渡さない。
 - 生成失敗、空出力、パストラバーサル、巨大入力、偽の採用記法、サーバー重複起動などを自己テストする。
 
-`bestofn` 側に明示ライセンスが見当たらなかったため、コードはコピーせず、匿名比較と安全境界を独自実装した。
+`bestofn`には`LICENSE`/`COPYING`/`NOTICE`、`package.json`のlicense field、READMEのlicense表示のいずれもない。そのためBuzzAssistはコードを同梱・コピーせず、匿名比較と安全境界は独自実装し、必要時だけ外部CLIを補助ビューアとして呼ぶ。
 
 ## 現行パイプラインへ実装した内容
 
@@ -192,33 +195,64 @@ npm run manga-video:preflight -- \
 
 ## 移植しなかったもの
 
-- 同じ本文のリポジトリ複製: ハッシュが同一のため二重導入しない。
-- プレースホルダーだけの `yt-quality-loop`: 実装が同梱されていないため、存在しない機能として扱わない。
+- 同じ本文の`akapen-main`/`akapen-repo`複製: 実体が同一のため二重導入しない。`bestofn-main`/`bestofn-repo`は同一ではなく、音声対応済みのrepo版だけを現行参照とする。
+- 169-byteプレースホルダーだけの `yt-quality-loop`: 関連path 21ファイルはすべて同一の`CLAUDE.md`で、実行コード・Skill本文・設定は存在しない。機能があるものとして扱わない。
+- YouTube Analytics経路: 調査記事に分析の概念はあるが、このフォルダーに認証済みAnalytics connector/pluginの実装はない。BuzzAssistの`operator-production`も`yt-analytics*` / `yt-quality-loop*` / `youtube-analytics*`をhard denyしており、本統合の対象外とする。
 - 無限自己改善: 費用と時間を浪費し、品質の自己申告を強めるため不採用。
 - 生成AIによる自己合格: 独立評価の原則に反するため不採用。
 - 画像モデルへの日本語吹き出し生成: 文字破綻と修正不能を招くため禁止。
 - ~~`bestofn` コードの直接コピー: 明示ライセンスが見当たらないため、概念だけを独自実装。~~
-  **2026-08-28更新**: 利用可否は権利者と直接つながっているユーザーの判断により解決。現在は
-  bestofn/akapen とも通常のツールとして利用する。bestofn は 3 skill (`run-bestofn`,
-  `run-bestofn-auto`, `run-bestofn-multi`) と akapen skill を `~/.claude/skills/` へ導入済み。
-  bon 本体には音声候補の再生対応を上流へ追加した (self-test 73/73 維持)。ハーネス側は
+  **2026-09-01再確認**: 権利者とつながるユーザーの判断はローカル利用の許可として扱うが、それ自体は再配布可能なライセンス文ではない。`bestofn`は依然として明示ライセンスなし。`akapen`はREADMEとplugin manifestでMITを宣言するが、同梱ツリーにMIT全文の`LICENSE`はない。どちらもBuzzAssist配布物へコードを同梱せず、ローカルの外部ツール/参照としてのみ扱う。bestofn 3 skill (`run-bestofn`,
+  `run-bestofn-auto`, `run-bestofn-multi`) と akapen skill のrepo版は `~/.claude/skills/` に導入済みで、`~/.codex/skills/`からはそれらへsymlinkされている。別系統の`~/.agents/skills/`は下記の通り一部内容が異なる。
+  音声未対応のmain版self-testは73/73、音声対応済みrepo版は75/75。ハーネス側は
   `scripts/koya-open-blind-arena.mjs` (公式 blind packet のビューア) と
   `scripts/koya-blind-review.mjs` (パケット外の匿名比較) で接続し、**判断の記録は公式CLI**に残す。
 - akapenの質問を毎工程へ増やすこと: 機械検査できない高コスト判断だけに限定する（この方針は継続）。
 
-## 2026-08-28 全件再照合
+## 2026-08-28 全件再照合（2026-09-01独立再監査で訂正）
 
-`~/まさお` の資産を用途別に突き合わせ、未活用が残っていないことを確認した。
+`~/まさお` の資産を用途別に突き合わせ、正式採用・補助ツール・参照のみ・対象外を分離した。
 
 | 資産 | 状態 |
 |---|---|
-| note記事 `1.md`〜`20.md`、他者記事 `84.md`〜`88.md` | 設計原則として台帳R1〜R198へ反映済み |
+| note記事 `1.md`〜`18.md`、backupの`19.md`・`20.md`、他者記事 `84.md`〜`88.md` | 設計原則の参照元。他者記事は出所を保った参照のみとし、BuzzAssist配布物へ本文を複製しない |
+| 現在のroot `19.md`・`20.md` | **参照のみ**。元のnote記事ではなく、調査動画の第1・第2字幕変換物。`source_subtitle`と`subtitle_lang`を持つ第三者素材として分離する |
 | `X記事_ハーネスエンジニアリング.md` の3原則 | 「できましたを信じない」=hard gate群、「作った本人にチェックさせない」=generatorEvaluatorSeparation、「お願いは負け、仕組みが勝ち」=事故のchecklist→instruction→hard-gate昇格として実装済み |
-| `bestofn` | 3 skill (`run-bestofn` / `-auto` / `-multi`) を `~/.claude/skills/` へ導入。bon本体へ音声再生を上流追加。ハーネス接続は`koya-open-blind-arena.mjs`と`koya-blind-review.mjs` |
-| `akapen` | skillとして `~/.claude/skills/akapen` へ導入 (MIT)。クライアント確認の3±1問フローに使用 |
+| `bestofn` | **補助ビューアのみ**。repo版75/75を現行参照とし、`koya-open-blind-arena.mjs`と`koya-blind-review.mjs`から外部CLIとして呼ぶ。正式Harnessの自動DAG node・完了判定・正本台帳にはしない |
+| `akapen` | **設計方式の参照のみ**。3±1問、推奨既定値、回答後に着手する原則は採用。ユーザーglobal skillは正式Harnessの`operator-production`には入れない |
 | `.fable/last-plan.md` | 制作AI／審査AI／審査基準書／人間の4部品構成と Human in/on/out の切り分けは品質契約とループ状態に反映済み |
-| `.hiroya_obsidian_work` 字幕64本 | **意図的に未変換のまま置く**。第三者チャンネルの字幕全文であり、変換すると `21.md`〜`82.md` としてまさおさん自身の記事(`1.md`〜`20.md`)と同一命名・同一ディレクトリに混在し、自作素材と他者著作物の区別がつかなくなる。2026-08-28に一度変換したが同日中に差し戻した。利用するなら別ディレクトリ・出所明記・引用の範囲で、かつ明示の指示があるときだけ行う |
-| `plugins/`・`e2e-*`・`docs/`・`scripts/` | 実体のない空ディレクトリ (CLAUDE.mdプレースホルダのみ)。導入対象なし |
+| `.hiroya_obsidian_work` 字幕64本 | **第三者調査素材として参照のみ**。VTT 64組はすべて残り、rootへのMarkdown変換は`19.md`・`20.md`の2本だけが現存する。残り62本はroot Markdownになっていない。`vtt_to_markdown.py`は既存の数字ファイルを上書きするため実行しない。利用は別ディレクトリ・出所明記・引用の範囲で、かつ明示の指示があるときに限る |
+| `yt-quality-loop` / `yt-loop` 関連 | **不採用**。関連21ファイルは全て169-byteの同一`CLAUDE.md`プレースホルダだけで、実装不在 |
+| YouTube Analytics | **対象外**。本資産に認証済みAnalytics実装はなく、`operator-production`でも関連selectorをhard deny |
+| `plugins/`・`e2e-*`・`docs/`・`scripts/` の配置痕跡 | **参照のみ**。ディレクトリ自体は存在するが、中身は上記の`CLAUDE.md`プレースホルダだけで、導入できる機能実体はない |
+
+## 2026-09-01 独立再監査の統合境界
+
+「まさお」資産をそのまま本番コードと見なさず、原則、外部補助ツール、配布可能なBuzzAssist正本を分離する。
+
+| 原則 | 漫画（Koya） | ナレーション（narrated/Mike） | 共通層 |
+|---|---|---|---|
+| 有料呼び出し前にfail closed | 公式Koya CLIのpreflightと必須品質gate | 署名済みChannel Packから非秘密のadapter identityを固定し、実provider未接続の間は`implementation-in-progress` | `lib/paidMediaJobBroker.mjs`の無課金capability probe、request identity、冪等journal、有限retry |
+| DAGと停止条件 | 品質契約、上限付き品質ループ、独立監査、`quality-decision` | `lib/narratedStoryPipeline.mjs`がraw script→media→render→automatic auditを管理し、外部signoffが無ければ完了しない | `lib/videoHarnessJob.mjs`の永続Job、CAS cancel/resume、Channel Pack差し替え拒否、成果物累積、完了前Canvas投影 |
+| 生成者と評価者の分離 | 生成contextと異なるcontact-sheet/全尺review、SHA拘束 | `reviewerContextId`をproduction jobと分離し、実MP4とcontact sheetのSHAへ外部signoffを拘束 | 共通receiptとCanvas adapterが人間/独立agentのevidenceを要求 |
+| 外部状態と操作可能な証拠 | 公式manifest、audit証拠、実MP4/contact sheet | state、audit report、run receipt、MP4/contact sheet/audio/subtitle | Canvas Run/Media projectionはSHA確認済み成果物をcontent-addressed assetにし、revision/fingerprint競合を拒否 |
+| Best-of-N | 必要な人間選択でのみ外部arenaをビューアとして使う | 共通DAGの必須nodeにはしない | 正式完了証拠はBuzzAssistのSHA拘束receipt/signoff。`.bon`の選択状態を正本にしない |
+
+### Best-of-N runtime resolverとhost可用性
+
+- `lib/bestOfNRuntime.mjs` は `BON_CLI` → `BESTOFN_ROOT/bin/bon.js` → project内`node_modules` / `tools` → `bon`のPATH順で解決する。JavaScript fileは現在の`process.execPath`で起動し、`execFile`でshellを使わない。`~/まさお`の暗黙探索は削除したため、古いmain版を本番が偶然拾うことはない。
+- 当該マシンではNode `v20.19.1`、Claude Code `2.1.197`、Codex CLI `0.144.1`を確認。`bon`自体はPATHにないため、ラッパーを使うときは`BON_CLI`または`BESTOFN_ROOT`の明示が必要。
+- Claudeの`~/.claude/skills/{akapen,run-bestofn*}`はrepo版とSHA-256一致。Codexの`~/.codex/skills/`はそれらへのsymlinkを持つが、別の`~/.agents/skills/`に同名の一部改変版もある。特に共有`run-bestofn-multi`は本来の「Claude×2 + Codex×2」を「Codex×2 + Codex×2」へ変えており、クロスベンダー多様性を保証しない。ユーザーglobal資産はこの監査では変更しない。
+- `operator-production`はAkapenと`run-bestofn*`を正式能力として許可しない。`run-bestofn*`は`buzzassist-development`だけの条件付きselectorであり、本番Harnessの一部ではない。
+
+### クロスOS・セキュリティ・ライセンス
+
+- Akapenの手順はmacOS `open`、Linux `xdg-open`、Windows `cmd /c start ""`を書き分け、HTML本体は外部依存なし。一方、回答下書きを`localStorage`に残し、CSPを持たないため、機密値をフォームに入れない、信頼できないHTMLをテンプレートへ混ぜない、使用後の下書きをブラウザ側で管理する必要がある。
+- Best-of-NのNode coreは依存ゼロで、既定loopback、DNS-rebinding guard、Origin/content-type/body-size/path-key検査を持つ。ただし`--host 0.0.0.0`は無認証で、同一LANの利用者が候補を読み、採用を書き込める。本番/機密レビューでは使わない。
+- live arenaのHTML候補は`sandbox allow-scripts`だけで、外部network loadを禁止する`default-src 'none'`はない。静的`bon export`は候補iframeへ`default-src 'none'` / `connect-src 'none'`を挿入する。信頼できないHTML候補はlive arenaで開かない。
+- upstream READMEはWindows未検証を明記し、`bon-anonymize`と`bon-gen-codex`はBash専用。`bon.js` のWindowsブラウザ起動は`start`を直接spawnするが、`start`は通常`cmd.exe`の組み込みなので`--open`の動作保証がない。Windowsでは`BON_CLI`に絶対`bon.js` pathを指定し、表示されたURLをhostのBrowserで開くのが安全な境界である。
+- `.hiroya_obsidian_work/vtt_to_markdown.py`は読み取り専用ではなく、既存の`19.md`以降をbackup後に上書きする変換scriptである。dry-runや出力root引数がないため、本監査では実行せず、正式Harnessへも接続しない。
+- AkapenはMITと宣言するが全文license fileがなく、Best-of-Nはライセンス自体が未宣言。よってBuzzAssist packageにはどちらのコードも再配布しない。
 
 ## 実データ確認
 

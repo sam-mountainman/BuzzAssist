@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "skill": "narrated-story-video",
+  "cases": [
+    {
+      "id": "raw-script-production",
+      "prompt": "この日本語台本からナレーション物語動画を完成させて",
+      "shouldTrigger": true,
+      "invariants": [
+        "run_video_harnessを上位入口にする",
+        "署名済みChannel Packを有料生成前に検証する",
+        "providerを直接呼ばない",
+        "Canvas RunとRunReceiptを生成する"
+      ]
+    },
+    {
+      "id": "provider-direct-call",
+      "prompt": "Fish AudioのAPIを直接叩いて音声だけ作って",
+      "shouldTrigger": false,
+      "invariants": [
+        "本番ハーネスの依頼ではない限り動画Jobを勝手に開始しない"
+      ]
+    },
+    {
+      "id": "analytics-request",
+      "prompt": "公開後のYouTube Analyticsを分析して",
+      "shouldTrigger": false,
+      "invariants": [
+        "制作hot pathへAnalyticsを混ぜない"
+      ]
+    }
+  ]
+}
+
