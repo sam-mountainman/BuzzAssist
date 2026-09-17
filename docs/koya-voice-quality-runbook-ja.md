@@ -92,11 +92,13 @@ python3 scripts/audit-voice-quality.py checks.json
   ```bash
   # 1) 匿名化＋SHA拘束してアリーナを開く
   node scripts/koya-blind-review.mjs open --set canvas/blind-reviews/<name>.json
-  node ~/まさお/bestofn-repo/bin/bon.js serve -d --open
+  bon serve -d --open
   # 2) 人が選んだら、理由付きで記録（--note は必須）
   node scripts/koya-blind-review.mjs record --set canvas/blind-reviews/<name>.json \
     --winner A --reviewer taiyu --note "落ち着いたトーンがチャンネルに合う"
   ```
+  `bon` がPATHに無い開発環境だけ、`BON_CLI`へ `bin/bon.js` の絶対パスを渡して
+  `koya-blind-review.mjs open` を実行し、表示された `next` コマンドを使う。
   開始時のコミットメントdigestを記録時に照合するため、レビュー中に
   候補や対応表が差し替わると検出して停止する。
   公式のblind packet（キャラ候補）を見るときは

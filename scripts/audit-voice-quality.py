@@ -194,7 +194,10 @@ def whisper_model(model_name=None):
     except ImportError:
         return None
     if _WHISPER is None:
-        name = model_name or "kotoba-tech/kotoba-whisper-v2.0-faster"
+        # Keep the channel default unchanged, while allowing a caller to use a
+        # smaller already-cached model for a fast first-pass CER gate. Failed
+        # clips can then be escalated to the canonical Kotoba model alone.
+        name = model_name or os.environ.get("VOICE_QA_WHISPER_MODEL") or "kotoba-tech/kotoba-whisper-v2.0-faster"
         try:
             _WHISPER = WhisperModel(name, device="cpu", compute_type="int8", local_files_only=True)
         except Exception:  # noqa: BLE001 - cache miss
@@ -324,6 +327,8 @@ def check_voice_quality(check):
     duration = len(audio) / sr
     metrics = {"durationSec": round(duration, 3), "peak": round(original_peak, 4)}
     problems, warnings, unavailable = [], [], []
+    segments = check.get("segments") or []
+    segment_utmos = bool(check.get("segmentUtmos")) and bool(segments)
 
     if original_peak >= 0.999:
         problems.append("clipping at full scale (original samples)")
@@ -334,8 +339,13 @@ def check_voice_quality(check):
             metrics["utmos"] = round(score, 3)
             short_clip = duration < float(check.get("minUtmosDuration", 2.0))
             if score < float(check.get("minUtmos", 2.7)):
-                (warnings if short_clip else problems).append(
-                    f"utmos {score:.2f} < {check.get('minUtmos', 2.7)}" + (" (short clip)" if short_clip else ""))
+                if segment_utmos:
+                    warnings.append(
+                        f"combined multi-speaker utmos {score:.2f} < {check.get('minUtmos', 2.7)}; "
+                        "segment floor enforced")
+                else:
+                    (warnings if short_clip else problems).append(
+                        f"utmos {score:.2f} < {check.get('minUtmos', 2.7)}" + (" (short clip)" if short_clip else ""))
             elif score < float(check.get("warnUtmos", 0.0)):
                 warnings.append(f"utmos {score:.2f} below warn threshold")
         except Exception as error:  # noqa: BLE001
@@ -375,9 +385,10 @@ def check_voice_quality(check):
             if abs(lufs - target) > tolerance:
                 problems.append(f"loudness {lufs:.1f} LUFS outside {target}±{tolerance}")
 
-    segments = check.get("segments") or []
     if segments:
         segment_rows = []
+        if segment_utmos:
+            metrics["segmentUtmosApplied"] = True
         for segment in segments:
             seg_id = segment.get("id", "")
             clip = slice_audio(audio, sr, float(segment.get("start", 0)), float(segment.get("end", duration)))
@@ -387,6 +398,17 @@ def check_voice_quality(check):
                 row["skipped"] = "too short"
                 segment_rows.append(row)
                 continue
+            if segment_utmos and check.get("computeUtmos", True):
+                try:
+                    score = utmos_score(clip, sr)
+                    row["utmos"] = round(score, 3)
+                    short_clip = seg_duration < float(check.get("minUtmosDuration", 2.0))
+                    if score < float(check.get("minUtmos", 2.7)):
+                        (warnings if short_clip else problems).append(
+                            f"utmos[{seg_id}] {score:.2f} < {check.get('minUtmos', 2.7)}"
+                            + (" (short clip)" if short_clip else ""))
+                except Exception as error:  # noqa: BLE001
+                    unavailable.append(f"utmos[{seg_id}]: {str(error)[:120]}")
             expected_text = segment.get("expectedText", "")
             if expected_text:
                 transcript = transcribe(clip)
@@ -512,7 +534,7 @@ def main():
     environment = {
         "scriptSha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "utmosSource": str(UTMOS_CACHE_DIR),
-        "whisperModel": "kotoba-tech/kotoba-whisper-v2.0-faster",
+        "whisperModel": os.environ.get("VOICE_QA_WHISPER_MODEL") or "kotoba-tech/kotoba-whisper-v2.0-faster",
         "speakerBackend": os.environ.get("VOICE_QA_SPEAKER_BACKEND", "resemblyzer"),
     }
     print(json.dumps({"overall": overall, "environment": environment, "checks": results}, ensure_ascii=False))

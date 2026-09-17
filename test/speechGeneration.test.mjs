@@ -16,22 +16,44 @@ import {
   speechBoundsFromAlignment,
 } from "../lib/speechGeneration.mjs";
 
+function completedSpeechJob(result = {}, overrides = {}) {
+  return {
+    jobId: "job-speech-1",
+    providerJobId: "provider-speech-1",
+    requestKey: "speech:test:1",
+    inputHash: "a".repeat(64),
+    kind: "voice.synthesis",
+    provider: "elevenlabs",
+    adapterVersion: "elevenlabs-speech-server-v1",
+    model: "eleven_v3",
+    voiceId: "voice-default",
+    status: "completed",
+    reservation: { reservationId: "reservation-speech-1", status: "committed" },
+    usage: { seconds: 0.7, units: 5, cost: 0.01, currency: "USD" },
+    result: {
+      artifact: { url: "https://artifacts.invalid/speech.mp3" },
+      requestId: "req-123",
+      ...result,
+    },
+    attempts: { total: 1, retries: [] },
+    ...overrides,
+  };
+}
+
 test("Eleven v3 is the default speech model and timing response is normalized", async () => {
   let request = null;
-  const fetchImpl = async (url, options) => {
-    request = { url: String(url), options };
-    return {
-      ok: true,
-      headers: { get: (name) => name === "request-id" ? "req-123" : null },
-      json: async () => ({
-        audio_base64: Buffer.from("fake-mp3").toString("base64"),
+  const mediaJobBroker = {
+    start: async (spec) => {
+      request = spec;
+      return completedSpeechJob({
         alignment: {
           characters: ["こ", "ん", "に", "ち", "は"],
           character_start_times_seconds: [0.1, 0.2, 0.3, 0.4, 0.5],
           character_end_times_seconds: [0.2, 0.3, 0.4, 0.5, 0.7],
         },
-      }),
-    };
+      });
+    },
+    waitFor: async () => { throw new Error("completed job must not be polled"); },
   };
 
   const result = await generateElevenLabsSpeech({
@@ -41,8 +63,8 @@ test("Eleven v3 is the default speech model and timing response is normalized", 
     previousRequestIds: ["req-before"],
     nextRequestIds: ["req-after"],
     voiceId: "voice-default",
-    apiKey: "test-key",
-    fetchImpl,
+    mediaJobBroker,
+    artifactReader: async () => Buffer.from("fake-mp3"),
   });
 
   assert.equal(DEFAULT_SPEECH_MODEL, "eleven_v3");
@@ -51,8 +73,11 @@ test("Eleven v3 is the default speech model and timing response is normalized", 
   assert.equal(result.speechStartSeconds, 0.1);
   assert.equal(result.speechEndSeconds, 0.7);
   assert.equal(result.requestId, "req-123");
-  assert.match(request.url, /with-timestamps/);
-  const body = JSON.parse(request.options.body);
+  assert.equal(request.kind, "voice.synthesis");
+  assert.equal(request.provider, "elevenlabs");
+  assert.equal(request.adapterVersion, "elevenlabs-speech-server-v1");
+  assert.equal(JSON.stringify(request).includes("api.elevenlabs.io"), false);
+  const body = request.input;
   assert.equal(body.model_id, "eleven_v3");
   assert.equal(body.language_code, "ja");
   assert.equal(body.apply_text_normalization, undefined);
@@ -74,22 +99,20 @@ test("Japanese text normalization and context are enabled for compatible ElevenL
     nextRequestIds: ["req-after"],
     voiceId: "voice-default",
     model: "eleven_multilingual_v2",
-    apiKey: "test-key",
-    fetchImpl: async (_url, options) => {
-      body = JSON.parse(options.body);
-      return {
-        ok: true,
-        headers: { get: () => null },
-        json: async () => ({
-          audio_base64: Buffer.from("fake-mp3").toString("base64"),
+    mediaJobBroker: {
+      start: async (spec) => {
+        body = spec.input;
+        return completedSpeechJob({
           alignment: {
             characters: ["声"],
             character_start_times_seconds: [0],
             character_end_times_seconds: [0.5],
           },
-        }),
-      };
+        }, { model: "eleven_multilingual_v2" });
+      },
+      waitFor: async () => { throw new Error("completed job must not be polled"); },
     },
+    artifactReader: async () => Buffer.from("fake-mp3"),
   });
 
   assert.equal(body.apply_text_normalization, "on");
