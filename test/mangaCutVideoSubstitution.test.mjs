@@ -211,6 +211,24 @@ async function buildEpisode({ withMedia = true, thoughtInCut1 = false } = {}) {
   return { projectDir, canvasDir, episodeDir, manifestPath, stills };
 }
 
+// 文字入りの偽クリップに重ねる板。ffmpeg の drawtext は libfreetype を含まない
+// ビルド（Homebrew の ffmpeg 9 など）に無く、Windows ではフォントのパスの "C:" が
+// filter の区切りとして読まれた。板は PIL で描き、ffmpeg では本番も使う overlay で重ねる。
+async function renderTextPlate(dir, fontFile) {
+  const plate = join(dir, "text-plate.png");
+  const source = [
+    "import sys",
+    "from PIL import Image, ImageDraw, ImageFont",
+    "font = ImageFont.truetype(sys.argv[1], 64)",
+    "left, top, right, bottom = font.getbbox('SALE 2026')",
+    "image = Image.new('RGB', (right - left + 20, bottom - top + 20), (255, 255, 255))",
+    "ImageDraw.Draw(image).text((10 - left, 10 - top), 'SALE 2026', font=font, fill=(0, 0, 0))",
+    "image.save(sys.argv[2])",
+  ].join("\n");
+  await execFile("python3", ["-X", "utf8", "-c", source, fontFile, plate]);
+  return plate;
+}
+
 /** 開始フレームからゆっくり寄る偽クリップ（有料生成の代わり）。 */
 function mockGenerator({ variant = "motion", calls = [], ledgerPath = "", fontFile = "" } = {}) {
   return async (input) => {
@@ -223,10 +241,11 @@ function mockGenerator({ variant = "motion", calls = [], ledgerPath = "", fontFi
     const motion = variant === "static"
       ? "scale=854:480"
       : "scale=854:480,zoompan=z='1+0.002*on':d=1:s=854x480:fps=24";
-    const text = variant === "text"
-      ? `,drawtext=fontfile='${fontFile}':text='SALE 2026':fontsize=64:fontcolor=black:box=1:boxcolor=white:x=40:y=260`
-      : "";
-    await ff([...source, "-vf", `${motion}${text},format=yuv420p`, "-r", "24", "-t", String(input.duration), "-c:v", "libx264", "-preset", "ultrafast", out]);
+    const plate = variant === "text" ? await renderTextPlate(dirname(input.startFramePath), fontFile) : "";
+    const filter = plate
+      ? ["-i", plate, "-filter_complex", `[0:v]${motion}[base];[base][1:v]overlay=40:260,format=yuv420p`]
+      : ["-vf", `${motion},format=yuv420p`];
+    await ff([...source, ...filter, "-r", "24", "-t", String(input.duration), "-c:v", "libx264", "-preset", "ultrafast", out]);
     return {
       buffer: await readFile(out),
       mimeType: "video/mp4",
@@ -870,6 +889,10 @@ test("text drawn into the clip is caught even though the still had none", { skip
   const { audit } = await renderSubstitutedEpisode({ variant: "text", fontFile });
   assert.equal(audit.report.pass, false);
   assert.ok(failedGates(audit).includes("no-generated-text"), failedGates(audit).join());
+  // 描いた文字そのものを読んで落とすこと。以前はカラーのまま OCR に渡していて
+  // "SALE 2026" を一度も読めず、関係のない誤読でたまたま落ちていた。
+  const textGate = (audit.report.analysis?.cuts?.[0]?.gates || []).find((gate) => gate.id === "no-generated-text");
+  assert.match(textGate?.detail || "", /SALE|2026/u, `描いた文字を読めていない: ${textGate?.detail}`);
 });
 
 test("official CLI advertises the opt-in stage and its paid confirmation", () => {
