@@ -17,6 +17,12 @@
       "overlay": ".agents/skills/manga-page-camera/references/learned-auto.md",
       "scope": "genre"
     },
+    "genre:narrated-story-video": {
+      "mode": "auto-guidance",
+      "canonical": ".agents/skills/narrated-story-video/SKILL.md",
+      "overlay": ".agents/skills/narrated-story-video/references/learned-auto.md",
+      "scope": "genre"
+    },
     "platform:harness-parallel-execution": {
       "mode": "auto-guidance",
       "canonical": ".agents/skills/harness-parallel-execution/SKILL.md",
@@ -34,6 +40,7 @@
       "canonical": "docs/koya-channel-requirements-ledger.md",
       "reason": "要求台帳は承認と監査の記録そのもの。機械が書き足すと、何を人が決めたのかが分からなくなる なお channel-pack の内容は共有層へ流さない（クライアント固有）。",
       "scope": "channel-pack",
+      "packId": "koya",
       "confidential": true
     },
     "channel-pack:narrated-story": {

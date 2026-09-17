@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "skill": "platform-craft",
+  "cases": [
+    {
+      "id": "paid-speech-job",
+      "prompt": "Fish Audioを本番ハーネスにつないで、通信断でも二重課金しないようにして。",
+      "shouldTrigger": true,
+      "invariants": [
+        "typed Media Job Brokerを通す",
+        "submit前reservationとrequest identityを永続化する",
+        "408・504・Abort・2xx後の失敗を自動再送しない",
+        "provider job照会によるrecoverとReceipt証跡を実装する"
+      ]
+    },
+    {
+      "id": "skill-profile-review",
+      "prompt": "端末に入っている42個のSkillは全部この動画ハーネスの中身？skill-creatorも消していい？",
+      "shouldTrigger": true,
+      "invariants": [
+        "installed・bundled・productionAllowed・developmentOnlyを分ける",
+        "skill-creatorを開発専用で保持する",
+        "端末plugin一覧をHarness依存と混同しない",
+        "Claude CodeとCodexのadapterを同じ日本語正本へ向ける"
+      ]
+    },
+    {
+      "id": "canvas-browser-check",
+      "prompt": "BuzzAssist CanvasをCodex内蔵ブラウザーで実際に確認して。Playwrightも追加して。",
+      "shouldTrigger": true,
+      "invariants": [
+        "setupが返したlive Canvas URLを使う",
+        "内蔵Browserのtab.playwrightで描画・操作・consoleを確認する",
+        "この用途だけでstandalone Playwrightを追加しない"
+      ]
+    },
+    {
+      "id": "multi-session-audit",
+      "prompt": "この2セッションを漏れなく統合レビューして。",
+      "shouldTrigger": true,
+      "invariants": [
+        "原文をcontent hashで拘束する",
+        "原子findingと実装・台帳・最終回答のcrosswalkを作る",
+        "解決・未解決・枝差分・検証不能を分ける"
+      ]
+    }
+  ]
+}
