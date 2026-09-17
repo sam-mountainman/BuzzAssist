@@ -34,6 +34,8 @@ import {
   repairKoyaMangaAudioTail,
   renderKoyaMangaVideo,
   runKoyaMangaFullProduction,
+  runKoyaWardrobeReadiness,
+  koyaWardrobeReadinessPauseResult,
   refreshKoyaMangaBubbles,
   standardizeKoyaMangaCut,
   substituteKoyaMangaCutVideos,
@@ -123,8 +125,9 @@ function usage() {
     "Koya manga video production (fail-closed)",
     "",
     "node scripts/koya-manga-video.mjs <action> [options]",
-    "actions: contract, channel-contract, character-bootstrap-status, character-registration-reconcile, character-roster-review-draft, character-roster-audit, cast-readiness, story-review-draft, story-audit, location-plan, location-generate, location-import, location-anchor-review-draft, location-anchor-audit, location-review-draft, location-register, thumbnail-plan-draft, thumbnail-audit, handoff-export, handoff-verify, handoff-restore, plan, images, character-review-refresh, character-candidate-migrate-blind, character-candidate-import, character-style-generate, character-style-import, character-style-review-refresh, character-style-record-failure, character-style-compose, character-style-select, character-attribute-gate, character-approve, character-identity-refresh, character-identity-repair, character-identity-repack, character-register, prepare, speech, video-substitute, adjust-gap, standard-cut, repair-onset, repair-tail, sync-contract, refresh-bubbles, render, audit, reviewer-key-create, signoff, full, status",
+    "actions: contract, channel-contract, wardrobe-readiness, character-bootstrap-status, character-registration-reconcile, character-roster-review-draft, character-roster-audit, cast-readiness, story-review-draft, story-audit, location-plan, location-generate, location-import, location-anchor-review-draft, location-anchor-audit, location-review-draft, location-register, thumbnail-plan-draft, thumbnail-audit, handoff-export, handoff-verify, handoff-restore, plan, images, character-review-refresh, character-candidate-migrate-blind, character-candidate-import, character-style-generate, character-style-import, character-style-review-refresh, character-style-record-failure, character-style-compose, character-style-select, character-attribute-gate, character-approve, character-identity-refresh, character-identity-repair, character-identity-repack, character-register, prepare, speech, video-substitute, adjust-gap, standard-cut, repair-onset, repair-tail, sync-contract, refresh-bubbles, render, audit, reviewer-key-create, signoff, full, status",
     "common: --project-dir DIR --episode-id ID --script-path FILE --title TITLE --protagonist-speaker-id ID_OR_EXACT_NAME --character-bible-path JSON [--story-review-path JSON] [--source-face-review-path JSON] [--generator-host codex|claude|legacy-migration] [--generator-id ID] [--generator-context-id TASK_OR_SESSION_ID] [--retry-failed] [--image-concurrency N|auto] [--qa-concurrency N] [--speech-concurrency N|auto] [--image-fallback-model MODEL] [--qa-fallback-provider grok]",
+    "wardrobe-readiness: --episode-id ID [--script-path FILE] [--wardrobe-review-path JSON] (free script-driven outfit gate; writes canvas/assets/<episode-id>/wardrobe-readiness.json. exit 0 = every checked character has an outfit for every scene, exit 2 = pending slots. images/full refuse to start without a passing report for the exact script)",
     "story-audit: --script-path FILE --story-review-path JSON --protagonist-speaker-id ID_OR_EXACT_NAME (read-only; binds reversal beats and human policy checks to the exact script SHA-256)",
     "story-review-draft: --script-path FILE [--protagonist-speaker-id ID_OR_EXACT_NAME] (read-only; prints exact utterance inventory with all subjective fields unset and machine-suggested eyeOpenBeats to confirm)",
     "cast-readiness: --script-path FILE [--character-bible-path JSON] (read-only; blocks episode-local replacements for unregistered Koya fixed cast and checks required identity roles)",
@@ -172,6 +175,7 @@ function usage() {
     `signoff: --reviewer claude|codex [--reviewer-id ID] [--reviewer-context-id TASK_OR_SESSION_ID] --review-notes-path /absolute/review.json --reviewer-key-path /absolute/reviewer-ed25519.pem [--reviewer-trust-path JSON] --pass (the evaluator task/session must differ from the generator; the private key is read from the file, never from argv, and must be listed as active in the operator's trust list from ${REVIEWER_TRUST_ENV_GUIDANCE}; --reviewer-trust-path only cross-checks that list and never replaces it)`,
     "reviewer-key-create: --reviewer-key-path /absolute/outside-repo/reviewer-ed25519.pem [--reviewer-public-key-path FILE] [--reviewer-label NAME] (writes a new Ed25519 private key with mode 0600, refuses to overwrite either file, refuses paths inside this repository, --project-dir, or any git working tree, and prints the keyId plus the trust-list entry the operator registers out of band)",
     "handoff-export: [--output-dir DIR] [--bundle-id ID] [--character-ids id1,id2] [--visual-profile-ids id1] [--force] (exports only approved Koya data and SHA evidence; excludes candidate mappings, sessions and credentials)",
+    "images/full wardrobe override: --wardrobe-readiness-override-reason TEXT starts the paid images without a passing wardrobe-readiness report; the reason is recorded in the inventory and the episode state and reported by the final audit",
     "speech: R194 voice quality gate is always on; [--take-count 2..8] [--max-adaptive-takes 2..8]; --no-voice-quality-gate requires --voice-quality-gate-override-reason",
     "handoff-verify: --bundle-dir DIR (read-only full manifest/SHA/path/symlink verification)",
     "handoff-restore: --bundle-dir DIR (requires the matching installed production contract, then merges approved registry/profile data)",
@@ -188,6 +192,11 @@ const common = {
   contractPath: args.contractPath ? resolve(args.contractPath) : "",
   overridePath: args.overridePath ? resolve(args.overridePath) : "",
   protagonistSpeakerId: args.protagonistSpeakerId || "",
+  wardrobeReviewPath: args.wardrobeReviewPath ? resolve(args.wardrobeReviewPath) : "",
+  // 衣装ゲートを外すのは監査に残る人の判断で、素の flag では外せない。
+  wardrobeReadinessOverrideReason: typeof args.wardrobeReadinessOverrideReason === "string"
+    ? args.wardrobeReadinessOverrideReason
+    : "",
   // R194: the voice quality gate is ON for every official speech run. Turning
   // it off is an audited human override, never a default or an env-only flag.
   voiceQualityGate: args.noVoiceQualityGate === true ? false : true,
@@ -235,6 +244,12 @@ const common = {
   upstreamJobRevision: args.upstreamJobRevision,
   upstreamPreflightBinding: args.upstreamPreflightBinding || "",
 };
+
+function assertWardrobeOverrideReason() {
+  if (args.wardrobeReadinessOverrideReason === true) {
+    throw new Error("--wardrobe-readiness-override-reason requires TEXT explaining why the paid images start without a wardrobe-readiness pass.");
+  }
+}
 
 function requireEpisodeId() {
   if (!args.episodeId) throw new Error("--episode-id is required for this action.");
@@ -574,10 +589,47 @@ switch (args.action) {
     print({ episodeId: result.episodeId, state: result.state, paths: result.paths });
     break;
   }
+  case "wardrobe-readiness": {
+    const episodeId = requireEpisodeId();
+    const scriptPath = await scriptPathForResume();
+    const result = await runKoyaWardrobeReadiness({ ...common, scriptPath });
+    print({
+      episodeId,
+      status: result.report.status,
+      pass: result.report.pass,
+      inventoryPath: result.reportPath,
+      summary: result.report.summary,
+      pendingSlotIds: result.report.pendingSlotIds,
+      slots: result.report.slots.map((slot) => ({
+        slotId: slot.slotId,
+        castId: slot.castId,
+        sceneTags: slot.sceneTags,
+        sceneRef: slot.sceneRef,
+        status: slot.status,
+        matchedOutfit: slot.matchedOutfit,
+        requirement: slot.requirement,
+      })),
+      review: result.report.review
+        ? { path: result.report.review.path, reviewer: result.report.review.reviewer.id, decisions: result.report.review.decisions.length }
+        : null,
+    });
+    exitCode = result.exitCode;
+    break;
+  }
   case "images": {
     requireEpisodeId();
+    assertWardrobeOverrideReason();
     if (!common.scriptPath) throw new Error("--script-path is required for images.");
-    const result = await generateKoyaMangaImages(common);
+    let result;
+    try {
+      result = await generateKoyaMangaImages(common);
+    } catch (error) {
+      const paused = koyaWardrobeReadinessPauseResult(error, { preflight: null, projectDir, episodeId: args.episodeId, stage: "images" });
+      if (!paused) throw error;
+      print(paused.payload);
+      exitCode = paused.exitCode;
+      break;
+    }
     print({ episodeId: result.episodeId, status: result.state.status, waiting: result.waiting, paths: result.paths });
     if (result.waiting || result.failed) exitCode = 3;
     break;
@@ -992,6 +1044,7 @@ switch (args.action) {
   }
   case "full": {
     requireEpisodeId();
+    assertWardrobeOverrideReason();
     const scriptPath = await scriptPathForResume();
     if (!scriptPath) throw new Error("--script-path is required for a new full run; resumed runs can recover it from state.");
     // R6-F1: 上位から渡された --reviewer-trust-path を捨てず、開始前に運営者 env と照合する

@@ -78,6 +78,15 @@
       ]
     },
     {
+      "id": "wardrobe-readiness",
+      "inForceSince": "koya-manga-production-v53",
+      "what": "台本の場面が求める服（プール・葬儀・寝間着・雪の屋外など）を、有料の画像生成より前に固定キャストの登録済みの服と照合し、合う服の無い場面が残る間は画像生成を始めない。台本が変われば照合をやり直す",
+      "human": "タグで決まらない場面（矛盾するタグ・誤検出）は、生成とは別のコンテキストが書いたレビュー記録でだけ解決する。運営者のオーバーライドは理由つきで記録し、最終監査に出す",
+      "evidenceAuditIds": [
+        "wardrobe-readiness"
+      ]
+    },
+    {
       "id": "final-audit",
       "what": "レンダー済みMP4の実測監査。設定値ではなく出力を見る",
       "evidenceAuditIds": [

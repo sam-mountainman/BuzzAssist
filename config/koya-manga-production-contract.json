@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "koya-manga-production-v52",
+  "version": "koya-manga-production-v53",
   "channelId": "koya-manga",
   "description": "Fail-closed production contract for Koya-channel manga videos.",
   "sourceOfTruth": {
@@ -150,6 +150,21 @@
     "denseFaceSamplesPerSecond": 6,
     "cuts": []
   },
+  "wardrobeReadiness": {
+    "version": "koya-wardrobe-readiness-v1",
+    "inForceSince": "koya-manga-production-v53",
+    "stage": "before-paid-images",
+    "requirePassReportBeforeImages": true,
+    "bindReportToScriptDigest": true,
+    "sceneTagVocabulary": ["daily", "work", "home", "formal", "swim", "sleep", "winter-out", "summer-out"],
+    "baseOutfitSceneTags": ["daily", "work", "home"],
+    "defaultDetectedSceneTags": ["formal", "swim", "sleep", "winter-out", "summer-out"],
+    "slotGranularity": "scene-or-cut",
+    "reviewVersion": "koya-wardrobe-review-v1",
+    "requireIndependentReviewerContext": true,
+    "allowModelJudgment": false,
+    "operatorOverrideRequiresReason": true
+  },
   "editorial": {
     "preserveFullScript": true,
     "forbidContextlessLeadInImages": true,
@@ -271,6 +286,7 @@
     "thought-spotlight",
     "split-page-integrity",
     "video-substitution",
+    "wardrobe-readiness",
     "stt-verification",
     "audio-onset",
   "audio-speaker-continuity",

@@ -39,7 +39,8 @@ function usage() {
     "cancel --job-id ID --project-dir DIR",
     "list   --project-dir DIR",
     "",
-    "Koya (koya-manga-video) options: --episode-id ID --protagonist-speaker-id ID --character-bible-path FILE --story-review-path FILE [--contract-path FILE] [--override-path FILE] [--confirm-paid-video-generation] [--retry-failed-video]",
+    "Koya (koya-manga-video) options: --episode-id ID --protagonist-speaker-id ID --character-bible-path FILE --story-review-path FILE [--contract-path FILE] [--override-path FILE] [--confirm-paid-video-generation] [--retry-failed-video] [--wardrobe-readiness-override-reason TEXT]",
+    "  --wardrobe-readiness-override-reason: 台本駆動の衣装ゲート（wardrobe-readiness）の pass レポートが無いまま有料の画像生成を始める。理由は Job と最終監査に残る",
     "  --confirm-paid-video-generation: エピソード例外で印を付けたカットの動画クリップ生成（別課金）を許可する。無ければ開始フレームと費用計画だけ作って止まる",
     "Narrated (narrated-story-video) options: --episode-id ID",
     "Common: --want TEXT --title TEXT --options-json FILE",
@@ -77,6 +78,7 @@ async function optionsFrom(args) {
     ["storyReviewPath", args.storyReviewPath ? resolve(args.storyReviewPath) : ""],
     ["contractPath", args.contractPath ? resolve(args.contractPath) : ""],
     ["overridePath", args.overridePath ? resolve(args.overridePath) : ""],
+    ["wardrobeReadinessOverrideReason", typeof args.wardrobeReadinessOverrideReason === "string" ? args.wardrobeReadinessOverrideReason : ""],
   ];
   for (const [key, value] of mappings) if (value !== undefined && value !== "") options[key] = value;
   if (args.retryFailed === true) options.retryFailed = true;
