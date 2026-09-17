@@ -436,6 +436,138 @@ test("契約から保証の裏づけが全部消えたら pass ではなく skip
   assert.equal(done.outcome, "fail", "契約が縮んで測れなくなった保証を、全体 pass に飲み込まないこと");
 });
 
+test("後から入った保証は、それより前の契約で測るとき不合格に数えない", async () => {
+  // カット単位の動画差し替え（v52）を宣言に足したとき、v50 の合格作が後から
+  // 不合格に変わった。監査単位の「当時無かった監査は対象外」が保証単位には無く、
+  // 下の実レポート照合（運営者の手元でしか走らない）だけが気づいた。
+  const { recordGatesFromAuditSteps, isGateNotInForce } = await import("../lib/harnessRunReceipt.mjs");
+  const declaration = JSON.parse(readFileSync(join(root, "config/harnesses/koya-manga-video.harness.json"), "utf8"));
+  const contract = JSON.parse(readFileSync(join(root, "config/koya-manga-production-contract.json"), "utf8"));
+  const introduced = declaration.guarantees.filter((g) => g.inForceSince);
+  assert.ok(introduced.length > 0, "後から足した保証に inForceSince が書かれていること");
+  const series = (version) => String(version).replace(/-v\d+$/u, "");
+  for (const g of introduced) {
+    // 系列が違う版を書くと比べられず、書いていないのと同じになる。
+    assert.equal(series(g.inForceSince), series(contract.version), `${g.id}: inForceSince の系列が現行契約と違う`);
+    // 現行の契約がその版より前だと、新しい回でもこの保証が測られない。
+    assert.equal(
+      isGateNotInForce({ verdict: "skip", notInForce: { since: g.inForceSince, contractVersion: contract.version } }),
+      false,
+      `${g.id}: 現行契約 ${contract.version} がまだ ${g.inForceSince} に達していない`,
+    );
+  }
+
+  const later = introduced[0];
+  const laterIds = new Set(later.evidenceAuditIds);
+  const olderIds = declaration.guarantees.flatMap((g) => g.evidenceAuditIds).filter((id) => !laterIds.has(id));
+  const olderVersion = later.inForceSince.replace(/\d+$/u, (n) => String(Number(n) - 1));
+  const measure = (contractVersion) => {
+    const receipt = openManga();
+    recordGatesFromAuditSteps(receipt, {
+      declaration,
+      steps: olderIds.map((id) => ({ id, pass: true })),
+      requiredAuditIds: olderIds,
+      contractVersion,
+    });
+    return finalizeRunReceipt(receipt, { outcome: "pass", timestamp: NOW });
+  };
+
+  const past = measure(olderVersion);
+  assert.equal(past.outcome, "pass", "当時の契約を満たした過去作は、後から足した保証で落ちないこと");
+  assert.equal(past.gates[later.id].verdict, "skip", "測っていないものを pass と書かないこと");
+  assert.match(past.gates[later.id].detail, /存在しなかった/u);
+  assert.deepEqual(past.summary.notInForceGates, [later.id]);
+  assert.equal(past.summary.skipped, 0);
+  assert.equal(past.summary.passed, past.summary.declaredGateCount - 1, "対象外を通過に数えないこと");
+  const shared = redactForPlatform(past);
+  assert.deepEqual(shared.gates[later.id], { verdict: "skip", notInForce: true });
+  assert.equal(JSON.stringify(shared.gates).includes(olderVersion), false, "契約の版の文字列は返さないこと");
+
+  // 保証が入った版以降の契約で裏づけが消えていたら、それは「縮んだ」であって対象外ではない。
+  for (const version of [later.inForceSince, later.inForceSince.replace(/\d+$/u, (n) => String(Number(n) + 1))]) {
+    const shrunk = measure(version);
+    assert.equal(shrunk.outcome, "fail", `${version}: 契約が縮んで測れなくなった保証を対象外にしないこと`);
+    assert.deepEqual(shrunk.summary.skippedGates, [later.id]);
+    assert.equal(shrunk.summary.notInForce, 0);
+  }
+  // 系列が違う・版が読めない——比べられないものを「古い」とは扱わない。
+  for (const version of ["other-series-v1", "版不明", ""]) {
+    assert.equal(measure(version).outcome, "fail", `${version || "(空)"}: 比べられない版で対象外にしないこと`);
+  }
+
+  // 印だけ付けても、版の比較が通らなければ免除しない。
+  const forged = openManga();
+  for (const id of forged.harnessBuild.declaredGates) {
+    recordGate(forged, id === later.id
+      ? { id, verdict: "skip", evidence: { x: 1 }, detail: "後から付けた印" }
+      : { id, verdict: "pass", evidence: { measured: 1 } });
+  }
+  forged.gates[later.id].notInForce = { since: olderVersion, contractVersion: later.inForceSince };
+  const forgedDone = finalizeRunReceipt(forged, { outcome: "pass", timestamp: NOW });
+  assert.equal(forgedDone.outcome, "fail");
+  assert.deepEqual(forgedDone.summary.skippedGates, [later.id]);
+
+  // 集計でも、過去作の対象外を「この版で測れていないゲート」に並べない。
+  const result = rollup([{ file: "past.json", receipt: past }, { file: "shrunk.json", receipt: measure(later.inForceSince) }]);
+  const stat = result.builds[0].gates[later.id];
+  assert.deepEqual({ skip: stat.skip, notInForce: stat.notInForce }, { skip: 1, notInForce: 1 });
+
+  // 版として読めない inForceSince は、黙って無視せず宣言の誤りとして止める。
+  const broken = structuredClone(declaration);
+  broken.guarantees.find((g) => g.id === later.id).inForceSince = "v52";
+  assert.throws(
+    () => recordGatesFromAuditSteps(openManga(), { declaration: broken, steps: [], requiredAuditIds: olderIds, contractVersion: olderVersion }),
+    /inForceSince が契約の版として読めない/u,
+  );
+});
+
+test("過去の契約の必須監査を全て満たした回は、今の宣言で記録しても合格のまま", async () => {
+  // 下の実レポート照合は運営者の手元でしか走らず、CI では飛ぶ。保証を足して
+  // 過去作を後から落とす退行（v52 の動画差し替え）もそこでしか見えなかった。
+  // 契約ごとの必須監査一覧だけを持ち込んで、同じことを CI でも見る。
+  const { recordGatesFromAuditSteps } = await import("../lib/harnessRunReceipt.mjs");
+  const declaration = JSON.parse(readFileSync(join(root, "config/harnesses/koya-manga-video.harness.json"), "utf8"));
+  const contract = JSON.parse(readFileSync(join(root, "config/koya-manga-production-contract.json"), "utf8"));
+  const fixture = JSON.parse(readFileSync(join(root, "test/fixtures/koya-past-contract-audits.json"), "utf8"));
+  const parse = (version) => {
+    const match = /^(.+)-v(\d+)$/u.exec(version);
+    return match ? { series: match[1], number: Number(match[2]) } : null;
+  };
+  const current = parse(contract.version);
+  const previous = `${current.series}-v${current.number - 1}`;
+  assert.ok(
+    fixture.contracts.some((entry) => entry.version === previous),
+    `契約を ${contract.version} に上げたら、${previous} の必須監査を test/fixtures/koya-past-contract-audits.json に足すこと`,
+  );
+
+  for (const entry of fixture.contracts) {
+    const past = parse(entry.version);
+    assert.ok(past && past.series === current.series && past.number < current.number, `${entry.version}: 現行契約より前の同じ系列であること`);
+    const record = (failing = "") => {
+      const receipt = openManga();
+      recordGatesFromAuditSteps(receipt, {
+        declaration,
+        steps: entry.requiredAudits.map((id) => ({ id, pass: id !== failing })),
+        requiredAuditIds: entry.requiredAudits,
+        contractVersion: entry.version,
+      });
+      return finalizeRunReceipt(receipt, { outcome: "pass", timestamp: NOW });
+    };
+    const done = record();
+    assert.equal(
+      done.outcome,
+      "pass",
+      `${entry.version}: 当時の必須監査を全て満たした回が、今の宣言では不合格になる`
+      + `（不合格 ${done.summary.failedGates.join(", ") || "なし"} / 未測定 ${done.summary.skippedGates.join(", ") || "なし"}）。`
+      + "後から足した保証なら inForceSince を書くこと",
+    );
+    // 対象外の扱いが緩すぎないか——当時の必須監査が1つでも落ちたら不合格。
+    for (const id of entry.requiredAudits) {
+      assert.equal(record(id).outcome, "fail", `${entry.version}: ${id} が落ちても合格になる`);
+    }
+  }
+});
+
 test("実在する過去の監査レポートで、記録とレポートの判定が一致する", async (t) => {
   // 合成データだけで検証すると、実際の監査ステップ ID と対応表のずれを見逃す。
   const { readFileSync, existsSync } = await import("node:fs");
