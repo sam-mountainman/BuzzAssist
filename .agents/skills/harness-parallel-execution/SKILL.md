@@ -277,7 +277,7 @@ canvas/assets/<ep>/script-image-*.json
   `--qa-concurrency N` で上げられる。生成枠とQA枠を分離するには
   QA不合格時の再生成ループを跨いだ2段パイプラインにする必要がある。
 
-## マイクハーネスの並列粒度
+## ナレーション物語ハーネスの並列粒度
 
 ### 並列にしてよい
 
@@ -318,7 +318,7 @@ audits/audio/fish-audio-picture-retime-plan-v1.json
 audits/audio/bgm-allocation-approval-v1.json
 audits/audio/fish-av-master-v1/*.json
 .media/fish-audio/full-v1/private-state.json       mode 0600
-episodes/mike-fish-av-v1/input.json
+episodes/<episode>/input.json
 production/work-fish-av-v1/                        rmSync で丸ごと消える
 ```
 
