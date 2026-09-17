@@ -14,7 +14,8 @@ test("canvas managed overlays stay visible when media and generator frames overl
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
   const frameOverlayBuilder = sliceBetween(source, "function buildFrameOverlays", "function getCanvasMediaDisplayName");
   const imageOverlayBuilder = sliceBetween(source, "function buildSelectedImageOverlays", "function buildVideoPlaybackOverlays");
-  const videoOverlayBuilder = sliceBetween(source, "function buildVideoPlaybackOverlays", "function buildSubtitlePreviewOverlays");
+  const videoOverlayBuilder = sliceBetween(source, "function buildVideoPlaybackOverlays", "function buildAudioPlaybackOverlays");
+  const audioOverlayBuilder = sliceBetween(source, "function buildAudioPlaybackOverlays", "function buildSubtitlePreviewOverlays");
   const subtitleOverlayBuilder = sliceBetween(source, "function buildSubtitlePreviewOverlays", "// Fetched SRT text");
   const frameRenderer = sliceBetween(source, "{frameOverlays.map", "{subtitlePreviewOverlays.map");
   const imageHeaderRenderer = sliceBetween(source, "{selectedImageOverlays.map", "<div ref={hoverOverlayRef}");
@@ -31,6 +32,11 @@ test("canvas managed overlays stay visible when media and generator frames overl
     subtitleOverlayBuilder,
     /if \(!shouldBuildViewportOverlay\(placement, appState, selectedIds, element\.id\)\) continue/,
     "offscreen SRT overlays should still be discarded before DOM work",
+  );
+  assert.match(
+    audioOverlayBuilder,
+    /if \(!shouldBuildViewportOverlay\(placement, appState, selectedIds, element\.id\)\) continue/,
+    "offscreen audio controls should be discarded before DOM work",
   );
   assert.doesNotMatch(
     videoOverlayBuilder,
@@ -77,6 +83,11 @@ test("canvas managed overlays stay visible when media and generator frames overl
     /className="lovart-video-playback-ui"/,
     "video controls should remain independently renderable above the interactive canvas",
   );
+  assert.match(
+    videoControlsRenderer,
+    /className="lovart-video-playback-ui lovart-audio-playback-ui"/,
+    "audio controls should remain independently renderable above the interactive canvas",
+  );
   assert.doesNotMatch(
     source,
     /isCoveredByLater(?:Asset|Element)\s*&&\s*!overlay\.isSelected/,
@@ -106,6 +117,11 @@ test("canvas overlay refresh stays bounded on large scenes", async () => {
     source,
     /return limitViewportOverlays\(overlays, appState, VIDEO_PLAYBACK_OVERLAY_MAX_ITEMS\)/,
     "video playback DOM count should be capped",
+  );
+  assert.match(
+    source,
+    /return limitViewportOverlays\(overlays, appState, AUDIO_PLAYBACK_OVERLAY_MAX_ITEMS\)/,
+    "audio playback control DOM count should be capped",
   );
   assert.match(
     source,

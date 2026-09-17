@@ -478,7 +478,7 @@ test("dragging selected media translates overlay nodes instead of rebuilding per
   assert.match(source, /node\.style\.translate = translate/);
   assert.match(source, /applySelectionDragTranslation\(drag\.dx \* zoomValue, drag\.dy \* zoomValue, drag\.movedIds\)/);
   const anchorCount = (source.match(/data-overlay-anchor=\{/g) || []).length;
-  assert.equal(anchorCount, 5, "frame, image preview, video, subtitle, and selected-image overlays each carry an anchor id");
+  assert.equal(anchorCount, 6, "frame, image preview, video, audio, subtitle, and selected-image overlays each carry an anchor id");
   // The rebuild baseline captures every element's geometry for drag detection.
   assert.match(source, /geometry\.set\(element\.id, \{/);
   assert.match(source, /selectionKey: \[\.\.\.selectedBaselineIds\]\.sort\(\)\.join\(','\)/);

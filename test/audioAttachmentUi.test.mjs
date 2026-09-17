@@ -14,6 +14,28 @@ test("audio attachments keep the previous audio-specific UI", async () => {
   assert.doesNotMatch(source, /className="lovart-utility-asset-card audio empty"/);
 });
 
+test("Canvas audio and BGM cards open one explicit native audio player", async () => {
+  const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+
+  assert.match(source, /function isCanvasAudioElement\(element\) \{\s*return !element\?\.isDeleted && element\?\.customData\?\.codexMediaKind === 'audio'/);
+  assert.match(source, /function buildAudioPlaybackOverlays\(scene\)/);
+  assert.match(source, /const assetUrl = normalizeCanvasAssetUrl\(assetUrlFromElement\(element\)\)\s*if \(!assetUrl\) continue/);
+  assert.match(source, /sourceURL: canvasRequestInfo\(assetUrl\)\.url/);
+  assert.match(source, /customData\.buzzassistArtifactKind === 'bgm' \? 'BGM' : '音声'/);
+  assert.match(source, /return limitViewportOverlays\(overlays, appState, AUDIO_PLAYBACK_OVERLAY_MAX_ITEMS\)/);
+  assert.match(source, /function AudioCanvasControlsOverlay\(\{ audio, onExpand \}\)/);
+  assert.match(source, /aria-label=\{`\$\{audio\.label\}を再生: \$\{audio\.fileName\}`\}/);
+  assert.match(source, /function ExpandedAudioPlayer\(\{ audio, onClose \}\)/);
+  assert.match(source, /aria-label="音声プレイヤー"/);
+  assert.match(source, /<audio\s+src=\{audio\.sourceURL\}\s+controls\s+autoPlay\s+preload="metadata"/);
+  assert.match(source, /data-audio-playback-id=\{audio\.id\}/);
+  assert.match(source, /\{audioPlaybackOverlays\.map\(\(audio\) => \(/);
+  assert.match(source, /<ExpandedAudioPlayer audio=\{expandedAudioPlayback\}/);
+  assert.match(css, /\.lovart-audio-modal-player \{\s*display: block;\s*width: 100%;/);
+  assert.match(css, /\.lovart-audio-play-icon \{/);
+});
+
 test("file attachment previews leave the selection border unobstructed", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
 
