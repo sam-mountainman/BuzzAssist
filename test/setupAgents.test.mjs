@@ -117,6 +117,30 @@ test("plugin staging ships the public learning catalog, never the full proposals
   assert.doesNotMatch(source, /"docs\/learning\/applied\.jsonl"/u);
 });
 
+test("配布物へのコピーは、Windows の名前空間つきパスでも許可していない設定ファイルを入れない", async () => {
+  // Node 20 の fs.cp は、Windows で filter に "\\?\D:\..." 形式のパスを渡す。リポジトリの
+  // ルートとの前方一致で見ていたので一致せず、skip や公開面の許可リストまで配布物へ入り、
+  // 同梱物の検査がセットアップを止めた（Windows の CI、Node 20 だけ）。
+  const { win32 } = await import("node:path");
+  const { isChannelPackPath } = await import("../scripts/setup-agents.mjs");
+  const root = "D:\\a\\BuzzAssist\\BuzzAssist";
+  for (const [source, excluded] of [
+    ["D:\\a\\BuzzAssist\\BuzzAssist\\config\\ci-test-skip-allowlist.json", true],
+    ["\\\\?\\D:\\a\\BuzzAssist\\BuzzAssist\\config\\ci-test-skip-allowlist.json", true],
+    ["\\\\?\\D:\\a\\BuzzAssist\\BuzzAssist\\config\\public-surface-allowlist.json", true],
+    ["\\\\?\\D:\\a\\BuzzAssist\\BuzzAssist\\config\\harnesses\\koya-manga-video.harness.json", false],
+    ["\\\\?\\D:\\a\\BuzzAssist\\BuzzAssist\\config", false],
+    ["\\\\?\\D:\\a\\BuzzAssist\\BuzzAssist\\lib\\narratedStoryPipeline.mjs", false],
+    ["d:\\a\\buzzassist\\BuzzAssist\\config\\public-surface-allowlist.json", true],
+    ["\\\\?\\D:\\a\\BuzzAssist\\BuzzAssist\\docs\\learning\\proposals.jsonl", true],
+  ]) {
+    assert.equal(isChannelPackPath(source, root, win32), excluded, source);
+  }
+  assert.equal(isChannelPackPath("/repo/config/ci-test-skip-allowlist.json", "/repo"), true);
+  assert.equal(isChannelPackPath("/repo/config/harnesses", "/repo"), false);
+  assert.equal(isChannelPackPath("/elsewhere/config/ci-test-skip-allowlist.json", "/repo"), false, "リポジトリの外は config 規則の対象外");
+});
+
 test("staged plugin verification rejects a tree that contains the full proposals ledger", async () => {
   // コピー一覧を直しても、誰かが書き戻せば同じ穴が開く。staging 検査が
   // fail-closed に止めることを、実際の一時ディレクトリで確かめる。
