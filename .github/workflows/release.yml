@@ -21,6 +21,9 @@ jobs:
     uses: ./.github/workflows/cross-platform.yml
     permissions:
       contents: read
+    # 呼び出し先へ secret は自動では渡らない。渡さないと公開前ゲートの
+    # tarball 監査が検査語彙を照合しないまま通る。
+    secrets: inherit
 
   publish:
     needs: gates
@@ -55,7 +58,14 @@ jobs:
       - name: Pack and checksum
         id: pack
         shell: bash
+        env:
+          BUZZASSIST_SENSITIVE_VOCABULARY_KEY: ${{ secrets.BUZZASSIST_SENSITIVE_VOCABULARY_KEY }}
         run: |
+          # 運営者の端末へ自動更新で届く成果物なので、検査語彙を照合せずに公開しない。
+          if [ -z "$BUZZASSIST_SENSITIVE_VOCABULARY_KEY" ]; then
+            echo "::error title=検査語彙の鍵が無い::リポジトリの secret BUZZASSIST_SENSITIVE_VOCABULARY_KEY を設定してから Release すること（値は運営側端末の ~/.buzzassist/sensitive-vocabulary.key）。"
+            exit 1
+          fi
           package_file="$(node -p 'const p = require("./package.json"); `${p.name.replace(/^@/, "").replace(/\//g, "-")}-${p.version}.tgz`')"
           npm pack --silent > /tmp/buzzassist-npm-pack.log
           test -f "$package_file"

@@ -37,7 +37,7 @@ import {
   extractVocabularyTokens,
   normalizeVocabularyTerm,
 } from "../lib/packageTarballAudit.mjs";
-import { loadSensitiveVocabularyDigest, SENSITIVE_VOCABULARY_DIGEST_PATH } from "./audit-package-tarball.mjs";
+import { loadSensitiveVocabulary, SENSITIVE_VOCABULARY_DIGEST_PATH } from "./audit-package-tarball.mjs";
 import { collectSensitiveSignals } from "./audit-public-surface.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -181,7 +181,7 @@ function escapeRegExp(value) {
 }
 
 /**
- * salted digest 語彙（docs/learning/sensitive-vocabulary.digest.json）に一致した
+ * 鍵つき digest 語彙（docs/learning/sensitive-vocabulary.digest.json）に一致した
  * token を置換する。tarball 監査（countVocabularyDigestHits）と同じ tokenizer と
  * 正規化を使うので、ここで消したものは監査でも当たらない。語そのものは
  * この関数の外へ出さない。
@@ -192,7 +192,7 @@ export function redactVocabularyDigestTokens(value, vocabulary) {
   const matched = [...extractVocabularyTokens(text)].filter((token) => {
     const normalized = normalizeVocabularyTerm(token);
     if (!vocabulary.lengths.has([...normalized].length)) return false;
-    return vocabulary.digests.has(digestVocabularyTerm(normalized, vocabulary.salt));
+    return vocabulary.digests.has(digestVocabularyTerm(normalized, vocabulary.key));
   }).sort((left, right) => right.length - left.length);
   let hits = 0;
   for (const token of matched) {
@@ -203,7 +203,7 @@ export function redactVocabularyDigestTokens(value, vocabulary) {
 
 /** 語彙照合なしで書かれた overlay のヘッダに刻む印。読む側と監査側が見分けられるようにする。 */
 export const OVERLAY_VOCABULARY_MISSING_NOTE =
-  "<!-- 語彙照合なし: sensitive-vocabulary.digest.json が無い状態で --allow-missing-vocabulary により生成。私的語の残存を検出していない。 -->";
+  "<!-- 語彙照合なし: sensitive-vocabulary.digest.json を照合できない状態（一覧か鍵が無い）で --allow-missing-vocabulary により生成。私的語の残存を検出していない。 -->";
 
 /**
  * overlay の text 側に掛ける redaction の材料。Channel Pack 由来の語（運営者端末
@@ -224,11 +224,12 @@ export function overlayRedactionContext({
 } = {}) {
   const signals = collectSensitiveSignals(projectDir);
   const vocabularyPath = path.join(projectDir, SENSITIVE_VOCABULARY_DIGEST_PATH);
-  const vocabulary = loadSensitiveVocabularyDigest(vocabularyPath);
+  const loaded = loadSensitiveVocabulary(vocabularyPath, { projectDir });
+  const vocabulary = loaded.vocabulary;
   if (vocabulary === null) {
     if (allowMissingVocabulary !== true) {
       throw new Error(
-        `digest 語彙が無いので overlay を生成しない: ${SENSITIVE_VOCABULARY_DIGEST_PATH}\n`
+        `digest 語彙を照合できないので overlay を生成しない: ${SENSITIVE_VOCABULARY_DIGEST_PATH}（${loaded.reason}）\n`
         + "語彙無しの overlay は私的語の残存を検出できない（tarball 監査と同じ理由）。\n"
         + "  node scripts/audit-package-tarball.mjs build-vocabulary で語彙を作るか、\n"
         + "  開発用途に限り --allow-missing-vocabulary を付ける（overlay ヘッダに「語彙照合なし」が刻まれる）。",
@@ -751,7 +752,8 @@ function printHelp() {
             丸ごと所有するファイル）を書き直す。人が書く SKILL.md には
             触らないので reviewer は要らない。review-only の宛先
             （台帳・ゲート基準）は自動反映せず保留として報告する。
-            docs/learning/sensitive-vocabulary.digest.json が無ければ止まる
+            docs/learning/sensitive-vocabulary.digest.json か、その鍵
+            （BUZZASSIST_SENSITIVE_VOCABULARY_KEY / ~/.buzzassist/sensitive-vocabulary.key）が無ければ止まる
             （語彙無しでは私的語の残存を検出できない）
     --allow-missing-vocabulary  開発用途のみ。語彙無しで生成し、overlay ヘッダに
                                 「語彙照合なし」を刻む

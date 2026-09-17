@@ -21,7 +21,14 @@ import {
   sanitizeForOverlay,
   summarizeProposals,
 } from "../scripts/harness-learn.mjs";
-import { buildSensitiveVocabularyDigest, parseSensitiveVocabularyDigest } from "../lib/packageTarballAudit.mjs";
+import {
+  buildSensitiveVocabularyDigest,
+  parseSensitiveVocabularyDigest,
+  SENSITIVE_VOCABULARY_KEY_ENV,
+} from "../lib/packageTarballAudit.mjs";
+
+// テスト用の検査語彙の鍵。本番の鍵はリポジトリの外にだけ置く。
+const TEST_VOCABULARY_KEY = "3c".repeat(32);
 
 // テストで使う固有語はすべて合成語。実在のキャスト名・顧客識別子・端末 path を
 // テストの平文へ書かない（テストファイルも公開リポジトリに載る）。
@@ -223,7 +230,8 @@ test("overlay に evidence 逐語が出ない（語彙に無い固有名詞も d
 
 test("overlay の text 側は redactSharedLearningText と digest 語彙を通る", () => {
   const vocabulary = parseSensitiveVocabularyDigest(
-    buildSensitiveVocabularyDigest([SYNTHETIC_CLIENT, "架空太郎"], { generatedAt: "2026-09-05T00:00:00Z" }),
+    buildSensitiveVocabularyDigest([SYNTHETIC_CLIENT, "架空太郎"], { key: TEST_VOCABULARY_KEY, generatedAt: "2026-09-05T00:00:00Z" }),
+    { key: TEST_VOCABULARY_KEY },
   );
   const context = { terms: [SYNTHETIC_CAST], castIds: [SYNTHETIC_CAST_ID], homeRoot: SYNTHETIC_HOME, vocabulary };
   const text = `${SYNTHETIC_CAST}の衣装は ${SYNTHETIC_HOME}/wardrobe に置く。${SYNTHETIC_CAST_ID} は client-work/${SYNTHETIC_CLIENT} 由来。運営者架空太郎さんの指示`;
@@ -527,9 +535,29 @@ test("digest 語彙が無ければ overlay の redaction 材料を作らず thro
     mkdirSync(join(projectDir, "docs", "learning"), { recursive: true });
     writeFileSync(
       join(projectDir, "docs", "learning", "sensitive-vocabulary.digest.json"),
-      JSON.stringify(buildSensitiveVocabularyDigest([SYNTHETIC_CLIENT], { generatedAt: "2026-09-06T00:00:00Z" })),
+      JSON.stringify(buildSensitiveVocabularyDigest([SYNTHETIC_CLIENT], { key: TEST_VOCABULARY_KEY, generatedAt: "2026-09-06T00:00:00Z" })),
     );
-    const present = overlayRedactionContext({ projectDir, homeRoot: SYNTHETIC_HOME });
+    // 一覧はあるのに鍵が無い＝照合できない。「語彙あり」とも「無し」とも丸めず止める。
+    const savedKey = process.env[SENSITIVE_VOCABULARY_KEY_ENV];
+    process.env[SENSITIVE_VOCABULARY_KEY_ENV] = "";
+    const savedHome = process.env.HOME;
+    process.env.HOME = join(projectDir, "..", `${projectDir.split(/[\\/]/u).pop()}-nohome`);
+    try {
+      assert.throws(
+        () => overlayRedactionContext({ projectDir, homeRoot: SYNTHETIC_HOME }),
+        /照合できない/u,
+      );
+    } finally {
+      process.env.HOME = savedHome;
+    }
+    process.env[SENSITIVE_VOCABULARY_KEY_ENV] = TEST_VOCABULARY_KEY;
+    let present;
+    try {
+      present = overlayRedactionContext({ projectDir, homeRoot: SYNTHETIC_HOME });
+    } finally {
+      if (savedKey === undefined) delete process.env[SENSITIVE_VOCABULARY_KEY_ENV];
+      else process.env[SENSITIVE_VOCABULARY_KEY_ENV] = savedKey;
+    }
     assert.equal(present.vocabularyMissing, false);
     assert.ok(present.vocabulary && present.vocabulary.count === 1);
     const clean = renderOverlay([], "2026-09-06T00:00:00Z", present);
