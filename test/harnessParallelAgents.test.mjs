@@ -82,10 +82,26 @@ test("read-only を要求したら、保証できないエンジンは選ばな�
   // 黙って書き込み可能な claude へ落ちてはいけない。
   // 認証状態とは無関係に、read-only を保証できないという理由で落ちること。
   // 「未ログインだから落ちた」では、ログインした途端に書き込み可能になる。
+  //
+  // 以前は2つ目の assert で本物のプローブを呼び、「この機械では claude が
+  // 使えない」ことを期待していた。環境の事実を振る舞いとして固定していたので
+  // ログイン済みの機械では必ず落ち、しかも落ちる前に**実際のモデル呼び出しが
+  // 走っていた**。プローブを差し替えて、判定の経路だけを見る。
+  let probed = 0;
+  const probe = async (engineId) => {
+    probed += 1;
+    return { engineId, available: false, reason: "テスト用の未ログイン" };
+  };
   await assert.rejects(
-    () => selectEngine("claude", { readOnly: true }),
+    () => selectEngine("claude", { readOnly: true, probe }),
     /read-only を保証できません/u,
   );
+  assert.equal(probed, 0, "read-only で弾くときは、エンジンを起動しない（実行も課金もしない）");
   // read-only を要求しなければ、判定理由は認証状態になる（別の経路）。
-  await assert.rejects(() => selectEngine("claude", {}), /使えません/u);
+  await assert.rejects(() => selectEngine("claude", { probe }), /使えません: テスト用の未ログイン/u);
+  assert.equal(probed, 1, "read-only でなければプローブで判定する");
+  // 自動選択でも、read-only を保証できない claude はプローブせずに外す。
+  probed = 0;
+  await assert.rejects(() => selectEngine("auto", { readOnly: true, probe }), /使えるエージェントCLIがありません/u);
+  assert.equal(probed, 1, "codex だけをプローブし、claude は起動しないこと");
 });
