@@ -59,11 +59,17 @@ function toolWorks(command, args) {
 
 const hasFfmpeg = toolWorks("ffmpeg", ["-version"]) && toolWorks("ffprobe", ["-version"]);
 const hasPythonCv = toolWorks("python3", ["-c", "import cv2, numpy"]);
-const hasTesseract = toolWorks("tesseract", ["--version"]);
+// 監査は -l jpn+eng で読む。本体があっても言語データが欠けていれば、監査は
+// 「文字の検出器が無い」で落ちるので、起動できるかではなく両方の言語で判定する。
+const hasTesseract = (() => {
+  const result = spawnSync("tesseract", ["--list-langs"], { encoding: "utf8" });
+  const langs = `${result.stdout || ""}\n${result.stderr || ""}`.split(/\r?\n/u).map((line) => line.trim());
+  return result.status === 0 && langs.includes("jpn") && langs.includes("eng");
+})();
 const mediaSkip = hasFfmpeg ? false : "ffmpeg/ffprobe が無い";
 const auditSkip = !hasFfmpeg ? "ffmpeg/ffprobe が無い"
   : !hasPythonCv ? "python3 + OpenCV が無い"
-  : !hasTesseract ? "tesseract（文字混入の検出器）が無い"
+  : !hasTesseract ? "tesseract（文字混入の検出器、jpn+eng）が無い"
   : false;
 
 async function baseContract() {

@@ -39,26 +39,42 @@ jobs:
         # OpenCV 5 は Haar cascade（cv2.CascadeClassifier）を本体から外したので、
         # 顔検出を使う監査が全部落ちる（2026-09 に 5.0 が出て CI が拾った）。4 系に固定する。
         run: python -m pip install "opencv-python-headless<5" numpy pillow
-      # 動画のレンダーと実MP4の監査は ffmpeg / ffprobe に乗っている。ランナーの
-      # イメージには入っていない。入れないと数十件が落ち、許可できない skip も出る
+      # 動画のレンダーと実MP4の監査は ffmpeg / ffprobe に、カット差し替えの監査は
+      # 文字の混入を見る tesseract（jpn+eng）に乗っている。ランナーのイメージには
+      # どちらも入っていない。入れないと数十件が落ち、許可できない skip も出る
       # （必須の道具の欠落は skip の許可リストに入れない決まり）。各 OS の
       # パッケージ管理で入れ、第三者の action は使わない（release の gate でも走るため）。
-      - name: Install ffmpeg (Linux)
+      # macOS と Windows の日本語データは、全言語で 686MB ある Homebrew の
+      # tesseract-lang の代わりに、tessdata_fast 4.1.0 の1ファイルを SHA-256 で照合して置く。
+      - name: Install media and OCR tools (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
-      - name: Install ffmpeg (macOS)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg tesseract-ocr tesseract-ocr-jpn
+      - name: Install media and OCR tools (macOS)
         if: runner.os == 'macOS'
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
-        run: brew install ffmpeg
-      - name: Install ffmpeg (Windows)
+        run: |
+          brew install ffmpeg tesseract
+          tessdata="$(brew --prefix)/share/tessdata"
+          curl -fsSL -o "$tessdata/jpn.traineddata" https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/4.1.0/jpn.traineddata
+          echo "1f5de9236d2e85f5fdf4b3c500f2d4926f8d9449f28f5394472d9e8d83b91b4d  $tessdata/jpn.traineddata" | shasum -a 256 -c -
+      - name: Install media and OCR tools (Windows)
         if: runner.os == 'Windows'
-        run: choco install ffmpeg -y --no-progress
-      - name: Show media toolchain
+        run: |
+          choco install ffmpeg tesseract -y --no-progress
+          $dir = "C:\Program Files\Tesseract-OCR"
+          $dest = Join-Path $dir "tessdata\jpn.traineddata"
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/4.1.0/jpn.traineddata" -OutFile $dest
+          $hash = (Get-FileHash $dest -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne "1f5de9236d2e85f5fdf4b3c500f2d4926f8d9449f28f5394472d9e8d83b91b4d") { throw "jpn.traineddata の SHA-256 が一致しない: $hash" }
+          Add-Content -Path $env:GITHUB_PATH -Value $dir
+      - name: Show media and OCR toolchain
         run: |
           ffmpeg -hide_banner -version
           ffprobe -hide_banner -version
+          tesseract --version
+          tesseract --list-langs
       - name: Run tests including isolated Codex and Claude Code setup
         run: npm test -- --skip-policy config/ci-test-skip-allowlist.json
       # 公開面の検査。このリポジトリは PUBLIC なので、新しいファイルが1つ
