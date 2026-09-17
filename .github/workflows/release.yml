@@ -46,9 +46,10 @@ jobs:
         # PIL が無いと下書き作成の23件が「Python実行環境を解決できない」で落ちる。
         # OpenCV 5 は cv2.CascadeClassifier を本体から外したので 4 系に固定する。
         run: python -m pip install "opencv-python-headless<5" numpy pillow
-      # 動画のレンダーと実MP4の監査は ffmpeg / ffprobe に乗っている（cross-platform.yml と同じ理由）。
-      - name: Install ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      # 動画のレンダーと実MP4の監査は ffmpeg / ffprobe に、カット差し替えの監査は
+      # tesseract（jpn+eng）に乗っている（cross-platform.yml と同じ理由）。
+      - name: Install media and OCR tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg tesseract-ocr tesseract-ocr-jpn
       - name: Verify tag and plugin versions
         run: npm run release:verify -- "$GITHUB_REF_NAME"
       - name: Run full validation
