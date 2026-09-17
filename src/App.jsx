@@ -87,6 +87,7 @@ const FRAME_OVERLAY_MAX_ITEMS = 320
 const MEDIA_HEADER_OVERLAY_MAX_ITEMS = 320
 const MOBILE_IMAGE_PREVIEW_OVERLAY_MAX_ITEMS = 8
 const VIDEO_PLAYBACK_OVERLAY_MAX_ITEMS = 120
+const AUDIO_PLAYBACK_OVERLAY_MAX_ITEMS = 120
 const SUBTITLE_PREVIEW_OVERLAY_MAX_ITEMS = 120
 const ATTACHMENT_CARD_WIDTH = 320
 const ATTACHMENT_CARD_HEIGHT = 180
@@ -2877,6 +2878,10 @@ function isCanvasVideoElement(element) {
   return !element?.isDeleted && (isGeneratedVideoResult(element) || element?.customData?.codexMediaKind === 'video')
 }
 
+function isCanvasAudioElement(element) {
+  return !element?.isDeleted && element?.customData?.codexMediaKind === 'audio'
+}
+
 function isCanvasFileAttachmentElement(element) {
   const kind = element?.customData?.codexMediaKind
   return !element?.isDeleted && ['audio', 'xml', 'srt', 'script'].includes(kind)
@@ -4046,6 +4051,41 @@ function buildVideoPlaybackOverlays(scene) {
   return limitViewportOverlays(overlays, appState, VIDEO_PLAYBACK_OVERLAY_MAX_ITEMS)
 }
 
+function buildAudioPlaybackOverlays(scene) {
+  const appState = scene.appState ?? {}
+  const selectedIds = new Set(getSelectedIds(appState))
+  const overlays = []
+
+  for (const element of scene.elements) {
+    if (!isCanvasAudioElement(element)) continue
+    // Native media elements must never receive an arbitrary local path. The
+    // harness projection exposes SHA-bound bytes only through this Canvas
+    // asset route; canvasRequestInfo adds tunnel access without persisting it.
+    const assetUrl = normalizeCanvasAssetUrl(assetUrlFromElement(element))
+    if (!assetUrl) continue
+    const placement = getFrameViewportPlacement(getElementGeometry(element), appState)
+    if (!shouldBuildViewportOverlay(placement, appState, selectedIds, element.id)) continue
+    const customData = element.customData ?? {}
+    const mimeType = String(customData.codexAssetMimeType || '')
+    overlays.push({
+      id: element.id,
+      sourceURL: canvasRequestInfo(assetUrl).url,
+      mimeType: mimeType.startsWith('audio/') ? mimeType : 'audio/mpeg',
+      fileName: getCanvasMediaDisplayName(element, scene.files),
+      label: customData.buzzassistArtifactKind === 'bgm' ? 'BGM' : '音声',
+      left: placement.left,
+      top: placement.top,
+      width: placement.width,
+      height: placement.height,
+      angle: Number(element.angle) || 0,
+      isSelected: selectedIds.has(element.id),
+      duration: Number(customData.codexAssetDuration) || 0
+    })
+  }
+
+  return limitViewportOverlays(overlays, appState, AUDIO_PLAYBACK_OVERLAY_MAX_ITEMS)
+}
+
 function buildSubtitlePreviewOverlays(scene) {
   const appState = scene.appState ?? {}
   const selectedIds = new Set(getSelectedIds(appState))
@@ -4820,6 +4860,99 @@ function VideoCanvasControlsOverlay({ video, isHovered, onExpand }) {
   )
 }
 
+function AudioCanvasControlsOverlay({ audio, onExpand }) {
+  const minDim = Math.min(audio.width, audio.height)
+  if (minDim < 60) return null
+  const iconScale = Math.max(0.5, Math.min(1, minDim / 180))
+  const durationLabel = formatPlaybackDuration(audio.duration)
+  const placementStyle = {
+    left: `${audio.left}px`,
+    top: `${audio.top}px`,
+    width: `${audio.width}px`,
+    height: `${audio.height}px`,
+    transform: audio.angle ? `rotate(${audio.angle}rad)` : undefined
+  }
+  const openPlayer = (event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    onExpand(audio)
+  }
+
+  // Keep the card itself selectable. Only this explicit button owns pointer
+  // events, and only one native <audio> decoder is created after activation.
+  return (
+    <div
+      className="lovart-video-playback-ui lovart-audio-playback-ui"
+      data-overlay-anchor={audio.id}
+      data-media-kind="audio"
+      style={placementStyle}
+    >
+      <button
+        type="button"
+        className="lovart-video-play-icon lovart-audio-play-icon"
+        style={{
+          width: `${Math.round(48 * iconScale)}px`,
+          height: `${Math.round(48 * iconScale)}px`
+        }}
+        onPointerDown={openPlayer}
+        onClick={openPlayer}
+        aria-label={`${audio.label}を再生: ${audio.fileName}`}
+        title={`${audio.label}を再生`}
+      >
+        <svg width={Math.round(18 * iconScale)} height={Math.round(18 * iconScale)} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M8 5.14v13.72a1 1 0 001.5.86l11.04-6.86a1 1 0 000-1.72L9.5 4.28A1 1 0 008 5.14z" fill="#fff" />
+        </svg>
+      </button>
+      <div className="lovart-audio-kind">{audio.label}</div>
+      {durationLabel ? <div className="lovart-video-duration">{durationLabel}</div> : null}
+    </div>
+  )
+}
+
+function ExpandedAudioPlayer({ audio, onClose }) {
+  const [playbackError, setPlaybackError] = useState('')
+  return (
+    <div
+      className="lovart-video-modal lovart-audio-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-label="音声プレイヤー"
+      onPointerDown={(event) => {
+        if (event.target !== event.currentTarget) return
+        event.preventDefault()
+        event.stopPropagation()
+        onClose()
+      }}
+    >
+      <button type="button" className="lovart-video-modal-close" onClick={onClose} aria-label="閉じる">
+        <CloseIcon />
+      </button>
+      <div className="lovart-audio-modal-card" onPointerDown={(event) => event.stopPropagation()}>
+        <div className="lovart-audio-modal-heading">
+          <strong>{audio.label}</strong>
+          <span>{audio.fileName}</span>
+        </div>
+        <audio
+          src={audio.sourceURL}
+          controls
+          autoPlay
+          preload="metadata"
+          className="lovart-audio-modal-player"
+          aria-label={`${audio.label}プレイヤー: ${audio.fileName}`}
+          data-audio-playback-id={audio.id}
+          onClick={(event) => event.stopPropagation()}
+          onCanPlay={(event) => {
+            setPlaybackError('')
+            void event.currentTarget.play().catch(() => {})
+          }}
+          onError={() => setPlaybackError('音声を読み込めませんでした')}
+        />
+        {playbackError ? <div className="lovart-audio-playback-error" role="alert">{playbackError}</div> : null}
+      </div>
+    </div>
+  )
+}
+
 function ExpandedVideoPlayer({ video, onClose }) {
   return (
     <div
@@ -5090,6 +5223,7 @@ export default function App() {
   const [speechBubbleEditorError, setSpeechBubbleEditorError] = useState('')
   const [speechBubbleEditorStatus, setSpeechBubbleEditorStatus] = useState('')
   const [videoPlaybackOverlays, setVideoPlaybackOverlays] = useState([])
+  const [audioPlaybackOverlays, setAudioPlaybackOverlays] = useState([])
   const [subtitlePreviewOverlays, setSubtitlePreviewOverlays] = useState([])
   const [subtitleScrollOffsets, setSubtitleScrollOffsets] = useState({})
   const [managedSelectionActive, setManagedSelectionActive] = useState(false)
@@ -5573,6 +5707,7 @@ export default function App() {
   const [silenceCutAdvancedOpen, setSilenceCutAdvancedOpen] = useState(false)
   const [hoveredVideoPlaybackId, setHoveredVideoPlaybackId] = useState('')
   const [expandedVideoPlayback, setExpandedVideoPlayback] = useState(null)
+  const [expandedAudioPlayback, setExpandedAudioPlayback] = useState(null)
   const [pendingPanelFrame, setPendingPanelFrame] = useState(null)
   const [selectedGeneratedResult, setSelectedGeneratedResult] = useState(null)
 
@@ -6018,6 +6153,7 @@ export default function App() {
         : nextSpeechBubbleOverlay
     ))
     setVideoPlaybackOverlays(buildVideoPlaybackOverlays(scene))
+    setAudioPlaybackOverlays(buildAudioPlaybackOverlays(scene))
     const subtitleOverlays = buildSubtitlePreviewOverlays(scene)
     subtitlePreviewOverlaysRef.current = subtitleOverlays
     setSubtitlePreviewOverlays(subtitleOverlays)
@@ -6152,7 +6288,7 @@ export default function App() {
         if (node.isConnected) node.style.translate = ''
       }
     }
-  }, [frameOverlays, selectedImageOverlays, videoPlaybackOverlays, subtitlePreviewOverlays])
+  }, [frameOverlays, selectedImageOverlays, videoPlaybackOverlays, audioPlaybackOverlays, subtitlePreviewOverlays])
 
   // Pointer state for the element-drag fast path. Capture phase so the flag
   // flips before Excalidraw's own pointerup commit fires onChange.
@@ -7762,7 +7898,7 @@ export default function App() {
       const related = event?.relatedTarget
       if (
         related instanceof Element &&
-        related.closest('.lovart-video-playback-ui, .lovart-image-header, .lovart-video-modal')
+        related.closest('.lovart-video-playback-ui, .lovart-audio-playback-ui, .lovart-image-header, .lovart-video-modal, .lovart-audio-modal')
       ) {
         return
       }
@@ -10911,7 +11047,20 @@ export default function App() {
           key={`controls-${video.id}`}
           video={video}
           isHovered={hoveredVideoPlaybackId === video.id}
-          onExpand={setExpandedVideoPlayback}
+          onExpand={(nextVideo) => {
+            setExpandedAudioPlayback(null)
+            setExpandedVideoPlayback(nextVideo)
+          }}
+        />
+      ))}
+      {audioPlaybackOverlays.map((audio) => (
+        <AudioCanvasControlsOverlay
+          key={`audio-controls-${audio.id}`}
+          audio={audio}
+          onExpand={(nextAudio) => {
+            setExpandedVideoPlayback(null)
+            setExpandedAudioPlayback(nextAudio)
+          }}
         />
       ))}
       {frameOverlays.map((overlay) => {
@@ -11321,6 +11470,9 @@ export default function App() {
 
       {expandedVideoPlayback ? (
         <ExpandedVideoPlayer video={expandedVideoPlayback} onClose={() => setExpandedVideoPlayback(null)} />
+      ) : null}
+      {expandedAudioPlayback ? (
+        <ExpandedAudioPlayer audio={expandedAudioPlayback} onClose={() => setExpandedAudioPlayback(null)} />
       ) : null}
 
       {openMenu ? (

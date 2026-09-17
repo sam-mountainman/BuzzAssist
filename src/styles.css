@@ -531,6 +531,26 @@ body {
   transform: translate(-50%, -50%);
 }
 
+.lovart-audio-play-icon {
+  background: rgb(37 99 235 / 0.9);
+  box-shadow: 0 10px 24px rgb(37 99 235 / 0.28);
+}
+
+.lovart-audio-kind {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  padding: 4px 8px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  background: rgb(37 99 235 / 0.88);
+  border-radius: 999px;
+  box-shadow: 0 8px 18px rgb(37 99 235 / 0.2);
+  pointer-events: none;
+}
+
 .lovart-video-duration,
 .lovart-video-expand {
   position: absolute;
@@ -545,6 +565,12 @@ body {
   font-weight: 600;
   line-height: 1;
   border-radius: 999px;
+}
+
+.lovart-audio-playback-ui .lovart-video-duration {
+  bottom: 10px;
+  left: 10px;
+  font-size: 11px;
 }
 
 .lovart-video-expand {
@@ -574,6 +600,49 @@ body {
   max-height: 88vh;
   background: #000;
   border-radius: 10px;
+}
+
+.lovart-audio-modal-card {
+  width: min(560px, calc(100vw - 40px));
+  padding: 24px;
+  color: #111827;
+  background: #fff;
+  border: 1px solid rgb(255 255 255 / 0.2);
+  border-radius: 14px;
+  box-shadow: 0 28px 80px rgb(0 0 0 / 0.34);
+}
+
+.lovart-audio-modal-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  margin-bottom: 18px;
+}
+
+.lovart-audio-modal-heading strong {
+  color: #2563eb;
+  font-size: 13px;
+}
+
+.lovart-audio-modal-heading span {
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lovart-audio-modal-player {
+  display: block;
+  width: 100%;
+}
+
+.lovart-audio-playback-error {
+  margin-top: 12px;
+  color: #b91c1c;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .lovart-video-modal-close {
