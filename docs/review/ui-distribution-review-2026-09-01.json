@@ -1,0 +1,230 @@
+{
+  "schemaVersion": 1,
+  "reviewDate": "2026-09-01",
+  "reviewerTask": "ui-distribution-reviewer",
+  "overall": {
+    "status": "conditional-pass-with-open-p1-findings",
+    "p0": 0,
+    "p1": 3,
+    "p2": 6,
+    "p2ClosedOrVerified": 3,
+    "p2Remaining": 3,
+    "summary": "The canonical project harness is profile-bound. A newly projected run containing valid PNG, MP4, WAV, MP3, and SRT assets mounted in Codex's in-app Browser with zero console warnings/errors. The MP4, WAV, and MP3 each reached readyState=4 with a two-second decoded duration; both native audio players advanced beyond 1.5 seconds without an error. A provider-free committed regression also generates valid media through the shared FFmpeg resolver and probes and fully decodes the content-addressed projected MP4, WAV, and MP3 copies. Host-cache parity, an accepted npm roster-signal exception, and real cross-platform UI smoke coverage remain open."
+  },
+  "scope": [
+    "Codex in-app Browser Canvas mount",
+    "Canvas image, video, audio, and subtitle representation",
+    "npm tarball and private Channel Pack boundary",
+    "Claude Code and Codex shared canonical skills",
+    "operator-production skill profile",
+    "macOS, Windows, and Linux portability evidence"
+  ],
+  "constraints": [
+    "No paid generation was run.",
+    "No plugin or host configuration was changed.",
+    "No artifact was published.",
+    "No standalone Playwright dependency was added.",
+    "An initial isolated-fixture attempt was blocked by ENOSPC. After exact disposable test scratch directories were removed, a new valid-media fixture was created and mounted without changing host configuration."
+  ],
+  "passedEvidence": [
+    {
+      "command": "node scripts/audit-public-surface.mjs --json",
+      "result": "exit 0; gateOk=true; status=accepted-risk; no unresolved path, term, or path-leak findings"
+    },
+    {
+      "command": "node scripts/audit-package-tarball.mjs --json --require-signals",
+      "result": "exit 0; 528 entries; no unresolved findings; two accepted channel-roster findings remain"
+    },
+    {
+      "command": "node --test test/packageTarballAudit.test.mjs test/skillInventory.test.mjs test/canvasRunMediaProjection.test.mjs test/canvasRunProjection.test.mjs test/videoHarnessCanvasAdapter.test.mjs",
+      "result": "26 passed, 0 failed; includes shared-resolver generation, ffprobe codec checks, and full decode of the projected content-addressed MP4, WAV, and MP3 assets"
+    },
+    {
+      "command": "npm pack --dry-run --json --ignore-scripts",
+      "result": "528 files; no worktree or channel-pack directory entries"
+    },
+    {
+      "command": "node scripts/skill-inventory.mjs --profile operator-production --include-global --include-plugin-cache",
+      "result": "profile resolved; 20 skill records and 1 plugin record allowed when global/cache copies are included; skill-creator excluded from production; analytics and yt-quality-loop hard-denied; seven project/cache collisions and 18 external divergent hashes reported"
+    },
+    {
+      "command": "node --test test/audioAttachmentUi.test.mjs test/overlayStacking.test.mjs test/fileNameDisplay.test.mjs test/panelTarget.test.mjs test/textPreviewScroll.test.mjs test/canvasRunMediaProjection.test.mjs",
+      "result": "64 passed, 0 failed; covers explicit audio/BGM player markup, bounded overlays, drag tracking, existing video/image/subtitle behavior, and provider-free projected-media decode"
+    },
+    {
+      "command": "npm run build",
+      "result": "Vite production build completed successfully"
+    }
+  ],
+  "browserEvidence": {
+    "runtime": "Codex bundled in-app Browser with its Playwright-compatible tab API",
+    "standalonePlaywrightRequired": false,
+    "mount": {
+      "result": "The live Canvas mounted and exposed its Canvas controls and generated images. A second clean mount produced no console errors or warnings.",
+      "firstMountCondition": "The first mount logged repeated save HTTP 500 errors while the data volume was effectively full; the errors disappeared after free space recovered.",
+      "interpretation": "The first-mount failures are correlated with ENOSPC and are not counted as application correctness failures."
+    },
+    "existingScene": {
+      "totalElements": 1512,
+      "liveElements": 844,
+      "files": 567,
+      "liveImages": 382,
+      "liveVideos": 11,
+      "liveSubtitles": 5,
+      "liveAudio": 0,
+      "harnessRunMediaElements": 0
+    },
+    "isolatedHarnessRunScene": {
+      "runId": "real-media-browser-001",
+      "projectionResult": "5 SHA-verified media artifacts projected; 5 content-addressed assets copied; 4 Excalidraw file records created",
+      "media": [
+        "valid 640x360 PNG",
+        "valid two-second H.264/AAC MP4",
+        "valid PCM WAV narration",
+        "valid MP3 BGM",
+        "valid UTF-8 SRT"
+      ],
+      "visualResult": "The Canvas visibly arranged the image, video preview, two audio waveform cards, and subtitle card below the run/artifact cards.",
+      "videoPlayer": {
+        "dialog": "拡大動画プレイヤー",
+        "readyState": 4,
+        "durationSeconds": 2,
+        "error": null,
+        "assetUrlUsesContentAddressedRunPath": true
+      },
+      "audioPlayer": {
+        "dialog": "音声プレイヤー",
+        "singleNativeDecoderPerOpenDialog": true,
+        "wav": {
+          "readyState": 4,
+          "durationSeconds": 2,
+          "playbackAdvancedBeyondSeconds": 1.5,
+          "error": null,
+          "assetUrlUsesContentAddressedRunPath": true
+        },
+        "mp3Bgm": {
+          "readyState": 4,
+          "durationSeconds": 2,
+          "playbackAdvancedBeyondSeconds": 1.5,
+          "error": null,
+          "assetUrlUsesContentAddressedRunPath": true
+        }
+      },
+      "consoleWarningsOrErrors": 0
+    },
+    "assetChecks": [
+      "A PNG asset returned HTTP 200.",
+      "An MP4 asset returned HTTP 200 with video/mp4.",
+      "A WAV asset returned HTTP 200 with audio/wav.",
+      "An MP3 asset returned HTTP 200 with audio/mpeg.",
+      "An SRT asset returned HTTP 200 with application/x-subrip."
+    ],
+    "notProven": [
+      "Claude Code's browser host was not available in this task."
+    ]
+  },
+  "skillAndProfileEvidence": {
+    "canonicalInventory": [
+      "platform-craft",
+      "harness-parallel-execution",
+      "harness-self-improvement",
+      "manga-video-production",
+      "manga-page-camera",
+      "narrated-story-video",
+      "skill-creator"
+    ],
+    "language": "ja",
+    "sharedSource": ".agents/skills",
+    "hostAdapters": [
+      ".claude/skills",
+      ".codex/skills"
+    ],
+    "productionDecision": {
+      "skillCreator": "retained as a bundled development-only skill and excluded from operator-production",
+      "youtubeAnalytics": "hard-denied from operator-production",
+      "ytQualityLoop": "hard-denied from operator-production"
+    },
+    "runtimeBinding": "The formal video-harness production profile binds declared canonical paths and hashes and rejects development-only or undeclared global fallbacks."
+  },
+  "findings": [
+    {
+      "id": "P1-HOST-CACHE-DIVERGENCE",
+      "priority": "P1",
+      "status": "open",
+      "finding": "Seven BuzzAssist skill IDs resolve to a current project canonical version and at least one divergent installed plugin-cache or external copy.",
+      "impact": "The formal harness remains deterministic because it binds the project path and hash, but ad-hoc skill discovery outside that harness cannot yet guarantee identical Claude Code and Codex content on this host.",
+      "recommendation": "Publish and install one reviewed stable bundle on both hosts, then require the inventory collision gate to report zero production-relevant divergent hashes before claiming host-wide parity."
+    },
+    {
+      "id": "P1-NPM-ROSTER-ACCEPTED-RISK",
+      "priority": "P1",
+      "status": "accepted-risk-not-clean",
+      "finding": "The package audit passes only with two accepted channel-roster exceptions. Two packaged implementation files each contain four of eleven roster identifiers.",
+      "impact": "No Channel Pack directory, display name, or unresolved private path was packaged, but the npm boundary is not strictly free of channel-derived identifiers.",
+      "recommendation": "Replace the roster-specific identifiers with generic fixtures or keep those implementations outside the public tarball, then remove the exceptions and require status=clean."
+    },
+    {
+      "id": "P1-CROSS-PLATFORM-UI-SMOKE",
+      "priority": "P1",
+      "status": "open",
+      "finding": "The repository defines Ubuntu, macOS, and Windows CI and isolated setup simulations, but its test runner explicitly notes that a real UI mount test is not implemented.",
+      "impact": "Build and filesystem portability are covered by design; equal Canvas rendering, media controls, and host integration on real Windows/Linux and Claude Code are not empirically proven.",
+      "recommendation": "Add a small no-network fixture and browser mount smoke on every OS, plus separate Claude Code and Codex host acceptance runs, without adding a second Playwright dependency where the host Browser API is available."
+    },
+    {
+      "id": "P2-MEDIA-DECODE-GAP",
+      "priority": "P2",
+      "status": "closed-provider-free-regression",
+      "finding": "Canvas media projection validates path containment, symlinks, SHA-256, extension, and declared MIME. The Browser smoke proves projected MP4 playback, and the committed provider-free regression uses the shared cross-platform FFmpeg resolver to generate valid H.264/AAC MP4, PCM WAV, and MP3 assets, projects them, verifies their content-addressed locations with ffprobe, and fully decodes every stream.",
+      "impact": "The projected media copies are now reproducibly proven decodable independently of a provider or browser. Cross-host UI parity remains a separate finding.",
+      "recommendation": "Keep the regression in the focused and release test suites."
+    },
+    {
+      "id": "P2-AUDIO-IS-LINKED-PREVIEW",
+      "priority": "P2",
+      "status": "verified-on-current-macos-codex-host",
+      "finding": "Audio and BGM waveform cards now expose an explicit play control that opens one native audio player overlay. It accepts only normalized Canvas asset URLs, obtains tunnel access at runtime without persistence, and does not create a decoder for every visible card.",
+      "impact": "The production build and provider-free byte regression pass. In Codex's in-app Browser, both WAV narration and MP3 BGM opened the native player, reached readyState=4, reported a two-second duration, advanced playback beyond 1.5 seconds, and produced no console warning or error.",
+      "recommendation": "Repeat the same fixture on Claude Code and other operating systems under the cross-platform finding."
+    },
+    {
+      "id": "P2-HARNESS-MEDIA-VISUAL-SIGNOFF",
+      "priority": "P2",
+      "status": "verified-on-current-macos-codex-host",
+      "finding": "A minimal isolated run with a valid PNG, MP4, WAV, MP3, and SRT was projected through the new harness-run media namespace and mounted in Codex's in-app Browser.",
+      "impact": "The current host has end-to-end visual proof for the new projection path, including MP4 playback metadata and zero console warnings/errors.",
+      "recommendation": "Repeat the same fixture as a release acceptance run on Claude Code, Windows, and Linux before claiming cross-host parity."
+    },
+    {
+      "id": "P2-RAW-TARBALL-SETUP-CONSTRAINT",
+      "priority": "P2",
+      "status": "documented-constraint",
+      "finding": "Canonical harness skills live under .agents/skills and are promoted into the staged plugin skills directory by the official setup script. The raw npm package plugin manifest points at the generic skills directory.",
+      "impact": "The supported setup and updater route can share the canonical skills, but treating the raw tarball as a directly installable complete harness would omit that promotion step.",
+      "recommendation": "Keep official setup as the only supported install path, or make the published artifact staging step explicit and test raw-artifact installation."
+    },
+    {
+      "id": "P2-LEGACY-CANVAS-SOURCE-PATH",
+      "priority": "P2",
+      "status": "migration-debt",
+      "finding": "At least one legacy video element in the current local Canvas retains an absolute source path in custom data. The new projection intentionally omits source absolute paths.",
+      "impact": "This is local-state privacy and portability debt, not an npm tarball leak.",
+      "recommendation": "Provide a one-time local Canvas migration that removes legacy source paths after content-addressed assets are confirmed."
+    },
+    {
+      "id": "P2-SAVE-FAILURE-UX",
+      "priority": "P2",
+      "status": "open",
+      "finding": "When disk exhaustion caused save HTTP 500 responses, failures were visible in the console but no durable operator-facing recovery proof was observed.",
+      "impact": "An operator could continue editing while persistence is failing.",
+      "recommendation": "Surface a persistent save-failed state with retry guidance and an explicit recovered/saved acknowledgement."
+    }
+  ],
+  "unverifiedExternalConditions": [
+    "Real Windows Canvas rendering and media playback",
+    "Real Linux Canvas rendering and media playback",
+    "Claude Code browser integration with the same fixture",
+    "Fresh stable-release installation into both host caches",
+    "Public registry installation of the final release artifact"
+  ]
+}
