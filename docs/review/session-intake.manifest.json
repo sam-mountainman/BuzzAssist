@@ -16,8 +16,8 @@
     "eligibleUserTurnOccurrences": 49,
     "uniqueUserMessages": 37,
     "duplicateUserTurnOccurrences": 12,
-    "findingIds": 72,
-    "countExplanation": "72はfindings ledgerの原子所見ID数、37はsource filterを通過した49 turn occurrenceをexact content SHA-256で重複排除したuser message数であり、同じ母集団でも1対1対応でもない。"
+    "findingIds": 73,
+    "countExplanation": "73はfindings ledgerの原子所見ID数、37はsource filterを通過した49 turn occurrenceをexact content SHA-256で重複排除したuser message数であり、同じ母集団でも1対1対応でもない。"
   },
   "sources": [
     {
@@ -104,9 +104,9 @@
       "eligibleTurnOccurrences": 49,
       "uniqueUserMessages": 37,
       "duplicateOccurrences": 12,
-      "findingIds": 72,
+      "findingIds": 73,
       "findingIdsAreNotUserMessages": true,
-      "countExplanation": "72はレビューが分解した原子finding ID数。37は2 sessionのeligible user-visible turnを本文非保存のcontent SHA-256で重複排除した数。1 turnから複数findingが生じ、同じturnが継続sessionへ複製されるため一致しない。"
+      "countExplanation": "73はレビューが分解した原子finding ID数。37は2 sessionのeligible user-visible turnを本文非保存のcontent SHA-256で重複排除した数。1 turnから複数findingが生じ、同じturnが継続sessionへ複製されるため一致しない。"
     },
     "turns": [
       {
@@ -428,10 +428,10 @@
         "occurrences": [
           {"sourceId": "claude-session-f4a4ec5b", "sourceTurnOrdinal": 14, "sourceLineNumber": 3479, "filterClass": "origin-human-string", "eventSha256": "bd024da437ec69e9194a154a001b6da92139752b62f6fa8cfcfd9ef80bf0b0d8"}
         ],
-        "findingIds": ["cx-i1", "cx-i2", "cx-i3", "cx-i4", "cx-i5", "cx-i6", "cx-i7", "cx-i8", "cx-i9", "cx-i10", "cx-i11", "cx-i12", "cx-i13", "cx-i14", "cx-i15", "cx-i16", "cx-i17", "cx-i18", "cx-i19", "cx-i20", "cx-i21", "cx-i22", "cx-i23", "cx-i24", "cx-i25", "cx-i26"]
+        "findingIds": ["cx-i1", "cx-i2", "cx-i3", "cx-i4", "cx-i5", "cx-i6", "cx-i7", "cx-i8", "cx-i9", "cx-i10", "cx-i11", "cx-i12", "cx-i13", "cx-i14", "cx-i15", "cx-i16", "cx-i17", "cx-i18", "cx-i19", "cx-i20", "cx-i21", "cx-i22", "cx-i23", "cx-i24", "cx-i25", "cx-i26", "cx-i27"]
       }
     ],
-    "coverageSha256": "3bf9b4c286f11188bd78a4e726e9ac7eacda913f312369e3e6ad9d9bfb7ed48a",
+    "coverageSha256": "261e8703e996c694375f394ae94b4bbdb7fd4f8ae20efdac1da196c071bec309",
     "independentAgentSignoff": {
       "status": "pending",
       "reviewerAgentId": null,
@@ -468,7 +468,7 @@
       "sourceIds": ["claude-session-f4a4ec5b"],
       "expectedFindingIds": [
         "cx-i1", "cx-i2", "cx-i3", "cx-i4", "cx-i5", "cx-i6", "cx-i7", "cx-i8",
-        "cx-i9", "cx-i10", "cx-i11", "cx-i12", "cx-i13", "cx-i14", "cx-i15", "cx-i16", "cx-i17", "cx-i18", "cx-i19", "cx-i20", "cx-i21", "cx-i22", "cx-i23", "cx-i24", "cx-i25", "cx-i26"
+        "cx-i9", "cx-i10", "cx-i11", "cx-i12", "cx-i13", "cx-i14", "cx-i15", "cx-i16", "cx-i17", "cx-i18", "cx-i19", "cx-i20", "cx-i21", "cx-i22", "cx-i23", "cx-i24", "cx-i25", "cx-i26", "cx-i27"
       ]
     }
   ]
