@@ -185,7 +185,7 @@ test("MCP handler is a thin dispatcher and preserves the service result envelope
   assert.equal(calls[0][1].channelPackPath, resolve("/tmp/project", "pack"), "相対 channelPackPath は projectDir 基準で解決される");
   assert.equal(calls[4][1].confirmed, true);
   assert.equal(calls[4][1].reviewerTrustPath, resolve("/secure/reviewer-trust.json"), "MCP 引数の信頼リスト path は service.resume まで届く");
-  assert.equal(calls[6][1].reviewerKeyPath, resolve("/secure/k.pem"), "signoff 引数は reviewer adapter までそのまま届く");
+  assert.equal(calls[6][1].reviewerKeyPath, "/secure/k.pem", "signoff 引数は reviewer adapter までそのまま届く");
   assert.equal(feedback.structuredContent.captured, 1);
   assert.match(feedback.content[0].text, /captured=1/u);
   assert.match(signed.content[0].text, /Reviewer signoff written for narrated-story-video Job video-a/u);
@@ -364,10 +364,10 @@ test("R5-REV-02: run/resume/get/list/cancel/collect-feedback never fall back to 
   assert.deepEqual(calls.at(-1)[1], { projectDir: resolve("/work/project"), scriptPath: resolve("/work/project", "rel/script.md"), channelPackPath: resolve("/packs/pack.json"), reviewerTrustPath: resolve("/secure/trust.json") });
   // server が roots から埋めた projectDir が env より優先される。
   await handleVideoHarnessToolCall({ name: TOOL_GET_VIDEO_HARNESS_JOB, arguments: { projectDir: "/work/from-roots", jobId: "video-a" } }, { ...deps, env: { EXCALIDRAW_PROJECT_DIR: "/work/from-env" } });
-  assert.equal(calls.at(-1)[1].projectDir, "/work/from-roots");
+  assert.equal(calls.at(-1)[1].projectDir, resolve("/work/from-roots"));
   // 明示も roots も無ければ EXCALIDRAW_PROJECT_DIR（setup 時 project）。
   await handleVideoHarnessToolCall({ name: TOOL_CANCEL_VIDEO_HARNESS_JOB, arguments: { jobId: "video-a" } }, { ...deps, env: { EXCALIDRAW_PROJECT_DIR: "/work/from-env" } });
-  assert.equal(calls.at(-1)[1].projectDir, "/work/from-env");
+  assert.equal(calls.at(-1)[1].projectDir, resolve("/work/from-env"));
   for (const [, args] of calls) assert.notEqual(args.projectDir, cwdBefore, "MCP server の cwd が projectDir になることはない");
   assert.equal(process.cwd(), cwdBefore);
 });
