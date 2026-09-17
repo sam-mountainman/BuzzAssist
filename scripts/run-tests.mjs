@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 //   node scripts/run-tests.mjs              前提の無い検査は skip、理由を必ず出す
-//   node scripts/run-tests.mjs --strict     skip を1件も許さない（リリース前・開発機）
+//   node scripts/run-tests.mjs --strict     skip を1件も許さない（全前提を揃えた開発機）
+//   node scripts/run-tests.mjs --skip-policy config/ci-test-skip-allowlist.json
+//                                           clean releaseで既知の私有前提だけ許す
 //
 // なぜ skip を数えるか:
 // 終了コードしか見ていなかったので、**壊れた検査が skip されて緑になる**状態が
@@ -10,16 +12,29 @@
 //
 // skip 自体は要る。前提が手元に無い環境で落とし続けると、本当の失敗が常時赤に
 // 埋もれる。だから禁じるのではなく、**必ず目に見えるところへ出す**。
-// リリース前は --strict で1件も許さない。
+// clean releaseは私有Channel Pack等を持たないため、名前・理由・OSを固定した
+// --skip-policyを使う。FFmpeg/Pythonなど必須toolchainの欠落はallowlistできない。
 
 import { spawnSync } from "node:child_process";
-import { readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { evaluateTestSkips, parseTapSkips, validateTestSkipPolicy } from "../lib/testSkipPolicy.mjs";
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const testDir = join(rootDir, "test");
 const strict = process.argv.includes("--strict") || process.env.BUZZASSIST_TEST_STRICT === "1";
+const skipPolicyFlag = process.argv.indexOf("--skip-policy");
+if (strict && skipPolicyFlag >= 0) {
+  throw new Error("--strict and --skip-policy are mutually exclusive.");
+}
+if (skipPolicyFlag >= 0 && (!process.argv[skipPolicyFlag + 1] || process.argv[skipPolicyFlag + 1].startsWith("--"))) {
+  throw new Error("--skip-policy requires a JSON file path.");
+}
+const skipPolicyPath = skipPolicyFlag >= 0 ? resolve(rootDir, process.argv[skipPolicyFlag + 1]) : "";
+const skipPolicy = skipPolicyPath ? JSON.parse(readFileSync(skipPolicyPath, "utf8")) : null;
+if (skipPolicy) validateTestSkipPolicy(skipPolicy);
 
 const testFiles = readdirSync(testDir)
   .filter((name) => name.endsWith(".test.mjs"))
@@ -71,10 +86,7 @@ for (const { args, countsSkips } of commands) {
   if (countsSkips) {
     const output = String(result.stdout || "");
     process.stdout.write(output);
-    for (const line of output.split("\n")) {
-      const match = line.match(/^(?:not )?ok \d+ - (.+?) # SKIP ?(.*)$/u);
-      if (match) skipped.push({ name: match[1].trim(), reason: (match[2] || "").trim() || "(理由なし)" });
-    }
+    skipped.push(...parseTapSkips(output));
   }
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
@@ -89,11 +101,30 @@ if (skipped.length > 0) {
       + "何を用意すれば走るのかを skip の理由に書くこと。\n");
     process.exitCode = 1;
   }
-  if (strict) {
+  if (skipPolicy) {
+    const verdict = evaluateTestSkips(skipped, skipPolicy);
+    if (!verdict.pass) {
+      if (verdict.unexpected.length > 0) {
+        process.stdout.write(`\nrelease skip policyに無いskipが ${verdict.unexpected.length}件ある:\n`);
+        for (const entry of verdict.unexpected) process.stdout.write(`  - ${entry.name}\n      ${entry.reason}\n`);
+      }
+      if (verdict.stale.length > 0) {
+        process.stdout.write(`\nもう発生しないallowlist項目が ${verdict.stale.length}件ある。削除または前提を確認すること:\n`);
+        for (const entry of verdict.stale) process.stdout.write(`  - ${entry.name}\n`);
+      }
+      process.exitCode = 1;
+    } else {
+      process.stdout.write(`\nrelease skip policy: clean-cloneで意図した ${skipped.length}件だけを確認した。\n`);
+    }
+  } else if (strict) {
     process.stdout.write("\n--strict: skip を1件も許さない設定です。"
       + "前提を揃えるか、その検査が本当に環境依存かを見直してください。\n");
     process.exitCode = 1;
   }
 } else {
   process.stdout.write("\nskip なし（全ての検査が実際に走った）\n");
+  if (skipPolicy) {
+    process.stdout.write("release skip policyの全項目がstaleです。不要な例外を残さないため失敗にします。\n");
+    process.exitCode = 1;
+  }
 }
