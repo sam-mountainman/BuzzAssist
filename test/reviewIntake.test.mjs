@@ -236,6 +236,12 @@ test("coverage rejects raw text/path fields and stale independent signoff", () =
 });
 
 test("checked-in intake preserves the measured 46 findings versus 36 unique messages distinction", async () => {
+  // 以前は 46 / 36 / 47 を固定値で assert していた。台帳はラウンドごとに
+  // 増える設計なので、**正しく次のラウンドを登録した瞬間にこのテストが落ちた**
+  // ——現状を仕様として固定する型。守りたいのは数そのものではなく、
+  // (1) 9/1 に測った46件が失われず元のラウンドに属し続けること、
+  // (2) finding 数と user message 数が1対1ではないことを区別し続けること、
+  // (3) 全 finding がどれかの利用者発言に紐付いていること（散逸しない）。
   const [manifestText, findingsText] = await Promise.all([
     readFile(new URL("../docs/review/session-intake.manifest.json", import.meta.url), "utf8"),
     readFile(new URL("../docs/review/findings.jsonl", import.meta.url), "utf8"),
@@ -243,13 +249,26 @@ test("checked-in intake preserves the measured 46 findings versus 36 unique mess
   const manifest = JSON.parse(manifestText);
   const findings = parseFindingsJsonl(findingsText);
   const result = validateReviewIntake({ manifest, findings });
-  assert.equal(result.findingCount, 46);
-  assert.deepEqual(result.userTurnCoverage, {
-    uniqueUserMessages: 36,
-    eligibleTurnOccurrences: 47,
-    duplicateOccurrences: 11,
-    referencedFindingCount: 46,
-    signoffStatus: "pending",
-  });
+
+  // (1) 9/1 の測定は追記で増えても消えない。
+  const measuredOn0901 = { "codex-2026-08-31": 23, "codex-2026-09-01": 14, "claude-session-intake-2026-09-01": 9 };
+  for (const [roundId, count] of Object.entries(measuredOn0901)) {
+    const round = manifest.rounds.find((entry) => entry.id === roundId);
+    assert.ok(round, `9/1 に測ったラウンド ${roundId} が消えている`);
+    assert.equal(round.expectedFindingIds.length, count, `${roundId} の件数が変わっている`);
+  }
+  assert.ok(result.findingCount >= 46, "9/1 の46件を下回ってはいけない");
+
+  // (2) 数え方の区別。
+  const coverage = result.userTurnCoverage;
+  assert.equal(result.findingCount, findings.length, "台帳の全行を数えること");
+  assert.equal(coverage.duplicateOccurrences, coverage.eligibleTurnOccurrences - coverage.uniqueUserMessages);
+  assert.notEqual(result.findingCount, coverage.uniqueUserMessages,
+    "finding 数と user message 数は別物（1発言から複数の指摘が出る）");
   assert.equal(manifest.userTurnCoverage.measurement.findingIdsAreNotUserMessages, true);
+
+  // (3) 散逸しない: 全 finding が発言に紐付いている。
+  assert.equal(coverage.referencedFindingCount, result.findingCount,
+    "発言に紐付いていない finding がある（どの指摘から来たか追えない）");
+  assert.equal(coverage.signoffStatus, "pending", "独立レビューを経ずに verified と書かないこと");
 });
