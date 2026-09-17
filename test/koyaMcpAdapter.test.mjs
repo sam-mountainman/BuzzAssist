@@ -21,6 +21,7 @@ import {
 } from "../lib/koyaMcpAdapter.mjs";
 
 const root = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
+const UNIT_SEPARATOR = String.fromCharCode(0x1f);
 
 // R6-1: doctor は reviewer 信頼アンカーを必須項目として見るので、決定論 runtime には運営者 env を含める。
 const OPERATOR_TRUST_JSON = (() => {
@@ -279,4 +280,45 @@ test("R6-7: reviewer-key-create and signoff resource keys include the key path a
     koyaJobResourceKey({ projectDir, action: "speech", options: { episodeId: "ep-001", reviewerKeyPath: "/x" } }),
     koyaJobResourceKey({ projectDir, action: "speech", options: { episodeId: "ep-001" } }),
   );
+});
+
+test("実行プロセスが居ない背景ジョブは、待機中ではなく中断として返す", async () => {
+  // runner が起動に失敗しても記録は queued のままで、読むだけの側は再分類して
+  // いなかった。運用者からは永遠に「待機中」に見えた（Windows で実際に起きた）。
+  const { mkdir, readFile } = await import("node:fs/promises");
+  const { spawnSync } = await import("node:child_process");
+  const { writeJsonAtomic } = await import("../lib/atomicJsonFile.mjs");
+  const projectDir = await mkdtemp(path.join(os.tmpdir(), "buzzassist-koya-job-dead-"));
+  try {
+    // 確実に存在しない PID を作る（起動して終わるのを待ち、その PID を使う）。
+    const exited = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
+    assert.equal(exited.status, 0);
+    const deadPid = exited.pid;
+    const jobId = "koya-mtest0001-deadpid01";
+    const jobRoot = path.join(projectDir, "canvas", "koya-mcp-jobs");
+    await mkdir(jobRoot, { recursive: true });
+    const jobPath = path.join(jobRoot, `${jobId}.json`);
+    await writeJsonAtomic(jobPath, {
+      version: 1,
+      id: jobId,
+      action: "character-review-refresh",
+      projectDir,
+      resourceKey: [projectDir, "character-review-refresh", "(no-episode)"].join(UNIT_SEPARATOR),
+      status: "queued",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      jobPath,
+      stdoutPath: path.join(jobRoot, `${jobId}.stdout.log`),
+      stderrPath: path.join(jobRoot, `${jobId}.stderr.log`),
+      runnerPid: deadPid,
+    });
+    const read = await readKoyaMcpJob({ projectDir, jobId });
+    assert.equal(read.status, "interrupted", JSON.stringify(read));
+    assert.match(read.interruptedReason, /実行プロセスが見つからない/u);
+    // 記録も直す（次に読む人も同じ判定になる）。
+    const persisted = JSON.parse(await readFile(jobPath, "utf8"));
+    assert.equal(persisted.status, "interrupted");
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
 });
