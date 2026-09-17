@@ -37,11 +37,40 @@ import {
   extractVocabularyTokens,
   normalizeVocabularyTerm,
 } from "../lib/packageTarballAudit.mjs";
+import { buildPublicProposalCatalog, renderPublicProposalCatalog } from "../lib/harnessLearningCurator.mjs";
 import { loadSensitiveVocabulary, SENSITIVE_VOCABULARY_DIGEST_PATH } from "./audit-package-tarball.mjs";
 import { collectSensitiveSignals } from "./audit-public-surface.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LEARN_DIR = path.join(REPO_ROOT, "docs", "learning");
+const SHARED_PROPOSALS_PATH = path.join(LEARN_DIR, "proposals.jsonl");
+const PUBLIC_CATALOG_PATH = path.join(LEARN_DIR, "proposals.public.jsonl");
+
+/**
+ * 共有台帳から、配布物に入れる公開 catalog（id / kind / target だけ）を作り直す。
+ *
+ * catalog は派生物なのに、捕捉は台帳だけに書いていた。そのため**別セッションが
+ * 捕捉するたびに catalog が台帳とずれ、テストが落ち、誰かが手で再生成する**
+ * 状態だった（2026-09-17 には台帳 74 件・catalog 63 件）。手で直す運用は、
+ * 直す人がいない回にずれたまま配布される。捕捉と同じロックの中で作り直す。
+ */
+export function refreshPublicProposalCatalog({
+  ledgerPath = SHARED_PROPOSALS_PATH, catalogPath = PUBLIC_CATALOG_PATH, read = readJsonl,
+} = {}) {
+  const rendered = renderPublicProposalCatalog(buildPublicProposalCatalog(read(ledgerPath)).entries);
+  const current = fs.existsSync(catalogPath) ? fs.readFileSync(catalogPath, "utf8") : null;
+  if (current === rendered) return { written: false, catalogPath };
+  const temporary = `${catalogPath}.${process.pid}.tmp`;
+  fs.writeFileSync(temporary, rendered, "utf8");
+  fs.renameSync(temporary, catalogPath);
+  return { written: true, catalogPath };
+}
+
+function refreshCatalogForSharedLedger(ledgerPath) {
+  // pack 側の台帳は公開 catalog の材料ではない。
+  if (path.resolve(ledgerPath) !== path.resolve(SHARED_PROPOSALS_PATH)) return { written: false, skipped: true };
+  return refreshPublicProposalCatalog({ ledgerPath });
+}
 
 /**
  * その提案をどの台帳へ書くか。
@@ -707,6 +736,7 @@ export function captureLearningProposal(input, {
   ledgerPathResolver = ledgerPathFor,
   lock = withProposalCaptureLock,
   signals = collectSensitiveSignals(REPO_ROOT),
+  refreshCatalog = refreshCatalogForSharedLedger,
 } = {}) {
   const entry = buildProposal(input);
   const verdict = channelTermsInSharedEntry(entry, signals);
@@ -719,7 +749,8 @@ export function captureLearningProposal(input, {
       return id === entry.id && row?.session === entry.session;
     });
     if (!duplicate) append(ledgerPath, entry);
-    return { entry, ledgerPath, appended: !duplicate };
+    const catalog = duplicate ? { written: false } : refreshCatalog(ledgerPath);
+    return { entry, ledgerPath, appended: !duplicate, catalog };
   });
 }
 

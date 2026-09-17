@@ -577,3 +577,69 @@ test("sync CLI は digest 語彙が無いと止まり、--allow-missing-vocabula
   assert.match(source, /args\.allowMissingVocabulary === true/u);
   assert.match(source, /--allow-missing-vocabulary/u);
 });
+
+test("共有台帳への捕捉は、同じロックの中で公開 catalog を作り直す", async () => {
+  // catalog は台帳からの派生物なのに、捕捉は台帳だけに書いていた。別セッションが
+  // 捕捉するたびに catalog がずれてテストが落ち、手で再生成していた
+  // （2026-09-17 には台帳 74 件・catalog 63 件）。
+  const { mkdtempSync, mkdirSync, readFileSync, rmSync, existsSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { captureLearningProposal, refreshPublicProposalCatalog } = await import("../scripts/harness-learn.mjs");
+  const { comparePublicProposalCatalog } = await import("../lib/harnessLearningCurator.mjs");
+  const root = mkdtempSync(join(tmpdir(), "learn-catalog-"));
+  try {
+    const shared = join(root, "shared", "proposals.jsonl");
+    const pack = join(root, "pack", "proposals.jsonl");
+    const catalog = join(root, "shared", "proposals.public.jsonl");
+    mkdirSync(join(root, "shared"), { recursive: true });
+    mkdirSync(join(root, "pack"), { recursive: true });
+    const resolver = (target) => (String(target).startsWith("channel-pack:") ? pack : shared);
+    const calls = [];
+    const refreshCatalog = (ledgerPath) => {
+      calls.push(ledgerPath);
+      return ledgerPath === shared ? refreshPublicProposalCatalog({ ledgerPath, catalogPath: catalog }) : { written: false, skipped: true };
+    };
+    const signals = { terms: [], castIds: [] };
+    const base = { kind: "fact", evidence: "", session: "s1", now: "2026-09-17T00:00:00Z" };
+
+    const first = captureLearningProposal(
+      { ...base, target: "platform:platform-craft", text: "共有層の一般的な規則その一" },
+      { ledgerPathResolver: resolver, refreshCatalog, signals },
+    );
+    assert.equal(first.appended, true);
+    assert.equal(first.catalog.written, true, "共有台帳へ書いたら catalog も作り直すこと");
+    const ledgerRows = readFileSync(shared, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    assert.equal(comparePublicProposalCatalog({ ledgerRows, catalogText: readFileSync(catalog, "utf8") }).ok, true,
+      "作り直した catalog が台帳と一致すること");
+    assert.ok(readFileSync(catalog, "utf8").includes(first.entry.id));
+    assert.equal(readFileSync(catalog, "utf8").includes("一般的な規則"), false, "catalog に本文を載せない");
+
+    // 同じ捕捉の繰り返しは台帳も catalog も変えない。
+    const again = captureLearningProposal(
+      { ...base, target: "platform:platform-craft", text: "共有層の一般的な規則その一" },
+      { ledgerPathResolver: resolver, refreshCatalog, signals },
+    );
+    assert.equal(again.appended, false);
+    assert.equal(again.catalog.written, false);
+
+    // pack 宛の捕捉は公開 catalog の材料ではない。
+    const before = readFileSync(catalog, "utf8");
+    const packed = captureLearningProposal(
+      { ...base, target: "channel-pack:narrated-story", text: "チャンネル固有の規則" },
+      { ledgerPathResolver: resolver, refreshCatalog, signals },
+    );
+    assert.equal(packed.appended, true);
+    assert.equal(readFileSync(catalog, "utf8"), before, "pack 宛の捕捉で公開 catalog を変えない");
+    assert.equal(existsSync(pack), true);
+
+    // 既定の作り直しは、共有台帳以外への書き込みでは何もしない。
+    const defaulted = captureLearningProposal(
+      { ...base, target: "channel-pack:narrated-story", text: "チャンネル固有の規則その二" },
+      { ledgerPathResolver: resolver, signals },
+    );
+    assert.equal(defaulted.catalog.skipped, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
