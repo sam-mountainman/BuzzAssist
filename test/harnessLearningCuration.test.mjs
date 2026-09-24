@@ -164,6 +164,17 @@ test("sync は退避した項目を learned-archive.md へ移すだけで、正�
   }
 });
 
+test("--help が自動捕捉・検査・curate・フック・子エージェントの規則を説明する", () => {
+  const script = fileURLToPath(new URL("../scripts/harness-learn.mjs", import.meta.url));
+  const help = spawnSync(process.execPath, [script, "--help"], { encoding: "utf8" });
+  assert.equal(help.status, 0);
+  for (const phrase of ["curate", "blocked", "auto-receipt", "harness-learn-hook.mjs", "BUZZASSIST_LEARNING_WRITE_FORBIDDEN", "learned-archive.md", "提案ゼロは正常"]) {
+    assert.ok(help.stdout.includes(phrase), `help に ${phrase} が無い`);
+  }
+  // 宛先の一覧に旧名を出さない（新しい捕捉へ旧名を使わせない）。
+  assert.equal(/--target <[^>]*skill:/u.test(help.stdout), false);
+});
+
 test("curate CLI は既定で dry-run（何も書かない）、退避は reviewer 名が無ければ止まる", () => {
   const script = fileURLToPath(new URL("../scripts/harness-learn.mjs", import.meta.url));
   const cwd = fileURLToPath(new URL("..", import.meta.url));

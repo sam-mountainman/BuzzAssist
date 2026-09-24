@@ -1424,36 +1424,66 @@ function printHelp() {
     --text "指摘の内容を、次に読む人が判断できる粒度で"
     --evidence "根拠（ファイル:行、実測値、ユーザーの発言など）"
     --session "セッションIDなど（必須。同一セッションの重複をまとめる）"
+            書く前に検査する: 検査語彙（HMAC digest）に当たる語は拒否。プロンプト注入らしい
+            言い回し・隠し HTML コメント・不可視 Unicode・資格情報らしい文字列・端末の絶対パスは
+            捨てずに blocked として残す（資格情報とパスは置き換えて記録。overlay には載らない）
 
-  status    未反映の提案を、繰り返された回数順に出す
+  status    未反映の提案を、繰り返された回数順に出す。旧名（skill: など）で記録した提案も
+            新しい宛先で数える。blocked は理由つきで別に出す（本文は出さない）
 
   sync      **自動反映**。各スキルの references/learned-auto.md（機械が
             丸ごと所有するファイル）を書き直す。人が書く SKILL.md には
             触らないので reviewer は要らない。review-only の宛先
             （台帳・ゲート基準）は自動反映せず保留として報告する。
+            blocked の提案は載せない。人が退避した項目は references/learned-archive.md へ移す。
             docs/learning/sensitive-vocabulary.digest.json か、その鍵
             （BUZZASSIST_SENSITIVE_VOCABULARY_KEY / ~/.buzzassist/sensitive-vocabulary.key）が無ければ止まる
             （語彙無しでは私的語の残存を検出できない）
     --allow-missing-vocabulary  開発用途のみ。語彙無しで生成し、overlay ヘッダに
                                 「語彙照合なし」を刻む
 
+  curate    長く再発していない overlay 項目を、退避の**候補として列挙するだけ**（既定 dry-run）。
+            見るのは「最後に再発・再捕捉された日」と「関連するゲートが直近の RunReceipt に
+            不合格・skip で出たか」。overlay は毎回まるごと読まれるので「使われた回数」は使わない
+    --stale-days <N>         最後の再発からの日数の下限（既定 ${CURATE_DEFAULT_STALE_DAYS}）
+    --gate-window-days <N>   直近とみなす Receipt の期間（既定 ${CURATE_DEFAULT_GATE_WINDOW_DAYS}）
+    --receipts-dir <dir>     RunReceipt の置き場（既定 docs/learning/receipts）
+    --archive --id <id>[,<id>] --reviewer <名前> --reason "何を見て判断したか" --human-verified
+            候補に出た項目だけを learned-archive.md へ退避する（削除しない。再発すれば戻る）。
+            人の確認（human-verified）が無い退避記録は効力を持たない——再発しないのは
+            その規則が効いているからかもしれず、機械には見分けられないため
+
   promote   overlay の項目を人の規則へ格上げする（reviewer 必須）。
-            正本にその文言が実在しないと通らない
+            正本にその文言が実在しないと通らない。blocked の提案と、検査に当たる --note は通さない
     --id <提案ID>  --reviewer <名前>  --note "どこにどう書いたか"
 
   review    統合案を出す（既定は dry-run。スキルには触らない）
     --apply-hint   まとめ方の助言を詳しく出す
 
-  apply     提案を反映済みとして記録する
+  apply     提案を反映済みとして記録する（promote と同じ検査を通す）
     --id <提案ID>  --reviewer <名前>  --note "何をどう書いたか"
+
+  自動で入ってくる提案（どちらも提案台帳への追記だけで、正本と overlay には触らない）:
+    - Receipt からの自動捕捉: Video Harness の Job が completed / failed / awaiting-human-review で
+      決着すると、RunReceipt の不合格ゲート・knownRemainingIssues のコード・再試行と再開の回数を、
+      Channel Pack 宛の台帳へ createdBy=auto-receipt として積む（本文はゲート id とコードだけ。
+      同じ Receipt からは二重に積まない。全部通った Run からは何も積まない）。
+      BUZZASSIST_LEARNING_AUTO_CAPTURE=0 で止まる
+    - Canvas feedback: Canvas 上の採択・却下・コメント（collect_video_harness_feedback）
+  ユーザーの訂正らしい発言は、プラグインの UserPromptSubmit フック（scripts/harness-learn-hook.mjs）が
+  見つけてエージェントに capture を促す。フックは何も書き換えず、発言本文も保存しない。
+
+  子エージェント（harness-parallel-agents が起動）には BUZZASSIST_LEARNING_WRITE_FORBIDDEN が
+  渡り、capture / sync / promote / apply / curate --archive は拒否される。捕捉したい内容は
+  結果本文で親へ返し、親が確かめてから capture する。
 
   channel-pack 宛の正本は Channel Pack（BUZZASSIST_CHANNEL_PACK →
   channel-packs/<id>/）を先に読み、pack 側に無いときだけリポジトリ直下を読む。
   どれを読んだかは status / review / promote / apply の出力に出る。
 
-  なぜこの形か: 捕捉は書き換えない、review は既定 dry-run、apply には
-  reviewer 名が要る。自動で正本を書き換える作りにすると、「スクリプトが
-  自分で自分に合格を出す」のと同じ構造になるため。
+  なぜこの形か: 捕捉は書き換えない、review と curate は既定 dry-run、apply・promote・
+  退避には reviewer 名が要る。自動で正本を書き換える作りにすると、「スクリプトが
+  自分で自分に合格を出す」のと同じ構造になるため。提案ゼロは正常で、毎回何かを書かせる圧はかけない。
 `);
 }
 
@@ -1560,7 +1590,11 @@ function main() {
     }
 
     case "review": {
-      const clusters = clusterForConsolidation(summary);
+      // blocked は統合案に入れない（本文を出すと、注入らしい文をそのまま読ませることになる）。
+      const reviewable = summary.filter((entry) => entry.applied || learningBlockReasons(entry).length === 0);
+      const blockedCount = summary.length - reviewable.length;
+      if (blockedCount > 0) process.stdout.write(`⛔ blocked ${blockedCount} 件は統合案から外しました（理由は status）\n`);
+      const clusters = clusterForConsolidation(reviewable);
       if (clusters.length === 0) {
         process.stdout.write("統合するものはありません\n");
         break;

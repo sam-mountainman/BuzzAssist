@@ -333,6 +333,21 @@ BuzzAssistを次の3層に固定する。
 ### Phase 7 — Hermes型の自己改善を閉ループ化する
 
 - [ ] Claude/Codexの両方で、訂正・好み・禁止・実測事実をturn内で自動候補化する
+  - [x] 両ホストのプラグインにUserPromptSubmitフック（`scripts/harness-learn-hook.mjs`）を載せ、
+    訂正・禁止・繰り返しの言い回しでエージェントへcaptureを促す。フックは何も書き換えず、
+    発言本文を保存せず（リポジトリ外にsha256と時刻だけ）、常にexit 0で入力を止めない。
+    捕捉するかはエージェントが決める（言い回しが当たっただけの誤検知を台帳へ積まない）
+  - [ ] Codexのプラグインフックは信頼レビュー後にだけ動く。実機のCodexで一度通すこと
+- [x] Job決着時（completed / failed / awaiting-human-review）にRunReceiptから不合格ゲート・
+  knownRemainingIssuesのコード・再試行と再開の回数を、Channel Pack宛のproposalへ自動で積む
+  （`createdBy=auto-receipt`、Receipt digestをsessionにして冪等、本文はid・コード・件数だけ）
+- [x] capture / sync / promote / applyの前に、注入らしい言い回し・隠しHTMLコメント・不可視Unicode・
+  資格情報らしい文字列・端末の絶対パスを検査し、削除せず`blocked`として残す（検査語彙照合とは別の層）
+- [x] 旧名宛先（`skill:` / `ledger:` / `doc:`）の対応表をharness-learnとfeedback bundleで共有し、
+  status / sync / curatorで新しい宛先に数える
+- [x] 長く再発しないoverlay項目を`curate`で候補として列挙する（最後の再発日と、関連ゲートが直近の
+  Receiptに出たかで判定。既定dry-run）。退避はhuman-verifiedの人の判断に限り、削除はしない
+- [x] `harness-parallel-agents`が起動する子エージェントは学習を書かず、捕捉したい内容を親へ返す
 - [ ] captureはproposal追記だけにし、正本を直接変更しない
 - [x] セッション終了後のread-only curatorを追加する
 - [x] curatorは類似提案を束ね、1事象1Skillの増殖を防ぐ
