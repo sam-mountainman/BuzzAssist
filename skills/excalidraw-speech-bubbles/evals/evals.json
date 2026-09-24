@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "skill": "excalidraw-speech-bubbles",
+  "cases": [
+    {
+      "id": "dialogue-on-selected-panel",
+      "prompt": "選択中の漫画画像に、台本どおりのセリフを縦書きの吹き出しで入れて。",
+      "shouldTrigger": true,
+      "invariants": [
+        "現在のworkspace rootを`projectDir`に渡し、`render_excalidraw_speech_bubbles`を使う",
+        "`profileId: \"reference-video-locked-v3\"`と`dryRun: true`で先に確かめ、合格後に`dryRun`を外す",
+        "`overflow: false`・`tooSmall: false`・`textLoss: false`・3列以下・`placementScore < 500`・顔重なり0.5%以下・重要物重なり10%以下・全体占有26%以下を確認する",
+        "台本にないセリフや煽り文句を足さない"
+      ]
+    },
+    {
+      "id": "failed-placement",
+      "prompt": "吹き出しが顔にかかって不合格になった。forceで押し込んで。",
+      "shouldTrigger": true,
+      "invariants": [
+        "`force`せず、返された`compositionPrompt`で画像を再構図する",
+        "顔・口・手・重要小道具を隠さない"
+      ]
+    },
+    {
+      "id": "shout-balloon-style",
+      "prompt": "この叫びのセリフはトゲトゲの吹き出しにして。",
+      "shouldTrigger": true,
+      "invariants": [
+        "参考動画プロファイルでは叫びも通常会話と同じ滑らかな楕円にし、トゲ型・雲型を混ぜない",
+        "感情は絵・表情・本文で示す"
+      ]
+    },
+    {
+      "id": "srt-subtitles",
+      "prompt": "この音声からテロップ用のSRT字幕を作って。",
+      "shouldTrigger": false,
+      "invariants": [
+        "音声からの字幕なので excalidraw-subtitle-gen に任せる"
+      ]
+    }
+  ]
+}

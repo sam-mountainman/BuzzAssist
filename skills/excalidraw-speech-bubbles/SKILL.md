@@ -1,9 +1,9 @@
 ---
 name: excalidraw-speech-bubbles
-description: Add or revise professional Japanese manga speech bubbles, narration cards, shout balloons, and thought balloons on the current local BuzzAssist/Excalidraw canvas. Use for 吹き出し, セリフ入れ, 漫画テロップ, vertical Japanese dialogue, or the R5 August speech-bubble system.
+description: 現在のローカル BuzzAssist/Excalidraw キャンバス上の漫画画像に、プロ品質の日本語の吹き出し（speech bubbles）、ナレーション枠（narration cards）、叫びの吹き出し（shout balloons）、心の声の吹き出し（thought balloons）を追加・修正する。「吹き出しを入れて」「セリフ入れして」「漫画テロップを付けて」「縦書きのセリフを置いて」（vertical Japanese dialogue）と言われたときや、R5（8月版）の吹き出しシステム（R5 August speech-bubble system）を使うときに使う。
 ---
 
-# Excalidraw Speech Bubbles R5（8月版）
+# Excalidraw 吹き出し R5（8月版）
 
 参考動画の本編で使われている、白地・細めの黒線・明朝体の縦書き・均等な余白を基準にする。表示物は透明な全画面SVG、編集元は `canvas/speech-bubbles/*.json`。GPT-Image-2は吹き出し本体を毎回描く用途には使わない。
 
@@ -11,7 +11,7 @@ description: Add or revise professional Japanese manga speech bubbles, narration
 
 ## 絶対原則
 
-- 現在のホストタスクのワークスペースルートを絶対パスの `projectDir` として、すべてのBuzzAssistツールへ渡す。
+- 現在のホストタスクのワークスペースルート（current workspace root）を絶対パスの `projectDir` として、すべてのBuzzAssistツールへ渡す。
 - `render_excalidraw_speech_bubbles` を使う。Excalidrawの楕円・線・1文字改行の組み合わせは公開品質に使わない。
 - 通常吹き出しは滑らかな縦長楕円。尻尾なしを既定とし、必要な場面だけ短い尻尾を付ける。
 - 強い発話と心の声も、参考動画プロファイルでは通常会話と同じ滑らかな楕円にする。汎用漫画のトゲ型・雲型を混ぜない。
