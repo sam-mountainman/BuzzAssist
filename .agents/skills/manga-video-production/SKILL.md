@@ -127,6 +127,88 @@ node scripts/koya-blind-review.mjs record --set <spec.json> --winner A --reviewe
 採用の記録は公式CLI（`character-approve`、`character-style-select`）に残す。
 アリーナの選択は記録ではない。
 
+### 声の人選（2026-09-18 追加。台帳 readiness-9）
+
+Koya の本番経路は**声を自動で選ばない**。鍵があるだけで機械が選んだ声が
+有料音声生成へ進んでいたため、人が選んだと言える台帳記録を一つに定めた。
+
+人間選定として数えるのは、voice profile の `casting` が次を**すべて**満たすものだけ
+（`lib/koyaVoiceSelectionGuard.mjs` 冒頭が正本）。
+
+- `selectionVersion >= 2`
+- 匿名ラベル `selectedCandidateLabel`（A, B, C… の1文字）
+- 採用理由 `selectionReason`（4文字以上）
+- 採用者 `approvedBy`（自動を示す値は不可）
+- 試聴確認 `previewConfirmed === true`
+- `candidateSetId` と `auditionCandidateCount >= 2`
+- 有効な `selectedAt`
+- 自動由来の印が無いこと（method/source/route/origin が "auto" 系でない）
+
+`castRegistryVoices` が書く記録（`selectionVersion` 1、score と persona だけ）は
+**何点でも数えない**。profile の id が `auto-` で始まるかは判定に使わない。
+
+- 不足しても Job は**失敗させず一時停止**する（終了コード3・`awaiting-voice-selection`）。
+  失敗にすると終端になり、同じ入力での再実行が死んだ Job への再接続になるため。
+- 監査は**その回に出る話者**と、ナレーションに紐づく主人公だけを見る。登録簿の全員ではない。
+- 主人公は毎話交代する回限りの人物で、固定キャストに含まれない。
+  契約が `narrationVoicePolicy=protagonist-voice` なので、ナレーション全行がその人の声になる。
+  **固定キャストの声を全部決めても、その回の主人公の声は決まらない。**
+
+**未解決（2026-09-24 時点）**: 一時停止を解除する経路が正規入口に無い。
+ゲートが案内するのは `scripts/build-manga-video.mjs voice-library-audition` だが、
+このスクリプトは CLAUDE.md がベンチマーク専用と定めているもので、
+`scripts/koya-manga-video.mjs` の action 一覧に `voice-library-*` は無い。
+解除が要るときは、この穴を埋めてから進むこと。埋めずに旧スクリプトで回避しない。
+
+### 場所（2026-09-18 追加）
+
+背景は、有料生成のほかに**チャット型の画像ツールで作った板を取り込む経路**がある。
+
+```bash
+node scripts/koya-manga-video.mjs location-import --location-id <id> --import-map-path <map.json>
+node scripts/koya-manga-video.mjs location-anchor-review-draft --location-id <id>
+node scripts/koya-manga-video.mjs location-anchor-audit --location-id <id> --location-anchor-review-path <json>
+node scripts/koya-manga-video.mjs location-review-draft --location-id <id>
+node scripts/koya-manga-video.mjs location-register --location-id <id> --location-review-path <json>
+```
+
+- 取り込みは有料呼び出しをしない。既存の板と古い manifest は
+  `superseded-<timestamp>/` へ退避し、**消さない**。取り込み自体はアンカー承認にならない。
+- 記録が残っていない板は、**作り話で埋めずに欠落として通す**。
+  `provenanceGap { reason, specificationPath, specificationSha256 }` に、その画像が満たそうとした
+  仕様書を名指しし、`promptRecorded` / `generatorContextRecorded` / `referenceImagesRecorded` の
+  うち残っていないものを `false` で挙げる。3つは独立で、`false` だけが受け付けられる。
+- 欠落のある板は、欠落した内容に応じて記録が削られる
+  （`referenceImagesRecorded: false` なら参照画像は空になり、その板はアンカーSHAを持たない。
+  建物の連続性は `architectureLockPass` で目視判定するしかなくなる）。
+- 欠落のある板を含むレビューは、独立レビュアーが `provenanceGapAcknowledged: true` を
+  立てないと通らない。
+- 地名の別名は場所台帳の `aliases` に書く。台本の見出し表記が揺れると別の場所として扱われる。
+- 看板などの架空の文字を許す場所は `textPolicy: fictional-signage-allowed` を宣言する。
+  宣言すると読める文字の検査が「文字が無いこと」から「架空の文字だけであること」に変わる。
+
+**止まらないことに注意**: 台本に出てくる場所が登録簿に無くても、制作は止まらない。
+参照が空のまま4分割の環境アトラスを**有料で新規に描き起こして**それを基準にする。
+止まるのは人物だけで、場所には同等のゲートが無い。承認済みの絵と違う場所が
+黙って本編に入りうるので、台本を受け取ったら場所の登録状況を先に確かめること。
+
+### 衣装（2026-09-18 追加）
+
+台本が求める服を、**有料の画像生成より前に**登録済みの衣装と照合する。
+
+```bash
+node scripts/koya-manga-video.mjs wardrobe-readiness --episode-id <id> --script-path <script>
+```
+
+- 無料。`canvas/assets/<episode-id>/wardrobe-readiness.json` を書く。
+  終了コード 0 = 全員ぶん揃っている、2 = 未登録の枠がある。
+- `images` と `full` は、**その台本そのもの**に対する合格報告が無ければ開始しない。
+- 判定に使う場面タグは、asset 側の `sceneTags` と、show bible の
+  `outfitStages[].sceneTags` の両方から取る。どちらかに書けば足りる。
+- 既定のタグ（daily / work / home）はベース衣装で通る。止まるのは
+  formal / swim / sleep / winter-out / summer-out を持つ場面が台本に出たときだけ。
+- 新しい衣装が要ると分かってから清書する。台本が来る前に先回りして作らない。
+
 ## 制作手順
 
 1. 台本を省略・要約せず解析し、時系列、人物、読み、感情曲線、発話、画面上の証拠を固定する。`koya-story-review-v1`へ攻撃1/2/3、show bible `storyGrammar.castSemantics.reversalSignal`のキャスト（castIdで参照）による号砲、証拠、主人公本人のとどめ、`exitBlocker`のキャストが登場する回だけ退路封鎖1行を実発話IDで記録し、実在地名/ブランド、暴力美化、悪役コメディ、酒語彙抑制を確認する。`story-audit`合格後の同じreviewを`plan/full --story-review-path`へ渡す。台本変更後の古いreviewは使わない。
