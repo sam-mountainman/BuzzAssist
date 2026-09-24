@@ -1,4 +1,4 @@
 interface:
-  display_name: "Excalidraw Image Gen"
-  short_description: "Place generated images on the Excalidraw canvas"
-  default_prompt: "Use $buzzassist:excalidraw-image-gen to generate an image on the Excalidraw canvas."
+  display_name: "Excalidraw 画像生成"
+  short_description: "生成した画像を Excalidraw キャンバスに置く"
+  default_prompt: "$buzzassist:excalidraw-image-gen を使って、Excalidraw キャンバスに画像を生成して。"

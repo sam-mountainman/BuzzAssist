@@ -1,42 +1,41 @@
 ---
 name: excalidraw-video-gen
-description: Generate or insert a video into the local BuzzAssist canvas. Use when the user asks to create, place, or generate a video on the Excalidraw canvas using Grok Imagine(Grok) or BuzzAssist cloud models (Seedance 2, Seedance 2 Fast, Kling v3, Kling o3, Kling v2.6, Grok Imagine API), or Lovart models (Veo 3.1, Hailuo 2.3, Kling 3.0 Omni, Wan 2.6).
+description: ローカルの BuzzAssist キャンバス（Excalidraw）へ動画を生成・挿入する。「動画を作って」「動画を生成して」「この画像を動画にして」「キャンバスに動画を置いて」など、Excalidraw キャンバス上で動画を作る・置く・生成する（create / place / generate a video）依頼で使う。対応するのは Grok Imagine(Grok)、BuzzAssist クラウドモデル（Seedance 2、Seedance 2 Fast、Kling v3、Kling o3、Kling v2.6、Grok Imagine API）、Lovart モデル（Veo 3.1、Hailuo 2.3、Kling 3.0 Omni、Wan 2.6）。
 ---
 
-# Excalidraw Video Gen
+# Excalidraw 動画生成
 
-Use this skill when the user wants a generated video represented on the BuzzAssist canvas.
+ユーザーが生成した動画を BuzzAssist キャンバス上に置きたいときに使う。
 
-## Preconditions
+## 前提
 
-Resolve the current Codex/Claude Code task's workspace root before calling any
-BuzzAssist tool. Pass that absolute path as `projectDir` on every selection,
-generation, batch, and insertion call. Never use the plugin cache, BuzzAssist
-source repository, or the project remembered at install time as a substitute.
-If the current project's canvas is not open yet, call
-`open_buzzassist_canvas({ projectDir })` first and open its returned `canvasUrl`
-in the host's in-app browser.
+BuzzAssist のツールを呼ぶ前に、現在（current）の Codex / Claude Code タスクの
+ワークスペースルートを特定する。選択・生成・一括生成・挿入のすべての呼び出しで、
+その絶対パスを `projectDir` として渡す。plugin cache、BuzzAssist のソースリポジトリ、
+インストール時に記憶したプロジェクトで代用しない。現在のプロジェクトのキャンバスが
+まだ開いていなければ、先に `open_buzzassist_canvas({ projectDir })` を呼び、返ってきた
+`canvasUrl` をホストの in-app browser で開く。
 
-The Excalidraw service should be running for the active project. The default
-URL is usually:
+Excalidraw のサービスは、作業中のプロジェクトで動いている必要がある。既定の URL は
+たいてい次のとおり。
 
 ```text
 http://127.0.0.1:43219
 ```
 
-If that port is busy, read `canvas/.server.json` for the live `url`.
+そのポートが使用中なら、live な `url` を `canvas/.server.json` から読む。
 
-Grok Imagine(Grok) requires the official Grok CLI (grok-cli-tools) and xAI login:
+Grok Imagine(Grok) には、公式の Grok CLI（grok-cli-tools）と xAI へのログインが必要。
 
 ```bash
 grok login --timeout 600
 ```
 
-BuzzAssist cloud models (`seedance-2`, `seedance-2-fast`, `kling-v3`, `kling-o3`, `kling-v2-6`, `grok-imagine-video-api`) require BuzzAssist sign-in: check with the plugin `buzzassist_auth_status` tool and sign in with `buzzassist_login`. They also support `mode` (`standard`/`pro` for Kling), `endFramePath` (keyframe end-frame on Seedance/Kling), `referenceVideoPaths`/`referenceAudioPaths` (Seedance reference mode), and `useMotion` + `motionOrientation` (Kling v2.6 motion control: start frame + 1 reference video).
+BuzzAssist クラウドモデル（`seedance-2`、`seedance-2-fast`、`kling-v3`、`kling-o3`、`kling-v2-6`、`grok-imagine-video-api`）には BuzzAssist へのサインインが必要。plugin の `buzzassist_auth_status` ツールで状態を確かめ、`buzzassist_login` でサインインする。これらのモデルは次の引数にも対応する。`mode`（Kling の `standard`/`pro`）、`endFramePath`（Seedance/Kling のキーフレームの終了フレーム）、`referenceVideoPaths`/`referenceAudioPaths`（Seedance の参照モード）、`useMotion` + `motionOrientation`（Kling v2.6 のモーションコントロール。開始フレーム＋参照動画1本）。
 
 ## 生成前の確認（必須）
 
-`generate_excalidraw_video` / `generate_excalidraw_videos_batch` は `confirmedSettings: true` なしの呼び出しを拒否します（`payloadPreview` を除く）。ユーザーのメッセージで全設定が明示されていない限り、生成前に AskUserQuestion を1回だけ出して確認してください:
+`generate_excalidraw_video` / `generate_excalidraw_videos_batch` は `confirmedSettings: true` なしの呼び出しを拒否する（`payloadPreview` を除く）。ユーザーのメッセージで全設定が明示されていない限り、生成前に AskUserQuestion を1回だけ出して確認する。
 
 - モデル（Grok Imagine / Seedance 2 / Kling v3 / Veo 3.1 …）
 - 実行先（同じモデルが複数の実行先を持つ場合だけ。例: Grok Imagine → Grok / BuzzAssist、Kling / Seedance → Lovart / BuzzAssist。LovartはBuzzAssistより上に表示して優先）
@@ -44,7 +43,7 @@ BuzzAssist cloud models (`seedance-2`, `seedance-2-fast`, `kling-v3`, `kling-o3`
 - 添付画像・動画の用途が曖昧なら、開始フレーム・スタイル/被写体参照・モーション元のどれかを生成前に確認する
 - 推奨デフォルト: Grok Imagine (Grok)・16:9・6s・720p — 選択肢には（推奨）を付ける
 
-確認できたら `confirmedSettings: true` を付けて呼び出します。
+確認できたら `confirmedSettings: true` を付けて呼び出す。
 
 ### AskUserQuestionの表示ルール
 
@@ -57,7 +56,7 @@ BuzzAssist cloud models (`seedance-2`, `seedance-2-fast`, `kling-v3`, `kling-o3`
 
 ### 段階式の質問順
 
-一気に全設定を質問してはいけません。必ず前の回答を受け取ってから次を組み立てます。
+一気に全設定を質問してはいけません。必ず前の回答を受け取ってから次を組み立てる。
 
 1. 添付画像・動画の用途が曖昧なら、開始フレーム・スタイル/被写体参照・モーション元のどれかを最初に質問し、対応モデルを絞る
 2. モデルが未指定なら、次にモデルだけを質問する
@@ -67,17 +66,17 @@ BuzzAssist cloud models (`seedance-2`, `seedance-2-fast`, `kling-v3`, `kling-o3`
    - 対応時のみ音声・モード・開始/終了フレーム・参照素材
 5. 1画面で収まらない場合は、回答後に残りの未確認項目だけを次画面で質問する
 
-ユーザーが添付用途・モデル・実行先を変更したら、対応しなくなった後続設定だけを破棄して質問し直し、引き続き有効な回答は保持します。
+ユーザーが添付用途・モデル・実行先を変更したら、対応しなくなった後続設定だけを破棄して質問し直し、引き続き有効な回答は保持する。
 
-## Workflow
+## 手順
 
-1. Read the selection with the plugin `get_excalidraw_selection` tool, passing
-   the current task's absolute `projectDir`.
+1. plugin の `get_excalidraw_selection` ツールで選択中の要素を読む。現在のタスクの
+   絶対パスの `projectDir` を渡す。
 
-2. Prefer `generate_excalidraw_videos_batch` for chat-driven generation, even
-   for one video. It creates and focuses the `Generating...` frame before the
-   slow generation starts, without showing selection handles. The default
-   layout fills items 1-5 across row 1 and items 6-10 across row 2.
+2. チャットからの生成では、1本だけでも `generate_excalidraw_videos_batch` を優先する。
+   時間のかかる生成が始まる前に `Generating...` フレームを作ってそこへフォーカスし、
+   選択ハンドルは出さないため。既定の配置では、1〜5件目を1行目、6〜10件目を2行目へ
+   横に並べる。
 
 ```json
 {
@@ -95,14 +94,14 @@ BuzzAssist cloud models (`seedance-2`, `seedance-2-fast`, `kling-v3`, `kling-o3`
 }
 ```
 
-Grok ImagineをGrokで複数本生成する場合は、回答された本数ぶん同じ設定の`jobs`を作り、`generate_excalidraw_videos_batch`を1回呼びます。先に全`Generating...`フレームを2行×5列で表示し、各動画を独立ジョブとして最大10件並列生成します。秒数（6秒または10秒）などの設定は全ジョブで共有します。
+Grok ImagineをGrokで複数本生成する場合は、回答された本数ぶん同じ設定の`jobs`を作り、`generate_excalidraw_videos_batch`を1回呼ぶ。先に全`Generating...`フレームを2行×5列で表示し、各動画を独立ジョブとして最大10件並列生成する。秒数（6秒または10秒）などの設定は全ジョブで共有する。
 
-`generate_excalidraw_video` follows the same placeholder behavior. On the
-local Grok route it also accepts `videoCount: 1..10` and expands that count
-into the same batch flow.
+`generate_excalidraw_video` も同じプレースホルダー動作をする。ローカル Grok の経路では
+`videoCount: 1..10` も受け付け、その本数を同じ一括生成フローへ展開する。
 
-3. If the user supplies an existing video path, use `insert_excalidraw_video`.
+3. ユーザーが既存の動画パスを渡した場合は `insert_excalidraw_video` を使う。
 
-## Notes
+## 補足
 
-Excalidraw does not render native video playback as an image element. This plugin places a linked video card into the scene and stores the generated file under `canvas/assets/`.
+Excalidraw は image 要素としてネイティブの動画再生を描画しない。そのためこの plugin は、
+リンク付きの動画カードをシーンに置き、生成したファイルを `canvas/assets/` に保存する。

@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "skill": "excalidraw-video-gen",
+  "cases": [
+    {
+      "id": "ambiguous-attachment",
+      "prompt": "この画像を使って、キャラが歩き出す動画を作って。",
+      "shouldTrigger": true,
+      "invariants": [
+        "添付画像の用途（開始フレーム・スタイル/被写体参照・モーション元）が曖昧なら、最初にそれだけを質問して対応モデルを絞る",
+        "質問はホストの`request_user_input` / `AskUserQuestion` UIで段階的に出し、モデル名と実行先を1つの選択肢へまとめない",
+        "確認後にだけ`confirmedSettings: true`を付けて呼ぶ"
+      ]
+    },
+    {
+      "id": "grok-cli-duration",
+      "prompt": "Grok ImagineをGrokで、8秒の動画を3本作って。",
+      "shouldTrigger": true,
+      "invariants": [
+        "Grok CLIの秒数は6秒・10秒だけなので、8秒は選べないことを伝えて有効な値から選んでもらう",
+        "同じ設定の`jobs`を3件作って`generate_excalidraw_videos_batch`を1回呼ぶ",
+        "現在のworkspace rootを`projectDir`に渡す"
+      ]
+    },
+    {
+      "id": "cloud-model-signin",
+      "prompt": "Seedance 2で、開始と終了のフレームを指定した動画をキャンバスに置いて。",
+      "shouldTrigger": true,
+      "invariants": [
+        "Seedanceは実行先が複数（Lovart / BuzzAssist）あるので、実行先をモデルとは別の質問で確認する",
+        "BuzzAssist経由なら`buzzassist_auth_status`で状態を確かめ、未ログインなら`buzzassist_login`を使う",
+        "終了フレームは`endFramePath`で渡す"
+      ]
+    },
+    {
+      "id": "still-image-request",
+      "prompt": "キャンバスに夜の街の画像を1枚作って。",
+      "shouldTrigger": false,
+      "invariants": [
+        "静止画の生成なので excalidraw-image-gen に任せる"
+      ]
+    }
+  ]
+}

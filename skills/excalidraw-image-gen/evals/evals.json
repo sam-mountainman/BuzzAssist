@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "skill": "excalidraw-image-gen",
+  "cases": [
+    {
+      "id": "unspecified-settings",
+      "prompt": "キャンバスに夕焼けの海辺の画像を作って。",
+      "shouldTrigger": true,
+      "invariants": [
+        "モデルが未指定なら、最初の質問はモデルだけにし、回答を待ってから実行先・設定を聞く",
+        "質問はホストの`request_user_input` / `AskUserQuestion` UIで、1画面1〜3問・各2〜3択・推奨を先頭に（推奨）付きで出し、`その他`を足さない",
+        "モデル名と実行先を1つの選択肢へまとめない",
+        "確認後にだけ`confirmedSettings: true`を付け、現在のworkspace rootを`projectDir`に渡して`generate_excalidraw_images_batch`を呼ぶ"
+      ]
+    },
+    {
+      "id": "fully-specified-multi",
+      "prompt": "GPT Image 2をCodexで、16:9で4枚、選択中の枠の右に「雨の商店街」を生成して。",
+      "shouldTrigger": true,
+      "invariants": [
+        "指定済みの項目を再質問しない",
+        "同じ設定の`jobs`を4件作って`generate_excalidraw_images_batch`を1回呼び、1つのjobへ枚数だけを渡さない",
+        "選択要素がAIホルダーならその`width`と`height`を目標サイズにし、置き換えを明示されない限りホルダーを消さない"
+      ]
+    },
+    {
+      "id": "attached-character-reference",
+      "prompt": "添付したキャラの画像を参照して、同じキャラがカフェに座っている絵を作って。",
+      "shouldTrigger": true,
+      "invariants": [
+        "添付の絶対ローカルパスを`referenceImagePaths`に渡し、会話上で画像を見ただけで生成しない",
+        "一括生成では共通参照をトップレベルの`referenceImagePaths`に1回だけ指定する",
+        "上限を超える添付を勝手に捨てず、ユーザーに絞り込みを頼む"
+      ]
+    },
+    {
+      "id": "video-request",
+      "prompt": "この画像を6秒の動画にしてキャンバスに置いて。",
+      "shouldTrigger": false,
+      "invariants": [
+        "動画の生成なので excalidraw-video-gen に任せる"
+      ]
+    }
+  ]
+}

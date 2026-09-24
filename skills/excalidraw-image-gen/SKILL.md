@@ -1,32 +1,31 @@
 ---
 name: excalidraw-image-gen
-description: Generate or insert a bitmap into the local BuzzAssist canvas. Use when the user asks to create, fill, replace, or place an AI-generated image on the Excalidraw canvas using GPT Image 2(Codex), Grok Imagine(Grok), or BuzzAssist cloud models (Nano Banana 2, GPT Image 2 API, Seedream 5.0 Lite, Grok Imagine API — require the buzzassist_login plugin tool), or Lovart models (Midjourney, Flux.2 Max, Nano Banana Pro, Ideogram 4 — require LOVART_ACCESS_KEY/SECRET_KEY or ~/.lovart/credentials.json).
+description: ローカルの BuzzAssist キャンバス（Excalidraw）へ画像（bitmap）を生成・挿入する。「画像を作って」「画像を生成して」「この枠を画像で埋めて」「画像を差し替えて」「キャンバスに画像を置いて」など、AI生成画像を Excalidraw キャンバスへ作る・埋める・置き換える・配置する（create / fill / replace / place an AI-generated image）依頼で使う。対応するのは GPT Image 2(Codex)、Grok Imagine(Grok)、BuzzAssist クラウドモデル（Nano Banana 2、GPT Image 2 API、Seedream 5.0 Lite、Grok Imagine API — plugin の buzzassist_login ツールでのログインが必要）、Lovart モデル（Midjourney、Flux.2 Max、Nano Banana Pro、Ideogram 4 — LOVART_ACCESS_KEY/SECRET_KEY か ~/.lovart/credentials.json が必要）。
 ---
 
-# Excalidraw Image Gen
+# Excalidraw 画像生成
 
-Use this skill when the user wants an image placed onto the BuzzAssist canvas.
+ユーザーが BuzzAssist キャンバスへ画像を置きたいときに使う。
 
-## Preconditions
+## 前提
 
-Resolve the current Codex/Claude Code task's workspace root before calling any
-BuzzAssist tool. Pass that absolute path as `projectDir` on every selection,
-generation, batch, and insertion call. Never use the plugin cache, BuzzAssist
-source repository, or the project remembered at install time as a substitute.
-If the current project's canvas is not open yet, call
-`open_buzzassist_canvas({ projectDir })` first and open its returned `canvasUrl`
-in the host's in-app browser.
+BuzzAssist のツールを呼ぶ前に、現在（current）の Codex / Claude Code タスクの
+ワークスペースルートを特定する。選択・生成・一括生成・挿入のすべての呼び出しで、
+その絶対パスを `projectDir` として渡す。plugin cache、BuzzAssist のソースリポジトリ、
+インストール時に記憶したプロジェクトで代用しない。現在のプロジェクトのキャンバスが
+まだ開いていなければ、先に `open_buzzassist_canvas({ projectDir })` を呼び、返ってきた
+`canvasUrl` をホストの in-app browser で開く。
 
-The Excalidraw service should be running for the active project. The default
-URL is usually:
+Excalidraw のサービスは、作業中のプロジェクトで動いている必要がある。既定の URL は
+たいてい次のとおり。
 
 ```text
 http://127.0.0.1:43219
 ```
 
-If that port is busy, read `canvas/.server.json` for the live `url`.
+そのポートが使用中なら、live な `url` を `canvas/.server.json` から読む。
 
-AI holders are rectangle elements with:
+AI ホルダー（生成画像を置く枠）は、次の `customData` を持つ rectangle 要素。
 
 ```json
 {
@@ -38,7 +37,7 @@ AI holders are rectangle elements with:
 
 ## 生成前の確認（必須）
 
-`generate_excalidraw_image` / `generate_excalidraw_images_batch` は `confirmedSettings: true` なしの呼び出しを拒否します（`payloadPreview` を除く）。ユーザーのメッセージで全設定が明示されていない限り、生成前に AskUserQuestion を1回だけ出して確認してください:
+`generate_excalidraw_image` / `generate_excalidraw_images_batch` は `confirmedSettings: true` なしの呼び出しを拒否する（`payloadPreview` を除く）。ユーザーのメッセージで全設定が明示されていない限り、生成前に AskUserQuestion を1回だけ出して確認する。
 
 - モデル（GPT-Image-2.0 / Grok Imagine / NanoBanana 2 / Seedream v5 Lite / Midjourney …）
 - 実行先（同じモデルが複数の実行先を持つ場合だけ。例: GPT Image 2 → Codex / Lovart / BuzzAssist、Nano Banana 2 → Lovart / BuzzAssist、Grok Imagine → Grok / BuzzAssist。LovartはBuzzAssistより上に表示して優先）
@@ -46,7 +45,7 @@ AI holders are rectangle elements with:
 - モデルが対応する場合だけ、品質・解像度・枚数を確認する。GPT-Image-2.0の実行先がChatGPT（Codex）の場合と、Grok Imagineの実行先がGrokの場合は1〜10枚。各画像は独立生成として最大10件を並列実行する。選択肢が1つしかない項目は聞かない
 - 推奨デフォルト: GPT-Image-2.0 (Codex)・1:1・Auto — 選択肢には（推奨）を付ける
 
-確認できたら `confirmedSettings: true` を付けて呼び出します。
+確認できたら `confirmedSettings: true` を付けて呼び出す。
 
 ### AskUserQuestionの表示ルール
 
@@ -59,7 +58,7 @@ AI holders are rectangle elements with:
 
 ### 段階式の質問順
 
-一気に全設定を質問してはいけません。必ず前の回答を受け取ってから次を組み立てます。
+一気に全設定を質問してはいけません。必ず前の回答を受け取ってから次を組み立てる。
 
 1. モデルが未指定なら、最初はモデルだけを質問する
 2. モデル確定後、そのモデルに複数の実行先がある場合だけ、実行先を別の質問として出す。モデル名と実行先を1つの選択肢へまとめない
@@ -68,7 +67,7 @@ AI holders are rectangle elements with:
    - 対応時のみ品質・解像度・枚数
 4. 1画面で収まらない場合は、回答後に残りの未確認項目だけを次画面で質問する
 
-ユーザーがモデルまたは実行先を変更したら、対応しなくなった後続設定だけを破棄して質問し直し、引き続き有効な回答は保持します。
+ユーザーがモデルまたは実行先を変更したら、対応しなくなった後続設定だけを破棄して質問し直し、引き続き有効な回答は保持する。
 
 ## チャット添付の参照画像
 
@@ -130,18 +129,18 @@ AI holders are rectangle elements with:
 - `generate_character_storyboard` はタグに合う画風参照を既定2枚まで自動選択し、その後ろへキャラ台帳のidentity参照を追加する。3人以上のカットはidentityを優先して画風参照を1枚へ減らす
 - ベース画像では文字・吹き出しを生成しない。`bubbleSafeZone` に話者の反対側の余白を残し、吹き出しは決定論的な後工程で重ねる
 
-## Workflow
+## 手順
 
-1. Read the selection with the plugin `get_excalidraw_selection` tool, passing
-   the current task's absolute `projectDir`.
+1. plugin の `get_excalidraw_selection` ツールで選択中の要素を読む。現在のタスクの
+   絶対パスの `projectDir` を渡す。
 
-2. If exactly one selected element is an AI holder, use its `width` and `height` as the target generation and display size.
+2. 選択中の要素がちょうど1つで、それが AI ホルダーなら、その `width` と `height` を
+   生成サイズと表示サイズの目標にする。
 
-3. Prefer `generate_excalidraw_images_batch` for chat-driven generation, even
-   for one image. It creates the `Generating...` frame first, focuses the
-   viewport without selection handles, and replaces each frame as its result
-   arrives. The default layout fills across: items 1-5 in row 1 and items 6-10
-   in row 2.
+3. チャットからの生成では、1枚だけでも `generate_excalidraw_images_batch` を優先する。
+   先に `Generating...` フレームを作り、選択ハンドルを出さずにビューポートをそこへ合わせ、
+   結果が届いたフレームから順に置き換えるため。既定の配置は横へ埋めていく形で、
+   1〜5件目が1行目、6〜10件目が2行目。
 
 ```json
 {
@@ -157,9 +156,9 @@ AI holders are rectangle elements with:
 }
 ```
 
-Use `"model": "grok-imagine-image-hermes"` when the user requests Grok Imagine(Grok).
+ユーザーが Grok Imagine(Grok) を指定したら `"model": "grok-imagine-image-hermes"` を使う。
 
-GPT-Image-2.0をChatGPT（Codex）で、またはGrok ImagineをGrokで複数枚生成する場合は、回答された枚数ぶん同じ設定の`jobs`を作り、`generate_excalidraw_images_batch`を1回呼びます。1つのjobへ枚数だけを渡してはいけません。先に全`Generating...`フレームを2行×5列（1〜5枚目が1行目、6〜10枚目が2行目）で表示し、最大10件を並列生成するためです。
+GPT-Image-2.0をChatGPT（Codex）で、またはGrok ImagineをGrokで複数枚生成する場合は、回答された枚数ぶん同じ設定の`jobs`を作り、`generate_excalidraw_images_batch`を1回呼ぶ。1つのjobへ枚数だけを渡さない。先に全`Generating...`フレームを2行×5列（1〜5枚目が1行目、6〜10枚目が2行目）で表示し、最大10件を並列生成するため。
 
 ```json
 {
@@ -173,11 +172,11 @@ GPT-Image-2.0をChatGPT（Codex）で、またはGrok ImagineをGrokで複数枚
 }
 ```
 
-`generate_excalidraw_image` follows the same placeholder behavior and is a
-valid convenience tool for one result. On the ChatGPT/Codex and local Grok
-routes it also accepts `imageCount: 1..10` and expands that count into the same batch flow.
+`generate_excalidraw_image` も同じプレースホルダー動作をするので、結果が1件だけなら
+使ってよい便利ツール。ChatGPT/Codex とローカル Grok の経路では `imageCount: 1..10` も
+受け付け、その枚数を同じ一括生成フローへ展開する。
 
-4. If the user supplies an existing image path, insert it with the plugin `insert_excalidraw_image` tool:
+4. ユーザーが既存の画像パスを渡した場合は、plugin の `insert_excalidraw_image` ツールで挿入する。
 
 ```json
 {
@@ -193,10 +192,11 @@ routes it also accepts `imageCount: 1..10` and expands that count into the same 
 }
 ```
 
-5. Do not delete the holder unless the user explicitly asks for replacement. Keeping the holder preserves the intended slot.
+5. ユーザーが置き換えを明示しない限り、ホルダーを削除しない。ホルダーを残しておけば、
+   意図した置き場所（スロット）が保たれる。
 
-## Guardrails
+## 守ること
 
-- Do not overwrite existing asset files without an explicit replacement request.
-- Do not hand-write Excalidraw image records if the plugin tool is available.
-- Confirm the returned `elementId`, dimensions, and asset path after insertion.
+- 明示的な置き換えの依頼がない限り、既存のアセットファイルを上書きしない。
+- plugin ツールが使えるなら、Excalidraw の画像レコードを手書きしない。
+- 挿入後は、返ってきた `elementId`、寸法、アセットパスを確認する。
