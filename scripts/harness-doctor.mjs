@@ -31,6 +31,7 @@ import { promisify } from "node:util";
 import path from "node:path";
 
 import { channelPackPresent } from "../lib/channelPackResolver.mjs";
+import { resolveKoyaDialogueAdapter, resolveKoyaMangaProductionContract } from "../lib/koyaMangaProductionContract.mjs";
 import { CHANNEL_PACK_ENVELOPE_VERSION } from "../lib/channelPackEnvelope.mjs";
 import { requireElevenLabsApiKey } from "../lib/speechGeneration.mjs";
 import { resolveLovartCredentials } from "../lib/lovartMediaGeneration.mjs";
@@ -482,20 +483,35 @@ async function probeNarratedPaidMediaRuntime({ job, runtime = {}, env = process.
   };
 }
 
-const KOYA_DIALOGUE_ADAPTER_SPEC = Object.freeze({
-  kind: "voice.dialogue",
-  provider: "elevenlabs",
-  model: "eleven_v3",
-  adapterVersion: "elevenlabs-dialogue-server-v1",
-});
+/**
+ * 測るアダプタは契約が決める（KOYA_DIALOGUE_ADAPTERS の1件）。以前は ElevenLabs を
+ * ここに固定していたので、契約をオトシゴに切り替えても doctor は ElevenLabs を測り、
+ * 本番は測っていないオトシゴに課金する、という食い違いが起き得た。本番側も
+ * 「doctor が測ったアダプタ＝契約のアダプタ」を有料の音声の前に照合する。
+ */
+async function koyaDialogueAdapterSpec(projectDir, runtime = {}) {
+  if (runtime.koyaDialogueAdapter) return runtime.koyaDialogueAdapter;
+  const resolved = await resolveKoyaMangaProductionContract({ projectDir });
+  return resolveKoyaDialogueAdapter(resolved);
+}
 
 /**
  * Koya speech no longer calls ElevenLabs with a local raw key. Probe the exact
  * non-billable BuzzAssist Media Job adapter used by requestKoyaDialogueMediaJob.
  * A raw ELEVENLABS_API_KEY must never make this check pass.
  */
-async function probeKoyaDialoguePaidMediaRuntime({ runtime = {}, env = process.env } = {}) {
-  const spec = KOYA_DIALOGUE_ADAPTER_SPEC;
+async function probeKoyaDialoguePaidMediaRuntime({ runtime = {}, env = process.env, projectDir = REPO_ROOT } = {}) {
+  let spec;
+  try {
+    spec = { ...(await koyaDialogueAdapterSpec(projectDir, runtime)) };
+  } catch (error) {
+    return {
+      ok: false,
+      status: "contract-invalid",
+      kind: "voice.dialogue",
+      detail: `Koya 契約から台詞音声のアダプタを決められない: ${String(error?.message || error).slice(0, 180)}`,
+    };
+  }
   const injectedProbe = typeof runtime.mediaAdapterProbe === "function" ? runtime.mediaAdapterProbe : null;
   const apiBase = String(runtime.mediaJobApiBase ?? env.BUZZASSIST_MEDIA_JOB_API_BASE ?? "").trim();
   if (!injectedProbe && !apiBase) {
@@ -745,7 +761,7 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "",
     : null;
   const tts = narratedMedia?.tts
     ?? (harnessId === "koya-manga-video"
-      ? await probeKoyaDialoguePaidMediaRuntime({ runtime, env: runtimeEnv })
+      ? await probeKoyaDialoguePaidMediaRuntime({ runtime, env: runtimeEnv, projectDir: path.resolve(projectDir) })
       : (runtime.ttsProbe
         ? await runtime.ttsProbe()
         : await probeSecretVia(() => requireElevenLabsApiKey({}), {
@@ -759,7 +775,7 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "",
     fix: tts.ok ? "" : harnessId === "narrated-story-video"
       ? "署名Channel Packのruntime.ttsProvider / voice adapter identityを一致させ、BUZZASSIST_MEDIA_JOB_API_BASEの非課金capabilities probeがreadyを返す状態にする"
       : harnessId === "koya-manga-video"
-        ? "BUZZASSIST_MEDIA_JOB_API_BASEを設定し、voice.dialogue / elevenlabs / eleven_v3 / elevenlabs-dialogue-server-v1 の非課金capabilities probeがreadyを返す状態にする。生のELEVENLABS_API_KEYだけではKoya本番経路の確認にならない"
+        ? `BUZZASSIST_MEDIA_JOB_API_BASEを設定し、契約が指す ${[tts.kind, tts.provider, tts.model, tts.adapterVersion].filter(Boolean).join(" / ")} の非課金capabilities probeがreadyを返す状態にする。生の提供元APIキーだけではKoya本番経路の確認にならない`
         : tts.fix,
   });
 

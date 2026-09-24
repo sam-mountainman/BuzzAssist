@@ -163,3 +163,30 @@ test("最終監査は、契約が指す型番で manifest と各台詞を照合�
   assert.ok(ids.includes("audio-model"), "契約がオトシゴなら eleven_v3 の manifest は落ちる");
   assert.ok(ids.includes("utterance-models"));
 });
+
+test("doctor は契約が指す台詞音声アダプタを測る（ElevenLabs に固定しない）", async () => {
+  const { runHarnessDoctor } = await import("../scripts/harness-doctor.mjs");
+  const { fileURLToPath } = await import("node:url");
+  const root = fileURLToPath(new URL("..", import.meta.url));
+  const probed = [];
+  const report = await runHarnessDoctor({
+    projectDir: root,
+    harnessId: "koya-manga-video",
+    runtime: {
+      koyaDialogueAdapter: OTOSHIGO,
+      diskFreeBytes: async () => 64 * 1024 ** 3,
+      resolveProductionRoute: async () => ({ command: "fixture-node", args: ["koya-manga-video.mjs", "help"], cwd: root, label: "scripts/koya-manga-video.mjs", mcpTool: "run_video_harness" }),
+      mediaAdapterProbe: async (spec) => {
+        probed.push(spec);
+        return { ok: true, status: "ready", ...spec };
+      },
+    },
+  });
+  const tts = report.checks.find((check) => check.id === "tts-key");
+  assert.ok(probed.some((spec) => spec.provider === "otoshigo" && spec.kind === "voice.dialogue"), "オトシゴの識別子で非課金 probe を出す");
+  assert.equal(probed.some((spec) => spec.kind === "voice.dialogue" && spec.provider === "elevenlabs"), false, "契約がオトシゴなら ElevenLabs を測らない");
+  assert.equal(tts.ok, true);
+  assert.equal(tts.provider, "otoshigo");
+  assert.equal(tts.model, "irodori-tts-v4.1-small");
+  assert.equal(tts.adapterVersion, "otoshigo-dialogue-server-v1");
+});
