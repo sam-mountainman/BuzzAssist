@@ -23,6 +23,7 @@ import {
   planNarratedBookendProgram,
   renderOpeningPart,
   segmentFramePlan,
+  missingBookendFfmpegFilters,
 } from "../lib/narratedStoryBookends.mjs";
 import { loadNarratedStoryChannelConfig } from "../lib/narratedStoryPipeline.mjs";
 import { planOnlyPreflight } from "../lib/videoHarnessService.mjs";
@@ -257,9 +258,23 @@ const FONT_CANDIDATES = [
   "C:\\Windows\\Fonts\\arial.ttf",
 ];
 const fontPath = FONT_CANDIDATES.find((candidate) => existsSync(candidate)) || "";
+const TITLE_CARD_CONFIG = { bookends: { enabled: true, opening: { kind: "title-card", text: "x" } } };
+// drawtext は freetype 付きの ffmpeg にしか無い（CI の macOS の Homebrew 版には無い）。
+const drawtextMissing = toolchain.ok ? (await missingBookendFfmpegFilters(toolchain.ffmpeg, TITLE_CARD_CONFIG)).length > 0 : true;
+
+test("タイトルカードが要る drawtext の有無を、有料生成の前に ffmpeg のフィルター一覧で確かめる", async () => {
+  const listing = (text) => async () => ({ stdout: text, stderr: "" });
+  assert.deepEqual(await missingBookendFfmpegFilters({ command: "ffmpeg" }, TITLE_CARD_CONFIG, { run: listing(" T.C drawtext          V->V       Draw text\n") }), []);
+  assert.deepEqual(await missingBookendFfmpegFilters({ command: "ffmpeg" }, TITLE_CARD_CONFIG, { run: listing(" T.. drawbox           V->V       Draw box\n") }), ["drawtext"]);
+  assert.deepEqual(await missingBookendFfmpegFilters({ command: "ffmpeg" }, TITLE_CARD_CONFIG, { run: async () => { throw new Error("no ffmpeg"); } }), ["drawtext"], "確かめられないときは無いものとして止める");
+  assert.deepEqual(await missingBookendFfmpegFilters({ command: "ffmpeg" }, { bookends: { enabled: false } }, { run: listing("") }), [], "bookends を使わないなら何も要らない");
+  assert.deepEqual(await missingBookendFfmpegFilters({ command: "ffmpeg" }, { bookends: { enabled: true, opening: { kind: "video" } } }, { run: listing("") }), [], "動画の OP には drawtext が要らない");
+});
 
 test("title card renders the Pack text with the Pack font through a relative textfile", {
-  skip: !toolchain.ok ? "ffmpeg is unavailable" : (!fontPath ? "no font available on this host" : false),
+  skip: !toolchain.ok ? "ffmpeg is unavailable"
+    : (!fontPath ? "no font available on this host"
+      : (drawtextMissing ? "この ffmpeg に drawtext が無い（freetype 無しのビルド。本番は有料生成の前に ffmpeg-filter-missing:drawtext で止まる）" : false)),
 }, async () => {
   const dir = await mkdtemp(join(os.tmpdir(), "narrated-title-card-"));
   try {
