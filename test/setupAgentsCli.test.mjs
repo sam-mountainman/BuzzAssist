@@ -158,6 +158,8 @@ test("normal setup fails closed when the canonical harness doctor is not ready",
           LOVART_SECRET_KEY: "",
           BUZZASSIST_MEDIA_TOKEN: "",
           BUZZASSIST_TOKEN: "",
+          // 前提ツールの自動導入（ffmpeg の取得など）は、この試験の対象外。
+          BUZZASSIST_INSTALL_PREREQUISITES: "0",
         },
       }),
       (error) => {

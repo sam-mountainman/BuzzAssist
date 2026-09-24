@@ -82,6 +82,8 @@ async function isolatedMachine(prefix) {
     LOVART_SECRET_KEY: "",
     BUZZASSIST_MEDIA_TOKEN: "",
     BUZZASSIST_TOKEN: "",
+    // 前提ツールの自動導入（ffmpeg の取得など）はこの試験の対象外。更新器経由では元から行わない。
+    BUZZASSIST_INSTALL_PREREQUISITES: "0",
     BUZZASSIST_UPDATER_INSTALL: "",
     BUZZASSIST_AUTO_UPDATE_SKIP_REGISTER: "",
   };

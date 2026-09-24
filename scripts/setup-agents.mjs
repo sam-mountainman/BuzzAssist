@@ -149,6 +149,10 @@ Options:
                          Diagnostic/canvas-only mode: report missing video-harness prerequisites without failing setup.
                          The safe updater always uses this mode so that a missing prerequisite never blocks
                          the release that fixes it (the report is kept in the updater state instead).
+  --no-install-prerequisites
+                         Do not install ffmpeg/ffprobe and the Python venv (opencv-python-headless<5, numpy, pillow)
+                         into ~/.buzzassist/tools. Also BUZZASSIST_INSTALL_PREREQUISITES=0. Installed by default,
+                         without admin rights and without touching system tools; tesseract is only reported.
   --tunnel               Start a Canvas Tunnel after setup for phone access to the same full Excalidraw UI (Cloudflare by default).
   --ngrok-authtoken <token>
                          Opt into ngrok instead of Cloudflare and configure it. Also reads BUZZASSIST_NGROK_AUTHTOKEN or NGROK_AUTHTOKEN.
@@ -388,6 +392,69 @@ async function ensureWidgetBuild() {
 
   logStep("Building the native widget UI");
   await runNpm(["run", "build:widget"], { inherit: true });
+}
+
+function prerequisiteInstallSkipReason() {
+  if (hasArg("--no-install-prerequisites")) return "skipped-by-flag";
+  if (/^(0|false|no)$/iu.test(String(process.env.BUZZASSIST_INSTALL_PREREQUISITES || "").trim())) return "skipped-by-env";
+  if (dryRun) return "planned-dry-run";
+  // 夜間の自動更新で第三者のバイナリを取りに行かない。前提の欠けは doctor と state に残る。
+  if (updaterInstall.updater) return "skipped-updater";
+  return "";
+}
+
+/**
+ * 動画ハーネスの前提ツールを ~/.buzzassist/tools/ に入れる（lib/prerequisiteTools.mjs）。
+ * 失敗しても setup は止めない。止めるかどうかは直後の doctor が決める。
+ */
+async function installPrerequisites() {
+  const tools = await import("../lib/prerequisiteTools.mjs");
+  const skip = prerequisiteInstallSkipReason();
+  if (skip) {
+    if (skip === "planned-dry-run") console.log("Would install ffmpeg/ffprobe and the Python venv into ~/.buzzassist/tools when missing.");
+    console.log(`BUZZASSIST_PREREQUISITES=${skip}`);
+    tools.appendManagedToolsToPath(process.env, { homeDir });
+    return;
+  }
+  logStep("Preparing video-harness tools in ~/.buzzassist/tools (no admin rights; system tools are left untouched)");
+  const { resolveFfmpegToolchain, resolvePythonRuntime } = await import("../lib/harnessRuntimeResolver.mjs");
+  const statuses = {};
+
+  const toolchain = await resolveFfmpegToolchain({ env: process.env });
+  if (toolchain.ok) {
+    statuses.ffmpeg = toolchain.ffmpeg.source === "buzzassist-tools" ? "managed" : "present";
+  } else {
+    console.log(`Installing ffmpeg/ffprobe ${tools.MANAGED_FFMPEG_VERSION} (pinned SHA-256).`);
+    const installed = await tools.ensureManagedFfmpeg({ env: process.env, homeDir });
+    statuses.ffmpeg = installed.ok ? "installed" : installed.status;
+    if (!installed.ok) console.log(`  ffmpeg を入れられませんでした: ${installed.detail}`);
+  }
+  tools.appendManagedToolsToPath(process.env, { homeDir });
+
+  const explicitPython = ["BUZZASSIST_PYTHON", "PYTHON"].some((name) => String(process.env[name] || "").trim());
+  if (explicitPython) {
+    // 明示の interpreter は運営者の決定。別の venv を作っても解決器は使わない。
+    statuses.python = "explicit-interpreter";
+  } else {
+    const runtime = await resolvePythonRuntime({ env: process.env, projectDir, requiredModules: [...tools.PYTHON_VENV_MODULES] });
+    if (runtime.ok) {
+      statuses.python = runtime.source === "buzzassist-tools-venv" ? "managed" : "present";
+    } else {
+      const venv = await tools.ensureManagedPythonVenv({ env: process.env, homeDir, log: (line) => console.log(line) });
+      statuses.python = venv.ok ? venv.status : "failed";
+      if (!venv.ok) console.log(`  Python の環境を用意できませんでした: ${venv.detail}`);
+    }
+  }
+
+  const tesseract = await tools.probeTesseract({ env: process.env });
+  statuses.tesseract = tesseract.status;
+  if (!tesseract.ok) console.log(`  日本語の tesseract が見つかりません（カット差し替えの監査に使う）。導入: ${tesseract.hint}`);
+
+  console.log(`BUZZASSIST_PREREQ_FFMPEG=${statuses.ffmpeg}`);
+  console.log(`BUZZASSIST_PREREQ_PYTHON=${statuses.python}`);
+  console.log(`BUZZASSIST_PREREQ_TESSERACT=${statuses.tesseract}`);
+  const failed = ["ffmpeg", "python"].filter((key) => ["failed", "unsupported"].includes(statuses[key]));
+  console.log(`BUZZASSIST_PREREQUISITES=${failed.length === 0 ? "ok" : `partial:${failed.join(",")}`}`);
 }
 
 // 運営者の配置表（追跡外）が無ければ例から作る。上書きはしない。作ったことは必ず出す。
@@ -1385,6 +1452,7 @@ export async function runSetupAgents() {
   await ensureBuild();
   await ensureWidgetBuild();
   await ensureDeploymentMap();
+  await installPrerequisites();
 
   // ホストの設定が済んだことと、ハーネスが動かせることは別。ここを区別せずに
   // 「configured」だけ出していたので、運営者が最初の本番を回したときに

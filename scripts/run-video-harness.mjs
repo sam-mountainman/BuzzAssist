@@ -14,6 +14,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
+import { appendManagedToolsToPath } from "../lib/prerequisiteTools.mjs";
 import { videoHarnessService } from "../lib/videoHarnessService.mjs";
 
 function parseArgs(argv) {
@@ -157,6 +158,8 @@ async function main() {
 }
 
 if (isDirectCli(import.meta.url)) {
+  // setup が ~/.buzzassist/tools に入れた ffmpeg / ffprobe を各工程に見せる（運営者の PATH が先）。
+  appendManagedToolsToPath(process.env);
   main().catch((error) => {
     process.stderr.write(`${error?.stack || error}\n`);
     process.exitCode = 1;

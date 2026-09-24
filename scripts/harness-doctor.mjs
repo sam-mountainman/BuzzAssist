@@ -57,6 +57,7 @@ import {
 import { probePaidMediaJobAdapter } from "../lib/paidMediaJobBroker.mjs";
 import { REVIEWER_TRUST_ENV_GUIDANCE, REVIEWER_TRUST_PATH_ENV, preflightReviewerTrust } from "../lib/koyaReviewAttestation.mjs";
 import { resolveCodexCommand } from "./codex-image-bridge.mjs";
+import { appendManagedToolsToPath } from "../lib/prerequisiteTools.mjs";
 
 const defaultRunCommand = promisify(execFile);
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -712,7 +713,7 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "",
       required: true,
       ok: probe.ok,
       detail: probe.ok ? `${id} ${probe.version}（${formatRuntimeCommand(probe)}）` : probe.detail,
-      fix: probe.ok ? "" : `${id} が要る。macOS なら \`brew install ffmpeg\`、Windows なら \`winget install Gyan.FFmpeg\`。動画のレンダーと実測監査の全部がこれに乗っているので、無いと本編は1本も作れない。独自パスは ${id === "ffmpeg" ? "FFMPEG_PATH" : "FFPROBE_PATH"} で指定できる`,
+      fix: probe.ok ? "" : `${id} が要る。setup（node scripts/setup-agents.mjs）を --no-install-prerequisites なしで実行すると、固定版を管理者権限なしで ~/.buzzassist/tools に入れる。自分で入れるなら macOS は \`brew install ffmpeg\`、Windows は \`winget install Gyan.FFmpeg\`。動画のレンダーと実測監査の全部がこれに乗っているので、無いと本編は1本も作れない。独自パスは ${id === "ffmpeg" ? "FFMPEG_PATH" : "FFPROBE_PATH"} で指定できる`,
     });
   }
 
@@ -974,6 +975,8 @@ const isDirectExecution = Boolean(process.argv[1])
   && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 
 if (isDirectExecution) {
+  // setup が ~/.buzzassist/tools に入れた ffmpeg / ffprobe も、運営者の PATH の後ろで見る。
+  appendManagedToolsToPath(process.env);
   main().catch((error) => {
     process.stderr.write(`${error?.message || error}\n`);
     process.exitCode = 1;

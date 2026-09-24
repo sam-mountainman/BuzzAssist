@@ -253,6 +253,8 @@ async function runHostSetup(host) {
       GROK_DEPLOYMENT_KEY: "",
       BUZZASSIST_MEDIA_TOKEN: "",
       BUZZASSIST_TOKEN: "",
+      // 前提ツールの自動導入（ffmpeg の取得や venv の作成）は配布経路の検証の対象外。
+      BUZZASSIST_INSTALL_PREREQUISITES: "0",
       // R6-F2: 運営者の信頼リスト env は host の起動シェルに置く。setup が生成する
       // MCP 設定には **名前だけ** が載り、この値（sentinel）は一切書かれないこと。
       BUZZASSIST_REVIEWER_TRUST: reviewerTrustSentinel,

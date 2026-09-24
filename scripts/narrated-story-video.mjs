@@ -14,6 +14,7 @@ import {
   runNarratedStoryVideo,
   signNarratedStoryVideoReview,
 } from "../lib/narratedStoryVideo.mjs";
+import { appendManagedToolsToPath } from "../lib/prerequisiteTools.mjs";
 
 export {
   NARRATED_STORY_VIDEO_OUTCOME_VERSION,
@@ -136,6 +137,8 @@ export async function main(argv = process.argv.slice(2)) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  // setup が ~/.buzzassist/tools に入れた ffmpeg / ffprobe を各工程に見せる（運営者の PATH が先）。
+  appendManagedToolsToPath(process.env);
   main().catch((error) => {
     process.stderr.write(`${error?.stack || error}\n`);
     process.exitCode = 1;

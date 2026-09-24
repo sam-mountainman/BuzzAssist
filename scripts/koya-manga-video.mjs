@@ -87,6 +87,10 @@ import {
 import { parseMangaScript } from "../lib/mangaVideoPipeline.mjs";
 import { readCharacterRegistry } from "../lib/characterRegistry.mjs";
 import { auditKoyaCharacterRosterReview, createKoyaCharacterRosterReviewDraft } from "../lib/koyaCharacterRosterReview.mjs";
+import { appendManagedToolsToPath } from "../lib/prerequisiteTools.mjs";
+
+// setup が ~/.buzzassist/tools に入れた ffmpeg / ffprobe を各工程に見せる（運営者の PATH が先）。
+appendManagedToolsToPath(process.env);
 
 // usage() に載っていないが実装が読む flag。usage の `--flag` 一覧と合わせて既知集合を作る。
 // 上位 Job 層（videoHarnessAdapters）が full へ渡す upstream binding もここに含める。
