@@ -119,10 +119,12 @@ OSのクリップボードやGUI自動操作を主要経路にしない。
 ## 独立 signoff の署名
 
 contact sheet の独立確認は `review/contact-sheet-signoff.json`
-（`buzzassist-narrated-story-contact-sheet-signoff-v1`）として Job workspace に置く。
-本文は `reviewer`、`reviewerContextId`、`approved: true`、`videoSha256`、
-`contactSheetSha256`、`originalDetailReviewed: true`、空の `findings` と
-`knownRemainingIssues` を持ち、reviewer の Ed25519 秘密鍵で `reviewerAttestation` を付ける。
+（`buzzassist-narrated-story-contact-sheet-signoff-v2`）として Job workspace に置く。
+本文は `reviewer`、`reviewerContextId`、`approved`、`videoSha256`、`contactSheetSha256`、
+`originalDetailReviewed: true`、`findings`、`knownRemainingIssues`、`qualityReview`
+（`contractDigest`、`evaluatorContextId`＝`reviewerContextId`、`rubricScores`、`notes`）を持ち、
+reviewer の Ed25519 秘密鍵で `reviewerAttestation` を付ける。`approved` は `true`（findings は空）か
+`false`（差し戻し、findings は1件以上）。評価項目と契約の digest は Job の `review.quality` にある。
 署名対象には Job ID・identityDigest・MP4 SHA・contact sheet SHA・signoff 本文 SHA・
 reviewer context が入るので、承認内容の書き換えも署名で落ちる。
 
@@ -136,7 +138,9 @@ node scripts/narrated-story-video.mjs signoff \
   --project-dir /absolute/project \
   --reviewer claude --reviewer-context-id <実Claude-session-id> \
   --reviewer-key-path /secure/outside-repo/reviewer-ed25519.pem \
+  --review-path /absolute/review-scores.json \
   --pass
+# review-scores.json は { rubricScores, notes, findings }。差し戻しは --pass の代わりに --fail
 # または --reviewer codex --reviewer-context-id <実Codex-task-id>
 # 出力先は既定の Job workspace 内 review/contact-sheet-signoff.json。governed route
 # （finalize / RunReceipt）が読むのはこの場所だけなので、--signoff-path は付けない
@@ -146,7 +150,7 @@ node scripts/narrated-story-video.mjs signoff \
 ```
 
 MCP を使える host では、同じ工程を `signoff_video_harness_job`（`jobId`, `reviewer`,
-`reviewerContextId`, `reviewerKeyPath`, 任意 `reviewerTrustPath`, `pass: true`, `confirmed: true`）と
+`reviewerContextId`, `reviewerKeyPath`, `reviewPath`, 任意 `reviewerTrustPath`, `pass: true|false`, `confirmed: true`）と
 `create_video_harness_reviewer_key`（`reviewerKeyPath`, `confirmed: true`）で呼ぶ。引数名は Koya の
 `run_koya_manga_pipeline action=signoff` と共通で、鍵・信頼リストは path だけを受け、中身は拒否される。
 Koya Job をこの tool へ渡すと拒否される（Koya は `run_koya_manga_pipeline` 側）。上位
@@ -162,6 +166,22 @@ subject を署名する唯一の経路であり、finalize と RunReceipt は `v
 で信頼リスト照合を行う。署名の無い signoff、信頼リスト未登録・失効済みの鍵、generator と
 同じ context の signoff は final へ進めない。
 
+## 品質ループ
+
+独立 signoff は、承認でも差し戻しでも品質ループの1回になる（中核は `lib/qualityLoop.mjs`、
+このジャンルの評価項目は `lib/narratedStoryQualityLoop.mjs`）。合格は、機械ゲートが全部通り、
+評価項目の加重平均が目標点以上で、どの項目も下限を下回らないこと。台本と画の意味の一致・
+人物の同一性・語りの声は下限 80、ほかは 60。平均が目標に届いても1項目の下限割れは不合格。
+
+届かない回は失敗指紋を残して `awaiting-human-review` で止まる（例外にはしない）。次の回には、
+前の回で使っていない `--reviewer-context-id` と、Job の作業領域の `quality/revision-delta.json`
+（`{ "previousFailureFingerprint", "revisionDelta" }`）が要る。直した出力は台本・Pack・コードの
+指紋が変わって別の Job になるので、新しい Job の同じファイルに `"predecessorJobId"` を書いて
+前の Job のループを引き継ぐ。書かなければ新しいループの1回目として数える。
+
+止まる条件は目標到達・人の判断・費用・時間・回数・停滞。上限は Channel Pack の `qualityLoop`
+で変えられるが、評価項目と下限は変えられない（範囲外の値は有料生成の前に止まる）。
+
 ## 完了条件
 
 次がすべて実在し、SHA拘束されるまで完成と呼ばない。
@@ -170,6 +190,7 @@ subject を署名する唯一の経路であり、finalize と RunReceipt は `v
 - 実MP4の全デコード成功
 - 契約に列挙された全gateの実測pass
 - 現在のMP4へ拘束され、信頼リスト上の active な reviewer 鍵で署名された独立contact-sheet signoff
+- 品質ループに合格した回があり、その回の signoff が今の MP4 に結び付いた承認であること（`qualityLoopPassed`）
 - `knownRemainingIssues`が空
 - Canvas Runが最終成果物と同じartifact SHAを表示
 

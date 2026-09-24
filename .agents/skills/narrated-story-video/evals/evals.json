@@ -50,6 +50,16 @@
         "一人称の体験談を生成して本人の体験として出さず、[[operator-replace]] を残して運営者の差し替えを待つ",
         "--confirmed の前に preflight.blockers を読む"
       ]
+    },
+    {
+      "id": "narrated-quality-loop-retry",
+      "prompt": "差し戻しの指摘を直して作り直した。前のと続けて品質チェックを通して。",
+      "shouldTrigger": true,
+      "invariants": [
+        "新しい Job の quality/revision-delta.json に previousFailureFingerprint・revisionDelta・predecessorJobId を書く",
+        "前の回で使っていない reviewer context で --review-path つきの signoff をやり直す",
+        "平均が目標に届いても、意味の一致・同一性・声の下限割れがあれば完成と言わない"
+      ]
     }
   ]
 }

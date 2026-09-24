@@ -124,7 +124,8 @@ const job = await broker.start({
 ## 品質ループ（作って、測って、直す）
 
 `lib/qualityLoop.mjs`。ジャンルに依らない品質ループの中核で、漫画もナレーション物語もここを
-使う。ジャンルが決めるのは評価項目・機械ゲート・上限だけ。2つ目を作らない。
+使う。ジャンルが決めるのは評価項目・下限・機械ゲート・上限だけで、漫画は `lib/mangaQualityHarness.mjs`、
+ナレーション物語は `lib/narratedStoryQualityLoop.mjs` に置く。2つ目の中核を作らない。
 
 - 作る係と同じ文脈の評価は拒否し、評価の文脈は回ごとに新しくする（同じ人が直した版を
   見直すのは許すが、文脈の使い回しは拒否する）
@@ -223,7 +224,7 @@ path は拒否する。標準出力には `keyId` と信頼リストへ貼る `t
 | production Job の start / resume（照合用 path） | `run-video-harness.mjs start\|resume [--reviewer-trust-path JSON]` | `run_video_harness` / `resume_video_harness_job` の `reviewerTrustPath` |
 | reviewer 鍵の作成 | `koya-manga-video.mjs reviewer-key-create` / `narrated-story-video.mjs reviewer-key-create` | `create_video_harness_reviewer_key`（`reviewerKeyPath`, 任意 `reviewerPublicKeyPath` / `reviewerLabel`, `confirmed: true`） |
 | Koya Job の signoff | `koya-manga-video.mjs signoff --reviewer-key-path PEM [--reviewer-trust-path JSON]` | `run_koya_manga_pipeline action=signoff`（`reviewerKeyPath`, `reviewerContextId`, 任意 `reviewerTrustPath`） |
-| narrated Job の signoff | `narrated-story-video.mjs signoff --reviewer-key-path PEM [--reviewer-trust-path JSON]` | `signoff_video_harness_job`（同じ引数名。Koya Job を渡すと拒否） |
+| narrated Job の signoff | `narrated-story-video.mjs signoff --reviewer-key-path PEM --review-path REVIEW.json --pass\|--fail [--reviewer-trust-path JSON]` | `signoff_video_harness_job`（同じ引数名に `reviewPath`・`pass: true\|false`。Koya Job を渡すと拒否） |
 
 上位 `run-video-harness.mjs` の `--reviewer-trust-path`（MCP `reviewerTrustPath`）は Job identity に
 入らず `job.json` にも保存されない実行時引数。env と一致した path だけを service がジャンル子 CLI
