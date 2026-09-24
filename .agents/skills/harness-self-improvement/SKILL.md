@@ -116,6 +116,38 @@ node scripts/harness-learn.mjs capture \
 **同じ指摘が2回目以降なら警告が出る。** それは「まだ直っていない」という
 強い信号なので、その場で正本へ反映するところまでやる。
 
+**文脈に「[BuzzAssist 自己改善] …」が足されたら**、それは BuzzAssist プラグインの
+フック（Claude Code と Codex の UserPromptSubmit）が、直前の発言に訂正・禁止・
+繰り返しらしい言い回しを見つけたという合図にすぎない。発言が本当に訂正・禁止・
+繰り返しに当たるかを自分で判断し、当たればその場で `capture` する。当たらなければ
+何もしない。フックは捕捉も発言本文の保存もせず、提案ゼロは正常。案内を
+「毎回何か capture せよ」と読まない——書かせる圧をかけると、効かない教訓が溜まる。
+
+**子エージェントは学習を書かない。** `harness-parallel-agents` が起動する子には
+`BUZZASSIST_LEARNING_WRITE_FORBIDDEN` が渡り、capture / sync / promote / apply /
+`curate --archive` は拒否される。子は捕捉したい内容を結果本文で親へ返し、親が
+確かめてから capture する。並列の子それぞれが同じ指摘を書くと再発回数が水増しされ、
+確かめていない推測が台帳に入るため。
+
+廃止した旧名（`skill:<名前>`）で記録済みの提案は、対応表
+`lib/harnessLearningTargets.mjs`（harness-learn・feedback bundle・Canvas collector が
+同じ1つを読む）で新しい宛先へ解決される。status は新しい宛先で数え、「旧名 … で記録」と
+出す。台帳の行は書き換えない（提案 ID が本文と宛先から作られるので、書き換えると
+過去の反映記録と結び付かなくなる）。
+
+## 書き込み前の検査
+
+capture・sync・promote・apply の前に、本文を検査する。見るのは、プロンプト注入らしい
+言い回し、隠し HTML コメント、不可視 Unicode、資格情報らしい文字列（sk-、Bearer、JWT、
+PEM など）、端末を特定できる絶対パス。検査語彙（HMAC digest）の照合とは別の層で、
+語彙に無い形の混入を止める。
+
+- 当たった提案は捨てずに `blocked` として台帳に残る。資格情報とパスは置き換えて記録し、
+  元の文字列は指紋だけ残す
+- blocked は overlay に載らず、review にも出ず、promote・apply もできない
+- status の ⛔ 欄に理由だけが出る（本文は出ない）。理由を見て、何を直すかの形に書き直して
+  capture し直す。元の行は台帳の規則どおり書き換えない
+
 ## 自動反映（sync）
 
 捕捉したものは、区切りで `sync` を打てば自動で正本へ載る。
@@ -200,7 +232,26 @@ node scripts/harness-learn.mjs apply --id <提案ID> \
 数えない。誰も確認していない自動反映は証跡にならないので、この仕組みは意図的に
 そこで止まる。
 
-## Canvasからの自動捕捉
+## 自動の捕捉経路
+
+エージェントが覚えていなくても走る捕捉は2つある。どちらも**提案を積むまで**で、
+正本への自動昇格ではない。
+
+### Job の決着時（RunReceipt から）
+
+共通入口（`run-video-harness` の start / resume、MCP の同じ service）を通った Job が
+completed / failed / awaiting-human-review で決着すると、その Receipt から学習候補を
+取り出して提案台帳へ積む。
+
+- 本文に入るのは、不合格・skip のゲート id、issue のコード、再試行・再開の回数などの
+  件数だけ。台本・プロンプト・生のエラー全文・パス・人名は入れない
+- 各行は `createdBy=auto-receipt`、Receipt の digest、捕捉時の skill SHA を持つ。
+  同じ Receipt からは二重に積まない。全部通った Run からは何も積まない
+- 宛先は Channel Pack 宛の非公開台帳。genre / platform へ一般化するときは、人が
+  target を明示して別の提案として capture する
+- 捕捉に失敗しても Job の結果は変えない。`BUZZASSIST_LEARNING_AUTO_CAPTURE=0` で止まる
+
+### Canvas のフィードバック
 
 Canvas Run上の採択・却下・改善コメントは、次の投影より前に
 `collect_video_harness_feedback`（または同じcollectorを使う共通Job API）で読む。
@@ -278,6 +329,24 @@ node scripts/harness-feedback-ingest.mjs approve \
 あり、AIが自分の変更を自分で承認する意味ではない。正本への昇格は従来どおり
 `skill-creator`でfixture比較を行い、人の承認証跡を要する。
 
+## 使われない教訓の扱い（curate）
+
+overlay は毎回まるごと読まれるので、hermes の curator のような「使われた回数」は
+意味を持たない。代わりに「最後に再発・再捕捉された日」と「関連するゲートが直近の
+RunReceipt に不合格・skip で出たか」を見て、長く再発していない項目を**候補として
+列挙するだけ**にする（既定 dry-run）。
+
+```bash
+node scripts/harness-learn.mjs curate                    # 候補の一覧（何も書き換えない）
+node scripts/harness-learn.mjs curate --archive --id <id> \
+  --reviewer <名前> --reason "何を見て判断したか" --human-verified
+```
+
+退避は候補に出た項目だけ、人の確認つきでだけ行い、`references/learned-archive.md` へ
+移すだけで削除しない。退避後に再発すれば overlay へ戻る。`learned-archive.md` は
+作業前に読む対象ではない。再発しないのは、その規則が効いているからかもしれず、
+機械には見分けられない——だから機械の判断で退避しない。
+
 ## 改善したかを測る（RunReceipt）
 
 提案を反映しても、**良くなったかどうかは別に測らないと分からない**。
@@ -353,3 +422,6 @@ genre/platformへ引き上げる。
 - Channel Pack固有のコメントを共有learning台帳へ書く
 - 「ユーザーが言ったから」だけを根拠に書く。**何を観測したか**を evidence に残す
 - `rollup` を見ずに「よく落ちる」と書く。落ちている場所は測れる
+- blocked の提案本文を、検査を通さずに正本へ貼る
+- `curate` の候補を、人の確認なしに機械の判断で退避する
+- フックの案内を「毎回何か capture せよ」と読む

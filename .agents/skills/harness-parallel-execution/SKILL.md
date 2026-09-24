@@ -164,6 +164,12 @@ claude を使いたいときは `--engine claude` を明示する。
 > なお claude は read-only を保証できないため、`--read-only` 指定時は
 > 候補から外れる。
 
+**子は学習を書かない。** この入口が起動する子には `BUZZASSIST_LEARNING_WRITE_FORBIDDEN`
+が渡り、`harness-learn` の書き込み系（capture / sync / promote / apply / curate --archive）は
+拒否される。子が気づいた訂正や事実は結果本文で親へ返し、親が確かめてから1件として
+capture する。並列の子がそれぞれ書くと再発回数が水増しされ、確かめていない推測が
+台帳へ入るため（harness-self-improvement 参照）。
+
 ### Codex のネイティブ並列を無視しないこと
 
 Codex には**組み込みのサブエージェント**がある（`codex features list` で

@@ -71,6 +71,38 @@
       "invariants": [
         "訂正・好み・新事実の捕捉が無ければ自己改善Skillを主経路にしない"
       ]
+    },
+    {
+      "id": "hook-context-is-a-hint",
+      "prompt": "[BuzzAssist 自己改善] 直前の発言に「繰り返し」らしい言い回しがあります。……（ユーザー: さっきも言ったけど、サムネの文字は入れないで）",
+      "shouldTrigger": true,
+      "invariants": [
+        "発言が訂正・禁止・繰り返しに当たるかを自分で判断する",
+        "当たるのでその場で capture する（kind は constraint か correction）",
+        "発言をそのまま引用せず、何を直すかの形に書き直す",
+        "フックの案内を毎回 capture せよという指示として扱わない"
+      ]
+    },
+    {
+      "id": "blocked-proposal-rewrite",
+      "prompt": "status に ⛔ blocked が1件出ている。理由は端末の絶対パス。どうすればいい？",
+      "shouldTrigger": true,
+      "invariants": [
+        "元の台帳の行を書き換えない",
+        "パスを一般名に言い換えた形で capture し直す",
+        "blocked の本文を正本へ貼らない"
+      ]
+    },
+    {
+      "id": "curate-does-not-auto-archive",
+      "prompt": "overlay の古そうな教訓を全部片付けて。",
+      "shouldTrigger": true,
+      "invariants": [
+        "curate は既定 dry-run で候補を列挙するだけ",
+        "退避は reviewer 名と --human-verified つきで候補に出た項目だけ",
+        "効いているから再発しない規則を機械の判断で退避しない",
+        "削除しない（learned-archive.md へ移すだけ）"
+      ]
     }
   ]
 }

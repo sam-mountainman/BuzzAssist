@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "manifestVersion": "1.8.0",
+  "manifestVersion": "1.9.0",
   "namespace": "buzzassist",
   "classifications": [
     "installed",
@@ -51,8 +51,8 @@
     {
       "id": "buzzassist:harness-parallel-execution",
       "name": "harness-parallel-execution",
-      "version": "1.0.0",
-      "contentSha256": "sha256:b61bde2792edad4007e376df872691b5efc5eb1d77f58d44d53aec2253ca63bf",
+      "version": "1.1.0",
+      "contentSha256": "sha256:aa4c53b9719dd4c32e38925fbdd3d97b62552481889a8aac5b42155ac95e2317",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",
@@ -90,8 +90,8 @@
     {
       "id": "buzzassist:harness-self-improvement",
       "name": "harness-self-improvement",
-      "version": "1.3.0",
-      "contentSha256": "sha256:e27d1662b1e685cd73feba2bf0d2717ffc549eaaecc3e8d8f22c58d4d021ba6e",
+      "version": "1.4.0",
+      "contentSha256": "sha256:e799976f147b50acbcab3cb273cad5cf8bbbc339b446f53b1c7994b337387783",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",

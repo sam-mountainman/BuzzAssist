@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "skill": "harness-parallel-execution",
+  "cases": [
+    {
+      "id": "parallel-review-children-return-findings",
+      "prompt": "11人分の混同防止レビューを並列で回して、見つかった指摘は学習にも残しておいて。",
+      "shouldTrigger": true,
+      "invariants": [
+        "harness-parallel-agents でレビューを並列に起動する",
+        "子には学習の書き込みをさせない",
+        "子の指摘は結果本文で親へ返させ、親が確かめてから1件ずつ capture する"
+      ]
+    },
+    {
+      "id": "serial-images-stage",
+      "prompt": "最短で終わらせたいから、画像生成の工程を別エピソード同士で同時に走らせて。",
+      "shouldTrigger": true,
+      "invariants": [
+        "images はチャンネル全体で直列必須であることを先に確かめる",
+        "推測で並列化しない"
+      ]
+    },
+    {
+      "id": "not-parallel-request",
+      "prompt": "この関数の名前を変えて。",
+      "shouldTrigger": false,
+      "invariants": [
+        "並列実行の正本を読まない"
+      ]
+    }
+  ]
+}
