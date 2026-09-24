@@ -10,6 +10,7 @@ import {
   assertSupportedNodeVersion,
   claudeDesktopConfigPathForPlatform,
   commandNameForPlatform,
+  resolveHostCommandForPlatform,
   detectSetupAgent,
   normalizeSetupAgentName,
 } from "../lib/setupAgents.mjs";
@@ -29,6 +30,33 @@ test("host detection prefers explicit BuzzAssist hint over ambient shell markers
   assert.equal(detectSetupAgent({ env: { BUZZASSIST_SETUP_AGENT: "codex", CLAUDE_CODE: "1" }, argv: [] }), "codex");
   assert.equal(detectSetupAgent({ env: { CLAUDE_CODE: "1" }, argv: [] }), "claude");
   assert.equal(detectSetupAgent({ env: { CODEX_THREAD_ID: "thread" }, argv: [] }), "codex");
+});
+
+test("Windows host commands resolve to the native claude.exe before a claude.cmd shim, in PATH order", () => {
+  const present = new Set([
+    "C:\\Users\\Op\\.local\\bin\\claude.exe",
+    "C:\\npm\\claude.cmd",
+    "C:\\npm\\codex.cmd",
+  ]);
+  const exists = (candidate) => present.has(candidate);
+  // ネイティブインストーラの claude.exe は PATH の ~/.local/bin にある（PATH に無くても探す）。
+  assert.equal(
+    resolveHostCommandForPlatform("claude", { platform: "win32", env: { Path: "C:\\Windows;C:\\Users\\Op\\.local\\bin", USERPROFILE: "C:\\Users\\Op" }, exists }),
+    "C:\\Users\\Op\\.local\\bin\\claude.exe",
+  );
+  assert.equal(
+    resolveHostCommandForPlatform("claude", { platform: "win32", env: { Path: "C:\\npm;C:\\Users\\Op\\.local\\bin", USERPROFILE: "C:\\Users\\Op" }, exists }),
+    "C:\\npm\\claude.cmd",
+    "the first PATH directory wins, as in Windows itself",
+  );
+  assert.equal(
+    resolveHostCommandForPlatform("claude", { platform: "win32", env: { Path: "C:\\Windows", USERPROFILE: "C:\\Users\\Op" }, exists }),
+    "C:\\Users\\Op\\.local\\bin\\claude.exe",
+    "the native installer location is found even when it is missing from PATH",
+  );
+  assert.equal(resolveHostCommandForPlatform("codex", { platform: "win32", env: { PATH: "C:\\npm" }, exists }), "C:\\npm\\codex.cmd");
+  assert.equal(resolveHostCommandForPlatform("claude", { platform: "win32", env: { PATH: "" }, exists: () => false }), "claude.cmd");
+  assert.equal(resolveHostCommandForPlatform("claude", { platform: "darwin", env: {}, exists }), "claude");
 });
 
 test("platform helpers produce macOS and Windows host paths", () => {

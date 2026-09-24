@@ -15,6 +15,7 @@ import {
   assertSupportedNodeVersion,
   claudeDesktopConfigPathForPlatform,
   commandNameForPlatform,
+  resolveHostCommandForPlatform,
   detectSetupAgent,
   hostInstallHelp,
   normalizeSetupAgentName,
@@ -989,8 +990,11 @@ async function cleanupLegacyClaude(claude) {
 
 async function setupClaude(pluginDir) {
   logStep("Configuring Claude Code");
-  const claude = commandName("claude");
-  if (!(await commandAvailable(claude))) {
+  // Windows のネイティブ版 Claude Code は claude.exe（claude.cmd は無い）。PATH に
+  // どちらも無ければ、シェル経由の「認識されません」（exit 1）を「ある」と誤認しないよう見送る。
+  const claude = resolveHostCommandForPlatform("claude");
+  const claudeLocated = dryRun || process.platform !== "win32" || path.isAbsolute(claude);
+  if (!claudeLocated || !(await commandAvailable(claude))) {
     console.warn(hostInstallHelp("claude"));
     console.warn("Claude Code CLI was not found. Run these commands after installing Claude Code:");
     console.warn(`  ${formatCommand("claude", ["plugin", "marketplace", "add", managedPluginDir, "--scope", "user"])}`);

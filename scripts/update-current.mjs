@@ -32,6 +32,7 @@ import {
   updaterPaths,
 } from "../lib/pluginAutoUpdate.mjs";
 import { envWithNodeOnPath, resolveNpmInvocation } from "../lib/npmInvocation.mjs";
+import { resolveHostCommandForPlatform } from "../lib/setupAgents.mjs";
 
 const argv = process.argv.slice(2);
 const homeDir = resolve(process.env.BUZZASSIST_SETUP_HOME || homedir());
@@ -380,10 +381,6 @@ async function restoreBackup() {
   await reinstallRestoredHosts();
 }
 
-function commandName(name) {
-  return process.platform === "win32" ? `${name}.cmd` : name;
-}
-
 async function reinstallRestoredHosts() {
   const selector = "buzzassist@buzzassist";
   for (const host of normalizeUpdateHosts(config.hosts)) {
@@ -395,7 +392,7 @@ async function reinstallRestoredHosts() {
         // The stable managed source is already restored; retry on next host launch.
       }
     } else if (host === "claude") {
-      const claude = commandName("claude");
+      const claude = resolveHostCommandForPlatform("claude");
       await run(claude, ["plugin", "uninstall", selector, "--scope", "user", "--keep-data", "-y"], {
         allowFailure: true,
         timeoutMs: 180_000,
