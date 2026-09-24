@@ -1,6 +1,6 @@
 ---
 name: manga-video-production
-description: 日本語漫画動画の台本設計、キャラクター、画像、ElevenLabs音声、吹き出し、カメラ、レンダー、修復、実MP4監査を行う。漫画動画を新規制作・変更・レビュー・監査するときは常に使い、旧version固有スクリプトを新作へ流用しない。
+description: 日本語漫画動画の台本設計、キャラクター、画像、台詞音声、吹き出し、カメラ、レンダー、修復、実MP4監査を行う。漫画動画を新規制作・変更・レビュー・監査するときは常に使い、旧version固有スクリプトを新作へ流用しない。
 ---
 
 
@@ -225,7 +225,7 @@ node scripts/koya-manga-video.mjs wardrobe-readiness --episode-id <id> --script-
 5. 発話ごとの意味から構図を設計する。カット見出しだけを全発話へ誤適用しない。人物、背景、証拠、吹き出し余白を同時に設計する。
 6. 独立画像jobを適応並列で生成し、技術・意味QAを行う。合格済みhashを再利用し、不合格だけを修正する。利用上限ではcheckpointを書いて停止する。
 7. 承認済み日本語ネイティブ音声を人物ごとに固定する。声も最低2候補をA〜Eだけで全件実聴し、provider・voice ID・声名・sourceを伏せたまま`winnerLabel`と理由を先に保存してからprivate mappingを開く。新規作品の四角いナレーション枠は視覚様式を保ち、音声は主人公の承認済みVoice ID/Profile/設定/モデルと完全一致させる。専用ナレーターを作らない。
-8. ElevenLabs `eleven_v3`のカット単位text-to-dialogue-with-timestampsで最低2テイクを作り、完全性と自然さで選ぶ。BGM・環境音・信号処理は使わない。
+8. 契約が指す台詞音声アダプタ（`KOYA_DIALOGUE_ADAPTERS` の1件。`config/koya-manga-production-contract.json` の `audio.provider`/`audio.model`）のカット単位text-to-dialogue-with-timestampsで最低2テイクを作り、完全性と自然さで選ぶ。アダプタを本番コードに書き込まない。doctor が非課金で測ったアダプタと契約のアダプタが違えば有料の音声に入らない。BGM は契約の `audio.allowBgm` が true のときだけ、環境音・信号処理は `audio.allowSignalEffects` が true のときだけ使う（2026-09-24 時点はどちらも false）。
 
 手動顔注釈は人物単位で使い回さず、元画像SHA-256ごとに原寸再計測する。別カットで同人物を注釈済みでも、新しい元画像を保護済みと推測しない。窓反射、鏡像、写真・端末画面内の可視顔も、手前の本人顔とは別ID・別矩形のhard faceとして同一画像内に全件在庫化する。
 検出コマンドが失敗したのに安定出力パスへ前回の合格レポートが残っている状態を成功としない。source-face配置は今回呼び出しが新しく生成した証拠だけを受理し、失敗時は例外停止する。
