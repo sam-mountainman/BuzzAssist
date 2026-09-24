@@ -49,13 +49,24 @@ jobs:
       - name: Install media and OCR tools (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg tesseract-ocr tesseract-ocr-jpn
+      # macOS は、setup が運営者の端末に入れるのと同じ固定版 ffmpeg（SHA-256 照合つき）を使う。
+      # Homebrew の ffmpeg は freetype 無しでビルドされ、タイトルカードの drawtext を持たない
+      # （2026-09-24、CI で落ちた）。必須の道具の欠けは skip の許可リストに入れない決まりなので、
+      # 道具のほうを揃える。運営者と同じ ffmpeg で試験することにもなる。
+      - name: Install the pinned ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          bin_dir="$(node -e "import('./lib/prerequisiteTools.mjs').then(async (m) => { const r = await m.ensureManagedFfmpeg({ toolsDir: process.env.RUNNER_TEMP + '/buzzassist-tools' }); if (!r.ok) { console.error(r.detail); process.exit(1); } console.log(require('node:path').dirname(r.ffmpeg)); })")"
+          echo "$bin_dir" >> "$GITHUB_PATH"
+          "$bin_dir/ffmpeg" -hide_banner -filters | grep -q ' drawtext '
       - name: Install media and OCR tools (macOS)
         if: runner.os == 'macOS'
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
         run: |
-          brew install ffmpeg tesseract
+          brew install tesseract
           tessdata="$(brew --prefix)/share/tessdata"
           curl -fsSL -o "$tessdata/jpn.traineddata" https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/4.1.0/jpn.traineddata
           echo "1f5de9236d2e85f5fdf4b3c500f2d4926f8d9449f28f5394472d9e8d83b91b4d  $tessdata/jpn.traineddata" | shasum -a 256 -c -
