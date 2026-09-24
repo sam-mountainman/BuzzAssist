@@ -95,7 +95,7 @@ appendManagedToolsToPath(process.env);
 // usage() に載っていないが実装が読む flag。usage の `--flag` 一覧と合わせて既知集合を作る。
 // 上位 Job 層（videoHarnessAdapters）が full へ渡す upstream binding もここに含める。
 const EXTRA_KNOWN_FLAGS = Object.freeze([
-  "--project-dir", "--contract-path", "--override-path", "--file-name", "--render-concurrency",
+  "--project-dir", "--contract-path", "--override-path", "--file-name", "--render-concurrency", "--revision-delta",
   "--reading-dictionary-path", "--candidate-rebuild-spec-path", "--reviewer-trust-path",
   "--upstream-job-id", "--upstream-job-path", "--upstream-job-revision", "--upstream-preflight-binding",
   "--upstream-execution-binding",
@@ -139,6 +139,7 @@ function usage() {
     "actions: contract, channel-contract, wardrobe-readiness, character-bootstrap-status, character-registration-reconcile, character-roster-review-draft, character-roster-audit, cast-readiness, story-review-draft, story-audit, location-plan, location-generate, location-import, location-anchor-review-draft, location-anchor-audit, location-review-draft, location-register, thumbnail-plan-draft, thumbnail-audit, handoff-export, handoff-verify, handoff-restore, voice-audition, voice-approve, plan, images, character-review-refresh, character-candidate-migrate-blind, character-candidate-import, character-style-generate, character-style-import, character-style-review-refresh, character-style-record-failure, character-style-compose, character-style-select, character-attribute-gate, character-approve, character-identity-refresh, character-identity-repair, character-identity-repack, character-register, prepare, speech, video-substitute, adjust-gap, standard-cut, repair-onset, repair-tail, sync-contract, refresh-bubbles, render, audit, reviewer-key-create, signoff, full, status",
     "common: --project-dir DIR --episode-id ID --script-path FILE --title TITLE --protagonist-speaker-id ID_OR_EXACT_NAME --character-bible-path JSON [--story-review-path JSON] [--source-face-review-path JSON] [--generator-host codex|claude|legacy-migration] [--generator-id ID] [--generator-context-id TASK_OR_SESSION_ID] [--retry-failed] [--image-concurrency N|auto] [--qa-concurrency N] [--speech-concurrency N|auto] [--image-fallback-model MODEL] [--qa-fallback-provider grok]",
     "wardrobe-readiness: --episode-id ID [--script-path FILE] [--wardrobe-review-path JSON] (free script-driven outfit gate; writes canvas/assets/<episode-id>/wardrobe-readiness.json. exit 0 = every checked character has an outfit for every scene, exit 2 = pending slots. images/full refuse to start without a passing report for the exact script)",
+    "audit: [--video-path MP4] [--revision-delta TEXT] (final audit; from the 2nd quality-loop round on, pass what was fixed for the previous failure, or write audits/koya-final/revision-delta.json; without it the audit stops for a human instead of recording the round)",
     "story-audit: --script-path FILE --story-review-path JSON --protagonist-speaker-id ID_OR_EXACT_NAME (read-only; binds reversal beats and human policy checks to the exact script SHA-256)",
     "story-review-draft: --script-path FILE [--protagonist-speaker-id ID_OR_EXACT_NAME] (read-only; prints exact utterance inventory with all subjective fields unset and machine-suggested eyeOpenBeats to confirm)",
     "cast-readiness: --script-path FILE [--character-bible-path JSON] (read-only; blocks episode-local replacements for unregistered Koya fixed cast and checks required identity roles)",
@@ -330,6 +331,8 @@ async function auditOptions() {
     quick: args.quick === true,
     dryRun: args.dryRun === true,
     reviewerTrustPath: typeof args.reviewerTrustPath === "string" ? resolve(args.reviewerTrustPath) : "",
+    // 品質ループの2回目以降で、前回の失敗をどう直したか。無ければ audit は人待ちで止まる。
+    revisionDelta: typeof args.revisionDelta === "string" ? args.revisionDelta : "",
   };
 }
 
