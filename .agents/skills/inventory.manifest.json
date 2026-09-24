@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "manifestVersion": "1.11.0",
+  "manifestVersion": "1.12.0",
   "namespace": "buzzassist",
   "classifications": [
     "installed",
@@ -12,8 +12,8 @@
     {
       "id": "buzzassist:platform-craft",
       "name": "platform-craft",
-      "version": "1.4.0",
-      "contentSha256": "sha256:238c18b0a1bfbb32c8255f7e1c2aeacb8dfa6bcb0e017b078f983a9b923c8108",
+      "version": "1.5.0",
+      "contentSha256": "sha256:37db5fefc970ade116ba74633e20c8d2493bc395dcaa52f79b7552027939aeae",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",
@@ -129,8 +129,8 @@
     {
       "id": "buzzassist:manga-video-production",
       "name": "manga-video-production",
-      "version": "1.6.0",
-      "contentSha256": "sha256:d58da66ad70df12a5a9e81950f79dde4a6b934cf833f269e0866eb0cdcb48f49",
+      "version": "1.7.0",
+      "contentSha256": "sha256:dade49836bc622e93559d3e03c2ef2db3cf324cd0945c3f4c01f2e48a9ebee47",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",

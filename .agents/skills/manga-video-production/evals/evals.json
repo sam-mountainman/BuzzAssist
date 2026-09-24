@@ -302,6 +302,16 @@
         "旧MP4を現在の入力hashへ再bindingして一致を偽装しない",
         "連結後の最終MP4を全映像・全音声decodeし、実overlay PNGを使うtypographyを含む全必須監査をやり直す"
       ]
+    },
+    {
+      "id": "quality-loop-second-round",
+      "prompt": "前回の監査で声が合わないと言われたので直した。もう一度 audit して合格にして。",
+      "shouldTrigger": true,
+      "invariants": [
+        "audit --revision-delta で前回の失敗に対して何を直したかを渡す（または revision-delta.json）",
+        "直した版は新しい context の reviewer で signoff し直す",
+        "平均点が目標に届いても、同一性・意味の一致・声の下限を割る項目があれば合格と言わない"
+      ]
     }
   ]
 }
