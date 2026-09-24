@@ -489,6 +489,43 @@ test("fresh upstream doctor evidence skips the duplicate doctor only for the exa
   }
 });
 
+test("a long paid stage does not make fresh upstream doctor evidence stale for the next stage in the same process", async () => {
+  // 各有料工程が Date.now() で鮮度を測り直していたので、画像工程（実測 13〜16 時間）の
+  // 直後の音声工程で必ず「doctor が古い」と落ちた。同じプロセス・同じ binding なら、
+  // 最初に検証した時刻を基準にする。新しいプロセスや新しい binding は初回として測る。
+  const projectDir = await mkdtemp(join(tmpdir(), "koya-upstream-anchor-"));
+  try {
+    const fixture = await createUpstreamPreflightFixture(projectDir);
+    const sixteenHours = 16 * 60 * 60_000;
+    const anchors = new Map();
+    const runtime = (nowMs, extra = {}) => ({
+      ...fixture.runtime,
+      now: () => nowMs,
+      verifyJobIdentity: async () => true,
+      runDoctor: async () => { throw new Error("verified upstream must not rerun doctor"); },
+      preflightAnchors: anchors,
+      ...extra,
+    });
+    const first = await assertKoyaFullPreflight(fixture.options(), runtime(fixture.nowMs));
+    assert.equal(first.mode, "verified-common-job");
+    const afterImages = await assertKoyaFullPreflight(fixture.options(), runtime(fixture.nowMs + sixteenHours));
+    assert.equal(afterImages.mode, "verified-common-job", "同じプロセスの次の工程を、時間が経っただけで止めないこと");
+    assert.equal(afterImages.jobRevision, first.jobRevision);
+    // 別のプロセス（最初の検証を知らない）では、16 時間前の doctor は古いまま。
+    await assert.rejects(
+      () => assertKoyaFullPreflight(fixture.options(), runtime(fixture.nowMs + sixteenHours, { preflightAnchors: new Map() })),
+      /stale/iu,
+    );
+    // 外側の Job が doctor を走らせ直せば binding が変わり、新しい初回として通る。
+    fixture.job.stages[0].finishedAt = new Date(fixture.nowMs + sixteenHours - 1_000).toISOString();
+    await fixture.write();
+    const refreshed = await assertKoyaFullPreflight(fixture.options(), runtime(fixture.nowMs + sixteenHours, { preflightAnchors: new Map() }));
+    assert.equal(refreshed.mode, "verified-common-job");
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});
+
 test("verified outer Job identity is propagated unchanged to every Koya full stage", async () => {
   const projectDir = await mkdtemp(join(tmpdir(), "koya-outer-job-propagation-"));
   try {
