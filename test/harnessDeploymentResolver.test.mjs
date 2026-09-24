@@ -56,3 +56,27 @@ test("operator map wins, while shell syntax and root escapes fail closed", async
   }
 });
 
+
+test("setup creates the operator deployment map from the example once and never overwrites it", async () => {
+  const { ensureOperatorDeploymentMap } = await import("../lib/harnessDeploymentResolver.mjs");
+  const { readFile } = await import("node:fs/promises");
+  const root = await mkdtemp(join(tmpdir(), "harness-deployment-ensure-"));
+  try {
+    assert.equal(ensureOperatorDeploymentMap({ repoRoot: root }).reason, "example-missing");
+    await mkdir(join(root, "config"), { recursive: true });
+    const example = `${JSON.stringify({ deployments: [{ harnessId: "narrated-story-video", root: ".", entrypoint: "node scripts/narrated-story-video.mjs" }] })}\n`;
+    await writeFile(join(root, "config", "harness-deployments.example.json"), example);
+    assert.equal(ensureOperatorDeploymentMap({ repoRoot: root, dryRun: true }).reason, "dry-run");
+    const created = ensureOperatorDeploymentMap({ repoRoot: root });
+    assert.equal(created.created, true);
+    assert.equal(await readFile(join(root, "config", "harness-deployments.json"), "utf8"), example);
+    const operator = `${JSON.stringify({ deployments: [{ harnessId: "narrated-story-video", root: "/srv/elsewhere", entrypoint: "node run.mjs" }] })}\n`;
+    await writeFile(join(root, "config", "harness-deployments.json"), operator);
+    const again = ensureOperatorDeploymentMap({ repoRoot: root });
+    assert.equal(again.created, false);
+    assert.equal(again.reason, "exists");
+    assert.equal(await readFile(join(root, "config", "harness-deployments.json"), "utf8"), operator, "operator map must not be overwritten");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

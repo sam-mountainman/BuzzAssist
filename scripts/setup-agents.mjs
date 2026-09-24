@@ -390,6 +390,22 @@ async function ensureWidgetBuild() {
   await runNpm(["run", "build:widget"], { inherit: true });
 }
 
+// 運営者の配置表（追跡外）が無ければ例から作る。上書きはしない。作ったことは必ず出す。
+async function ensureDeploymentMap() {
+  const { ensureOperatorDeploymentMap } = await import("../lib/harnessDeploymentResolver.mjs");
+  const result = ensureOperatorDeploymentMap({ repoRoot, dryRun });
+  if (result.created) {
+    console.log(`Created ${result.path} from harness-deployments.example.json (root "." = this checkout). Edit it if a harness is deployed elsewhere.`);
+    console.log("BUZZASSIST_HARNESS_DEPLOYMENTS=created-from-example");
+  } else if (result.reason === "dry-run") {
+    console.log(`Would create ${result.path} from harness-deployments.example.json.`);
+  } else if (result.reason === "exists") {
+    console.log("BUZZASSIST_HARNESS_DEPLOYMENTS=operator-map");
+  } else {
+    console.log("BUZZASSIST_HARNESS_DEPLOYMENTS=missing");
+  }
+}
+
 // このプラグインは PUBLIC な配布物なので、特定チャンネルの番組設定・
 // キャスト・承認記録を同梱しない。ジャンル共通の契約とスキルだけを配る。
 // 以前は config/ を丸ごとコピーしており、show bible と character styling が
@@ -1368,6 +1384,7 @@ export async function runSetupAgents() {
   await ensureDependencies();
   await ensureBuild();
   await ensureWidgetBuild();
+  await ensureDeploymentMap();
 
   // ホストの設定が済んだことと、ハーネスが動かせることは別。ここを区別せずに
   // 「configured」だけ出していたので、運営者が最初の本番を回したときに
