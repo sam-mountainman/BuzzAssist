@@ -1718,8 +1718,10 @@ test("フルラン錠が取れないときは failed でなく人待ち（exit 3
   // Job の project dir は job.json の場所から resolve で導く。Windows では
   // ドライブ文字と \ が付くので、期待値も同じ関数で作る。
   const expectedJobProjectDir = resolve(dirname(resolve("/Users/x/proj/canvas/harness-runs/video-koya-manga-video-0123456789abcdef/job.json")), "..", "..", "..");
+  // 案内はシェル用に引用符を付けることがある（Windows のドライブ文字と \ など）。
+  // 引用符を外して、path の中身だけを比べる。
   assert.equal(
-    paused.payload.next.at(-1).trim(),
+    paused.payload.next.at(-1).trim().replace(/['"]/gu, ""),
     `node scripts/run-video-harness.mjs resume --job-id video-koya-manga-video-0123456789abcdef --project-dir ${expectedJobProjectDir} --confirmed`,
     "job.json の場所から Job の project dir を導いて、次に打つコマンドを全文で出す",
   );
