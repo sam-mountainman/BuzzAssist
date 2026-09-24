@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "skill": "excalidraw-subtitle-gen",
+  "cases": [
+    {
+      "id": "scripted-subtitles",
+      "prompt": "このナレーション音声と台本から字幕を作って、キャンバスに置いて。",
+      "shouldTrigger": true,
+      "invariants": [
+        "`buzzassist_auth_status`で認証を確かめ、未ログインなら`buzzassist_login`を使う",
+        "行数・最大文字数が未指定ならAskUserQuestionで確認してから`confirmedSettings: true`で呼ぶ",
+        "台本ありなので`scriptText`か`scriptPath`を渡すscriptedモードにする",
+        "現在のworkspace rootを`projectDir`に渡し、`cueCount`・`credits`・アセットパスを報告する"
+      ]
+    },
+    {
+      "id": "after-silence-cut",
+      "prompt": "無音カットもしたいし、テロップも付けたい。",
+      "shouldTrigger": true,
+      "invariants": [
+        "先に無音カットを行い、カット後の動画/音声からSRTを作る",
+        "逆順にするとタイムコードがズレると伝える"
+      ]
+    },
+    {
+      "id": "high-quality-breaks",
+      "prompt": "字幕の改行位置をできるだけ自然にして。",
+      "shouldTrigger": true,
+      "invariants": [
+        "`returnWordsOnly: true`で単語タイミングを受け取り、文節の境目で区切った`subtitleLines`で2回目を呼ぶ",
+        "2回目の呼び出しにも`confirmedSettings: true`を付け、各キューのstart/endは単語のタイミングのまま保つ"
+      ]
+    },
+    {
+      "id": "silence-cut-only",
+      "prompt": "このPremiereのXMLの無音部分をカットして。",
+      "shouldTrigger": false,
+      "invariants": [
+        "字幕ではなく無音カットの依頼なので excalidraw-silence-cut に任せる"
+      ]
+    }
+  ]
+}

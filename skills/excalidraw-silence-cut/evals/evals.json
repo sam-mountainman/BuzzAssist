@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "skill": "excalidraw-silence-cut",
+  "cases": [
+    {
+      "id": "premiere-xml-jet-cut",
+      "prompt": "このPremiereのXMLをジェットカットして。",
+      "shouldTrigger": true,
+      "invariants": [
+        "モデルとフィラー・咳・言い直しの削除強度が未指定ならAskUserQuestionで確認してから`confirmedSettings: true`で本実行する",
+        "出力はPremiere XMLだけで、書き出し済みの動画を約束しない",
+        "現在のworkspace rootを`projectDir`に渡し、カット前後の長さとXMLのファイル名を報告する"
+      ]
+    },
+    {
+      "id": "offline-cut",
+      "prompt": "ネットにつながない環境で、動画の無音カットをしたい。",
+      "shouldTrigger": true,
+      "invariants": [
+        "完全ローカルの希望なので`ffmpeg-local`を使う",
+        "`ffmpeg`と`ffprobe`がPATH上にあるか、`FFMPEG_PATH` / `FFPROBE_PATH`を確かめる"
+      ]
+    },
+    {
+      "id": "no-silence-detected",
+      "prompt": "無音カットしたら「検出できる無音がない」って出た。適当に設定を変えてやり直して。",
+      "shouldTrigger": true,
+      "invariants": [
+        "パラメーターを当てずっぽうに変えて再試行せず、ツールのメッセージを伝える",
+        "`audioFadeSeconds`を足さない"
+      ]
+    },
+    {
+      "id": "subtitles-only",
+      "prompt": "この音声から字幕のSRTを作って。",
+      "shouldTrigger": false,
+      "invariants": [
+        "無音カットではなく字幕の依頼なので excalidraw-subtitle-gen に任せる"
+      ]
+    }
+  ]
+}

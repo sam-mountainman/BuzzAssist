@@ -1,35 +1,38 @@
 ---
 name: excalidraw-silence-cut
-description: Create a non-destructive Premiere Pro XML (FCP7 xmeml) that removes silences from a Premiere XML or local video. Use when the user asks for 無音カット, ジェットカット, silence cut, tempo cut, or XML cut-plan output.
+description: Premiere XML またはローカルの動画から無音部分を取り除く、非破壊の Premiere Pro XML（FCP7 xmeml）を作る。「無音カットして」「ジェットカットして」「間を詰めて」「テンポよくカットして」「カット用のXMLがほしい」など、無音カット・ジェットカット・silence cut・tempo cut・XML のカットプラン出力を求められたときに使う。
 ---
 
-# Excalidraw Silence Cut
+# Excalidraw 無音カット
 
-Use this skill when the user wants a silence-cut edit plan. The output is **Premiere XML only** under `canvas/assets/`; it is also inserted on the canvas as an SRT-style selectable text preview with line numbers, scrolling, download, and chat attachment actions. Do not promise a rendered video or a video media element.
+ユーザーが無音カットの編集プランを求めたときに使う。出力は `canvas/assets/` に置く
+**Premiere XML だけ**。キャンバスにも、行番号・スクロール・ダウンロード・チャット添付の
+操作を持つ、SRT 風の選択できるテキストプレビューとして挿入される。書き出し済みの動画や
+動画メディア要素ができるとは約束しない。
 
-## Preconditions
+## 前提
 
-- Resolve the current Codex/Claude Code task's workspace root and pass it as
-  `projectDir` to every BuzzAssist tool call. Never write into the plugin cache,
-  BuzzAssist source repository, or a project remembered at install time. Call
-  `open_buzzassist_canvas({ projectDir })` first when the current project's
-  canvas is not open.
-- `ffmpeg` and `ffprobe` must be available on PATH (or set `FFMPEG_PATH` / `FFPROBE_PATH`).
-- Default/recommended model is `elevenlabs-scribe-v2` via BuzzAssist login. Use `ffmpeg-local` only when the user wants a fully local/offline threshold cut.
+- 現在（current）の Codex / Claude Code タスクのワークスペースルートを特定し、すべての
+  BuzzAssist ツール呼び出しへ `projectDir` として渡す。plugin cache、BuzzAssist の
+  ソースリポジトリ、インストール時に記憶したプロジェクトへは書き込まない。現在の
+  プロジェクトのキャンバスが開いていなければ、先に `open_buzzassist_canvas({ projectDir })`
+  を呼ぶ。
+- `ffmpeg` と `ffprobe` が PATH 上にあること（または `FFMPEG_PATH` / `FFPROBE_PATH` を設定する）。
+- 既定かつ推奨のモデルは、BuzzAssist ログイン経由の `elevenlabs-scribe-v2`。`ffmpeg-local` は、ユーザーが完全にローカル／オフラインのしきい値カットを望むときだけ使う。
 
 ## 生成前の確認（必須）
 
-`silence_cut_excalidraw_video` は `confirmedSettings: true` なしの本実行を拒否します（`dryRun: true` のカットプラン確認は例外で常に可）。ユーザーのメッセージで全設定が明示されていない限り、本実行前に AskUserQuestion を1回だけ出して確認してください:
+`silence_cut_excalidraw_video` は `confirmedSettings: true` なしの本実行を拒否する（`dryRun: true` のカットプラン確認は例外で常に可）。ユーザーのメッセージで全設定が明示されていない限り、本実行前に AskUserQuestion を1回だけ出して確認する。
 
 - 入力: Premiere XML（推奨）または動画
 - モデル: `elevenlabs-scribe-v2`（推奨）または `ffmpeg-local`
 - Scribe の場合: フィラー・咳・言い直しの削除強度（0/30/60/90、既定は 40/0/0）
 
-確認できたら `confirmedSettings: true` を付けて呼び出します。
+確認できたら `confirmedSettings: true` を付けて呼び出す。
 
-## Workflow
+## 手順
 
-1. Call the plugin `silence_cut_excalidraw_video` tool:
+1. plugin の `silence_cut_excalidraw_video` ツールを呼ぶ。
 
 ```json
 {
@@ -48,21 +51,24 @@ Use this skill when the user wants a silence-cut edit plan. The output is **Prem
 }
 ```
 
-2. The tool outputs a `.xml` file in `canvas/assets/`, inserts an SRT-style line-numbered XML preview on the canvas, and returns `assetUrl`, `elementId`, `inputDuration`, `outputDuration`, `cutDuration`, `cutCount`, and `clipCount`.
-3. Report the before/after durations and the XML filename. Tell the user to import the XML into Premiere Pro as the cut-applied sequence.
+2. ツールは `.xml` ファイルを `canvas/assets/` に出力し、行番号付きの SRT 風 XML プレビューを
+   キャンバスへ挿入して、`assetUrl`、`elementId`、`inputDuration`、`outputDuration`、
+   `cutDuration`、`cutCount`、`clipCount` を返す。
+3. カット前後の長さと XML のファイル名を報告する。XML をカット適用済みのシーケンスとして
+   Premiere Pro へ読み込むよう、ユーザーに伝える。
 
-## Precision Notes
+## 精度についての補足
 
-- XML input is preferred because cuts are applied back onto existing timeline clips non-destructively.
-- `thresholdDb: "auto"` measures the media noise floor and uses noise floor + 6dB for ffmpeg-local detection.
-- ffmpeg-local analyzes a speech-focused temporary audio track with highpass/noise reduction, while leaving source media untouched.
-- Scribe mode uses word timestamps, keeps breath-like pauses, leaves longer pauses after sentence endings, and can remove fillers/coughs/retakes.
+- XML 入力を優先する。既存のタイムラインのクリップへ、非破壊でカットを適用し直せるため。
+- `thresholdDb: "auto"` はメディアのノイズフロアを測り、ffmpeg-local の検出にはノイズフロア + 6dB を使う。
+- ffmpeg-local は、highpass・ノイズ除去をかけた発話向けの一時音声トラックを解析する。元のメディアには手を加えない。
+- Scribe モードは単語のタイムスタンプを使い、息継ぎ程度の間は残し、文末の後には長めの間を残す。フィラー・咳・言い直しも取り除ける。
 
 ## SRTと併用するときの順序
 
-字幕も付ける場合は**先に無音カットXMLを作る → Premiereで適用/書き出し → カット後の音声から `generate_excalidraw_subtitles` でSRT生成**。逆順だとカットした分だけ字幕の全タイムコードがズレます。
+字幕も付ける場合は**先に無音カットXMLを作る → Premiereで適用/書き出し → カット後の音声から `generate_excalidraw_subtitles` でSRT生成**。逆順だとカットした分だけ字幕の全タイムコードがズレる。
 
-## Guardrails
+## 守ること
 
-- If the tool reports no detectable silence or near-total silence, relay the message instead of retrying with random parameters.
-- Do not add `audioFadeSeconds`; XML output has no rendered audio crossfade.
+- 検出できる無音が無い、またはほぼ全体が無音だとツールが報告したら、パラメーターを当てずっぽうに変えて再試行せず、そのメッセージを伝える。
+- `audioFadeSeconds` は付けない。XML 出力には、書き出した音声のクロスフェードが存在しないため。
