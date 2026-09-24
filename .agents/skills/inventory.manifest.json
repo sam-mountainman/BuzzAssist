@@ -12,8 +12,8 @@
     {
       "id": "buzzassist:platform-craft",
       "name": "platform-craft",
-      "version": "1.3.1",
-      "contentSha256": "sha256:ab9578bb1d4775a5a45b790e0b51a85fa576244a07a4f40041067743f01b0306",
+      "version": "1.4.0",
+      "contentSha256": "sha256:238c18b0a1bfbb32c8255f7e1c2aeacb8dfa6bcb0e017b078f983a9b923c8108",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",
@@ -207,8 +207,8 @@
     {
       "id": "buzzassist:narrated-story-video",
       "name": "narrated-story-video",
-      "version": "1.2.3",
-      "contentSha256": "sha256:9dca2e6cd22484bb958e912886b0d6c9db6bdb45182cbf8e7b0d8271ddeef439",
+      "version": "1.3.0",
+      "contentSha256": "sha256:dc25e398fd0bbb234858d87f1d567734294e497f5b9e679637c9906d10a8f05f",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",

@@ -53,6 +53,16 @@
         "learned-auto と SKILL.md が矛盾したら SKILL.md を優先する",
         "learned-auto の内容を監査・承認・合否の証跡として扱わない"
       ]
+    },
+    {
+      "id": "ffmpeg-readback-pitfalls",
+      "prompt": "字幕を焼いた MP4 で最後の字幕が出ない。転換も砂嵐になる。直して。",
+      "shouldTrigger": true,
+      "invariants": [
+        "字幕の終わりの時刻を切り捨てて動画の長さを越えないようにする",
+        "xfade の custom 式で状態変数を使うならその描画を1スレッドにする",
+        "完成 MP4 を読み戻して確かめ、生成側の記録を根拠にしない"
+      ]
     }
   ]
 }

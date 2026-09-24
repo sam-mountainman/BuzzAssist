@@ -39,6 +39,17 @@
         "learned-auto の内容を監査・承認・合否の証跡として扱わない",
         "再開は上位入口の run-video-harness resume から行う"
       ]
+    },
+    {
+      "id": "bookends-review-part",
+      "prompt": "OPと感想パートつきで1本作って。感想の「実は私も…」のところはいい感じに書いといて。",
+      "shouldTrigger": true,
+      "invariants": [
+        "OP・感想・転換は Channel Pack の bookends で宣言する",
+        "決まっていない曲や人物素材は Pack の blockers に書き、埋めない",
+        "一人称の体験談を生成して本人の体験として出さず、[[operator-replace]] を残して運営者の差し替えを待つ",
+        "--confirmed の前に preflight.blockers を読む"
+      ]
     }
   ]
 }

@@ -27,6 +27,9 @@ Fish Audio、ElevenLabs、字幕、retime、finalize用scriptを手で順番に�
 旧版・benchmark・archiveは本番Jobから呼ばない。
 
 `--confirmed`が無いstartはdurable Jobを作るだけで、有料Media Jobを発行しない。
+そのとき返る`preflight.blockers`は、台本とChannel Packを読むだけで分かる「有料生成の前に
+止まる理由」の一覧。`--confirmed`へ進む前に必ず読み、空でなければ運営者へまとめて示す。
+そのままresumeしても、有料生成の手前で同じ理由で止まる。
 共通Serviceが配備内で呼ぶ公開Coreは`node scripts/narrated-story-video.mjs full`だが、
 これはdeployment entrypointであって運営者が上位Jobを迂回する入口ではない。
 
@@ -48,6 +51,31 @@ Fish Audio、ElevenLabs、字幕、retime、finalize用scriptを手で順番に�
 6. temp MP4を生成し、全デコード、音量、音声とBGMの分離、尺、字幕、フレーム連続性を実測する。
 7. contact sheetを生成し、生成contextとは独立したreviewerのSHA拘束付き確認を待つ。
 8. 全gateがpassし`knownRemainingIssues`が空のときだけfinalへrenameし、RunReceiptとCanvas Runを確定する。
+
+## OP・本編・感想（bookends）
+
+番組の頭のOP、本編、あとの感想パートという構造は、Channel Packの`narrated-story.json`の
+`bookends`で宣言する。公開Coreは構造・汎用の転換・境目の監査だけを持ち、OPの文言・色・秒数・
+曲・人物素材などチャンネル固有の値は1つも持たない。足りなければ有料生成の前にblockerで止まる。
+
+- `opening`: `title-card`（文言・書体・背景・音はPack内のファイル）か、Pack内の`video`
+- `review`: 台本の区切り行（`scriptMarker`）、人物素材（`presenter`。必須と宣言して無ければ停止）、
+  感想用の曲
+- `transitions.openingToStory` / `transitions.storyToReview`: `hard-cut`、`fade-through-black`、
+  `film-burn` のどれかと、秒数、字幕なしの間（lead-in）。film-burnは外部素材なしで手続き的に描く
+- 境目では、字幕なしのlead-inのあとに語りと字幕が同時に始まり、BGMは境目を通して鳴り続ける
+- Packで決まっていないこと（未受領の曲、権利根拠の無い声、未提供の人物素材など）は、埋めずに
+  Packの`blockers`配列へ書く。Jobは有料生成の前に`awaiting-operator-input`で止まる
+
+感想パートの一人称の体験談は、生成した文を本人の体験として出さない。台本に
+`[[operator-replace]]`（Packが追加の印を宣言してもよい）が残っていれば有料生成へ進まず、
+最終監査の`operatorReplacementCleared`でも止まる。運営者が本人の体験へ差し替えてから進める。
+
+境目の監査（`audioBoundaryBreathV16`、`bookendTransitionMeasured`、監査v2）は、完成MP4の
+音声・映像フレーム・字幕と、MP4へ入れたvoice stemを実際にデコードして測る。語り末尾が
+切れていないこと、宣言した区間に転換が実在すること、転換中に字幕が無いこと、音の二重化や
+クリップが無いことを見る。閾値は基準版と壊した版を同じ測定にかけて決めてある
+（根拠は`lib/narratedStoryBookends.mjs`の各定数）。生成側の「こう作った」を根拠にpassにしない。
 
 ## 並列実行
 
