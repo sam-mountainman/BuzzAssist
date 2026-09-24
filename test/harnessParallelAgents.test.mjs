@@ -111,7 +111,9 @@ test("read-only を要求したら、保証できないエンジンは選ばな�
   assert.equal(probed, 1, "codex だけをプローブし、claude は起動しないこと");
 });
 
-test("起動する子エージェントには、学習を書かない印を環境変数で渡す", { skip: process.platform === "win32" }, async () => {
+test("起動する子エージェントには、学習を書かない印を環境変数で渡す", {
+  skip: process.platform === "win32" ? "Windows では shebang の偽 CLI を直接起動できない（印の付与は harnessLearningGuard の単体試験が全 OS で見る）" : false,
+}, async () => {
   // 子が並列に capture / sync すると同じ台帳の取り合いになり、同じ観測が子の数だけ
   // 別の回数として数えられる。子は結果本文で親へ返す。
   const dir = mkdtempSync(join(tmpdir(), "parallel-agent-env-"));

@@ -155,7 +155,9 @@ test("両ホストのフック定義は UserPromptSubmit だけで、plugin.json
   assert.ok(readJson("package.json").files.includes("hooks/"), "npm の配布物にフック定義が入らない");
 });
 
-test("実際のフック起動行を、plugin root を与えたシェルで動かせる", { skip: process.platform === "win32" }, () => {
+test("実際のフック起動行を、plugin root を与えたシェルで動かせる", () => {
+  // ホストはフックの起動行を OS のシェルへ渡す（Windows は cmd.exe、それ以外は /bin/sh）。
+  // 同じ起動行がどちらのシェルでも動くことを、spawnSync の shell: true で確かめる。
   const input = JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt: "それは違う、前にも伝えた" });
   const env = { ...process.env, [HOOK_EVENT_LOG_ENV]: "off" };
   // Claude Code は ${CLAUDE_PLUGIN_ROOT} を読み込み時に置き換えてからシェルへ渡す。
@@ -163,12 +165,12 @@ test("実際のフック起動行を、plugin root を与えたシェルで動�
   // Codex は PLUGIN_ROOT を環境変数で渡す（起動行は node -e がシェルに依らず解決する）。
   const codex = readJson("hooks/codex-hooks.json").hooks.UserPromptSubmit[0].hooks[0].command;
   for (const [label, command, extraEnv] of [["claude", claude, {}], ["codex", codex, { PLUGIN_ROOT: ROOT }]]) {
-    const result = spawnSync("/bin/sh", ["-c", command], { cwd: tmpdir(), input, env: { ...env, ...extraEnv }, encoding: "utf8", timeout: 20_000 });
+    const result = spawnSync(command, { shell: true, cwd: tmpdir(), input, env: { ...env, ...extraEnv }, encoding: "utf8", timeout: 20_000 });
     assert.equal(result.status, 0, `${label}: ${result.stderr}`);
     assert.match(JSON.parse(result.stdout).hookSpecificOutput.additionalContext, /harness-self-improvement/u, label);
   }
   // plugin root が渡らなくても、入力は止めない（何も出さずに exit 0）。
-  const missing = spawnSync("/bin/sh", ["-c", codex], { cwd: tmpdir(), input, env: { ...env, PLUGIN_ROOT: "", CLAUDE_PLUGIN_ROOT: "" }, encoding: "utf8", timeout: 20_000 });
+  const missing = spawnSync(codex, { shell: true, cwd: tmpdir(), input, env: { ...env, PLUGIN_ROOT: "", CLAUDE_PLUGIN_ROOT: "" }, encoding: "utf8", timeout: 20_000 });
   assert.equal(missing.status, 0);
   assert.equal(missing.stdout, "");
 });

@@ -5,49 +5,77 @@
       "name": "語が引けないことを「問題なし」と報告しない",
       "reason": "channel pack が無い環境",
       "category": "private-channel-pack",
-      "platforms": ["linux", "darwin", "win32"],
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
       "justification": "公開cloneには運営者固有の禁止語を含むChannel Packを同梱しない。合成packの検出試験は別に必ず走る。"
     },
     {
       "name": "運営者へ渡す経路が、契約を持たないプロジェクトで端から端まで通る",
       "reason": "channel pack が無い環境（配る中身が無い）",
       "category": "private-channel-pack",
-      "platforms": ["linux", "darwin", "win32"],
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
       "justification": "実Channel Packのexport/restore試験だけは私有packを要する。pack無しの配布経路は別の合成fixtureで検査する。"
     },
     {
       "name": "実在する過去の監査レポートで、記録とレポートの判定が一致する",
       "reason": "過去の監査レポートが無い環境",
       "category": "external-report",
-      "platforms": ["linux", "darwin", "win32"],
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
       "justification": "公開cloneへ顧客成果物を同梱しない。RunReceiptと合成監査レポートの対応試験は別に必ず走る。"
     },
     {
       "name": "Channel Pack の指紋は解決層と同じ探索順で取る",
       "reason": "channel pack が無い環境",
       "category": "private-channel-pack",
-      "platforms": ["linux", "darwin", "win32"],
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
       "justification": "公開cloneに実Channel Packは無い。探索順と指紋計算は合成packの単体試験で検査する。"
     },
     {
       "name": "Channel Pack が選ばれている限り、キャスト未検出は免除ではなく失敗になる",
       "reason": "channel pack が無い環境",
       "category": "private-channel-pack",
-      "platforms": ["linux", "darwin", "win32"],
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
       "justification": "実キャスト名を含むChannel Packは公開しない。同じfail-closed規則は合成authority fixtureで検査する。"
     },
     {
       "name": "このリポジトリ自身では旧入口が塞がれている",
       "reason": "channel pack が無い環境",
       "category": "private-channel-pack",
-      "platforms": ["linux", "darwin", "win32"],
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
       "justification": "実pack設置時だけのrepository-local確認であり、pack有無の両経路は合成sandbox試験で必ず走る。"
     },
     {
       "name": "wd14 gate separates fang and necklace on real assets",
       "reason": "wd14 model or calibration assets are not present",
       "category": "private-model-fixture",
-      "platforms": ["linux", "darwin", "win32"],
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
       "justification": "WD14重みと運営者画像は公開配布しない。画像属性ゲートの合成fixture試験はPython/OpenCVで必ず走る。"
     },
     {
@@ -55,7 +83,11 @@
       "reasonPrefix": "音声QA環境が無いので順序依存を再現できない（",
       "reasonSuffix": "）",
       "category": "optional-heavy-qa",
-      "platforms": ["linux", "darwin", "win32"],
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
       "justification": "UTMOS/STTを含む重量級音声QA環境はrelease runnerへ同梱しない。利用不可時のfail-closed判定は別のdoctor試験で検査する。"
     },
     {
@@ -63,106 +95,173 @@
       "reasonPrefix": "音声QA環境が無い（",
       "reasonSuffix": " に numpy/soundfile/pyworld/torch/faster_whisper/fugashi と UTMOS キャッシュが要る）",
       "category": "optional-heavy-qa",
-      "platforms": ["linux", "darwin", "win32"],
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
       "justification": "重量級音声QAモデルとキャッシュはrelease runnerへ同梱しない。未利用をpassへ偽装しないことはこのskip理由自体と別の単体試験で拘束する。"
     },
     {
       "name": "bundle同梱鍵を信頼せず、別鍵・別Harness・秘密file・symlinkを拒否する",
       "reason": "Windowsの非管理者symlink fixtureは不安定",
       "category": "platform-limitation",
-      "platforms": ["win32"],
+      "platforms": [
+        "win32"
+      ],
       "justification": "Windows runnerのsymlink作成権限だけを除外する。署名・秘密file・別Harness拒否はskip宣言より前に同じ試験で実行する。"
     },
     {
       "name": "registered character reconciliation promotes only a ready SHA-bound client-approved show member",
       "reason": "channel pack が無い環境",
       "category": "private-channel-pack",
-      "platforms": ["linux", "darwin", "win32"],
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
       "justification": "登録済みキャストと show bible の名前の対応を見る試験で、名前は私有 pack から引く。合成名では「宣言されていない」で落ちるため、実データが要る。"
     },
     {
       "name": "Koya production planning writes a contract snapshot and resumable state without paid calls",
       "reason": "channel pack が無い環境",
       "category": "private-channel-pack",
-      "platforms": ["linux", "darwin", "win32"],
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
       "justification": "本番のプラン生成は、実データ前提の工程に合成 fixture を使わない設計（fixture を読めるのは明言した契約テストだけ）。pack 無しではプラン生成そのものが止まる。"
     },
     {
       "name": "Koya planning refuses to overwrite an episode id owned by another script",
       "reason": "channel pack が無い環境",
       "category": "private-channel-pack",
-      "platforms": ["linux", "darwin", "win32"],
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
       "justification": "同上。プラン生成が私有 pack を要するため、pack 無しの公開 clone では走らない。"
     },
     {
       "name": "Koya location registration requires four SHA-bound, independently reviewed boards",
       "reason": "channel pack が無い環境",
       "category": "private-channel-pack",
-      "platforms": ["linux", "darwin", "win32"],
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
       "justification": "画風参照の画像は私有 pack にだけある。参照が無いとプロンプトに画風参照の指示が出ないため、合成 fixture では検査対象そのものが生じない。"
     },
     {
       "name": "editorial audit measures real image holds and passes the approved benchmark edit",
       "reason": "編集品質の実測監査には運営者の手元にしかない成果物が要る: canvas/manga-videos/manga-photo-homecoming-001/episode-manifest.json",
       "category": "external-report",
-      "platforms": ["linux", "darwin", "win32"],
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
       "justification": "運営者の手元にしかない成果物（ignore された canvas/ や運営者固有の設定）を公開 clone へ同梱しない。判定の仕組みは合成データの試験で別に検査する。"
     },
     {
       "name": "editorial audit rejects contextless inserts and unassigned dialogue",
       "reason": "編集品質の実測監査には運営者の手元にしかない成果物が要る: canvas/manga-videos/manga-photo-homecoming-001/episode-manifest.json",
       "category": "external-report",
-      "platforms": ["linux", "darwin", "win32"],
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
       "justification": "運営者の手元にしかない成果物（ignore された canvas/ や運営者固有の設定）を公開 clone へ同梱しない。判定の仕組みは合成データの試験で別に検査する。"
     },
     {
       "name": "editorial audit rejects conditional split-page lead-ins and image churn",
       "reason": "編集品質の実測監査には運営者の手元にしかない成果物が要る: canvas/manga-videos/manga-photo-homecoming-001/episode-manifest.json",
       "category": "external-report",
-      "platforms": ["linux", "darwin", "win32"],
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
       "justification": "運営者の手元にしかない成果物（ignore された canvas/ や運営者固有の設定）を公開 clone へ同梱しない。判定の仕組みは合成データの試験で別に検査する。"
     },
     {
       "name": "Koya styling rounds must follow every show-bible spec in order with immutable spec bytes",
       "reason": "styling round の順序検証には Channel Pack が要る（channel-packs/<id>/ を配置するか BUZZASSIST_CHANNEL_PACK を指定）",
       "category": "private-channel-pack",
-      "platforms": ["linux", "darwin", "win32"],
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
       "justification": "私有 Channel Pack を公開 clone へ同梱しない。pack 無しで検証できる部分は合成 fixture の試験が別に走る。"
     },
     {
       "name": "Koya MCP doctor and read-only actions use the canonical CLI",
       "reason": "doctor の正本チェックには Channel Pack が要る（channel-packs/<id>/ を配置するか BUZZASSIST_CHANNEL_PACK を指定）",
       "category": "private-channel-pack",
-      "platforms": ["linux", "darwin", "win32"],
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
       "justification": "私有 Channel Pack を公開 clone へ同梱しない。pack 無しで検証できる部分は合成 fixture の試験が別に走る。"
     },
     {
       "name": "Koya MCP doctor refuses an empty recipient until its signed pack is restored locally",
       "reason": "doctor の正本チェックには Channel Pack が要る（channel-packs/<id>/ を配置するか BUZZASSIST_CHANNEL_PACK を指定）",
       "category": "private-channel-pack",
-      "platforms": ["linux", "darwin", "win32"],
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
       "justification": "私有 Channel Pack を公開 clone へ同梱しない。pack 無しで検証できる部分は合成 fixture の試験が別に走る。"
     },
     {
       "name": "Arano's long-form source review inventories the missed cut-07-u04 protagonist head",
       "reason": "原画レビューの棚卸しには運営者の手元にしかない成果物が要る: config/koya-manga-source-face-reviews",
       "category": "external-report",
-      "platforms": ["linux", "darwin", "win32"],
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
       "justification": "運営者の手元にしかない成果物（ignore された canvas/ や運営者固有の設定）を公開 clone へ同梱しない。判定の仕組みは合成データの試験で別に検査する。"
     },
     {
       "name": "Arano's reflected and foreground heads are separate hard source-image inventory",
       "reason": "原画レビューの棚卸しには運営者の手元にしかない成果物が要る: config/koya-manga-source-face-reviews",
       "category": "external-report",
-      "platforms": ["linux", "darwin", "win32"],
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
       "justification": "運営者の手元にしかない成果物（ignore された canvas/ や運営者固有の設定）を公開 clone へ同梱しない。判定の仕組みは合成データの試験で別に検査する。"
     },
     {
       "name": "V4 artwork is preferred over earlier cut assets",
       "reason": "V4 原画の優先選択には運営者の手元にしかない成果物が要る: canvas/manga-videos/manga-photo-homecoming-001/episode-manifest.json",
       "category": "external-report",
-      "platforms": ["linux", "darwin", "win32"],
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
       "justification": "運営者の手元にしかない成果物（ignore された canvas/ や運営者固有の設定）を公開 clone へ同梱しない。判定の仕組みは合成データの試験で別に検査する。"
+    },
+    {
+      "name": "起動する子エージェントには、学習を書かない印を環境変数で渡す",
+      "reason": "Windows では shebang の偽 CLI を直接起動できない（印の付与は harnessLearningGuard の単体試験が全 OS で見る）",
+      "category": "platform-limitation",
+      "platforms": [
+        "win32"
+      ],
+      "justification": "偽のエージェント CLI を shebang の実行ファイルとして起動する試験で、Windows は shebang を解釈しない。子の環境へ印を付ける childAgentEnvironment は test/harnessLearningGuard.test.mjs が全 OS で確かめ、起動側がそれを使うことは macOS と Linux のこの試験が見る。"
     }
   ]
 }
