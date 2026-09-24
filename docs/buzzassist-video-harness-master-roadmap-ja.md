@@ -74,7 +74,8 @@ BuzzAssistを次の3層に固定する。
   crash回復を実装した。RunReceiptは成果物、provider、費用、監査、外部署名へSHA拘束する。
 - Canvas Runと実media投影を実装した。PNG、MP4、WAV、MP3、SRTの有効なfixtureを
   Codex内蔵Browserで実マウントし、画像・動画・音声・字幕の配置、MP4 `readyState=4`、
-  2秒のdecode、console warning/error 0を確認した。standalone Playwrightは不要。
+  2秒のdecode、console warning/error 0を確認した。無人の回帰は Playwright の Chromium で
+  CI（canvas-browser-smoke）と release の gate が実ブラウザーで Canvas を mount して確かめる（2026-09-24 決定）。
 - narrated-story Coreはnetwork禁止fixtureでraw台本→画像/TTS/BGM→実MP4→全decode→
   contact sheet→別context signoff→共通RunReceipt→Canvasまで完走し、中断後に有料素材を
   再生成しないことを実証した。
@@ -262,8 +263,7 @@ BuzzAssistを次の3層に固定する。
 - [ ] `prepare_canvas_attachments`経路を正式なチャット添付経路として維持する
 - [ ] OS GUI自動操作やクリップボードを主要経路にしない
 - [ ] Codexは内蔵Browser、Claudeは利用可能な内蔵Browser/Chrome連携で同じURLを開く
-- [ ] standalone Playwrightは今は追加しない
-- [ ] 無人UI回帰が必要になった時点で、小さいheadless runnerを別途判断する
+- [x] 無人UI回帰は Playwright（devDependency、CI と release の gate だけで使う）。運営者の端末には入れない。Stryker（変異テスト）は導入しない（2026-09-24 決定: lib 全体で 6〜20 時間、Node 20 行列と不整合）
 - [ ] Tunnelは別端末閲覧用と明記し、別端末単独実行と混同しない
 
 完了条件:
@@ -473,7 +473,7 @@ Platform APIとschemaをWave 1で凍結してから開始する。
 - `yt-quality-loop`の本番統合
 - Analytics系の制作Job接続
 - Hermes Agentの丸ごと導入
-- standalone Playwright
+- Stryker などの重い変異テスト基盤
 - 重いworkflow orchestratorの先行導入
 - providerを増やすだけの新Plugin
 - 正式Harnessが呼ばないRemotion/HyperFrames/RunPodのOperator profile常駐
