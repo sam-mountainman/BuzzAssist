@@ -18,6 +18,13 @@ import {
 import { runNarratedStoryVideo } from "../lib/narratedStoryVideo.mjs";
 import { createReviewerTrustEntry, generateReviewerKeyPair } from "../lib/koyaReviewAttestation.mjs";
 
+// この試験は Job の仕組み（再開・取消・Canvas 投影・Receipt）を、リポジトリの実際の
+// 宣言とスキルの上で確かめる。スキルの人の承認は人の手番で、正本を直した直後は必ず
+// 古くなるので、ここでは承認の要求を外す（子プロセスにも引き継がれる）。承認ゲート
+// 自体は test/videoHarnessProductionProfile.test.mjs が、公開前の承認は Release の
+// skills:check:release が見る。
+process.env.BUZZASSIST_REQUIRE_SKILL_APPROVAL = "0";
+
 const harnesses = [
   { id: "manga", keywords: ["漫画"], produces: { kind: "manga-video" } },
   { id: "story", keywords: ["物語"], produces: { kind: "narrated-story-video" } },

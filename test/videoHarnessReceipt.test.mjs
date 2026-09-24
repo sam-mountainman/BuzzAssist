@@ -41,6 +41,12 @@ import {
   resolvedProductionContractSha256,
 } from "../lib/videoHarnessExecutionIdentity.mjs";
 
+// 完走の試験は Job の仕組み（Receipt・Canvas・再開で二重課金しない）を、リポジトリの実際の
+// 宣言とスキルの上で確かめる。スキルの人の承認は人の手番で、正本を直した直後は必ず古く
+// なるので、ここでは承認の要求を外す（子プロセスにも引き継がれる）。承認ゲート自体は
+// test/videoHarnessProductionProfile.test.mjs が、公開前の承認は Release の skills:check:release が見る。
+process.env.BUZZASSIST_REQUIRE_SKILL_APPROVAL = "0";
+
 // Koya signoff の reviewer 鍵。信頼リストは生成プロセスとは別経路（環境変数）で
 // Receipt 側へ渡す。runVideoHarnessJob 経由の e2e は process.env を読むので、
 // この file の全 test に対して inline JSON で設定する（node --test は file ごとに別 process）。
