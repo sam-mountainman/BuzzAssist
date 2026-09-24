@@ -86,6 +86,7 @@ test("ハーネスが束縛するスキルが古いホストがあれば止め�
   await installClaude(home, "0.1.9", { skill: "古い指示\n" });
   await installCodex(home, "0.2.0");
   const verdict = probeHostSkillSync({ repoRoot: repo, homeDir: home, declaration: DECLARATION });
+  assert.equal(verdict.developmentCheckout, false, "合成のリポジトリは .git もアダプターも持たない＝運営者の端末と同じ扱い");
   assert.equal(verdict.ok, false);
   assert.equal(verdict.required, true, "束縛スキルのずれは本番を止めること");
   assert.deepEqual(verdict.blockingSkills, ["alpha"]);
@@ -111,5 +112,19 @@ test("束縛外のスキルのずれと、ハーネス未指定の確認では�
   assert.equal(bound.required, false, "束縛外のずれで本番を止めない");
   const setupOnly = probeHostSkillSync({ repoRoot: repo, homeDir: home });
   assert.equal(setupOnly.required, false);
+  await rm(base, { recursive: true, force: true });
+});
+
+test("開発用チェックアウトではアダプターが正本を直接読むので、ずれは知らせるだけで止めない", async () => {
+  const { base, repo, home } = await fixture();
+  await mkdir(join(repo, ".git"), { recursive: true });
+  await mkdir(join(repo, ".claude", "skills"), { recursive: true });
+  await mkdir(join(repo, ".codex", "skills"), { recursive: true });
+  await installClaude(home, "0.1.9", { skill: "古い指示\n" });
+  const verdict = probeHostSkillSync({ repoRoot: repo, homeDir: home, declaration: DECLARATION });
+  assert.equal(verdict.developmentCheckout, true);
+  assert.equal(verdict.ok, false, "ずれ自体は報告すること");
+  assert.equal(verdict.required, false, "開発用チェックアウトでは本番を止めない");
+  assert.match(verdict.detail, /正本を直接読む/u);
   await rm(base, { recursive: true, force: true });
 });

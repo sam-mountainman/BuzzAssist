@@ -858,6 +858,7 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "",
     fix: hostSync.fix,
     hosts: hostSync.installs.map((install) => ({ host: install.host, version: install.version })),
     ...(hostSync.blockingSkills?.length ? { blockingSkills: hostSync.blockingSkills } : {}),
+    developmentCheckout: hostSync.developmentCheckout === true,
   });
 
   const blocking = checks.filter((c) => c.required && !c.ok);
