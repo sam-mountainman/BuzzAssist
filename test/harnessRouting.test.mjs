@@ -67,3 +67,37 @@ test("このリポジトリ自身では旧入口が塞がれている", async (t
   const verdict = checkCanonicalRouting({ toolName: "build_excalidraw_manga_video", projectDir: root });
   assert.equal(verdict.allowed, false);
 });
+
+test("ハーネス宣言の produces.kind は全部、正規入口の表に載っている", async () => {
+  // 2026-09-24 の監査で、narrated-story-video だけ表に無く、未知ジャンル扱いで
+  // 旧入口のガードが素通りになっていた。宣言を足したのに表を忘れる、を
+  // 宣言側から数えて落とす。
+  const { readdir, readFile } = await import("node:fs/promises");
+  const dir = join(root, "config", "harnesses");
+  const files = (await readdir(dir)).filter((name) => name.endsWith(".harness.json"));
+  assert.ok(files.length >= 2, "宣言が読めていること");
+  for (const file of files) {
+    const declaration = JSON.parse(await readFile(join(dir, file), "utf8"));
+    const kind = declaration?.produces?.kind;
+    const canonical = GENRE_CANONICAL_ENTRYPOINTS[kind];
+    assert.ok(canonical, `${file} の produces.kind=${kind} が表に無い`);
+    assert.equal(
+      String(declaration.entrypoint || "").trim(),
+      canonical.cli.trim(),
+      `${file} の entrypoint が表の正規 CLI と違う`,
+    );
+    assert.ok(Array.isArray(canonical.legacyEntrypoints), `${kind} の legacyEntrypoints が配列であること`);
+  }
+});
+
+test("表に無いジャンルは通さない", () => {
+  const verdict = checkCanonicalRouting({ genre: "unregistered-genre", toolName: "anything" });
+  assert.equal(verdict.allowed, false, "未登録のジャンルは規則なしで素通りさせない");
+  assert.match(verdict.message, /GENRE_CANONICAL_ENTRYPOINTS/u, "どこへ登録すればよいかを言うこと");
+  assert.throws(() => assertCanonicalRouting({ genre: "unregistered-genre", toolName: "anything" }), /登録されていない/u);
+});
+
+test("ナレーション物語の正規入口は通る", () => {
+  const verdict = checkCanonicalRouting({ genre: "narrated-story-video", toolName: "run_video_harness" });
+  assert.equal(verdict.allowed, true);
+});
