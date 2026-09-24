@@ -37,6 +37,7 @@ import {
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
 import { loadHarnessDeployments } from "../lib/harnessDeploymentResolver.mjs";
 import { redactSharedLearningText } from "../lib/harnessFeedbackBundle.mjs";
+import { LEARNING_TARGET_ALIASES, resolveLearningTarget } from "../lib/harnessLearningTargets.mjs";
 import {
   digestVocabularyTerm,
   extractVocabularyTokens,
@@ -161,17 +162,13 @@ function loadTargetsFor(repoRoot = REPO_ROOT) {
 // なるので、読むときに翻訳する。提案IDは kind+target+text から作るため、
 // **翻訳は解決時だけに留め、記録した target 文字列は書き換えない**
 // （書き換えるとIDが変わり、過去の apply 記録と結び付かなくなる）。
-export const TARGET_ALIASES = {
-  "skill:manga-video-production": "genre:manga-video-production",
-  "skill:manga-page-camera": "genre:manga-page-camera",
-  "skill:harness-parallel-execution": "platform:harness-parallel-execution",
-  "skill:harness-self-improvement": "platform:harness-self-improvement",
-  "ledger:koya": "channel-pack:koya",
-  "doc:mike-audio-gates": "channel-pack:narrated-story",
-};
+//
+// 対応表そのものは lib/harnessLearningTargets.mjs に1つだけ置き、feedback bundle と
+// 共有する。以前はここと feedback bundle に別々に書かれていた。
+export const TARGET_ALIASES = LEARNING_TARGET_ALIASES;
 
 export function resolveTarget(target) {
-  return TARGET_ALIASES[target] ?? target;
+  return resolveLearningTarget(target);
 }
 
 function isChannelPackTarget(target) {
@@ -524,8 +521,17 @@ export function summarizeProposals(proposals, applied, readCanonical = null, has
         existing.evidence.push(entry.evidence);
       }
     } else {
+      // 旧名（skill: / ledger: / doc:）で記録された提案も、数えるときは新しい宛先へ寄せる。
+      // 寄せないと status・review・curator では旧名が別の宛先として並び、同じ正本に
+      // 溜まった提案が「1件ずつ」に見えて、まとめて書くべき合図が出なかった
+      // （2026-09-24 時点で共有台帳の 10 件がこの状態）。記録した行は書き換えず、
+      // 元の文字列は recordedTarget に残す。
+      const recordedTarget = entry.target;
+      const target = resolveTarget(recordedTarget);
       byId.set(id, {
         ...entry,
+        target,
+        ...(target !== recordedTarget ? { recordedTarget } : {}),
         id,
         occurrences: 1,
         firstSeenAt: entry.capturedAt ?? null,
@@ -541,6 +547,35 @@ export function summarizeProposals(proposals, applied, readCanonical = null, has
     if (b.occurrences !== a.occurrences) return b.occurrences - a.occurrences;
     return String(a.firstSeenAt).localeCompare(String(b.firstSeenAt));
   });
+}
+
+/**
+ * sync が各 overlay へ何を載せ、何を保留するかを決める（書き込みはしない）。
+ *
+ * 旧名で記録された提案は summarizeProposals が新しい宛先へ寄せ済みなので、
+ * ここでは解決後の target だけを見る。review-only の宛先は自動反映せず件数と
+ * 理由だけを返す——そこは承認と監査の記録そのものなので、機械が書き足すと
+ * 何を人が決めたのかが分からなくなる。
+ */
+export function planOverlaySync(summary, targets) {
+  const byTarget = new Map();
+  for (const entry of summary.filter((item) => !item.applied)) {
+    const target = resolveTarget(entry.target);
+    if (!byTarget.has(target)) byTarget.set(target, []);
+    byTarget.get(target).push(entry);
+  }
+  const overlays = [];
+  const held = [];
+  for (const [target, def] of Object.entries(targets)) {
+    const entries = byTarget.get(target) ?? [];
+    if (def.mode === "review-only") {
+      if (entries.length > 0) held.push({ target, count: entries.length, reason: def.reason });
+      continue;
+    }
+    if (!def.overlay) continue;
+    overlays.push({ target, overlay: def.overlay, entries });
+  }
+  return { overlays, held };
 }
 
 // hermes の curator が言う「クラスレベルへ寄せる」を、機械的にできる範囲で
@@ -917,7 +952,8 @@ export function attestationFor({ reviewer, isInteractive, agentAttested, humanVe
 
 export function channelTermsInSharedEntry(entry, signals) {
   const target = String(entry?.target || "");
-  const isShared = !(target.startsWith("channel-pack:") || target.startsWith("ledger:") || target.startsWith("doc:"));
+  // 旧名（ledger: / doc:）も対応表で channel-pack: へ解決してから層を判定する。
+  const isShared = !resolveTarget(target).startsWith("channel-pack:");
   if (!isShared) return { ok: true, hits: 0 };
   const body = `${entry?.text || ""}\u001f${entry?.evidence || ""}`;
   const terms = (signals?.terms || []).filter((term) => body.includes(term));
@@ -944,7 +980,8 @@ export function channelTermsInSharedEntry(entry, signals) {
  */
 export function privateTermsInSharedEntry(entry, vocabulary) {
   const target = String(entry?.target || "");
-  const isShared = !(target.startsWith("channel-pack:") || target.startsWith("ledger:") || target.startsWith("doc:"));
+  // 旧名（ledger: / doc:）も対応表で channel-pack: へ解決してから層を判定する。
+  const isShared = !resolveTarget(target).startsWith("channel-pack:");
   if (!isShared || !vocabulary) return { ok: true, hits: 0, checked: Boolean(vocabulary) };
   const { hits } = redactVocabularyDigestTokens(`${entry?.text || ""} ${entry?.evidence || ""}`, vocabulary);
   return {
@@ -1148,7 +1185,8 @@ function main() {
       process.stdout.write(`未反映 ${pending.length} 件（繰り返し回数順）\n\n`);
       for (const entry of pending) {
         const repeat = entry.occurrences > 1 ? ` ×${entry.occurrences}` : "";
-        process.stdout.write(`  [${entry.id}]${repeat} ${entry.kind} → ${entry.target}\n`);
+        const legacy = entry.recordedTarget ? `（旧名 ${entry.recordedTarget} で記録）` : "";
+        process.stdout.write(`  [${entry.id}]${repeat} ${entry.kind} → ${entry.target}${legacy}\n`);
         process.stdout.write(`      ${entry.text}\n`);
         for (const ev of entry.evidence) process.stdout.write(`      根拠: ${ev}\n`);
       }
@@ -1188,15 +1226,9 @@ function main() {
       // 人が書く正本（canonical）には一切触らない。
       // review-only の宛先は、そこが承認と監査の記録そのものなので
       // 自動反映しない——機械がゲート基準を緩められる余地を作らない。
-      const targets = loadTargets();
-      const pending = summary.filter((entry) => !entry.applied);
-      const byTarget = new Map();
-      for (const entry of pending) {
-        if (!byTarget.has(entry.target)) byTarget.set(entry.target, []);
-        byTarget.get(entry.target).push(entry);
-      }
+      const plan = planOverlaySync(summary, loadTargets());
       let wrote = 0;
-      const held = [];
+      const { held } = plan;
       // redaction の材料は1回だけ集める（Channel Pack の走査と digest 語彙の読み込み）。
       // digest 語彙が無ければここで止まる（fail-closed）。--allow-missing-vocabulary
       // でだけ通し、その overlay にはヘッダで印が付く。
@@ -1208,19 +1240,8 @@ function main() {
           + "    overlay ヘッダに「語彙照合なし」を刻みます。配布前に語彙を作って再 sync してください。\n",
         );
       }
-      for (const [target, def] of Object.entries(targets)) {
-        // 旧IDで記録された提案も拾う
-      const entries = [
-        ...(byTarget.get(target) ?? []),
-        ...Object.entries(TARGET_ALIASES)
-          .filter(([, to]) => to === target)
-          .flatMap(([from]) => byTarget.get(from) ?? []),
-      ];
-        if (def.mode === "review-only") {
-          if (entries.length > 0) held.push({ target, count: entries.length, reason: def.reason });
-          continue;
-        }
-        if (!def.overlay) continue;
+      for (const { overlay, entries } of plan.overlays) {
+        const def = { overlay };
         const full = path.join(REPO_ROOT, def.overlay);
         const next = renderOverlay(entries, now, redaction);
         const before = fs.existsSync(full) ? fs.readFileSync(full, "utf8") : null;
