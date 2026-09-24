@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "manifestVersion": "1.6.0",
+  "manifestVersion": "1.7.0",
   "namespace": "buzzassist",
   "classifications": [
     "installed",
@@ -12,8 +12,8 @@
     {
       "id": "buzzassist:platform-craft",
       "name": "platform-craft",
-      "version": "1.3.0",
-      "contentSha256": "sha256:f38e343457ca29e0b6e9ade1e56d314482699a7200def5a7a7b39e494f48dee8",
+      "version": "1.3.1",
+      "contentSha256": "sha256:ab9578bb1d4775a5a45b790e0b51a85fa576244a07a4f40041067743f01b0306",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",
@@ -207,8 +207,8 @@
     {
       "id": "buzzassist:narrated-story-video",
       "name": "narrated-story-video",
-      "version": "1.2.2",
-      "contentSha256": "sha256:bd6da78763a5de317710f489487b506e508dc0edfe4fa22b0362c3ce7845c639",
+      "version": "1.2.3",
+      "contentSha256": "sha256:9dca2e6cd22484bb958e912886b0d6c9db6bdb45182cbf8e7b0d8271ddeef439",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",

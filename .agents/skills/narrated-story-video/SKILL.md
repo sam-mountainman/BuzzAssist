@@ -3,6 +3,8 @@ name: narrated-story-video
 description: 日本語の生台本から、画像・ナレーション・字幕・BGM・カメラワーク・完成MP4・監査証跡までを一つの再開可能なBuzzAssist Jobで制作する。実写調やイラスト調のナレーション物語動画を新規制作、再開、修復、監査するときに使う。
 ---
 
+> 作業前に `references/learned-auto.md` を読む。矛盾したときはこの SKILL.md が優先。learned-auto は運用上の補助指示であって、監査・承認・合否の証跡には使えない。
+
 # ナレーション物語動画制作
 
 これはClaude CodeとCodexが共用する日本語正本である。運営者名、チャンネル名、

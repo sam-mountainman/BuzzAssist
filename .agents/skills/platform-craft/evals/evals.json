@@ -43,6 +43,16 @@
         "原子findingと実装・台帳・最終回答のcrosswalkを作る",
         "解決・未解決・枝差分・検証不能を分ける"
       ]
+    },
+    {
+      "id": "learned-overlay-before-retry-change",
+      "prompt": "課金APIの再送まわりを直す前に、これまでの失敗から学んだことも踏まえて設計して。",
+      "shouldTrigger": true,
+      "invariants": [
+        "作業前に references/learned-auto.md を読む",
+        "learned-auto と SKILL.md が矛盾したら SKILL.md を優先する",
+        "learned-auto の内容を監査・承認・合否の証跡として扱わない"
+      ]
     }
   ]
 }

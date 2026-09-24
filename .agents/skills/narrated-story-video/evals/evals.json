@@ -28,7 +28,17 @@
       "invariants": [
         "制作hot pathへAnalyticsを混ぜない"
       ]
+    },
+    {
+      "id": "learned-overlay-before-resume",
+      "prompt": "前にもらった指摘が効いているか気にしながら、止まっているナレーション動画のJobを再開して。",
+      "shouldTrigger": true,
+      "invariants": [
+        "作業前に references/learned-auto.md を読む",
+        "learned-auto と SKILL.md が矛盾したら SKILL.md を優先する",
+        "learned-auto の内容を監査・承認・合否の証跡として扱わない",
+        "再開は上位入口の run-video-harness resume から行う"
+      ]
     }
   ]
 }
-
