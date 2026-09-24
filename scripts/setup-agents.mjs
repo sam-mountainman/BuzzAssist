@@ -517,6 +517,44 @@ async function replaceDirectoryChildrenPreservingRoot(sourceDir, targetDir, { pr
   }
 }
 
+// 学習フック（UserPromptSubmit）の定義。ホストごとに形が違うので別ファイルにし、
+// 各 plugin.json の "hooks" がそれぞれを指す。hooks/ は上の一覧（lib・scripts など）に
+// 無いので、ここで別に配る。setup の本体とは独立させ、崩れたフック設定を配布物へ
+// 入れないよう、参照先と起動するスクリプトの実在まで確かめる（fail-closed）。
+export const PLUGIN_HOOK_MANIFESTS = Object.freeze({
+  ".claude-plugin/plugin.json": "hooks/claude-hooks.json",
+  ".codex-plugin/plugin.json": "hooks/codex-hooks.json",
+});
+const PLUGIN_HOOK_SCRIPT = "harness-learn-hook.mjs";
+
+export async function stagePluginHooks(sourceRoot, pluginRoot) {
+  const staged = [];
+  for (const [manifestPath, hookPath] of Object.entries(PLUGIN_HOOK_MANIFESTS)) {
+    const manifest = JSON.parse(await readFile(join(pluginRoot, manifestPath), "utf8"));
+    const declared = String(manifest.hooks || "").replace(/^\.\//u, "");
+    if (declared !== hookPath) {
+      throw new Error(`${manifestPath} の hooks が ${hookPath} を指していない: ${manifest.hooks ?? "(なし)"}`);
+    }
+    const target = join(pluginRoot, ...hookPath.split("/"));
+    await mkdir(dirname(target), { recursive: true });
+    await cp(join(sourceRoot, ...hookPath.split("/")), target, { force: true });
+    const hooks = JSON.parse(await readFile(target, "utf8"));
+    const commands = Object.values(hooks.hooks || {})
+      .flat()
+      .flatMap((group) => group?.hooks || [])
+      .map((hook) => String(hook?.command || ""));
+    if (commands.length === 0) throw new Error(`${hookPath} にフックが1つも無い`);
+    const scriptPresent = await pathExists(join(pluginRoot, "scripts", PLUGIN_HOOK_SCRIPT));
+    for (const command of commands) {
+      if (!command.includes(PLUGIN_HOOK_SCRIPT) || !scriptPresent) {
+        throw new Error(`${hookPath} の起動するスクリプトが配布物に無い: ${command.slice(0, 80)}`);
+      }
+    }
+    staged.push(hookPath);
+  }
+  return staged;
+}
+
 async function refreshManagedPluginSource() {
   if (skipPluginSource) {
     console.log(`Skipping managed plugin source refresh: ${managedPluginDir}`);
@@ -551,6 +589,7 @@ async function refreshManagedPluginSource() {
   ]) {
     await copyIfExists(join(repoRoot, dirName), join(tmpPluginRoot, dirName));
   }
+  await stagePluginHooks(repoRoot, tmpPluginRoot);
 
   // ハーネスの正本スキルを、ホストが実際に読む場所へ置く。
   //

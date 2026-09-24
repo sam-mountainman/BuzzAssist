@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"import(require('url').pathToFileURL(require('path').join(process.env.PLUGIN_ROOT||process.env.CLAUDE_PLUGIN_ROOT||'','scripts','harness-learn-hook.mjs')).href).then((m)=>m.runHookCli()).catch(()=>{})\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -49,6 +49,7 @@
     "!scripts/fill-koya-setting-sheet-*.mjs",
     "!scripts/tmp-*.mjs",
     "skills/",
+    "hooks/",
     "./AGENTS.md",
     "./CLAUDE.md",
     "./GEMINI.md",
