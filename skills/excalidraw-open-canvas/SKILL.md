@@ -1,18 +1,18 @@
 ---
 name: excalidraw-open-canvas
-description: Open the local project-bound BuzzAssist Excalidraw canvas. Use when the user asks to open, launch, view, or work in Excalidraw from Codex or Claude Code.
+description: 現在のプロジェクトに紐づくローカルの BuzzAssist Excalidraw キャンバスを開く。Codex や Claude Code で「キャンバスを開いて」「Excalidrawを起動して」「キャンバスを見せて」「Excalidrawで作業したい」と言われたとき（open / launch / view / work in Excalidraw）に使う。スマホなどマシンの外から同じキャンバスを開きたいとき（Canvas Tunnel）もここから始める。
 ---
 
-# Excalidraw Open Canvas
+# Excalidraw キャンバスを開く
 
-## Workflow
+## 手順
 
-1. Resolve the host task's current workspace/project root. This is the project
-   the user currently opened in Codex or Claude Code — never substitute the
-   BuzzAssist plugin/cache/repository directory and never reuse the project
-   chosen during an older setup just because it already has a server.
+1. ホストのタスクの current workspace/project root（現在のワークスペース／プロジェクトのルート）
+   を特定する。これはユーザーがいま Codex や Claude Code で開いているプロジェクトのこと。
+   BuzzAssist の plugin・cache・リポジトリのディレクトリで代用しない。以前のセットアップで
+   選んだプロジェクトも、そこにサーバーがすでにあるという理由だけで使い回さない。
 
-2. Call the plugin `open_buzzassist_canvas` tool with that absolute directory:
+2. その絶対パスを渡して、plugin の `open_buzzassist_canvas` ツールを呼ぶ。
 
 ```json
 {
@@ -20,28 +20,27 @@ description: Open the local project-bound BuzzAssist Excalidraw canvas. Use when
 }
 ```
 
-The MCP server also reads the host's MCP workspace roots automatically when
-`projectDir` is omitted, but pass it explicitly whenever the host exposes the
-current working directory. The tool starts or reuses this project's server,
-creates `<project>/canvas/assets`, and returns the project's live `canvasUrl`.
+`projectDir` を省略しても MCP サーバーはホストの MCP workspace roots を自動で読むが、
+ホストが現在の作業ディレクトリを公開しているときは必ず明示して渡す。このツールは
+このプロジェクトのサーバーを起動（すでにあれば再利用）し、`<project>/canvas/assets` を作り、
+そのプロジェクトの live な `canvasUrl` を返す。
 
-3. If the plugin tool is unavailable, start the service manually and keep it
-running:
+3. plugin ツールが使えない場合は、サービスを手動で起動し、動かし続ける。
 
 ```bash
 node scripts/serve-canvas.mjs /path/to/current/user/project
 ```
 
-Run this from the BuzzAssist repository root. The same command works in macOS,
-Windows PowerShell, and Linux.
+これは BuzzAssist リポジトリのルートで実行する。macOS、Windows PowerShell、Linux の
+どれでも同じコマンドで動く。
 
-4. First open the returned local URL in the current host's in-app browser. In
-Codex, use the in-app Browser tool. In Claude Code, use its browser tool. This
-is mandatory whenever that capability is exposed. Do not infer that it is
-unavailable merely because the canvas currently has zero connected clients.
+4. 返ってきたローカル URL は、まず現在のホストの in-app browser で開く。Codex では
+in-app Browser ツールを、Claude Code ではそのブラウザーツールを使う。その機能が公開されて
+いるときは、これが必須。キャンバスの接続クライアントがいま 0 件だというだけで、
+機能が利用できないと推測しない。
 
-Only when the current host does not expose an in-app Browser capability, call
-the plugin tool again with the explicit external-browser fallback:
+現在のホストが in-app Browser 機能を公開していない（利用できない）ときに限り、明示的な
+external-browser フォールバックを付けて plugin ツールをもう一度呼ぶ。
 
 ```json
 {
@@ -50,20 +49,20 @@ the plugin tool again with the explicit external-browser fallback:
 }
 ```
 
-This prefers Chrome/Chromium and falls back to the platform browser. Do not run
-`open`, `xdg-open`, or equivalent commands before trying the in-app Browser.
+これは Chrome/Chromium を優先し、無ければプラットフォームの既定ブラウザーへフォールバックする。
+in-app Browser を試す前に `open`、`xdg-open` などのコマンドを実行しない。
 
-The default URL is usually:
+既定の URL はたいてい次のとおり。
 
 ```text
 http://127.0.0.1:43219/
 ```
 
-If that port is busy, the server chooses another local port. Read the current
-project's `canvas/.server.json` for the live `url`. Different projects can run
-simultaneously on different localhost ports.
+そのポートが使用中なら、サーバーは別のローカルポートを選ぶ。live な `url` は現在の
+プロジェクトの `canvas/.server.json` から読む。プロジェクトが違えば、別々の localhost
+ポートで同時に動かせる。
 
-Canvas data is saved under:
+キャンバスのデータは次に保存される。
 
 ```text
 <current-project>/canvas/excalidraw-canvas.json
@@ -71,41 +70,42 @@ Canvas data is saved under:
 <current-project>/canvas/assets/
 ```
 
-If browser control is unavailable and the explicit external fallback cannot be
-called, treat the service start as successful and give the user the local URL.
+ブラウザーを操作できず、明示的な外部ブラウザーのフォールバックも呼べない場合は、
+サービスの起動を成功として扱い、ユーザーにローカル URL を伝える。
 
-## Phone / Mobile Same-UI Access
+## スマホ・モバイルから同じ UI で開く
 
-If the user asks to open the canvas from a phone, share it outside the machine,
-or use the exact same Excalidraw UI remotely, use Canvas Tunnel instead of
-BuzzAssist Remote Canvas:
+ユーザーがスマホからキャンバスを開きたい、マシンの外へ共有したい、まったく同じ
+Excalidraw UI をリモートで使いたいと言ったら、BuzzAssist Remote Canvas ではなく
+Canvas Tunnel を使う。
 
 ```bash
 npm run tunnel:start -- --project-dir /path/to/user/project
 ```
 
-Canvas Tunnel uses Cloudflare (`cloudflared`) by default. A quick tunnel needs
-no account; if `cloudflared` is not installed, tell the user to install it. For
-a fixed `canvas.buzzassist.ai` URL, the user runs `cloudflared tunnel login`
-once, then starts with `--cf-hostname canvas.buzzassist.ai`.
+Canvas Tunnel は既定で Cloudflare（`cloudflared`）を使う。quick tunnel ならアカウントは
+要らない。`cloudflared` が入っていなければ、インストールするようユーザーに伝える。
+固定の `canvas.buzzassist.ai` URL を使うときは、ユーザーが `cloudflared tunnel login` を
+1回実行し、そのあと `--cf-hostname canvas.buzzassist.ai` を付けて起動する。
 
-Use ngrok only when the user explicitly asks for ngrok:
+ngrok は、ユーザーが ngrok を明示的に求めたときだけ使う。
 
 ```bash
 npm run tunnel:start -- --project-dir /path/to/user/project --provider ngrok --ngrok-authtoken <token>
 ```
 
-The tunnel prints a public URL and an Access URL. Give the Access URL to the
-user for the phone. Continue to open the local `BUZZASSIST_CANVAS_URL` in the
-current host's in-app browser for desktop work. Use the external-browser
-fallback only when that in-app capability is unavailable.
+トンネルは公開 URL と Access URL を表示する。スマホ用にはユーザーへ Access URL を渡す。
+デスクトップでの作業には、引き続きローカルの `BUZZASSIST_CANVAS_URL` を現在のホストの
+in-app browser で開く。external-browser のフォールバックは、その in-app 機能が利用できない
+ときだけ使う。
 
-Stop the tunnel when finished:
+終わったらトンネルを止める。
 
 ```bash
 npm run tunnel:stop -- --project-dir /path/to/user/project
 ```
 
-## Notes
+## 補足
 
-This design intentionally mirrors Cowart's local-service shape: the browser edits a project-local canvas file, and Codex uses plugin tools for stable state reads/writes.
+この設計は意図的に Cowart のローカルサービスの形にそろえている。ブラウザーはプロジェクト内の
+キャンバスファイルを編集し、Codex は状態の読み書きを plugin ツールで安定して行う。

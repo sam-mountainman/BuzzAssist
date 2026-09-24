@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "skill": "excalidraw-official-mcp",
+  "cases": [
+    {
+      "id": "official-flowchart",
+      "prompt": "公式のExcalidraw MCPで、ログイン処理のフローチャートを作って。",
+      "shouldTrigger": true,
+      "invariants": [
+        "`excalidraw_official` サーバーを使う",
+        "図の種類・ノード・関係と流れの向き・必須ラベル・グループ分けを具体的に渡す"
+      ]
+    },
+    {
+      "id": "mcp-apps-unsupported",
+      "prompt": "本家のExcalidraw MCPを使ったのに、図がインタラクティブに表示されない。",
+      "shouldTrigger": true,
+      "invariants": [
+        "MCP接続はできても、MCP Apps非対応のクライアントでは対話型アプリの描画が使えないことがあると説明する"
+      ]
+    },
+    {
+      "id": "local-canvas-image",
+      "prompt": "キャンバスで選んだ枠に、AIで画像を生成して置いて。",
+      "shouldTrigger": false,
+      "invariants": [
+        "図の生成ではないので公式MCPへ送らず、excalidraw-image-gen に任せる"
+      ]
+    }
+  ]
+}

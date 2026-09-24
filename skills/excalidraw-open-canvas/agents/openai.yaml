@@ -1,4 +1,4 @@
 interface:
-  display_name: "Excalidraw Open Canvas"
-  short_description: "Open the local Excalidraw canvas"
-  default_prompt: "Use $buzzassist:excalidraw-open-canvas to open the Excalidraw canvas."
+  display_name: "Excalidraw キャンバスを開く"
+  short_description: "ローカルの Excalidraw キャンバスを開く"
+  default_prompt: "$buzzassist:excalidraw-open-canvas を使って、Excalidraw キャンバスを開いて。"

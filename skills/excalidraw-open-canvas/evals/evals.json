@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "skill": "excalidraw-open-canvas",
+  "cases": [
+    {
+      "id": "open-current-project-canvas",
+      "prompt": "Excalidrawのキャンバスを開いて。",
+      "shouldTrigger": true,
+      "invariants": [
+        "現在のホストのworkspace/project rootの絶対パスを`projectDir`として`open_buzzassist_canvas`へ明示して渡す",
+        "plugin cache・BuzzAssistリポジトリ・以前のセットアップで選んだプロジェクトで代用しない",
+        "返った`canvasUrl`をまずホストのin-app browserで開き、in-app Browserが利用できないときだけ`openExternalBrowser: true`で呼び直す",
+        "in-app Browserを試す前に`open`や`xdg-open`を実行しない"
+      ]
+    },
+    {
+      "id": "busy-default-port",
+      "prompt": "キャンバスが開かない。43219番ポートは別のプロジェクトで使ってるかも。",
+      "shouldTrigger": true,
+      "invariants": [
+        "現在のプロジェクトの`canvas/.server.json`からliveな`url`を読む",
+        "別プロジェクトのサーバーを現在のプロジェクト用として使い回さない"
+      ]
+    },
+    {
+      "id": "phone-same-ui",
+      "prompt": "スマホからも同じExcalidrawの画面を触りたい。",
+      "shouldTrigger": true,
+      "invariants": [
+        "BuzzAssist Remote CanvasではなくCanvas Tunnel（`npm run tunnel:start -- --project-dir ...`）を使う",
+        "既定はCloudflareで、ngrokはユーザーが明示したときだけ使う",
+        "スマホにはAccess URLを渡し、デスクトップはローカルの`BUZZASSIST_CANVAS_URL`をin-app browserで開き続ける"
+      ]
+    },
+    {
+      "id": "official-diagram-request",
+      "prompt": "公式のExcalidraw MCPで、ログイン処理のフローチャートをさっと作って。",
+      "shouldTrigger": false,
+      "invariants": [
+        "ローカルキャンバスを開くだけのこのSkillではなく excalidraw-official-mcp に任せる"
+      ]
+    }
+  ]
+}

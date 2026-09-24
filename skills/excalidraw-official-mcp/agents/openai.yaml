@@ -1,4 +1,4 @@
 interface:
-  display_name: "Official Excalidraw MCP"
-  short_description: "Use the official Excalidraw MCP App"
-  default_prompt: "Use $buzzassist:excalidraw-official-mcp to create a diagram with the official Excalidraw MCP."
+  display_name: "公式 Excalidraw MCP"
+  short_description: "公式の Excalidraw MCP App を使う"
+  default_prompt: "$buzzassist:excalidraw-official-mcp を使って、公式の Excalidraw MCP で図を作って。"
