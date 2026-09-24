@@ -203,6 +203,32 @@ test("start journals reservation before submission, retries 5xx, and emits a rec
   }
 });
 
+test("apiBase を渡さない broker は BUZZASSIST_MEDIA_JOB_API_BASE（doctor が probe する住所）へ送り、明示の apiBase はそれに勝つ", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "paid-media-env-base-"));
+  const saved = process.env.BUZZASSIST_MEDIA_JOB_API_BASE;
+  process.env.BUZZASSIST_MEDIA_JOB_API_BASE = "https://media-from-env.invalid/v1/media/jobs";
+  try {
+    const urls = [];
+    const refuse = async (url) => {
+      urls.push(String(url));
+      return response(400, { error: { code: "invalid_request", message: "fixture" } });
+    };
+    await assert.rejects(() => createPaidMediaJobBroker({ stateDir: join(stateDir, "env"), sleepFn: noSleep, apiFetch: refuse }).start(spec()));
+    assert.ok(urls[0].startsWith("https://media-from-env.invalid/v1/media/jobs"), urls[0]);
+    await assert.rejects(() => createPaidMediaJobBroker({
+      stateDir: join(stateDir, "explicit"),
+      sleepFn: noSleep,
+      apiFetch: refuse,
+      apiBase: "https://explicit.invalid/api/media/jobs",
+    }).start(spec()));
+    assert.ok(urls[1].startsWith("https://explicit.invalid/api/media/jobs"), urls[1]);
+  } finally {
+    if (saved === undefined) delete process.env.BUZZASSIST_MEDIA_JOB_API_BASE;
+    else process.env.BUZZASSIST_MEDIA_JOB_API_BASE = saved;
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("a 2xx decode failure is attempted once, records provider id, and requires recovery", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "paid-media-decode-"));
   try {
