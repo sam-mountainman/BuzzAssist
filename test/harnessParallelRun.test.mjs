@@ -84,8 +84,13 @@ test("独立したジョブは同時に走る", async () => {
   });
   assert.equal(summary.counts.passed, 3);
   assert.ok(summary.ok);
-  // 逐次なら3秒。同時に走っていれば2秒未満で終わる。
-  assert.ok(summary.totalDurationMs < 2000, `並列になっていない: ${summary.totalDurationMs}ms`);
+  // 「2秒未満で終わる」は機械の速さの仮定で、飽和した開発機と Windows の CI で落ちた
+  // （起動の重さで 4 秒かかった）。見たいのは速さではなく重なり: 3 本の区間が
+  // 同時に存在した瞬間があること。これは機械が遅くても変わらない。
+  const jobs = summary.jobs.map((job) => ({ id: job.id, start: job.startedAtMs, end: job.endedAtMs }));
+  const latestStart = Math.max(...jobs.map((job) => job.start));
+  const earliestEnd = Math.min(...jobs.map((job) => job.end));
+  assert.ok(latestStart < earliestEnd, `並列になっていない: ${JSON.stringify(jobs)}`);
 });
 
 test("同じロックを宣言したジョブは重ならない", async () => {
@@ -354,7 +359,7 @@ test("タイムアウトしたジョブは孫プロセスごと止める", async
     jobs: [{
       id: "spawner",
       command: "sh",
-      args: ["-c", `sleep 20 && touch ${marker}`],
+      args: ["-c", `sleep 2 && touch ${marker}`],
       timeoutMs: 500,
     }],
   };
@@ -364,8 +369,10 @@ test("タイムアウトしたジョブは孫プロセスごと止める", async
   });
   assert.equal(summary.jobs[0].status, "failed");
   assert.equal(summary.jobs[0].timedOut, true);
-  // 孫が生きていれば20秒後にマーカーを作る。ここで待って確認する。
-  await new Promise((resolve) => { setTimeout(resolve, 22_000); });
+  // 孫が生きていれば2秒後にマーカーを作る。ここで待って確認する。
+  // 以前は 20 秒＋22 秒待ちで、変異テストのたびに払っていた（cx-f2）。
+  // 孫が殺されたことの確認に要るのは「sleep より長く待つ」ことだけで、長さは関係ない。
+  await new Promise((resolve) => { setTimeout(resolve, 3_500); });
   assert.equal(fsSync.existsSync(marker), false, "孫プロセスが生き残ってファイルを作った");
 });
 

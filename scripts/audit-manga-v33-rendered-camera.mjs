@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { writeJsonAtomic } from "../lib/canvasScene.mjs";
+import { requirePythonRuntime } from "../lib/harnessRuntimeResolver.mjs";
 import {
   normalizeCameraShotSequence,
   normalizePanelLayout,
@@ -100,7 +101,15 @@ await writeJsonAtomic(planPath, {
   rows: planRows,
 });
 
-await execFile("python3", [
+// python3 の直書きは、その名前が無い端末（Windows の py -3、venv）で落ちる。
+// 本番と同じ解決器で、実際に import できる interpreter を選ぶ（cx-i12）。
+const python = await requirePythonRuntime({
+  purposeEnv: "KOYA_GATE_PYTHON",
+  projectDir,
+  requiredModules: ["cv2", "numpy"],
+});
+await execFile(python.command, [
+  ...python.args,
   join(projectDir, "scripts/analyze-manga-shot-motion.py"),
   "--video", videoPath,
   "--manifest", manifestPath,

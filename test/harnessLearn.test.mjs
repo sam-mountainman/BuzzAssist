@@ -456,6 +456,21 @@ test("人の確認が無い記録は「反映済み」として数えない", as
   );
 });
 
+test("反映証跡の本文は marker の近くに無ければ認めない（別の変更の文を流用できない）", async () => {
+  // marker が1行あり、note が正本の「どこか」にあれば通っていた。40 行以上離れた
+  // 別の節の文を --note に渡せば、その提案を書いていなくても反映済みにできた。
+  const { canonicalHasPromotionEvidence, PROMOTION_EVIDENCE_WINDOW_LINES } = await import("../scripts/harness-learn.mjs");
+  const note = "別の節に元からある十分長い規則の本文";
+  const far = ["buzzassist-learning:near1", ...Array(PROMOTION_EVIDENCE_WINDOW_LINES + 5).fill("- 無関係の行"), note].join("\n");
+  assert.equal(canonicalHasPromotionEvidence({ id: "near1", note }, far), false, "窓の外の文を証拠にしないこと");
+  const close = ["buzzassist-learning:near1", ...Array(5).fill("- 無関係の行"), note].join("\n");
+  assert.equal(canonicalHasPromotionEvidence({ id: "near1", note }, close), true);
+  const before = [note, ...Array(3).fill("- 無関係の行"), "buzzassist-learning:near1"].join("\n");
+  assert.equal(canonicalHasPromotionEvidence({ id: "near1", note }, before), true, "note が marker の前にあってもよい");
+  const multiline = ["buzzassist-learning:near1", "規則:", "  一行目の十分長い本文", "  二行目の本文"].join("\n");
+  assert.equal(canonicalHasPromotionEvidence({ id: "near1", note: "一行目の十分長い本文\n  二行目の本文" }, multiline), true, "複数行の note も認める");
+});
+
 test("正本への反映証跡はproposal固有markerと十分長い完全一致本文を両方要求する", () => {
   const text = "buzzassist-learning:abc123\n同じ失敗を避けるための十分長い規則本文";
   assert.equal(canonicalHasPromotionEvidence({ id: "abc123", note: "同じ失敗を避けるための十分長い規則本文" }, text), true);

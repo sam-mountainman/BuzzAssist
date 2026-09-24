@@ -440,11 +440,24 @@ export function promotionMarker(id) {
   return `buzzassist-learning:${String(id || "").trim()}`;
 }
 
+// marker と note が正本のどこにあってもよい、では足りない。note は「何をどう書いたか」
+// なので、marker の近く（同じ節）に無ければ、別の変更の文を証拠に流用できる（cx-a4）。
+export const PROMOTION_EVIDENCE_WINDOW_LINES = 40;
+
 export function canonicalHasPromotionEvidence(record, canonicalText) {
   if (!record?.id || typeof canonicalText !== "string") return false;
   const note = typeof record.note === "string" ? record.note.trim() : "";
   if (Array.from(note).length < PROMOTION_NOTE_MIN_CHARS) return false;
-  return canonicalText.includes(promotionMarker(record.id)) && canonicalText.includes(note);
+  const marker = promotionMarker(record.id);
+  const lines = canonicalText.split("\n");
+  const markerLines = lines.map((line, index) => (line.includes(marker) ? index : -1)).filter((index) => index >= 0);
+  if (markerLines.length === 0) return false;
+  // note は複数行にまたがってよい。marker の前後 N 行を1つの窓として見る。
+  return markerLines.some((at) => {
+    const start = Math.max(0, at - PROMOTION_EVIDENCE_WINDOW_LINES);
+    const end = Math.min(lines.length, at + PROMOTION_EVIDENCE_WINDOW_LINES + 1);
+    return lines.slice(start, end).join("\n").includes(note);
+  });
 }
 
 // 同じ指摘が何度も来るのは「まだ直っていない」という強い信号なので、

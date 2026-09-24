@@ -13,7 +13,9 @@
 # 後から登録された地名や人名で漏洩に変わる（実際に起きた）。
 #
 # 入れ方: npm run hooks:install
-# 一度だけ迂回したいとき: git push --no-verify（記録は残らないので、使ったら理由を残すこと）
+# このフックを迂回する手段は書かない。git 自体は --no-verify を持つが、それは
+# 「検査を通していない push」であって、PUBLIC リポジトリでは取り消せない。
+# 検査が誤検出だと思うなら、config/public-surface-allowlist.json に理由と件数を書いて通す。
 if ! node scripts/audit-public-surface.mjs --push-stdin --require-signals; then
   echo ""
   echo "公開面の検査が通らないので push を止めました。"
