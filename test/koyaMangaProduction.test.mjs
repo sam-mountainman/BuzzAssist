@@ -10,7 +10,7 @@ const requireResolver = () => ({ resolveChannelPackPath });
 import { createHash } from "node:crypto";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { deflateSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
@@ -1713,10 +1713,14 @@ test("フルラン錠が取れないときは failed でなく人待ち（exit 3
   assert.equal(paused.payload.status, KOYA_FULL_RUN_LOCK_HELD_STATUS);
   assert.equal(paused.payload.waiting, true);
   assert.equal(paused.payload.knownRemainingIssues[0].id, "full-run-lock");
-  assert.match(paused.payload.lockPath, /\.full-run-locks\//u);
+  // 錠のパスは OS の区切りで作られる（Windows は \）。区切りを決め打ちしない。
+  assert.match(paused.payload.lockPath, /\.full-run-locks[\\/]/u);
+  // Job の project dir は job.json の場所から resolve で導く。Windows では
+  // ドライブ文字と \ が付くので、期待値も同じ関数で作る。
+  const expectedJobProjectDir = resolve(dirname(resolve("/Users/x/proj/canvas/harness-runs/video-koya-manga-video-0123456789abcdef/job.json")), "..", "..", "..");
   assert.equal(
     paused.payload.next.at(-1).trim(),
-    "node scripts/run-video-harness.mjs resume --job-id video-koya-manga-video-0123456789abcdef --project-dir /Users/x/proj --confirmed",
+    `node scripts/run-video-harness.mjs resume --job-id video-koya-manga-video-0123456789abcdef --project-dir ${expectedJobProjectDir} --confirmed`,
     "job.json の場所から Job の project dir を導いて、次に打つコマンドを全文で出す",
   );
 
