@@ -52,6 +52,12 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg tesseract-ocr tesseract-ocr-jpn
       - name: Verify tag and plugin versions
         run: npm run release:verify -- "$GITHUB_REF_NAME"
+      # 本番スキルは既定で「人の承認が今の版・今の SHA に付いていなければ止まる」。
+      # 承認の無いスキルを自動更新で配ると、運営者の端末で本番が全部止まるので、
+      # 公開前に同じ条件で止める。承認は承認者本人の端末で
+      # `node scripts/skill-inventory.mjs --approve <id> --reviewer <name> --human-verified`。
+      - name: Require human approval for production skills
+        run: npm run skills:check:release
       - name: Run full validation
         run: npm test -- --skip-policy config/ci-test-skip-allowlist.json
       - name: Install Playwright Chromium

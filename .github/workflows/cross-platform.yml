@@ -86,6 +86,12 @@ jobs:
       - name: Audit public surface
         run: npm run public-surface
 
+      # 正本スキル・両ホストのアダプター・在庫 manifest（SHA と版）の整合。
+      # 正本を直して manifest を上げ忘れると、運営者の Job 作成が全部落ちる。
+      # 端末側の plugin cache のずれは CI には無いので、doctor の host-skill-sync が見る。
+      - name: Check skill inventory consistency
+        run: npm run skills:check
+
       - name: Build canvas
         run: npm run build
       # 検査語彙は鍵つき digest で、鍵は secret でだけ渡す（公開 salt の旧形式は

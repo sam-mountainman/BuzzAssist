@@ -111,6 +111,8 @@
     "prepack": "npm run build",
     "postinstall": "node scripts/patch-excalidraw.mjs",
     "public-surface": "node scripts/audit-public-surface.mjs",
+    "skills:check": "node scripts/skill-inventory.mjs",
+    "skills:check:release": "node scripts/skill-inventory.mjs --require-approval",
     "package:audit": "node scripts/audit-package-tarball.mjs",
     "doctor": "node scripts/harness-doctor.mjs",
     "hooks:install": "git config core.hooksPath .githooks"
