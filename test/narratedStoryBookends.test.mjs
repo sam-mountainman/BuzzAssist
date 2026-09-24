@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import { createChannelPackEnvelope } from "../lib/channelPackEnvelope.mjs";
 import { extractNarratedChannelPackRuntime } from "../lib/harnessChannelPackRuntime.mjs";
 import { resolveFfmpegToolchain } from "../lib/harnessRuntimeResolver.mjs";
 import {
@@ -24,6 +25,7 @@ import {
   segmentFramePlan,
 } from "../lib/narratedStoryBookends.mjs";
 import { loadNarratedStoryChannelConfig } from "../lib/narratedStoryPipeline.mjs";
+import { planOnlyPreflight } from "../lib/videoHarnessService.mjs";
 import { bookendFixtureChannelConfig } from "./fixtures/narratedBookendFixture.mjs";
 
 const toolchain = await resolveFfmpegToolchain();
@@ -274,6 +276,53 @@ test("title card renders the Pack text with the Pack font through a relative tex
     assert.equal(result.frames, 12);
     assert.match(result.graph.filterGraph, /drawtext=fontfile=opening-font\.ttf:textfile=opening-card\.txt:expansion=none:/u);
     assert.doesNotMatch(result.graph.filterGraph, /quoted/u, "the card text never enters the filter graph");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("plan-only preflight verifies the signed Pack and lists every stop reason without paid calls", async () => {
+  const dir = await mkdtemp(join(os.tmpdir(), "narrated-plan-preflight-"));
+  try {
+    const source = join(dir, "pack-source");
+    await mkdir(source);
+    await writeFile(join(source, "narrated-story.json"), JSON.stringify(bookendFixtureChannelConfig({
+      presenter: null,
+      blockers: [{ id: "review-bed-not-received", what: "the review song has not been delivered" }],
+    })), "utf8");
+    const signer = generateKeyPairSync("ed25519");
+    const privateKeyPem = signer.privateKey.export({ type: "pkcs8", format: "pem" });
+    const publicKeyPem = signer.publicKey.export({ type: "spki", format: "pem" });
+    const bundle = join(dir, "signed");
+    await createChannelPackEnvelope({
+      sourceDir: source,
+      outputDir: bundle,
+      id: "fixture-narrated-pack",
+      version: "1.0.0",
+      harnessId: "narrated-story-video",
+      payloadKind: "narrated-story-channel-pack",
+      privateKeyPem,
+      publicKeyPem,
+    });
+    const scriptPath = join(dir, "script.txt");
+    await writeFile(scriptPath, "本編です。\n---感想---\n[[operator-replace]]実は私もそうでした。\n", "utf8");
+    const job = { harness: { id: "narrated-story-video" } };
+    const result = await planOnlyPreflight({ job, scriptPath, channelPackPath: bundle, env: { BUZZASSIST_CHANNEL_PACK_PUBLIC_KEY_PEM: publicKeyPem } });
+    assert.equal(result.ok, false);
+    assert.equal(result.paidCallsAttempted, false);
+    for (const expected of [
+      "channel-pack-config-required:bookends.review.presenter-media-required",
+      "channel-pack-config-required:bookends.opening.backgroundImage-missing",
+      "channel-pack-declared-blocker:review-bed-not-received",
+      "operator-replacement-required:r001",
+    ]) assert.ok(result.blockers.includes(expected), `${expected}: ${result.blockers.join(", ")}`);
+    assert.deepEqual(result.segments, { story: 1, review: 1 });
+    // 信頼していない鍵で署名された Pack は、中身を読む前に止める。
+    const stranger = generateKeyPairSync("ed25519").publicKey.export({ type: "spki", format: "pem" });
+    const untrusted = await planOnlyPreflight({ job, scriptPath, channelPackPath: bundle, env: { BUZZASSIST_CHANNEL_PACK_PUBLIC_KEY_PEM: stranger } });
+    assert.deepEqual(untrusted.blockers, ["channel-pack-unverified"]);
+    // narrated 以外のハーネスは検査を持たない（結果に載せない）。
+    assert.equal(await planOnlyPreflight({ job: { harness: { id: "koya-manga-video" } }, scriptPath, channelPackPath: bundle }), null);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

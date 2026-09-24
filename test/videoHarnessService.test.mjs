@@ -485,3 +485,37 @@ test("決着した Job の学習捕捉は結果に件数だけを載せ、失敗
   const planned = await failing.start({ projectDir: "/tmp/video-service-project", scriptPath: "/tmp/script.txt", channelPackPath: "/tmp/pack" });
   assert.equal(planned.learningCapture, undefined);
 });
+
+test("plan-only start reports the read-only preflight blockers without running doctor or the paid adapter", async () => {
+  const calls = [];
+  const service = createVideoHarnessService(runtimeFixture({
+    createJob: async (input) => ({ job: fixtureJob({ projectDir: input.projectDir, harness: { id: "narrated-story-video" } }), attached: false }),
+    planPreflight: async (input) => {
+      calls.push(["preflight", input.scriptPath, input.channelPackPath]);
+      return { ok: false, blockers: ["channel-pack-declared-blocker:fixture"], paidCallsAttempted: false };
+    },
+    runJob: async () => { calls.push(["run"]); return fixtureJob({ status: "completed" }); },
+    doctor: async () => { calls.push(["doctor"]); return { ready: true }; },
+    adapter: async () => { calls.push(["adapter"]); return { status: "completed" }; },
+  }));
+  const result = await service.start({
+    projectDir: "/tmp/video-service-project",
+    scriptPath: "script.txt",
+    channelPackPath: "channel-pack",
+    harnessId: "narrated-story-video",
+  });
+  assert.equal(result.execution.planOnly, true);
+  assert.deepEqual(result.preflight.blockers, ["channel-pack-declared-blocker:fixture"]);
+  assert.match(result.note, /有料前 preflight で 1 件/u);
+  assert.deepEqual(calls, [["preflight", resolve("script.txt"), resolve("channel-pack")]]);
+  // 検査を持たないハーネス・検査が例外を投げた場合も plan は保存され、結果は壊れない。
+  const plain = await createVideoHarnessService(runtimeFixture()).start({
+    projectDir: "/tmp/video-service-project", scriptPath: "script.txt", channelPackPath: "channel-pack", harnessId: "fixture-harness",
+  });
+  assert.equal("preflight" in plain, false);
+  const thrown = await createVideoHarnessService(runtimeFixture({
+    planPreflight: async () => { throw new Error("boom"); },
+  })).start({ projectDir: "/tmp/video-service-project", scriptPath: "script.txt", channelPackPath: "channel-pack" });
+  assert.deepEqual(thrown.preflight.blockers, ["plan-preflight-failed"]);
+  assert.equal(thrown.status, "planned");
+});
