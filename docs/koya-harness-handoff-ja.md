@@ -108,7 +108,7 @@ MCPからは`run_koya_manga_pipeline`へ`action: "handoff-export" | "handoff-ver
 ## Receipt確定で止まったJobの復旧
 
 有料生成が終わった後に、信頼リスト未設定・conflict・attestation欠落などの設定/証跡側の失敗で
-RunReceiptが確定できない場合、Jobは`failed`（terminal）にならず、**`awaiting-human-review`に
+RunReceiptが確定できない場合、Jobは`failed`にならず、**`awaiting-human-review`に
 `pendingReceiptFinalization`を持って止まります**。成果物・Media Job・課金は済んでいるので、
 `node scripts/run-video-harness.mjs resume --job-id ID --project-dir DIR --confirmed`
 （MCPは`resume_video_harness_job`、`confirmed: true`必須）は**Receiptの確定だけ**を再試行し、

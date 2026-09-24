@@ -1,4 +1,6 @@
 {"id":"010746edff15","kind":"fact","target":"genre:manga-video-production"}
+{"id":"02da2b58db25","kind":"correction","target":"genre:narrated-story-video"}
+{"id":"0351aae79fc7","kind":"fact","target":"genre:narrated-story-video"}
 {"id":"079632f77850","kind":"constraint","target":"genre:narrated-story-video"}
 {"id":"0e71978746a3","kind":"fact","target":"genre:manga-video-production"}
 {"id":"145f594ef34e","kind":"correction","target":"genre:narrated-story-video"}
@@ -27,6 +29,7 @@
 {"id":"6fc1a6d87bdd","kind":"correction","target":"platform:platform-craft"}
 {"id":"7009e9e5c53f","kind":"fact","target":"genre:manga-video-production"}
 {"id":"751aa0517717","kind":"fact","target":"platform:platform-craft"}
+{"id":"77f76b5977da","kind":"correction","target":"genre:narrated-story-video"}
 {"id":"783cdad4eaa5","kind":"fact","target":"platform:platform-craft"}
 {"id":"7a5c4eaf8d4f","kind":"fact","target":"genre:manga-video-production"}
 {"id":"837a389bb6a2","kind":"fact","target":"genre:manga-video-production"}

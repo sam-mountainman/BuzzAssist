@@ -1174,3 +1174,81 @@ test("signoff attestation dispatch is driven by the harness declaration and fail
     }
   });
 });
+
+test("failed からの再開で完成した Job は、Job 層の再開記録を共通 RunReceipt に写す", async () => {
+  const root = await mkdtemp(join(tmpdir(), "video-receipt-resume-"));
+  try {
+    const outcome = await completedFixture(root);
+    const resumed = {
+      ...job(root),
+      resumeFromFailed: {
+        version: "buzzassist-video-harness-failed-resume-v1",
+        attempts: 1,
+        resumedAt: "2026-09-01T00:00:00.000Z",
+        previousFailure: {
+          failedAt: "2026-08-31T23:00:00.000Z",
+          failedStage: "production",
+          error: "render crashed",
+          blockers: [],
+          knownRemainingIssues: ["render crashed"],
+        },
+        mediaJobRecovery: [{ requestKey: "req-r", jobId: "media-r", before: "recovery-required", after: "completed" }],
+        mediaJobs: {
+          reused: [{ requestKey: "req-a", jobId: "media-a", kind: "image", provider: "fixture", artifactSha256: "a".repeat(64) }],
+          recovered: [{ requestKey: "req-r", jobId: "media-r", kind: "voice.synthesis", provider: "fixture", artifactSha256: "c".repeat(64) }],
+          reissued: [],
+          issued: [],
+          carried: [],
+        },
+        history: [],
+      },
+    };
+    const result = await createVideoHarnessRunReceipt({ job: resumed, outcome, now: () => "2026-09-01T00:00:00.000Z" });
+    assert.equal(result.receipt.outcome, "pass");
+    assert.equal(result.receipt.resumeFromFailed.attempts, 1);
+    assert.equal(result.receipt.resumeFromFailed.previousFailure.failedStage, "production");
+    assert.equal(result.receipt.resumeFromFailed.previousFailure.error, "render crashed");
+    assert.equal(result.receipt.resumeFromFailed.mediaJobs.reused[0].requestKeyDigest, createHash("sha256").update("req-a").digest("hex"));
+    assert.equal(result.receipt.resumeFromFailed.mediaJobs.recovered.length, 1);
+    assert.deepEqual(result.receipt.resumeFromFailed.mediaJobRecovery.map((row) => row.after), ["completed"]);
+    const written = JSON.parse(await readFile(result.path, "utf8"));
+    assert.equal(written.resumeFromFailed.previousFailure.error, "render crashed", "書き出した Receipt にも残る");
+    assert.equal(JSON.stringify(written).includes('"req-a"'), false, "requestKey の生値は Receipt に残さない");
+
+    const plain = await createVideoHarnessRunReceipt({ job: job(root), outcome, now: () => "2026-09-01T00:00:00.000Z" });
+    assert.equal(plain.receipt.resumeFromFailed, undefined, "再開していない Job の Receipt に再開記録を作らない");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("画像の失敗分を指紋迂回で作り直した Job は、その事実を共通 RunReceipt に 1 件写す（最新回が未使用でも history の最後の使用回）", async () => {
+  const root = await mkdtemp(join(tmpdir(), "video-receipt-image-retry-"));
+  try {
+    const outcome = await completedFixture(root);
+    const retriedFailed = { requested: true, jobIds: ["image:2"], count: 1, attempts: 2, completed: 1 };
+    const retried = { ...job(root), imageRetry: { requested: true, retriedFailed }, imageSummary: { total: 3, complete: 3, failed: 0, reused: 2, paidImages: 3, attempts: 4, retriedFailed } };
+    const result = await createVideoHarnessRunReceipt({ job: retried, outcome, now: () => "2026-09-01T00:00:00.000Z" });
+    assert.equal(result.receipt.outcome, "pass");
+    assert.deepEqual(result.receipt.imageRetry, {
+      requested: true, jobIdDigests: [createHash("sha256").update("image:2").digest("hex")], count: 1, attempts: 2, completed: 1,
+    });
+    const written = JSON.parse(await readFile(result.path, "utf8"));
+    assert.equal(written.imageRetry.attempts, 2, "再課金の回数が書き出した Receipt に残る");
+    assert.equal(JSON.stringify(written).includes("image:2"), false);
+
+    // 最新回は未使用でも、history に使用回があればその最後を写す。
+    const historic = {
+      ...job(root),
+      imageRetry: { requested: false, retriedFailed: null },
+      imageRetryHistory: [{ recordedAt: "2026-08-31T00:00:00.000Z", requested: true, retriedFailed: { ...retriedFailed, attempts: 5 } }],
+    };
+    const fromHistory = await createVideoHarnessRunReceipt({ job: historic, outcome, now: () => "2026-09-01T00:00:00.000Z" });
+    assert.equal(fromHistory.receipt.imageRetry.attempts, 5);
+
+    const plain = await createVideoHarnessRunReceipt({ job: { ...job(root), imageRetry: { requested: false, retriedFailed: null } }, outcome, now: () => "2026-09-01T00:00:00.000Z" });
+    assert.equal(plain.receipt.imageRetry, undefined, "迂回引数を使っていない Job には作らない");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

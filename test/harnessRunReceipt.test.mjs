@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { readFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -14,7 +15,9 @@ import {
   recordApproval,
   recordGate,
   recordGatesFromAuditChecks,
+  recordImageRetry,
   recordPaidMediaJob,
+  recordResumeFromFailed,
   recordRunArtifact,
   redactForPlatform,
   writeRunReceipt,
@@ -753,4 +756,65 @@ test("指紋の取れない層があれば、記録を作らない", async () =>
     "空の pack を受理しないこと",
   );
   await rm(sandbox, { recursive: true, force: true });
+});
+
+test("failed からの再開は Receipt に前回の失敗と Media Job の再利用/再発行を digest で残し、platform export は件数だけ返す", () => {
+  const digest = (value) => createHash("sha256").update(value).digest("hex");
+  const receipt = openManga();
+  recordResumeFromFailed(receipt, {
+    attempts: 2,
+    resumedAt: NOW,
+    previousFailure: { failedAt: NOW, failedStage: "production", error: "render crashed", blockers: ["ffmpeg"], knownRemainingIssues: ["render crashed"] },
+    mediaJobRecovery: [{ requestKey: "req-r", jobId: "media-r", before: "recovery-required", after: "completed" }],
+    mediaJobs: {
+      reused: [{ requestKey: "req-a", jobId: "media-a", kind: "image", provider: "fixture", artifactSha256: "a".repeat(64) }],
+      recovered: [{ requestKey: "req-r", jobId: "media-r", kind: "voice.synthesis", provider: "fixture", artifactSha256: "c".repeat(64) }],
+      reissued: [],
+      issued: [{ requestKey: "req-b", jobId: "media-b", kind: "image", provider: "fixture", artifact: { sha256: "b".repeat(64) } }],
+      carried: [],
+    },
+  });
+  assert.equal(receipt.resumeFromFailed.attempts, 2);
+  assert.equal(receipt.resumeFromFailed.previousFailure.failedStage, "production");
+  assert.equal(receipt.resumeFromFailed.previousFailure.error, "render crashed");
+  assert.deepEqual(receipt.resumeFromFailed.previousFailure.blockers, ["ffmpeg"]);
+  assert.equal(receipt.resumeFromFailed.mediaJobs.reused[0].requestKeyDigest, digest("req-a"));
+  assert.equal(receipt.resumeFromFailed.mediaJobs.issued[0].artifactSha256, "b".repeat(64), "artifact.sha256 形でも受ける");
+  assert.deepEqual(receipt.resumeFromFailed.mediaJobRecovery, [{ requestKeyDigest: digest("req-r"), jobId: "media-r", before: "recovery-required", after: "completed" }]);
+  const serialized = JSON.stringify(receipt);
+  for (const raw of ["req-a", "req-b", "req-r"]) assert.equal(serialized.includes(`"${raw}"`), false, `${raw}: requestKey の生値を残さない`);
+  for (const id of receipt.harnessBuild.declaredGates) recordGate(receipt, { id, verdict: "pass", evidence: { measured: 1 } });
+  const done = finalizeRunReceipt(receipt, { outcome: "pass", timestamp: NOW });
+  assert.deepEqual(redactForPlatform(done).resumeFromFailed, {
+    attempts: 2, failedStage: "production", reusedCount: 1, recoveredCount: 1, reissuedCount: 0, issuedCount: 1,
+  });
+  assert.equal(JSON.stringify(redactForPlatform(done)).includes("render crashed"), false, "失敗本文は platform へ返さない");
+  assert.throws(() => recordResumeFromFailed(done, { attempts: 3 }), /finalize 済み/u);
+
+  const plain = openManga();
+  for (const id of plain.harnessBuild.declaredGates) recordGate(plain, { id, verdict: "pass", evidence: { measured: 1 } });
+  const plainDone = finalizeRunReceipt(plain, { outcome: "pass", timestamp: NOW });
+  assert.equal(plainDone.resumeFromFailed, undefined, "再開していない Receipt に再開記録は無い");
+  assert.equal(redactForPlatform(plainDone).resumeFromFailed, null);
+});
+
+test("指紋迂回で作り直した画像行は Receipt に digest と回数で残り、platform export は件数だけ、ゲート判定には触れない", () => {
+  const digest = (value) => createHash("sha256").update(value).digest("hex");
+  const receipt = openManga();
+  recordImageRetry(receipt, { requested: true, jobIds: ["image:2", "image:7"], count: 2, attempts: 3, completed: 2 });
+  assert.deepEqual(receipt.imageRetry, {
+    requested: true, jobIdDigests: [digest("image:2"), digest("image:7")], count: 2, attempts: 3, completed: 2,
+  });
+  assert.equal(JSON.stringify(receipt).includes("image:2"), false, "画像行 id の生値は残さない");
+  assert.deepEqual(receipt.gates, {}, "記録はゲート判定に触れない");
+  for (const id of receipt.harnessBuild.declaredGates) recordGate(receipt, { id, verdict: "pass", evidence: { measured: 1 } });
+  const done = finalizeRunReceipt(receipt, { outcome: "pass", timestamp: NOW });
+  assert.deepEqual(redactForPlatform(done).imageRetry, { requested: true, count: 2, attempts: 3, completed: 2 });
+  assert.equal("jobIdDigests" in redactForPlatform(done).imageRetry, false);
+  assert.throws(() => recordImageRetry(done, { requested: true }), /finalize 済み/u);
+  const plain = openManga();
+  for (const id of plain.harnessBuild.declaredGates) recordGate(plain, { id, verdict: "pass", evidence: { measured: 1 } });
+  const plainDone = finalizeRunReceipt(plain, { outcome: "pass", timestamp: NOW });
+  assert.equal(plainDone.imageRetry, undefined);
+  assert.equal(redactForPlatform(plainDone).imageRetry, null);
 });

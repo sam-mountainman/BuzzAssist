@@ -1533,3 +1533,501 @@ test("Receipt確定失敗の blocker はメッセージ先頭の失敗コード�
   assert.deepEqual(jobTesting.receiptFailureBlockers("共通RunReceiptがpassにならなかった。"), ["run-receipt-finalization"]);
   assert.deepEqual(jobTesting.receiptFailureBlockers("signoffs[0]のreviewer attestationが無効: reviewer-key-untrusted"), ["run-receipt-finalization"]);
 });
+
+// ---------------------------------------------------------------------------
+// failed Job の再開（resume-from-failed）
+// ---------------------------------------------------------------------------
+
+function paidMediaRow(key, sha, overrides = {}) {
+  return {
+    version: "paid-media-job-v1",
+    jobId: `media-${key}`,
+    requestKey: `req-${key}`,
+    status: "completed",
+    kind: "image",
+    provider: "fixture",
+    model: "fixture-image",
+    inputHash: sha,
+    artifact: { sha256: sha, bytes: 1 },
+    ...overrides,
+  };
+}
+
+test("failed Job は共通 resume 経路で再開でき、完成済み Media Job は再発行されず、再開の事実が Job と finalizer に残る", async () => {
+  const root = await fixture();
+  try {
+    const { job } = await createVideoHarnessJob({
+      projectDir: root,
+      scriptPath: join(root, "script.txt"),
+      harnessId: "koya-manga-video",
+      repoRoot: root,
+    });
+    const { artifacts } = await paidArtifactsFixture(root);
+    const paidA = paidMediaRow("a", "a".repeat(64));
+    let doctorCalls = 0;
+    let finalizedJob = null;
+    const finalizeReceipt = async ({ job: current }) => {
+      finalizedJob = current;
+      const path = join(root, "resumed-run-receipt.json");
+      await writeFile(path, "{}\n");
+      return { path };
+    };
+    const run = (adapter, extra = {}) => runVideoHarnessJob({
+      projectDir: root,
+      jobId: job.id,
+      doctor: async () => { doctorCalls += 1; return { ready: true, blocking: [] }; },
+      adapter,
+      finalizeReceipt,
+      projectCanvas: async () => {},
+      env: {},
+      ...extra,
+    });
+
+    const failed = await run(async () => ({
+      status: "failed",
+      error: "render crashed after image generation",
+      knownRemainingIssues: ["render crashed after image generation"],
+      mediaJobs: [paidA],
+    }));
+    assert.equal(failed.status, "failed");
+    assert.ok(failed.completedAt);
+    assert.equal(failed.stages.find((stage) => stage.id === "production").status, "failed");
+    assert.deepEqual(failed.mediaJobs.map((row) => row.requestKey), ["req-a"], "完成済み Media Job の記録は failed でも残る");
+    assert.equal(failed.resumeFromFailed, undefined);
+
+    const adapterContexts = [];
+    const done = await run(async ({ job: current }) => {
+      adapterContexts.push(current);
+      return {
+        status: "completed",
+        artifacts,
+        mediaJobs: [paidA, paidMediaRow("b", "b".repeat(64))],
+        knownRemainingIssues: [],
+        result: { status: "final-koya-audited" },
+      };
+    });
+    assert.equal(done.status, "completed");
+    assert.equal(doctorCalls, 2, "failed からの resume でも doctor は他の resume と同じく再実行される");
+    assert.equal(adapterContexts.length, 1);
+    assert.equal(adapterContexts[0].status, "running");
+    assert.equal(adapterContexts[0].resumeFromFailed.attempts, 1, "adapter は再開中であることを context から読める");
+    assert.equal(adapterContexts[0].resumeFromFailed.mediaJobs, null, "分類は adapter の報告を見てから確定する");
+    assert.deepEqual(adapterContexts[0].mediaJobs.map((row) => row.requestKey), ["req-a"], "adapter は記録済みの完成 Media Job を受け取る");
+    assert.deepEqual(adapterContexts[0].stages.map((stage) => stage.status), ["pass", "pending", "pending", "pending"], "走っていない工程を pass のまま残さない");
+
+    const record = done.resumeFromFailed;
+    assert.equal(record.version, "buzzassist-video-harness-failed-resume-v1");
+    assert.equal(record.attempts, 1);
+    assert.equal(record.held, undefined);
+    assert.equal(record.previousFailure.failedStage, "production");
+    assert.equal(record.previousFailure.failedAt, failed.completedAt);
+    assert.match(record.previousFailure.error, /render crashed after image generation/u);
+    assert.deepEqual(record.previousFailure.knownRemainingIssues, ["render crashed after image generation"]);
+    assert.deepEqual(record.previousFailure.stages.map((stage) => stage.status), ["pass", "failed", "failed", "pending"]);
+    assert.deepEqual(record.mediaJobRecovery, []);
+    assert.deepEqual(record.mediaJobs.reused.map((row) => row.requestKey), ["req-a"], "同じ requestKey・同じ artifact SHA は再利用");
+    assert.deepEqual(record.mediaJobs.issued.map((row) => row.requestKey), ["req-b"], "記録に無い Media Job だけが新規発行");
+    assert.deepEqual(record.mediaJobs.reissued, []);
+    assert.deepEqual(record.mediaJobs.recovered, []);
+    assert.deepEqual(record.mediaJobs.carried, []);
+    assert.deepEqual(record.history, []);
+    assert.deepEqual(finalizedJob.resumeFromFailed.mediaJobs.reused.map((row) => row.requestKey), ["req-a"], "Receipt finalizer は再開の事実を受け取る");
+    assert.deepEqual(done.mediaJobs.map((row) => row.requestKey), ["req-a", "req-b"]);
+    assert.ok(done.artifacts.some((entry) => entry.kind === "run-receipt"));
+    assert.deepEqual(done.stages.map((stage) => stage.status), ["pass", "pass", "pass", "pass"]);
+    assert.deepEqual(done.blockers, []);
+    assert.equal(done.error, undefined);
+    const persisted = await readVideoHarnessJob({ projectDir: root, jobId: job.id });
+    assert.equal(persisted.status, "completed");
+    assert.deepEqual(persisted.resumeFromFailed.mediaJobs.reused.map((row) => row.requestKey), ["req-a"]);
+
+    // completed になった Job の resume は従来どおり再投影だけ（doctor も adapter も走らない）。
+    let adapterAgain = 0;
+    const again = await run(async () => { adapterAgain += 1; return { status: "completed" }; });
+    assert.equal(again.status, "completed");
+    assert.equal(adapterAgain, 0);
+    assert.equal(doctorCalls, 2);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("recovery-required の Media Job を持つ failed Job は broker の recover を通り、決着するまで doctor も adapter も起動しない", async () => {
+  const root = await fixture();
+  try {
+    const { job } = await createVideoHarnessJob({
+      projectDir: root,
+      scriptPath: join(root, "script.txt"),
+      harnessId: "koya-manga-video",
+      repoRoot: root,
+    });
+    const { artifacts } = await paidArtifactsFixture(root);
+    const paidA = paidMediaRow("a", "a".repeat(64));
+    const recovering = paidMediaRow("r", "c".repeat(64), {
+      status: "recovery-required", kind: "voice.synthesis", model: "fixture-tts", providerJobId: "prov-r", artifact: {},
+    });
+    let doctorCalls = 0;
+    let adapterCalls = 0;
+    const finalizeReceipt = async () => {
+      const path = join(root, "recovered-run-receipt.json");
+      await writeFile(path, "{}\n");
+      return { path };
+    };
+    const run = (adapter, extra = {}) => runVideoHarnessJob({
+      projectDir: root,
+      jobId: job.id,
+      doctor: async () => { doctorCalls += 1; return { ready: true, blocking: [] }; },
+      adapter: async (context) => { adapterCalls += 1; return adapter(context); },
+      finalizeReceipt,
+      projectCanvas: async () => {},
+      env: {},
+      ...extra,
+    });
+
+    const failed = await run(async () => ({
+      status: "failed",
+      error: "speech stage lost the connection after submit",
+      knownRemainingIssues: ["speech stage lost the connection after submit"],
+      mediaJobs: [paidA, recovering],
+    }));
+    assert.equal(failed.status, "failed");
+    assert.equal(failed.mediaJobs.find((row) => row.requestKey === "req-r").status, "recovery-required");
+    assert.equal(adapterCalls, 1);
+    assert.equal(doctorCalls, 1);
+
+    // recover しても未決着: failed のまま blocker を立てて止まる。再 submit（adapter 起動）はしない。
+    const recoverCalls = [];
+    const held = await run(async () => ({ status: "completed" }), {
+      recoverMediaJob: async (ref) => { recoverCalls.push(ref); return { ...recovering }; },
+    });
+    assert.equal(held.status, "failed");
+    assert.deepEqual(held.blockers, ["paid-media-recovery-pending"]);
+    assert.match(held.knownRemainingIssues[0], /^paid-media-recovery-pending: .*req-r: recover 後も recovery-required/u);
+    assert.deepEqual(recoverCalls, [{ requestKey: "req-r", jobId: "media-r", providerJobId: "prov-r" }], "recover は記録された identity で呼ぶ");
+    assert.equal(adapterCalls, 1, "未決着のまま adapter を起動しない");
+    assert.equal(doctorCalls, 1, "未決着のまま doctor も走らない");
+    assert.equal(held.resumeFromFailed.held, true);
+    assert.equal(held.resumeFromFailed.attempts, 1);
+    assert.deepEqual(held.resumeFromFailed.mediaJobRecovery, [{ requestKey: "req-r", jobId: "media-r", before: "recovery-required", after: "recovery-required" }]);
+    assert.equal(held.resumeFromFailed.previousFailure.error, "speech stage lost the connection after submit", "元の失敗理由は保持する");
+
+    // recover 自体が失敗: 同じく止まり、理由を記録する。
+    const heldAgain = await run(async () => ({ status: "completed" }), {
+      recoverMediaJob: async () => { throw new Error("broker unreachable"); },
+    });
+    assert.equal(heldAgain.status, "failed");
+    assert.deepEqual(heldAgain.blockers, ["paid-media-recovery-pending"]);
+    assert.match(heldAgain.resumeFromFailed.mediaJobRecovery[0].error, /broker unreachable/u);
+    assert.equal(heldAgain.resumeFromFailed.attempts, 2);
+    assert.equal(heldAgain.resumeFromFailed.history.length, 1);
+    assert.equal(adapterCalls, 1);
+
+    // recover が completed で決着: 記録を更新した上で通常経路へ戻り、adapter は決着済みの行を受け取る。
+    const recovered = { ...recovering, status: "completed", artifact: { sha256: "c".repeat(64), bytes: 1 } };
+    let seenRows = null;
+    const done = await run(async ({ job: current }) => {
+      seenRows = current.mediaJobs;
+      return {
+        status: "completed",
+        artifacts,
+        mediaJobs: [paidA, recovered],
+        knownRemainingIssues: [],
+        result: { status: "final-koya-audited" },
+      };
+    }, { recoverMediaJob: async () => recovered });
+    assert.equal(done.status, "completed");
+    assert.equal(adapterCalls, 2);
+    assert.equal(doctorCalls, 2);
+    assert.equal(seenRows.find((row) => row.requestKey === "req-r").status, "completed", "recover の結果が adapter 起動前に Job へ反映される");
+    assert.equal(done.resumeFromFailed.attempts, 3);
+    assert.equal(done.resumeFromFailed.held, undefined);
+    assert.deepEqual(done.resumeFromFailed.mediaJobRecovery, [{ requestKey: "req-r", jobId: "media-r", before: "recovery-required", after: "completed" }]);
+    assert.deepEqual(done.resumeFromFailed.mediaJobs.recovered.map((row) => row.requestKey), ["req-r"]);
+    assert.deepEqual(done.resumeFromFailed.mediaJobs.reused.map((row) => row.requestKey), ["req-a"]);
+    assert.deepEqual(done.resumeFromFailed.mediaJobs.issued, []);
+    assert.deepEqual(done.resumeFromFailed.mediaJobs.reissued, []);
+    assert.equal(done.resumeFromFailed.history.length, 2);
+    assert.equal(done.resumeFromFailed.history[1].held, true);
+    assert.equal(done.resumeFromFailed.history[1].history, undefined, "history は入れ子にしない");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("既定の recover は既定 journal に無い Media Job を再 submit せず、理由つきで未決着に留める", async () => {
+  const root = await fixture();
+  try {
+    const { job } = await createVideoHarnessJob({
+      projectDir: root,
+      scriptPath: join(root, "script.txt"),
+      harnessId: "koya-manga-video",
+      repoRoot: root,
+    });
+    const recovering = paidMediaRow("r", "c".repeat(64), { status: "recovery-required", kind: "voice.synthesis", artifact: {} });
+    let adapterCalls = 0;
+    const run = (extra = {}) => runVideoHarnessJob({
+      projectDir: root,
+      jobId: job.id,
+      doctor: async () => ({ ready: true, blocking: [] }),
+      adapter: async () => { adapterCalls += 1; return { status: "failed", error: "boom", knownRemainingIssues: ["boom"], mediaJobs: [recovering] }; },
+      projectCanvas: async () => {},
+      ...extra,
+    });
+    await run({ env: {} });
+    assert.equal(adapterCalls, 1);
+    const emptyJournal = join(root, "empty-media-jobs");
+    const held = await run({ env: { BUZZASSIST_MEDIA_JOB_STATE_DIR: emptyJournal } });
+    assert.equal(held.status, "failed");
+    assert.deepEqual(held.blockers, ["paid-media-recovery-pending"]);
+    assert.match(held.resumeFromFailed.mediaJobRecovery[0].error, /既定 journal/u);
+    assert.match(held.resumeFromFailed.mediaJobRecovery[0].error, /empty-media-jobs/u);
+    assert.equal(adapterCalls, 1, "journal に無い Media Job を新規発行で埋めない");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("直せない failed Job（台本欠落・改変、workspace 欠落、矛盾 journal、破損 journal）は理由つきで拒否し、Job を書き換えず doctor も adapter も走らない", async () => {
+  const root = await fixture();
+  try {
+    const { job } = await createVideoHarnessJob({
+      projectDir: root,
+      scriptPath: join(root, "script.txt"),
+      harnessId: "koya-manga-video",
+      repoRoot: root,
+    });
+    let doctorCalls = 0;
+    let adapterCalls = 0;
+    const attempt = () => runVideoHarnessJob({
+      projectDir: root,
+      jobId: job.id,
+      doctor: async () => { doctorCalls += 1; return { ready: true, blocking: [] }; },
+      adapter: async () => { adapterCalls += 1; return { status: "failed", error: "boom", knownRemainingIssues: ["boom"] }; },
+      projectCanvas: async () => {},
+      env: {},
+    });
+    const failed = await attempt();
+    assert.equal(failed.status, "failed");
+    assert.equal(doctorCalls, 1);
+    assert.equal(adapterCalls, 1);
+    const jobPath = join(root, "canvas", "harness-runs", job.id, "job.json");
+    const original = await readFile(jobPath, "utf8");
+    const parsed = JSON.parse(original);
+    const refused = (pattern) => (error) => {
+      assert.equal(error.code, "video-harness-failed-job-unrecoverable");
+      assert.match(error.message, /^video-harness-failed-job-unrecoverable: /u);
+      assert.match(error.message, pattern);
+      return true;
+    };
+
+    const scriptBody = await readFile(job.script.path);
+    await rm(job.script.path);
+    await assert.rejects(attempt(), refused(/保存済み台本を読めない/u));
+    await writeFile(job.script.path, "改変された台本\n", "utf8");
+    await assert.rejects(attempt(), refused(/SHA-256 が Job と一致しない/u));
+    await writeFile(job.script.path, scriptBody);
+
+    await writeFile(jobPath, JSON.stringify({ ...parsed, pendingReceiptFinalization: { version: "x" } }));
+    await assert.rejects(attempt(), refused(/Receipt 確定待ち/u));
+    await writeFile(jobPath, JSON.stringify({ ...parsed, runDir: join(root, "gone") }));
+    await assert.rejects(attempt(), refused(/workspace が無い/u));
+    await writeFile(jobPath, JSON.stringify({ ...parsed, stages: [{ id: "doctor", status: "pass" }] }));
+    await assert.rejects(attempt(), refused(/stages/u));
+    await writeFile(jobPath, JSON.stringify({ ...parsed, mediaJobs: [{ status: "recovery-required", kind: "image", provider: "fixture" }] }));
+    await assert.rejects(attempt(), refused(/requestKey も jobId も無く/u));
+    await writeFile(jobPath, "{ this is not json");
+    await assert.rejects(attempt(), (error) => {
+      assert.equal(error.code, "video-harness-job-journal-corrupt");
+      assert.match(error.message, /JSON として読めない/u);
+      return true;
+    });
+
+    await writeFile(jobPath, original);
+    assert.equal(doctorCalls, 1, "拒否経路で doctor は走らない");
+    assert.equal(adapterCalls, 1, "拒否経路で adapter は走らない");
+    const after = await readVideoHarnessJob({ projectDir: root, jobId: job.id });
+    assert.equal(after.status, "failed");
+    assert.equal(after.revision, parsed.revision, "拒否は Job を書き換えない");
+    assert.equal(after.resumeFromFailed, undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("failed Job の再開後にもう一度失敗すると、前回の再開記録は history に残り新しい失敗理由が previousFailure になる", async () => {
+  const root = await fixture();
+  try {
+    const { job } = await createVideoHarnessJob({
+      projectDir: root,
+      scriptPath: join(root, "script.txt"),
+      harnessId: "koya-manga-video",
+      repoRoot: root,
+    });
+    const paidA = paidMediaRow("a", "a".repeat(64));
+    const run = (adapter) => runVideoHarnessJob({
+      projectDir: root,
+      jobId: job.id,
+      doctor: async () => ({ ready: true, blocking: [] }),
+      adapter,
+      projectCanvas: async () => {},
+      env: {},
+    });
+    await run(async () => ({ status: "failed", error: "first failure", knownRemainingIssues: ["first failure"], mediaJobs: [paidA] }));
+    const second = await run(async () => ({ status: "failed", error: "second failure", knownRemainingIssues: ["second failure"], mediaJobs: [paidA] }));
+    assert.equal(second.status, "failed");
+    assert.equal(second.resumeFromFailed.attempts, 1);
+    assert.equal(second.resumeFromFailed.previousFailure.error, "first failure");
+    assert.deepEqual(second.resumeFromFailed.mediaJobs.reused.map((row) => row.requestKey), ["req-a"], "再失敗でも 1 回目の再開での再利用は確定して残る");
+    const third = await run(async () => ({ status: "awaiting-human-review", blockers: ["review"], knownRemainingIssues: ["review"], mediaJobs: [paidA] }));
+    assert.equal(third.status, "awaiting-human-review");
+    assert.equal(third.resumeFromFailed.attempts, 2);
+    assert.equal(third.resumeFromFailed.previousFailure.error, "second failure");
+    assert.equal(third.resumeFromFailed.history.length, 1);
+    assert.equal(third.resumeFromFailed.history[0].previousFailure.error, "first failure");
+    assert.deepEqual(third.stages.map((stage) => stage.status), ["pass", "awaiting-human-review", "pending", "pending"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("classifyResumedMediaJobs は同じ鍵で別 artifact になった行を reused に数えない", () => {
+  const recorded = [paidMediaRow("a", "a".repeat(64)), paidMediaRow("c", "c".repeat(64)), paidMediaRow("r", "r".repeat(64))];
+  const reported = [paidMediaRow("a", "a".repeat(64)), paidMediaRow("c", "d".repeat(64)), paidMediaRow("r", "r".repeat(64)), paidMediaRow("n", "e".repeat(64))];
+  const out = jobTesting.classifyResumedMediaJobs(recorded, reported, new Set(["req-r"]));
+  assert.deepEqual(out.reused.map((row) => row.requestKey), ["req-a"]);
+  assert.deepEqual(out.reissued.map((row) => row.requestKey), ["req-c"]);
+  assert.deepEqual(out.recovered.map((row) => row.requestKey), ["req-r"]);
+  assert.deepEqual(out.issued.map((row) => row.requestKey), ["req-n"]);
+  assert.deepEqual(out.carried, []);
+  const partial = jobTesting.classifyResumedMediaJobs(recorded, [paidMediaRow("a", "a".repeat(64))]);
+  assert.deepEqual(partial.carried.map((row) => row.requestKey), ["req-c", "req-r"], "報告されなかった記録は carried として区別する");
+  assert.equal(jobTesting.failedStageOf({ stages: [{ id: "doctor", status: "pass" }, { id: "production", status: "failed" }] }), "production");
+  assert.equal(jobTesting.failedStageOf({ stages: [{ id: "doctor", status: "failed" }, { id: "production", status: "failed" }] }), "doctor");
+});
+
+test("adapter outcome の imageRetry / imageSummary / mediaJobStateDir は同じ名前で Job に残り、空の mediaJobStateDir で既知の場所を消さない", async () => {
+  const root = await fixture();
+  try {
+    const { job } = await createVideoHarnessJob({
+      projectDir: root,
+      scriptPath: join(root, "script.txt"),
+      harnessId: "koya-manga-video",
+      repoRoot: root,
+    });
+    const { artifacts } = await paidArtifactsFixture(root);
+    const retriedFailed = { requested: true, jobIds: ["image:2", "image:7"], count: 2, attempts: 3, completed: 2 };
+    const imageSummary = { total: 9, complete: 9, failed: 0, reused: 7, paidImages: 9, attempts: 12, retriedFailed };
+    const stateDir = join(root, ".koya-dialogue-source", "paid-media-jobs");
+    let finalizedJob = null;
+    const run = (adapter, extra = {}) => runVideoHarnessJob({
+      projectDir: root,
+      jobId: job.id,
+      doctor: async () => ({ ready: true, blocking: [] }),
+      adapter,
+      finalizeReceipt: async ({ job: current }) => {
+        finalizedJob = current;
+        const path = join(root, "image-retry-run-receipt.json");
+        await writeFile(path, "{}\n");
+        return { path };
+      },
+      projectCanvas: async () => {},
+      env: {},
+      ...extra,
+    });
+    // 1回目: 失敗（画像は作り直し無し）。journal の場所だけ報告される。
+    const failed = await run(async () => ({
+      status: "failed",
+      error: "render crashed",
+      knownRemainingIssues: ["render crashed"],
+      mediaJobs: [paidMediaRow("a", "a".repeat(64))],
+      imageRetry: { requested: false, retriedFailed: null },
+      imageSummary: { total: 9, complete: 7, failed: 2, reused: 0, paidImages: 7, attempts: 9, retriedFailed: { requested: false, jobIds: [], count: 0, attempts: 0, completed: 0 } },
+      mediaJobStateDir: stateDir,
+    }));
+    assert.equal(failed.status, "failed");
+    assert.deepEqual(failed.imageRetry, { requested: false, retriedFailed: null });
+    assert.equal(failed.imageSummary.failed, 2);
+    assert.equal(failed.mediaJobStateDir, stateDir);
+    assert.equal(failed.imageRetryHistory, undefined, "迂回引数を使っていない回は history に積まない");
+    // 2回目: --retry-failed-images 相当で完成。空の mediaJobStateDir は既知の場所を消さない。
+    const done = await run(async () => ({
+      status: "completed",
+      artifacts,
+      mediaJobs: [paidMediaRow("a", "a".repeat(64))],
+      knownRemainingIssues: [],
+      result: { status: "final-koya-audited" },
+      imageRetry: { requested: true, retriedFailed },
+      imageSummary,
+      mediaJobStateDir: "",
+    }));
+    assert.equal(done.status, "completed");
+    assert.deepEqual(done.imageRetry, { requested: true, retriedFailed });
+    assert.deepEqual(done.imageSummary, imageSummary);
+    assert.equal(done.mediaJobStateDir, stateDir, "空文字では上書きしない");
+    assert.equal(done.imageRetryHistory.length, 1);
+    assert.deepEqual(done.imageRetryHistory[0].retriedFailed, retriedFailed);
+    assert.ok(done.imageRetryHistory[0].recordedAt);
+    assert.deepEqual(finalizedJob.imageRetry, { requested: true, retriedFailed }, "Receipt finalizer は同じ名前で受け取る");
+    const persisted = await readVideoHarnessJob({ projectDir: root, jobId: job.id });
+    assert.deepEqual(persisted.imageRetry, { requested: true, retriedFailed });
+    assert.equal(persisted.mediaJobStateDir, stateDir);
+    // 形の壊れた値は数値 0 / null に落とし、例外にしない。
+    const evidence = jobTesting.imageEvidenceFromOutcome({}, {
+      imageRetry: { requested: "yes", retriedFailed: { jobIds: "x", count: -1, attempts: "3", completed: 1.5 } },
+      imageSummary: [],
+      mediaJobStateDir: 42,
+    }, [], () => "2026-09-24T00:00:00.000Z");
+    assert.deepEqual(evidence, {
+      imageRetry: { requested: false, retriedFailed: { requested: false, jobIds: [], count: 0, attempts: 3, completed: 0 } },
+      imageSummary: null,
+    });
+    assert.deepEqual(jobTesting.imageEvidenceFromOutcome({}, {}, [], () => "x"), {}, "outcome に無ければ何も上書きしない");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("既定の recover は job.mediaJobStateDir の journal を先に探し、無ければ既定 journal、どちらにも無ければ拒否する", async () => {
+  const root = await fixture();
+  try {
+    const { createPaidMediaJobBroker } = await import("../lib/paidMediaJobBroker.mjs");
+    const childJournal = join(root, "child-source", "paid-media-jobs");
+    const defaultJournal = join(root, "default-media-jobs");
+    // 子の journal にだけ requestKey を置く（start は呼ばず、journal の形だけ再現する）。
+    const broker = createPaidMediaJobBroker({ stateDir: childJournal });
+    const requestKey = "req-child";
+    const { createHash } = await import("node:crypto");
+    const digest = createHash("sha256").update(requestKey).digest("hex");
+    await mkdir(join(childJournal, "jobs"), { recursive: true });
+    await writeFile(join(childJournal, "jobs", `${digest}.json`), `${JSON.stringify({
+      version: "paid-media-job-v1", jobId: "srv-1", requestKey, inputHash: "c".repeat(64), identityHash: "d".repeat(64),
+      kind: "voice.synthesis", provider: "fixture", adapterVersion: "v1", providerJobId: "prov-1", model: "m", voiceId: "",
+      status: "recovery-required", reservation: {}, usage: {}, result: null, attempts: { total: 1, retries: [] }, error: null,
+      createdAt: "2026-09-24T00:00:00.000Z", updatedAt: "2026-09-24T00:00:00.000Z",
+    })}\n`);
+    assert.ok(await broker.getLocal({ requestKey }), "fixture journal が broker から読めること");
+    const recoverCalls = [];
+    // recover 自体（network）は差し替えられないので、journal の探索順だけを検証する:
+    // 子 journal に無い requestKey → 既定 journal にも無い → 拒否メッセージに両方の場所が並ぶ。
+    await assert.rejects(
+      jobTesting.defaultRecoverMediaJob({ requestKey: "req-missing" }, {
+        job: { mediaJobStateDir: childJournal },
+        env: { BUZZASSIST_MEDIA_JOB_STATE_DIR: defaultJournal },
+      }),
+      (error) => {
+        assert.match(error.message, /req-missing/u);
+        assert.ok(error.message.indexOf(childJournal) < error.message.indexOf(defaultJournal), "子の journal を先に探す");
+        assert.match(error.message, /BUZZASSIST_MEDIA_JOB_STATE_DIR/u, "運営者向けの案内は残す");
+        return true;
+      },
+    );
+    assert.deepEqual(recoverCalls, []);
+    // job.mediaJobStateDir が無いときは既定 journal だけ。
+    await assert.rejects(
+      jobTesting.defaultRecoverMediaJob({ requestKey: "req-missing" }, { job: {}, env: { BUZZASSIST_MEDIA_JOB_STATE_DIR: defaultJournal } }),
+      (error) => !error.message.includes(childJournal) && error.message.includes(defaultJournal),
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
