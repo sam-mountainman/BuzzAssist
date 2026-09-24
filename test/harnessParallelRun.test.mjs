@@ -114,8 +114,10 @@ test("ロックが違えば同時に走る", async () => {
   const plan = {
     planId: "distinct-locks",
     jobs: [
-      { id: "w1", command: "sleep", args: ["1"], locks: ["a.json"] },
-      { id: "w2", command: "sleep", args: ["1"], locks: ["b.json"] },
+      // 3秒にしている: Windows の CI ではプロセスの起動そのものが1秒以上かかることがあり、
+      // 1秒のジョブでは2つ目を起動する前に1つ目が終わって、重なりを測れなかった。
+      { id: "w1", command: "sleep", args: ["3"], locks: ["a.json"] },
+      { id: "w2", command: "sleep", args: ["3"], locks: ["b.json"] },
     ],
   };
   const summary = await executePlan(plan, {
