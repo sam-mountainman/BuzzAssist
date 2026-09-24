@@ -59,8 +59,9 @@ async function writeJson(pathname, value) {
 
 async function copyConfig(sourceProject, targetProject, relativePath) {
   // Channel Pack はリポジトリ直下ではなく channel-packs/ に置かれるので、
-  // fixture の元も解決層に探させる。
-  const source = resolveChannelPackPath(sourceProject, relativePath);
+  // fixture の元も解決層に探させる。この束は Koya のものなので koya を名指しする
+  // （同じ端末に別チャンネルの pack が並ぶと、既定の pack は決められずに止まる）。
+  const source = resolveChannelPackPath(sourceProject, relativePath, "koya");
   const target = path.join(targetProject, relativePath);
   await mkdir(path.dirname(target), { recursive: true });
   await copyFile(source, target);
@@ -76,7 +77,7 @@ async function prepareProject(root, withData = true, mutateShowBible = null) {
     "config/koya-manga-quality-incidents.json",
   ];
   for (const relativePath of configFiles) await copyConfig(repoRoot, root, relativePath);
-  const stylingDirectory = resolveChannelPackPath(repoRoot, "config/koya-character-styling");
+  const stylingDirectory = resolveChannelPackPath(repoRoot, "config/koya-character-styling", "koya");
   for (const name of (await readdir(stylingDirectory)).filter((entry) => entry.endsWith(".json")).sort()) {
     await copyConfig(repoRoot, root, path.join("config", "koya-character-styling", name));
   }

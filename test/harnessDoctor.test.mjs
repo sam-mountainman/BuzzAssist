@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -547,6 +547,34 @@ test("R6-1: doctor reports the reviewer trust anchor as a required item for a na
   assert.equal(setupCheck.ok, false);
   assert.ok(setup.advisory.includes("reviewer-trust"));
   assert.ok(!setup.blocking.includes("reviewer-trust"));
+});
+
+test("Channel Pack が複数あって指定が無いときは、doctor ごと落ちずに channel-pack の項目で知らせる", async () => {
+  // 同じ端末で2つ目のチャンネルの pack を置いた日（2026-09-24）、setup の doctor が
+  // 例外で止まり、空き容量も鍵も何ひとつ報告できなくなった。
+  const project = await mkdtemp(join(tmpdir(), "harness-doctor-two-packs-"));
+  const savedPackId = process.env.BUZZASSIST_CHANNEL_PACK_ID;
+  delete process.env.BUZZASSIST_CHANNEL_PACK_ID;
+  try {
+    await mkdir(join(project, "channel-packs", "alpha"), { recursive: true });
+    await mkdir(join(project, "channel-packs", "beta"), { recursive: true });
+    for (const harnessId of ["", "koya-manga-video"]) {
+      const report = await runHarnessDoctor({
+        projectDir: project,
+        harnessId,
+        runtime: deterministicDoctorRuntime({ diskFreeBytes: async () => 40 * 1024 ** 3 }),
+      });
+      const pack = report.checks.find((check) => check.id === "channel-pack");
+      assert.equal(pack.ok, false, `${harnessId || "setup"}: 決められないものを通さない`);
+      assert.match(pack.detail, /2 個ある（alpha, beta）/u);
+      assert.match(pack.fix, /BUZZASSIST_CHANNEL_PACK_ID/u);
+      assert.ok(report.checks.some((check) => check.id === "disk-space"), "ほかの項目も報告される");
+    }
+  } finally {
+    if (savedPackId === undefined) delete process.env.BUZZASSIST_CHANNEL_PACK_ID;
+    else process.env.BUZZASSIST_CHANNEL_PACK_ID = savedPackId;
+    await rm(project, { recursive: true, force: true });
+  }
 });
 
 test("空き容量: ハーネス指定では必須、setup では任意（R6-1 と同じ扱い）", async () => {

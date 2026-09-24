@@ -573,12 +573,29 @@ function validateSignedChannelPackEvidence(evidence, harnessId) {
   };
 }
 
+// 同じ端末に Channel Pack が複数あり、どれを使うか指定が無いと channelPackPresent は
+// 例外を投げる（黙って1つを選ばないため）。doctor ごと落ちると他の項目まで見えなく
+// なるので、ここで受けて channel-pack の項目として報告する。
+const CHANNEL_PACK_AMBIGUOUS_FIX = "BUZZASSIST_CHANNEL_PACK_ID に使う Channel Pack の名前（channel-packs/ の下のフォルダ名）を入れて実行する。複数のチャンネルを同じ端末で回すときは、端末全体の既定にせず実行ごとに指定する";
+
+function channelPackPresence(projectDir) {
+  try {
+    return { present: channelPackPresent(projectDir), error: "" };
+  } catch (error) {
+    return { present: false, error: String(error?.message || error).slice(0, 200) };
+  }
+}
+
 async function probeChannelPack({ projectDir, harnessId, job, runtime }) {
   if (!harnessId) {
     // Setup時はHarness未選択でも、実際に復元済みのKoya正本があるなら
     // 「存在する」だけでなく読んで検証する。何も無い新規projectへKoyaを
     // 強制はせず、このcheck自体は任意のままにする。
-    if (channelPackPresent(projectDir)) {
+    const presence = channelPackPresence(projectDir);
+    if (presence.error) {
+      return { id: "channel-pack", required: false, ok: false, detail: presence.error, fix: CHANNEL_PACK_AMBIGUOUS_FIX };
+    }
+    if (presence.present) {
       let packDetail = "未設置";
       let packOk = false;
       try {
@@ -611,7 +628,9 @@ async function probeChannelPack({ projectDir, harnessId, job, runtime }) {
     let packDetail = "未設置";
     let packOk = false;
     let authorityFingerprint = null;
-    if (channelPackPresent(projectDir)) {
+    const presence = channelPackPresence(projectDir);
+    if (presence.error) packDetail = presence.error;
+    if (presence.present) {
       try {
         const authority = await (runtime.readKoyaChannelAuthority ?? readKoyaChannelAuthority)({ projectDir });
         packOk = authority.source === "project";
@@ -631,7 +650,7 @@ async function probeChannelPack({ projectDir, harnessId, job, runtime }) {
       ok: packOk,
       detail: packDetail,
       ...(authorityFingerprint ? { authorityFingerprint } : {}),
-      fix: packOk ? "" : "Koya本番には、署名済みChannel PackからJob固有workspaceへ復元した番組正本が要る。run_video_harnessのprepareを通し、show/location/thumbnail/stylingの全検証が通る状態にする",
+      fix: packOk ? "" : presence.error ? CHANNEL_PACK_AMBIGUOUS_FIX : "Koya本番には、署名済みChannel PackからJob固有workspaceへ復元した番組正本が要る。run_video_harnessのprepareを通し、show/location/thumbnail/stylingの全検証が通る状態にする",
     };
   }
 
