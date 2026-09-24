@@ -429,3 +429,28 @@ test("R6-1: an unconfigured, ambiguous, or all-revoked trust anchor stops confir
   assert.equal(planned.reviewerTrust.ok, true);
   assert.doesNotMatch(planned.note, /警告/u);
 });
+
+
+test("resume の retryFailedImages は adapter context にだけ載り、Job identity(options) と runJob には混ぜない", async () => {
+  // 画像の失敗分だけを同じ Job のまま作り直す（3-18）。options に入れると jobId の指紋が
+  // 変わって別 Job＝完成済み画像の全額払い直しになるので、reviewerTrustPath と同じ
+  // 実行文脈の経路で子へ渡す。
+  const runs = [];
+  const adapterContexts = [];
+  const service = createVideoHarnessService(runtimeFixture({
+    runJob: async (input) => {
+      runs.push(input);
+      await input.adapter({ job: fixtureJob({ id: input.jobId }), prepareResult: {} });
+      return fixtureJob({ id: input.jobId, status: "completed" });
+    },
+    adapter: async (context) => { adapterContexts.push(context); return { status: "completed", knownRemainingIssues: [] }; },
+  }));
+
+  await service.resume({ projectDir: "/tmp/video-service-project", jobId: "video-fixture-0123456789abcdef", confirmed: true, retryFailedImages: true });
+  assert.equal(adapterContexts[0].retryFailedImages, true, "adapter context には載る");
+  assert.equal("retryFailedImages" in runs[0], false, "runJob（Job 層）には渡さない");
+  assert.equal(runs[0].options, undefined, "resume は options を作らない（identity を変えない）");
+
+  await service.resume({ projectDir: "/tmp/video-service-project", jobId: "video-fixture-0123456789abcdef", confirmed: true });
+  assert.equal("retryFailedImages" in adapterContexts[1], false, "指定が無ければ context にも載せない");
+});

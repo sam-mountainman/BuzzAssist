@@ -34,7 +34,7 @@ function usage() {
     "BuzzAssist video harness (Claude Code / Codex common entry)",
     "",
     "start  --harness ID --script-path FILE --channel-pack BUNDLE [--confirmed] [--reviewer-trust-path JSON]",
-    "resume --job-id ID --project-dir DIR --confirmed [--reviewer-trust-path JSON]",
+    "resume --job-id ID --project-dir DIR --confirmed [--reviewer-trust-path JSON] [--retry-failed-images]",
     "status --job-id ID --project-dir DIR",
     "cancel --job-id ID --project-dir DIR",
     "list   --project-dir DIR",
@@ -48,6 +48,7 @@ function usage() {
     "--confirmed が無い start は durable job を作るだけで、有料APIを呼びません。",
     "",
     "--reviewer-trust-path は MCP の run_video_harness / resume_video_harness_job の reviewerTrustPath と同じ照合用引数です。",
+    "--retry-failed-images は、失敗した画像だけを同じ Job のまま作り直します（完成済みは再課金しない）。Job の識別子には入らず、使った事実は台帳と Receipt に残ります。",
     "  reviewer 信頼リストの唯一の信頼アンカーは運営者が実行側に設定する環境変数 BUZZASSIST_REVIEWER_TRUST",
     "  （または BUZZASSIST_REVIEWER_TRUST_JSON。旧 BUZZASSIST_KOYA_REVIEWER_TRUST(_JSON) は互換で読み、新旧不一致は env-ambiguous）。",
     "  明示 path の内容が env と一致しなければ reviewer-trust-conflict、env 未設定なら明示 path があっても",
@@ -131,6 +132,7 @@ async function main() {
         jobId: String(args.jobId),
         confirmed: true,
         reviewerTrustPath: reviewerTrustPathFrom(args),
+        retryFailedImages: args.retryFailedImages === true,
       });
       print(result);
       if (result.status !== "completed") process.exitCode = result.status === "awaiting-human-review" ? 3 : 2;

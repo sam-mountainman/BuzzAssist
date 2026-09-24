@@ -431,6 +431,43 @@ test("Koya adapter passes an exact parent-Job preflight binding to the internal 
     assert.ok(invokedArgs.includes("--confirm-paid-video-generation"));
     assert.ok(invokedArgs.includes("--retry-failed-video"));
     assert.equal(invokedArgs.includes("--retry-failed"), false, "画像の再試行とは別の指定");
+
+    // 画像の失敗分の作り直し（3-18）: resume の実行文脈 retryFailedImages は Job options に
+    // 入れずに子へ --retry-failed として渡す。options に入れると jobId の指紋が変わり、
+    // 別 Job＝完成済み画像の全額払い直しになる。使った事実は結果に残す（Receipt が記録する）。
+    let retryStdout = JSON.stringify({
+      status: "awaiting-human-review",
+      knownRemainingIssues: ["fixture"],
+      imageSummary: { total: 3, complete: 3, failed: 0, reused: 2, paidImages: 3, attempts: 4,
+        retriedFailed: { requested: true, jobIds: ["image:2"], count: 1, attempts: 1, completed: 1 } },
+      mediaJobStateDir: "/tmp/fixture/.koya-dialogue-source/paid-media-jobs",
+    });
+    const retryRunChild = async (command, args) => {
+      invokedArgs = args;
+      return { code: 3, signal: null, stdout: retryStdout, stderr: "" };
+    };
+    const retried = await executeVideoHarnessAdapter({
+      job,
+      prepareResult: { executionProjectDir: root },
+      retryFailedImages: true,
+      runChild: retryRunChild,
+    });
+    assert.ok(invokedArgs.includes("--retry-failed"), "実行文脈の retryFailedImages は子の --retry-failed になる");
+    assert.equal(job.options.retryFailed, undefined, "Job options（identity）には混ぜない");
+    assert.deepEqual(retried.imageRetry, {
+      requested: true,
+      retriedFailed: { requested: true, jobIds: ["image:2"], count: 1, attempts: 1, completed: 1 },
+    }, "指紋を迂回した事実と、何枚を何回作り直したかを結果に残す");
+    assert.equal(retried.imageSummary.reused, 2);
+    assert.equal(retried.mediaJobStateDir, "/tmp/fixture/.koya-dialogue-source/paid-media-jobs", "音声の Media Job journal の場所を親へ返す");
+
+    // 指定が無ければ渡さず、事実も requested:false で残す。
+    retryStdout = JSON.stringify({ status: "awaiting-human-review", knownRemainingIssues: ["fixture"] });
+    const plain = await executeVideoHarnessAdapter({ job, prepareResult: { executionProjectDir: root }, runChild: retryRunChild });
+    assert.equal(invokedArgs.includes("--retry-failed"), false);
+    assert.deepEqual(plain.imageRetry, { requested: false, retriedFailed: null });
+    assert.equal(plain.imageSummary, null);
+    assert.equal(plain.mediaJobStateDir, "");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

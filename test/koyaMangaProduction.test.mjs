@@ -40,6 +40,9 @@ import {
   runKoyaMangaFullProduction,
   sourceAvoidRegionsInOverlaySpace,
   synchronizeKoyaValidationCanaryVoiceCasting,
+  koyaImagePauseGuidance,
+  koyaFullRunLockPauseResult,
+  KOYA_FULL_RUN_LOCK_HELD_STATUS,
 } from "../lib/koyaMangaProduction.mjs";
 import {
   fingerprintKoyaChannelAuthority,
@@ -434,11 +437,13 @@ test("two direct Koya full coordinators for one episode cannot race shared paid 
     const options = { projectDir, episodeId: "single-coordinator", scriptPath: "/fixture/script.txt" };
     const first = runKoyaMangaFullProduction(options, runtime);
     await entered;
-    await assert.rejects(
-      runKoyaMangaFullProduction(options, runtime),
-      /Timed out waiting for canvas write lock/iu,
-    );
-    assert.equal(imageCalls, 1, "the rejected coordinator must not reach paid image work");
+    // 2026-09-24: 錠が取れない2本目は、失敗（throw → 外側 Job が failed）ではなく
+    // 人待ち（exit 3）で止まる。有料の画像工程には到達しないことは変わらない。
+    const second = await runKoyaMangaFullProduction(options, runtime);
+    assert.equal(second.exitCode, 3);
+    assert.equal(second.payload.status, KOYA_FULL_RUN_LOCK_HELD_STATUS);
+    assert.equal(second.payload.knownRemainingIssues[0].id, "full-run-lock");
+    assert.equal(imageCalls, 1, "the paused coordinator must not reach paid image work");
     releaseImages();
     const result = await first;
     assert.equal(result.exitCode, 3);
@@ -1666,4 +1671,59 @@ test("character-approve with a full-role import map stages every declared eye-op
     else process.env.BUZZASSIST_CHANNEL_PACK = savedPack;
     await rm(projectDir, { recursive: true, force: true });
   }
+});
+
+
+test("画像で止まったときの案内は、次に打つ resume コマンドの全文と、失敗分だけ作り直す引数を出す", () => {
+  // 今までは短い一行しか出ず、深夜に1人では次の一手が打てなかった。
+  const failed = koyaImagePauseGuidance({
+    failed: true,
+    imageSummary: { failed: 2, complete: 10 },
+    state: { imageLedgerPath: "/p/canvas/assets/ep/image-generation-ledger.json" },
+  }, { jobId: "video-koya-manga-video-0123456789abcdef", jobProjectDir: "/Users/x/My Project" });
+  assert.match(failed[0], /2 image job\(s\) failed/u);
+  assert.match(failed[0], /completed images \(10\) are reused/u);
+  assert.equal(
+    failed[2].trim(),
+    "node scripts/run-video-harness.mjs resume --job-id video-koya-manga-video-0123456789abcdef --project-dir '/Users/x/My Project' --confirmed --retry-failed-images",
+    "空白を含む path は引用し、失敗分だけ作り直す引数を最後に付ける",
+  );
+  assert.match(failed[3], /image-generation-ledger\.json/u);
+
+  const waiting = koyaImagePauseGuidance({ waiting: true, imageSummary: {} }, { jobId: "video-koya-manga-video-0123456789abcdef", jobProjectDir: "/p" });
+  assert.match(waiting[0], /waiting for a human decision/u);
+  assert.equal(waiting[1].includes("--retry-failed-images"), false, "人待ちのときは作り直しの引数を付けない");
+
+  assert.deepEqual(koyaImagePauseGuidance({}, {}), [], "止まっていなければ何も出さない");
+  const anonymous = koyaImagePauseGuidance({ failed: true, imageSummary: {} }, {});
+  assert.match(anonymous[2], /--job-id <job id> --project-dir <project that holds the Job>/u, "Job の情報が無ければ穴埋めで示す");
+});
+
+
+test("フルラン錠が取れないときは failed でなく人待ち（exit 3）で止め、次に打つ resume を案内する", async () => {
+  // 錠は待ち時間ゼロで、2分以上古く持ち主が死んでいるときしか外れない。親だけ落ちて子が
+  // 生きている状態で resume すると即 throw → 外側の Job が failed になり、払い終えた画像の
+  // 行が Job に残らない（Koya の throw 経路は Media Job の行を返さない）。
+  const lockError = new Error("Timed out waiting for canvas write lock: /p/canvas/manga-videos/.full-run-locks/abc");
+  const paused = await runKoyaMangaFullProduction(
+    { episodeId: "ep-lock", projectDir: "/p", upstreamJobId: "video-koya-manga-video-0123456789abcdef", upstreamJobPath: "/Users/x/proj/canvas/harness-runs/video-koya-manga-video-0123456789abcdef/job.json" },
+    { withFullRunLock: async () => { throw lockError; } },
+  );
+  assert.equal(paused.exitCode, 3);
+  assert.equal(paused.payload.status, KOYA_FULL_RUN_LOCK_HELD_STATUS);
+  assert.equal(paused.payload.waiting, true);
+  assert.equal(paused.payload.knownRemainingIssues[0].id, "full-run-lock");
+  assert.match(paused.payload.lockPath, /\.full-run-locks\//u);
+  assert.equal(
+    paused.payload.next.at(-1).trim(),
+    "node scripts/run-video-harness.mjs resume --job-id video-koya-manga-video-0123456789abcdef --project-dir /Users/x/proj --confirmed",
+    "job.json の場所から Job の project dir を導いて、次に打つコマンドを全文で出す",
+  );
+
+  // 錠以外の失敗は今までどおり投げる（黙って人待ちにしない）。
+  await assert.rejects(
+    () => runKoyaMangaFullProduction({ episodeId: "ep-lock", projectDir: "/p" }, { withFullRunLock: async () => { throw new Error("disk full"); } }),
+    /disk full/u,
+  );
+  assert.equal(koyaFullRunLockPauseResult(new Error("other"), { lockTarget: "/l", episodeId: "e" }), null);
 });

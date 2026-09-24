@@ -616,10 +616,15 @@ test("executor can explicitly retry only persistent failed jobs without regenera
   assert.equal(first.ledger.status, "failed");
   assert.equal(first.ledger.jobs["image:1"].status, "complete");
   failSecond = false;
+  assert.deepEqual(first.ledger.summary.retriedFailed, { requested: false, jobIds: [], count: 0, attempts: 0, completed: 0 },
+    "--retry-failed を渡していない回は、作り直し0件と記録する");
   const second = await executeMangaScriptImagePlan(plan, { maxRetries: 0, retryFailed: true, generateImage, visualQa });
   assert.equal(second.ledger.status, "complete");
   assert.equal(generationCounts.get("image-1.png"), 1);
   assert.equal(generationCounts.get("image-2.png"), 2);
+  // 失敗分の作り直しは、どの行を・何回・払い直したかを台帳に残す。
+  // 外側の Job と Receipt は「指紋を迂回する引数を使った」事実をこの記録で確かめる。
+  assert.deepEqual(second.ledger.summary.retriedFailed, { requested: true, jobIds: ["image:2"], count: 1, attempts: 1, completed: 1 });
   assert.equal(generationPrompts.get("image-2.png")[0], "scene 2");
   assert.match(generationPrompts.get("image-2.png")[1], /CORRECTION PASS:.*Fix these failures: repair me/u);
   assert.match(generationPrompts.get("image-2.png")[1], /FIRST reference image is the immediately previous candidate/u);
