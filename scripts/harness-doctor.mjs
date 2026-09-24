@@ -40,6 +40,7 @@ import {
   readKoyaChannelAuthority,
 } from "../lib/koyaChannelGovernance.mjs";
 import { GENRE_CANONICAL_ENTRYPOINTS } from "../lib/harnessRouting.mjs";
+import { probeHostSkillSync } from "../lib/hostSkillSync.mjs";
 import { channelPackRuntimeAdapterSpecs } from "../lib/harnessChannelPackRuntime.mjs";
 import {
   resolveHarnessDeployment,
@@ -156,6 +157,40 @@ async function probeDiskSpace(projectDir, runtime = {}) {
     fix: ok ? "" : "有料生成を始める前に空きを作ること。画像を全部作り終えたあとで書き込みに失敗すると、"
       + "払った分は戻らず、Job は再開できないので全額の作り直しになる。"
       + "この目安はベンチ回（台本2,850字で作業一式2.7GB）からの見積りで、本番尺で測った値ではない",
+  };
+}
+
+/**
+ * キャンバスの画像生成は、モデル未指定だと Codex 経由（gpt-image-2-codex）が既定になる。
+ * Claude Code だけを入れた運営者は、既定のまま頼むと「Codex を利用できません」で止まる
+ * （2026-09-24 監査）。黙って有料の別経路へ切り替えるのは確認なしの課金になるので、
+ * ここでは止めずに、使える経路の選び方を先に知らせる。本番 Job の画像経路
+ * （Media Job API）とは別の話なので required にはしない。
+ */
+async function probeDefaultImageRoute({ env = process.env, runtime = {} } = {}) {
+  const explicit = String(env.EXCALIDRAW_GPT_IMAGE_2_CODEX_COMMAND || env.EXCALIDRAW_IMAGE_GENERATION_COMMAND
+    || env.EXCALIDRAW_GPT_IMAGE_2_CODEX_URL || env.EXCALIDRAW_IMAGE_GENERATION_URL || "").trim();
+  if (explicit) return { ok: true, detail: "Codex 経由の画像生成は環境変数で明示された実行先を使う" };
+  const disabled = /^(1|true|yes)$/iu.test(String(env.EXCALIDRAW_DISABLE_CODEX_APP_SERVER_BRIDGE || "").trim());
+  let command = "";
+  if (!disabled) {
+    try {
+      const resolveCodex = runtime.resolveCodexCommand
+        || (await import("./codex-image-bridge.mjs")).resolveCodexCommand;
+      command = await resolveCodex();
+    } catch {
+      command = "";
+    }
+  }
+  if (command) return { ok: true, detail: "既定の画像経路（Codex 経由）に使える Codex がある" };
+  return {
+    ok: false,
+    detail: disabled
+      ? "既定の画像経路（Codex 経由）が環境変数で無効化されている"
+      : "既定の画像経路（Codex 経由）に使える Codex CLI / ChatGPT アプリが見つからない",
+    fix: "キャンバスで画像を頼むとき、モデル未指定だと Codex 経由になって止まる。"
+      + "Codex CLI か ChatGPT デスクトップアプリを入れてサインインする（https://chatgpt.com/ja-JP/codex/）か、"
+      + "頼むときに Grok（ローカル）など別の経路を明示すること。Lovart と BuzzAssist の経路はクレジットを使う",
   };
 }
 
@@ -610,9 +645,9 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "",
   // 入口がプレースホルダのまま、正規ルーティングにも載っていないハーネスは、
   // 前提が全部揃っても運営者は「台本をどこへ渡すのか」で止まる。
   // それは前提不足ではなく配布路の欠落なので、ready と言ってはいけない。
+  let declaration = null;
   if (harnessId) {
     const declarationPath = path.join(REPO_ROOT, "config", "harnesses", `${harnessId}.harness.json`);
-    let declaration = null;
     try { declaration = JSON.parse(readFileSync(declarationPath, "utf8")); } catch { /* 下で落とす */ }
     const route = await probeProductionRoute(declaration, harnessId, {
       runCommand,
@@ -786,8 +821,28 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "",
   // evidenceを見る。Harness未選択のセットアップでは対象外と明記する。
   add(await probeChannelPack({ projectDir, harnessId, job, runtime }));
 
+  add({ id: "image-default-route", required: false, ...(await probeDefaultImageRoute({ env: runtimeEnv, runtime })) });
+
   const drift = probeShippedSkillDrift();
   add({ id: "shipped-skill-drift", required: false, ...drift });
+
+  // 配布元が新しくても、ホストが読む cache が古ければ意味がない（2026-09-24、両ホストが
+  // 1版古いまま動いていた）。ハーネス指定ありで、そのハーネスが束縛するスキルがずれて
+  // いるときだけ止める。
+  const hostSync = probeHostSkillSync({
+    repoRoot: REPO_ROOT,
+    homeDir: runtime.homeDir || runtimeEnv.BUZZASSIST_SETUP_HOME || homedir(),
+    declaration,
+  });
+  add({
+    id: "host-skill-sync",
+    required: hostSync.required,
+    ok: hostSync.ok,
+    detail: hostSync.detail,
+    fix: hostSync.fix,
+    hosts: hostSync.installs.map((install) => ({ host: install.host, version: install.version })),
+    ...(hostSync.blockingSkills?.length ? { blockingSkills: hostSync.blockingSkills } : {}),
+  });
 
   const blocking = checks.filter((c) => c.required && !c.ok);
   const advisory = checks.filter((c) => !c.required && !c.ok);
