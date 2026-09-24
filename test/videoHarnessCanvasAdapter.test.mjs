@@ -13,6 +13,12 @@ const fileSha = (value) => createHash("sha256").update(value).digest("hex");
 test("provider fingerprints bind runtime identity, not per-job input hashes", () => {
   assert.equal(_testing.canvasArtifactKind("final-video", "/fixture/final-audited.mp4"), "final-mp4");
   assert.equal(_testing.canvasArtifactKind("audit-report", "/fixture/final-audit-report.json"), "audit-report");
+  // フォルダ名に紛らわしい文字が入っても判定は変わらない（CI の macOS の一時フォルダ名が
+  // 乱数で「png」を含み、JSON が画像と判定されて投影が落ちた）。
+  for (const directory of ["/var/folders/png42/T/work", "/tmp/image-reference-approved", "C:\\Users\\x\\png\\run"]) {
+    assert.equal(_testing.canvasArtifactKind("generation-manifest", `${directory}/generation-manifest.json`), "other", directory);
+  }
+  assert.equal(_testing.canvasArtifactKind("image", "/var/folders/png42/T/work/scene-01.png"), "image-candidate");
   const base = {
     mediaJobs: [{
       provider: "fixture-provider",
