@@ -262,6 +262,15 @@
         "win32"
       ],
       "justification": "偽のエージェント CLI を shebang の実行ファイルとして起動する試験で、Windows は shebang を解釈しない。子の環境へ印を付ける childAgentEnvironment は test/harnessLearningGuard.test.mjs が全 OS で確かめ、起動側がそれを使うことは macOS と Linux のこの試験が見る。"
+    },
+    {
+      "name": "macOS without Command Line Tools never launches the /usr/bin/python3 installer stub",
+      "reason": "Windows には /usr/bin/python3 の導入スタブが無い（実行権限つきの偽 python3 を置けない）",
+      "category": "platform-limitation",
+      "platforms": [
+        "win32"
+      ],
+      "justification": "macOS の Command Line Tools 導入スタブを踏まないことの試験で、Windows には該当する実行ファイルも実行権限の仕組みも無い。macOS と Linux の CI で走る。"
     }
   ]
 }

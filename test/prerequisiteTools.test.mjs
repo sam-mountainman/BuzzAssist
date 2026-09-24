@@ -276,7 +276,9 @@ test("the Python venv is built from an existing Python 3.10+, and with a verifie
   }
 });
 
-test("macOS without Command Line Tools never launches the /usr/bin/python3 installer stub", { skip: process.platform === "win32" }, async () => {
+test("macOS without Command Line Tools never launches the /usr/bin/python3 installer stub", {
+  skip: process.platform === "win32" ? "Windows には /usr/bin/python3 の導入スタブが無い（実行権限つきの偽 python3 を置けない）" : false,
+}, async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "buzzassist-python-candidates-"));
   try {
     await writeFile(path.join(dir, "python3"), "");

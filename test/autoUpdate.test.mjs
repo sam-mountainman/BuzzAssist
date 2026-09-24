@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import test from "node:test";
 
 import {
@@ -114,7 +114,9 @@ for (const scenario of [
         platform: scenario.platform,
         homeDir,
         env: {},
-        execPath: join(homeDir, "Node Runtime", "node"),
+        // 模擬する OS の形式の path にする。Windows の上で darwin / linux の登録内容を作るとき、
+        // C:\... は POSIX の絶対 path ではないので PATH に載らず、試験だけが落ちていた。
+        execPath: scenario.platform === "win32" ? join(homeDir, "Node Runtime", "node") : posix.join("/opt/buzzassist-test", "Node Runtime", "node"),
         getuid: scenario.getuid,
         runCommand,
         logger,
