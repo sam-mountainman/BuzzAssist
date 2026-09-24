@@ -18,13 +18,20 @@ import { homedir } from "node:os";
 import { resolveCodexCommand } from "./codex-image-bridge.mjs";
 import {
   BUZZASSIST_REPOSITORY,
+  UPDATER_INSTALL_ENV,
   compareVersions,
+  detectInstalledBuzzAssistHosts,
+  hostsBehindVersion,
   normalizeUpdateHosts,
   normalizeVersion,
+  parseSetupInstallReport,
+  recentCheckDecision,
   releaseVersion,
   safeReleaseDirectoryName,
+  unionUpdateHosts,
   updaterPaths,
 } from "../lib/pluginAutoUpdate.mjs";
+import { envWithNodeOnPath, resolveNpmInvocation } from "../lib/npmInvocation.mjs";
 
 const argv = process.argv.slice(2);
 const homeDir = resolve(process.env.BUZZASSIST_SETUP_HOME || homedir());
@@ -33,12 +40,20 @@ const configPath = resolve(readArg("--config", paths.configPath));
 const checkOnly = hasArg("--check-only");
 const force = hasArg("--force");
 const scheduled = hasArg("--scheduled");
+// 定刻起動でも 20 時間の短絡をしない（手動での確認や、取りこぼし調査用）。
+const noThrottle = hasArg("--no-throttle");
 const skipValidationTests = hasArg("--skip-validation-tests");
-const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 let stableSourceTouched = false;
 let backupDir = "";
 let config = null;
 let lockAcquired = false;
+
+class UpdateBusyError extends Error {
+  constructor() {
+    super("Another BuzzAssist update is already running.");
+    this.code = "BUZZASSIST_UPDATE_BUSY";
+  }
+}
 
 function readArg(name, fallback = "") {
   const index = argv.indexOf(name);
@@ -96,7 +111,7 @@ async function run(command, args, options = {}) {
     const child = spawn(command, args, {
       cwd,
       env,
-      shell: process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command),
+      shell: options.shell ?? (process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command)),
       stdio: inherit ? "inherit" : ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -126,6 +141,16 @@ async function run(command, args, options = {}) {
   });
 }
 
+// npm は実行中の Node に同梱のものを使う（launchd / systemd の PATH に npm は無い）。
+async function runNpm(args, options = {}) {
+  const npm = resolveNpmInvocation();
+  return run(npm.command, [...npm.args, ...args], {
+    ...options,
+    shell: npm.shell,
+    env: envWithNodeOnPath(options.env || process.env),
+  });
+}
+
 async function acquireLock() {
   await mkdir(paths.updaterDir, { recursive: true });
   try {
@@ -134,7 +159,7 @@ async function acquireLock() {
     if (error?.code !== "EEXIST") throw error;
     const lockStat = await stat(paths.lockDir).catch(() => null);
     if (!lockStat || Date.now() - lockStat.mtimeMs <= 2 * 60 * 60 * 1000) {
-      throw new Error("Another BuzzAssist update is already running.");
+      throw new UpdateBusyError();
     }
     await rm(paths.lockDir, { recursive: true, force: true });
     await mkdir(paths.lockDir);
@@ -257,13 +282,13 @@ async function prepareReleaseSource(release, version) {
     await validateReleaseSource(extractedSource, version);
 
     log("Installing Release dependencies.");
-    await run(npmCommand, ["ci"], { cwd: extractedSource, timeoutMs: 10 * 60 * 1000 });
+    await runNpm(["ci"], { cwd: extractedSource, timeoutMs: 10 * 60 * 1000 });
     log("Building canvas and widget bundles.");
-    await run(npmCommand, ["run", "build"], { cwd: extractedSource, timeoutMs: 10 * 60 * 1000 });
-    await run(npmCommand, ["run", "build:widget"], { cwd: extractedSource, timeoutMs: 10 * 60 * 1000 });
+    await runNpm(["run", "build"], { cwd: extractedSource, timeoutMs: 10 * 60 * 1000 });
+    await runNpm(["run", "build:widget"], { cwd: extractedSource, timeoutMs: 10 * 60 * 1000 });
     if (!skipValidationTests) {
       log("Running cross-host distribution validation.");
-      await run(npmCommand, ["run", "test:setup"], {
+      await runNpm(["run", "test:setup"], {
         cwd: extractedSource,
         timeoutMs: 10 * 60 * 1000,
         env: { ...process.env, BUZZASSIST_AUTO_UPDATE_SKIP_REGISTER: "1" },
@@ -383,9 +408,15 @@ async function reinstallRestoredHosts() {
   }
 }
 
-async function installRelease(sourceDir) {
-  const hosts = normalizeUpdateHosts(config.hosts);
-  if (hosts.length === 0) throw new Error("No Codex or Claude Code host is registered for updates.");
+/**
+ * setup-agents を更新器として呼ぶ。
+ *
+ * ハーネス前提（ffmpeg、音声品質の Python など）が欠けていても配る。欠けた端末には
+ * それを直す版も届かなくなるため（2026-09-24、負荷下で voice-quality-python の確認が
+ * 時間切れになり、0.1.25→0.1.26 の更新が丸ごと巻き戻された）。前提の状況は state と
+ * 更新ログに警告として残す。plugin の導入と MCP の実呼び出し検証は今までどおり必須。
+ */
+async function runSetupAsUpdater(sourceDir, hosts, extraArgs = []) {
   const setupArgs = [
     join(sourceDir, "scripts", "setup-agents.mjs"),
     "--agents", hosts.join(","),
@@ -395,21 +426,76 @@ async function installRelease(sourceDir) {
     "--skip-build",
     "--no-launch",
     "--no-auto-update",
+    "--allow-harness-not-ready",
+    ...extraArgs,
   ];
-  log(`Installing the Release for ${hosts.join(" and ")}.`);
   const result = await run(process.execPath, setupArgs, {
     cwd: sourceDir,
     timeoutMs: 8 * 60 * 1000,
+    inherit: false,
     env: {
-      ...process.env,
+      ...envWithNodeOnPath(process.env),
       BUZZASSIST_SETUP_HOME: homeDir,
       BUZZASSIST_AUTO_UPDATE_SKIP_REGISTER: "1",
+      [UPDATER_INSTALL_ENV]: "1",
     },
     allowFailure: true,
   });
+  if (result.stdout) process.stdout.write(result.stdout.endsWith("\n") ? result.stdout : `${result.stdout}\n`);
+  if (result.stderr) process.stderr.write(result.stderr.endsWith("\n") ? result.stderr : `${result.stderr}\n`);
+  return { ...result, report: parseSetupInstallReport(result.stdout) };
+}
+
+function logInstallWarnings(report) {
+  for (const warning of report.warnings) log(`Warning: ${warning}`);
+  if (report.harnessReady !== "yes") {
+    log("Video-harness prerequisites are not ready on this machine; the update was installed anyway. Run `node scripts/harness-doctor.mjs` for details.");
+  }
+}
+
+async function installRelease(sourceDir) {
+  const hosts = normalizeUpdateHosts(config.hosts);
+  if (hosts.length === 0) throw new Error("No Codex or Claude Code host is registered for updates.");
+  log(`Installing the Release for ${hosts.join(" and ")}.`);
+  const result = await runSetupAsUpdater(sourceDir, hosts);
   stableSourceTouched = true;
   if (!result.ok) throw new Error(`Host plugin update failed with exit ${result.code}.`);
+  logInstallWarnings(result.report);
   await verifyRuntime(config.pluginRoot, config.projectDir, config.canvasDir);
+  return result.report;
+}
+
+/**
+ * 管理下の plugin 元は最新なのに、ホストの読む plugin cache だけが古いときに入れ直す。
+ * 管理下の元を差し替えないので、巻き戻しは要らない。
+ */
+async function resyncHosts(behind) {
+  const hosts = normalizeUpdateHosts(behind.map((entry) => entry.host));
+  log(`Re-installing the current plugin for ${hosts.join(" and ")} (host cache is behind the managed source).`);
+  const result = await runSetupAsUpdater(config.pluginRoot, hosts, ["--skip-plugin-source"]);
+  if (!result.ok) throw new Error(`Host plugin re-install failed with exit ${result.code}.`);
+  logInstallWarnings(result.report);
+  await verifyRuntime(config.pluginRoot, config.projectDir, config.canvasDir);
+  return result.report;
+}
+
+async function installedHostVersions() {
+  try {
+    const { resolveHostPluginInstalls } = await import("../lib/hostSkillSync.mjs");
+    return resolveHostPluginInstalls({ homeDir });
+  } catch (error) {
+    log(`Could not read host plugin versions: ${error?.message || error}`);
+    return [];
+  }
+}
+
+function installStatePatch(report) {
+  return {
+    harnessReady: report?.harnessReady || "unreported",
+    harnessBlocking: report?.blocking || [],
+    skippedHosts: report?.skippedHosts || [],
+    warnings: report?.warnings || [],
+  };
 }
 
 async function pruneOldDirectories() {
@@ -438,7 +524,30 @@ async function main() {
   if (!config?.pluginRoot || !config?.managedMarketplaceDir) {
     throw new Error(`Auto-update configuration is incomplete: ${configPath}`);
   }
-  config.hosts = normalizeUpdateHosts(config.hosts);
+
+  // 定刻起動（3:17・ログイン時・取りこぼし補完）は、前回の確認が済んでから 20 時間は
+  // 何もしない。ロックを取ってから判定するので、同時に起動されても確認は1回に収まる。
+  const decision = recentCheckDecision({
+    state: await readJson(paths.statePath, {}),
+    scheduled,
+    force,
+    noThrottle,
+  });
+  if (decision.skip) {
+    log(`Skipping scheduled check: the last completed check was at ${decision.lastCompletedCheckAt} (within 20 hours).`);
+    console.log("BUZZASSIST_UPDATE=skipped-recent-check");
+    return;
+  }
+
+  // 登録時のホストに、この端末で BuzzAssist が入っているホストを足す。片方の手順で
+  // 登録した運営者でも、もう片方のホストへ同じ版が届くように。
+  const registeredHosts = normalizeUpdateHosts(config.hosts);
+  config.hosts = unionUpdateHosts(registeredHosts, detectInstalledBuzzAssistHosts({ homeDir }));
+  if (config.hosts.join(",") !== registeredHosts.join(",")) {
+    log(`Update hosts extended to ${config.hosts.join(", ")} (BuzzAssist is installed there).`);
+    const stored = await readJson(configPath, {});
+    await writeJson(configPath, { ...stored, hosts: config.hosts, updatedAt: timestamp() });
+  }
   config.repository ||= BUZZASSIST_REPOSITORY;
 
   const currentManifest = await readJson(join(config.pluginRoot, "package.json"), null);
@@ -459,19 +568,52 @@ async function main() {
   console.log(`BUZZASSIST_LATEST_VERSION=${latestVersion}`);
 
   if (!force && compareVersions(latestVersion, currentVersion) <= 0) {
+    // 管理下の元は最新でも、ホストの plugin cache が古いまま残ることがある
+    // （2026-09-24、両ホストが 1 版古いまま動いていた）。同じ版で入れ直す。
+    const behind = hostsBehindVersion({
+      installs: await installedHostVersions(),
+      hosts: config.hosts,
+      version: currentVersion,
+    });
+    if (behind.length > 0) {
+      const summary = behind.map((entry) => `${entry.host} ${entry.version}`).join(", ");
+      if (checkOnly) {
+        log(`Host plugin cache is behind ${currentVersion}: ${summary}.`);
+        console.log("BUZZASSIST_UPDATE=host-resync-available");
+        await updateState({ status: "host-resync-available", lastCompletedCheckAt: timestamp() });
+        return;
+      }
+      const report = await resyncHosts(behind);
+      await updateState({
+        status: "host-resynced",
+        installedVersion: currentVersion,
+        lastCheckedAt: timestamp(),
+        lastCompletedCheckAt: timestamp(),
+        lastError: "",
+        resyncedHosts: behind,
+        restartRequired: true,
+        ...installStatePatch(report),
+      });
+      log(`Host plugin cache re-synced to ${currentVersion}: ${summary}.`);
+      console.log("BUZZASSIST_UPDATE=host-resynced");
+      console.log("BUZZASSIST_HOST_RESTART_REQUIRED=yes");
+      return;
+    }
     log("BuzzAssist is already up to date.");
     console.log("BUZZASSIST_UPDATE=up-to-date");
+    await updateState({ status: "up-to-date", lastCompletedCheckAt: timestamp() });
     return;
   }
   if (checkOnly) {
     log(`Update ${currentVersion} -> ${latestVersion} is available.`);
     console.log("BUZZASSIST_UPDATE=available");
+    await updateState({ status: "available", lastCompletedCheckAt: timestamp() });
     return;
   }
 
   const prepared = await prepareReleaseSource(release, latestVersion);
   backupDir = await createBackup(currentVersion);
-  await installRelease(prepared.sourceDir);
+  const report = await installRelease(prepared.sourceDir);
   await updateState({
     status: "updated",
     installedVersion: latestVersion,
@@ -479,37 +621,49 @@ async function main() {
     latestVersion,
     lastUpdatedAt: timestamp(),
     lastCheckedAt: timestamp(),
+    lastCompletedCheckAt: timestamp(),
     lastError: "",
     archiveSha256: prepared.archiveSha256 || undefined,
     backupDir: backupDir || undefined,
     restartRequired: true,
+    ...installStatePatch(report),
   });
   await pruneOldDirectories();
   log(`BuzzAssist updated successfully: ${currentVersion} -> ${latestVersion}.`);
   console.log("BUZZASSIST_UPDATE=updated");
   console.log("BUZZASSIST_HOST_RESTART_REQUIRED=yes");
+  if (report.harnessReady !== "yes") {
+    console.log(`BUZZASSIST_UPDATE_WARNINGS=${report.warnings.join(";")}`);
+  }
 }
 
 try {
   await main();
 } catch (error) {
-  const message = error?.message || String(error);
-  if (stableSourceTouched && backupDir) {
-    try {
-      await restoreBackup();
-      log("Rollback completed; the previous managed plugin remains active.");
-    } catch (rollbackError) {
-      log(`Rollback needs attention: ${rollbackError?.message || rollbackError}`);
+  if (error?.code === "BUZZASSIST_UPDATE_BUSY") {
+    // 別の起動が更新中。state を「失敗」で上書きしない（実行中の更新の記録を壊すため）。
+    log("Another BuzzAssist update is already running; leaving it to finish.");
+    console.log("BUZZASSIST_UPDATE=busy");
+    process.exitCode = scheduled ? 0 : 1;
+  } else {
+    const message = error?.message || String(error);
+    if (stableSourceTouched && backupDir) {
+      try {
+        await restoreBackup();
+        log("Rollback completed; the previous managed plugin remains active.");
+      } catch (rollbackError) {
+        log(`Rollback needs attention: ${rollbackError?.message || rollbackError}`);
+      }
     }
+    await updateState({
+      status: "failed",
+      lastCheckedAt: timestamp(),
+      lastError: message,
+      rollbackAttempted: Boolean(stableSourceTouched && backupDir),
+    }).catch(() => {});
+    console.error(`[${timestamp()}] BuzzAssist update failed: ${message}`);
+    process.exitCode = 1;
   }
-  await updateState({
-    status: "failed",
-    lastCheckedAt: timestamp(),
-    lastError: message,
-    rollbackAttempted: Boolean(stableSourceTouched && backupDir),
-  }).catch(() => {});
-  console.error(`[${timestamp()}] BuzzAssist update failed: ${message}`);
-  process.exitCode = 1;
 } finally {
   if (lockAcquired) await releaseLock().catch(() => {});
 }

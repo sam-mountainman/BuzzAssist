@@ -9,11 +9,15 @@ import {
   BUZZASSIST_REPOSITORY,
   BUZZASSIST_UPDATE_LABEL,
   BUZZASSIST_WINDOWS_TASK,
+  encodeWindowsTaskXml,
   mergeUpdaterConfig,
   normalizeUpdateHosts,
   renderLaunchAgentPlist,
+  renderWindowsTaskXml,
   renderWindowsUpdateRunner,
+  schedulerPathEnv,
   updaterPaths,
+  windowsTaskXmlHasCatchUp,
 } from "../lib/pluginAutoUpdate.mjs";
 
 const DAILY_SCHEDULE = "daily-03:17-local-time";
@@ -88,9 +92,11 @@ function systemdQuote(value) {
   return `"${text.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("%", "%%")}"`;
 }
 
-export function renderSystemdUserService({ nodePath, updaterPath, configPath }) {
+export function renderSystemdUserService({ nodePath, updaterPath, configPath, pathEnv = "" }) {
   const command = [nodePath, updaterPath, "--scheduled", "--config", configPath].map(systemdQuote).join(" ");
-  return `[Unit]\nDescription=BuzzAssist stable Release update\n\n[Service]\nType=oneshot\nExecStart=${command}\n`;
+  // systemd の user manager の PATH には、Node の隣の npm や claude / codex が無いことがある。
+  const environment = String(pathEnv || "").trim() ? `Environment=${systemdQuote(`PATH=${pathEnv}`)}\n` : "";
+  return `[Unit]\nDescription=BuzzAssist stable Release update\n\n[Service]\nType=oneshot\n${environment}ExecStart=${command}\n`;
 }
 
 export function renderSystemdUserTimer({ hour = 3, minute = 17 } = {}) {
@@ -135,15 +141,21 @@ async function registerMacSchedule({ paths, runCommand, fsOps, uid }) {
   if (!verified.ok) throw new Error("launchd registration could not be verified.");
 }
 
+// XML で登録する。/SC DAILY では「開始予定を過ぎたら実行」を付けられず、3:17 に電源が
+// 落ちていた日の確認が丸ごと飛んでいた。登録後は /Query /XML で、取りこぼし補完の設定が
+// 実際に載ったかまで確かめる（名前が引けるだけでは確認にならない）。
 async function registerWindowsSchedule({ paths, runCommand }) {
   const registered = await runCommand("schtasks.exe", [
-    "/Create", "/F", "/SC", "DAILY", "/ST", "03:17",
+    "/Create", "/F",
     "/TN", BUZZASSIST_WINDOWS_TASK,
-    "/TR", paths.windowsRunnerPath,
+    "/XML", paths.windowsTaskXmlPath,
   ], { allowFailure: true });
   if (!registered.ok) throw new Error(`Windows Task Scheduler registration failed: ${registered.stderr || registered.stdout || "unknown error"}`);
-  const verified = await runCommand("schtasks.exe", ["/Query", "/TN", BUZZASSIST_WINDOWS_TASK], { allowFailure: true });
+  const verified = await runCommand("schtasks.exe", ["/Query", "/TN", BUZZASSIST_WINDOWS_TASK, "/XML"], { allowFailure: true });
   if (!verified.ok) throw new Error("Windows Task Scheduler registration could not be verified.");
+  if (!windowsTaskXmlHasCatchUp(verified.stdout)) {
+    throw new Error("Windows Task Scheduler registration lacks the daily trigger with StartWhenAvailable=true.");
+  }
 }
 
 async function registerLinuxSchedule({ paths, runCommand, fsOps }) {
@@ -173,6 +185,8 @@ export async function installAutoUpdateScheduler(options) {
     fsOps = DEFAULT_FS,
     skipRegister = false,
     getuid = process.getuid,
+    pathEnv = "",
+    now = () => new Date().toISOString(),
   } = options;
   const provider = schedulerProvider(platform);
   if (skipRegister) return { enabled: false, state: "manual", provider, reason: "registration-skipped" };
@@ -180,15 +194,20 @@ export async function installAutoUpdateScheduler(options) {
 
   if (platform === "darwin") {
     await fsOps.mkdir(dirname(paths.launchAgentPath), { recursive: true });
-    await fsOps.writeFile(paths.launchAgentPath, renderLaunchAgentPlist({ nodePath, updaterPath, configPath, logPath }));
+    await fsOps.writeFile(paths.launchAgentPath, renderLaunchAgentPlist({ nodePath, updaterPath, configPath, logPath, pathEnv }));
     await registerMacSchedule({ paths, runCommand, fsOps, uid: currentUid(getuid) });
   } else if (platform === "win32") {
     await fsOps.mkdir(dirname(paths.windowsRunnerPath), { recursive: true });
     await fsOps.writeFile(paths.windowsRunnerPath, renderWindowsUpdateRunner({ nodePath, updaterPath, configPath, logPath }));
+    const startDate = String(now()).slice(0, 10);
+    await fsOps.writeFile(
+      paths.windowsTaskXmlPath,
+      encodeWindowsTaskXml(renderWindowsTaskXml({ runnerPath: paths.windowsRunnerPath, startDate })),
+    );
     await registerWindowsSchedule({ paths, runCommand });
   } else if (platform === "linux") {
     await fsOps.mkdir(paths.systemdUserDir, { recursive: true });
-    await fsOps.writeFile(paths.systemdServicePath, renderSystemdUserService({ nodePath, updaterPath, configPath }));
+    await fsOps.writeFile(paths.systemdServicePath, renderSystemdUserService({ nodePath, updaterPath, configPath, pathEnv }));
     await fsOps.writeFile(paths.systemdTimerPath, renderSystemdUserTimer());
     await registerLinuxSchedule({ paths, runCommand, fsOps });
   }
@@ -213,6 +232,7 @@ export async function uninstallAutoUpdateScheduler(options) {
   } else if (platform === "win32") {
     if (!skipRegister) await runCommand("schtasks.exe", ["/Delete", "/F", "/TN", BUZZASSIST_WINDOWS_TASK], { allowFailure: true });
     await fsOps.rm(paths.windowsRunnerPath, { force: true });
+    if (paths.windowsTaskXmlPath) await fsOps.rm(paths.windowsTaskXmlPath, { force: true });
   } else if (platform === "linux") {
     if (!skipRegister) {
       await runCommand("systemctl", ["--user", "disable", "--now", LINUX_TIMER_NAME], { allowFailure: true });
@@ -336,6 +356,8 @@ export async function runAutoUpdateCli(options = {}) {
         updaterPath,
         configPath: paths.configPath,
         logPath: paths.logPath,
+        pathEnv: schedulerPathEnv({ nodePath: execPath, env, platform, homeDir }),
+        now: options.now,
       });
       const config = {
         ...baseConfig,

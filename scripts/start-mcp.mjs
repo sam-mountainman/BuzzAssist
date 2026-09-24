@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { envWithNodeOnPath, resolveNpmInvocation } from "../lib/npmInvocation.mjs";
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REQUIRED_DEPENDENCIES = [
@@ -26,6 +27,11 @@ function missingDependencies() {
 }
 
 function npmInstallCommand() {
+  // ホストが起動する MCP server の PATH に npm があるとは限らない（install.sh が
+  // ~/.buzzassist/tools/node に入れた Node は PATH に載っていない）。同梱の npm-cli.js を
+  // 今動いている Node で起動する。見つからないときだけ従来どおり名前で呼ぶ。
+  const npm = resolveNpmInvocation();
+  if (npm.source === "bundled-npm-cli") return { command: npm.command, args: [...npm.args, "install"] };
   if (process.platform === "win32") {
     return {
       command: "cmd.exe",
@@ -40,7 +46,7 @@ function runNpmInstall() {
   const result = spawnSync(command, args, {
     cwd: ROOT_DIR,
     env: {
-      ...process.env,
+      ...envWithNodeOnPath(process.env),
       FORCE_COLOR: "0",
     },
     encoding: "utf8",

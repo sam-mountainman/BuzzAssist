@@ -83,7 +83,10 @@ for (const scenario of [
     provider: "windows-task-scheduler",
     expectedCommand: "schtasks.exe /Create",
     artifact: (paths) => paths.windowsRunnerPath,
-    runCommand: async () => ok("registered\n"),
+    // schtasks は /Query /XML の結果をパイプへ UTF-16 で書くことがある。NUL 混じりでも読めること。
+    runCommand: async (_command, args) => (args.includes("/Query")
+      ? ok(`<Task>\n<Triggers><CalendarTrigger></CalendarTrigger></Triggers>\n<Settings><StartWhenAvailable>true</StartWhenAvailable></Settings></Task>`.split("").join("\u0000"))
+      : ok("registered\n")),
   },
   {
     platform: "linux",
@@ -134,6 +137,30 @@ for (const scenario of [
         const firstTimer = await readFile(paths.systemdTimerPath, "utf8");
         await runAutoUpdateCli({ ...options, logger: captureLogger().logger });
         assert.equal(await readFile(paths.systemdTimerPath, "utf8"), firstTimer, "reinstall must be idempotent");
+        // systemd の user manager の PATH に npm / claude / codex は無いことがある。
+        const service = await readFile(paths.systemdServicePath, "utf8");
+        assert.match(service, /^Environment="PATH=[^"]*Node Runtime/mu, "service must carry the registering Node's directory on PATH");
+      }
+      if (scenario.platform === "darwin") {
+        // 取りこぼし補完: 3:17 に落ちていた日はログイン時に走らせる。launchd の最小 PATH も補う。
+        const plist = await readFile(paths.launchAgentPath, "utf8");
+        assert.match(plist, /<key>RunAtLoad<\/key><true\/>/u);
+        assert.match(plist, /<key>EnvironmentVariables<\/key>\s*<dict>\s*<key>PATH<\/key><string>[^<]*Node Runtime/u);
+        assert.match(plist, /StartCalendarInterval/u);
+      }
+      if (scenario.platform === "win32") {
+        // /SC DAILY は取りこぼしを補わない。XML で StartWhenAvailable を付け、/Query /XML で確かめる。
+        const create = calls.find((call) => call.startsWith("schtasks.exe /Create"));
+        assert.match(create, /\/XML /u);
+        assert.doesNotMatch(create, /\/SC DAILY/u);
+        assert.ok(calls.some((call) => /^schtasks\.exe \/Query .*\/XML$/u.test(call)), calls.join("\n"));
+        const xmlBytes = await readFile(paths.windowsTaskXmlPath);
+        assert.deepEqual([...xmlBytes.subarray(0, 2)], [0xff, 0xfe], "task XML must be UTF-16LE with BOM");
+        const xml = xmlBytes.subarray(2).toString("utf16le");
+        assert.match(xml, /<StartWhenAvailable>true<\/StartWhenAvailable>/u);
+        assert.match(xml, /<DisallowStartIfOnBatteries>false<\/DisallowStartIfOnBatteries>/u);
+        assert.match(xml, /<StartBoundary>2026-09-01T03:17:00<\/StartBoundary>/u);
+        assert.ok(xml.includes(paths.windowsRunnerPath.replaceAll("&", "&amp;")));
       }
     });
   });
@@ -218,6 +245,34 @@ test("explicit registration skip is manual, never enabled", async () => {
     });
     assert.equal(result.schedule.enabled, false);
     assert.equal(result.config.enabled, false);
+    assert.ok(lines.includes("BUZZASSIST_AUTO_UPDATE=manual"));
+    assert.equal(lines.includes("BUZZASSIST_AUTO_UPDATE=enabled"), false);
+  });
+});
+
+test("Windows registration without the catch-up setting is reported as manual, never enabled", async () => {
+  await withHome("buzzassist-auto-win-nocatchup-", async (homeDir) => {
+    const input = await fixture(homeDir);
+    const { logger, lines } = captureLogger();
+    await assert.rejects(
+      () => runAutoUpdateCli({
+        argv: input.argv,
+        platform: "win32",
+        homeDir,
+        env: {},
+        execPath: join(homeDir, "node.exe"),
+        // 名前は引けるが、定義に StartWhenAvailable が無い（/SC DAILY で登録された古いタスク相当）。
+        runCommand: async (_command, args) => (args.includes("/Query")
+          ? ok("<Task><Triggers><CalendarTrigger/></Triggers><Settings></Settings></Task>")
+          : ok("registered\n")),
+        logger,
+        now: () => "2026-09-01T00:00:00.000Z",
+      }),
+      /StartWhenAvailable/u,
+    );
+    const paths = autoUpdateRuntimePaths(homeDir, "win32", {});
+    const config = JSON.parse(await readFile(paths.configPath, "utf8"));
+    assert.equal(config.enabled, false);
     assert.ok(lines.includes("BUZZASSIST_AUTO_UPDATE=manual"));
     assert.equal(lines.includes("BUZZASSIST_AUTO_UPDATE=enabled"), false);
   });

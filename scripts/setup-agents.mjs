@@ -26,6 +26,14 @@ import {
   REVIEWER_TRUST_PATH_ENV,
   reviewerTrustEnvSource,
 } from "../lib/koyaReviewAttestation.mjs";
+import {
+  detectInstalledBuzzAssistHosts,
+  isUpdaterInstallInvocation,
+  schedulerPathEnv,
+  unionUpdateHosts,
+  updaterPaths,
+} from "../lib/pluginAutoUpdate.mjs";
+import { envWithNodeOnPath, resolveNpmInvocation } from "../lib/npmInvocation.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const pluginName = "buzzassist";
@@ -139,6 +147,8 @@ Options:
   --no-auto-update       Do not register the daily safe updater for Codex/Claude Code.
   --allow-harness-not-ready
                          Diagnostic/canvas-only mode: report missing video-harness prerequisites without failing setup.
+                         The safe updater always uses this mode so that a missing prerequisite never blocks
+                         the release that fixes it (the report is kept in the updater state instead).
   --tunnel               Start a Canvas Tunnel after setup for phone access to the same full Excalidraw UI (Cloudflare by default).
   --ngrok-authtoken <token>
                          Opt into ngrok instead of Cloudflare and configure it. Also reads BUZZASSIST_NGROK_AUTHTOKEN or NGROK_AUTHTOKEN.
@@ -180,7 +190,25 @@ const launchCanvas = !hasArg("--no-launch");
 const enableAutoUpdate = !hasArg("--no-auto-update");
 const allowHarnessNotReady = hasArg("--allow-harness-not-ready");
 const launchTunnel = hasArg("--tunnel") && launchCanvas;
-const targetAgents = resolveTargetAgents();
+// 自動更新器（update-current.mjs）からの呼び出し。古い更新器は印の env を立てないので、
+// 更新器だけが使う引数の組でも見分ける（lib/pluginAutoUpdate.mjs）。
+const updaterInstall = isDirectExecution ? isUpdaterInstallInvocation({ argv, env: process.env }) : { updater: false, signal: "" };
+if (updaterInstall.updater && process.platform !== "win32") {
+  // launchd / systemd から起動された更新器は PATH が最小で、claude / codex / npm が
+  // 見えない。よく使われる置き場所を後ろに足す（運営者の PATH が先に効く）。
+  process.env.PATH = schedulerPathEnv({ nodePath: process.execPath, env: process.env, platform: process.platform, homeDir });
+}
+const targetAgents = resolveUpdaterTargets(resolveTargetAgents());
+
+/**
+ * 更新器からの呼び出しでは、BuzzAssist が既に入っている codex / claude を対象に足す。
+ * 片方の手順（CLAUDE.md なら Claude Code だけ）で登録された古い設定でも、
+ * もう片方のホストに同じ版を届けるため。対話の setup では足さない（手順どおり1つだけ）。
+ */
+function resolveUpdaterTargets(requested) {
+  if (!updaterInstall.updater) return requested;
+  return [...new Set([...requested, ...unionUpdateHosts(detectInstalledBuzzAssistHosts({ homeDir }))])];
+}
 const projectDir = resolve(
   readArg("--project-dir", process.env.BUZZASSIST_PROJECT_DIR || process.env.EXCALIDRAW_PROJECT_DIR || process.cwd()),
 );
@@ -298,6 +326,13 @@ async function run(command, args, options = {}) {
   });
 }
 
+// npm は実行中の Node に同梱のものを使う。install.sh / install.ps1 が
+// ~/.buzzassist/tools/node に入れた Node は PATH に載っていないことがある。
+async function runNpm(args, options = {}) {
+  const npm = resolveNpmInvocation();
+  return run(npm.command, [...npm.args, ...args], { ...options, env: envWithNodeOnPath(options.env || process.env) });
+}
+
 async function commandAvailable(command) {
   if (dryRun) return true;
   const result = await run(command, ["--version"], { allowFailure: true });
@@ -321,7 +356,7 @@ async function ensureDependencies() {
   }
 
   logStep("Installing npm dependencies");
-  await run(commandName("npm"), ["install"], { inherit: true });
+  await runNpm(["install"], { inherit: true });
 }
 
 async function ensureBuild() {
@@ -336,7 +371,7 @@ async function ensureBuild() {
   }
 
   logStep("Building the static canvas UI");
-  await run(commandName("npm"), ["run", "build"], { inherit: true });
+  await runNpm(["run", "build"], { inherit: true });
 }
 
 async function ensureWidgetBuild() {
@@ -352,7 +387,7 @@ async function ensureWidgetBuild() {
   }
 
   logStep("Building the native widget UI");
-  await run(commandName("npm"), ["run", "build:widget"], { inherit: true });
+  await runNpm(["run", "build:widget"], { inherit: true });
 }
 
 // このプラグインは PUBLIC な配布物なので、特定チャンネルの番組設定・
@@ -1083,8 +1118,27 @@ export function parseAutoUpdateRegistrationOutput(stdout) {
   };
 }
 
+/**
+ * 自動更新の対象ホスト。
+ *
+ * 今回設定できた codex / claude が1つも無ければ登録しない（Cursor だけの setup などは
+ * 今までどおり）。1つでもあれば、既存の登録（config.hosts）と、この端末で BuzzAssist が
+ * 既に入っているホストを足す。CLAUDE.md は Claude Code だけ、AGENTS.md は Codex だけを
+ * 設定させるので、今回の対象だけにすると、最後に setup しなかった方が更新から外れていた。
+ */
+export function resolveAutoUpdateHosts({ configured = [], existingHosts = [], installedHosts = [] } = {}) {
+  const base = unionUpdateHosts(configured);
+  if (base.length === 0) return [];
+  return unionUpdateHosts(base, existingHosts, installedHosts);
+}
+
 async function configureAutoUpdate(pluginDir, results) {
-  const hosts = targetAgents.filter((agent) => ["codex", "claude"].includes(agent) && results[agent]?.ok);
+  const existing = await readJson(updaterPaths(homeDir).configPath, {});
+  const hosts = resolveAutoUpdateHosts({
+    configured: targetAgents.filter((agent) => ["codex", "claude"].includes(agent) && results[agent]?.ok),
+    existingHosts: Array.isArray(existing?.hosts) ? existing.hosts : [],
+    installedHosts: detectInstalledBuzzAssistHosts({ homeDir }),
+  });
   if (hosts.length === 0) return null;
   if (!enableAutoUpdate) {
     console.log("Skipping automatic update registration.");
@@ -1115,6 +1169,25 @@ async function configureAutoUpdate(pluginDir, results) {
   throw new Error(
     "Auto-update installer returned success without a verified scheduler; refusing to report BUZZASSIST_AUTO_UPDATE=enabled.",
   );
+}
+
+/**
+ * setup を失敗とするホスト。
+ *
+ * 対話の setup では、設定できなかったホストが1つでもあれば失敗。自動更新器からの
+ * 呼び出しでは、CLI が見つからず見送ったホスト（skipped）だけでは失敗にしない——
+ * 後から CLI を消した端末で、残りのホストの更新まで止めないため。ただし1つも
+ * 設定できなかったときと、導入を試みて失敗したホストは今までどおり失敗（巻き戻し）。
+ */
+export function setupFailureVerdict({ targetAgents: agents = [], results = {}, updater = false } = {}) {
+  const notOk = agents.filter((agent) => !results[agent]?.ok);
+  const skipped = notOk.filter((agent) => results[agent]?.skipped);
+  if (!updater) return { failed: notOk, skipped: [] };
+  const configured = agents.filter((agent) => results[agent]?.ok);
+  return {
+    failed: configured.length > 0 ? notOk.filter((agent) => !results[agent]?.skipped) : notOk,
+    skipped,
+  };
 }
 
 function targetIncludesWidgetHost() {
@@ -1312,6 +1385,7 @@ export async function runSetupAgents() {
     const report = await runHarnessDoctor({ projectDir });
     console.log(`BUZZASSIST_HARNESS_READY=${report.ready ? "yes" : "no"}`);
     if (!report.ready) {
+      console.log(`BUZZASSIST_HARNESS_BLOCKING=${report.blocking.join(",")}`);
       harnessReadinessError = new Error(`BuzzAssist video harness prerequisites are missing: ${report.blocking.join(", ")}`);
       harnessReadinessError.exitCode = 2;
       console.log("動画ハーネスを回すには、まだ足りないものがあります:");
@@ -1332,13 +1406,19 @@ export async function runSetupAgents() {
     harnessReadinessError = new Error(`BuzzAssist video harness prerequisites could not be verified: ${error?.message || error}`);
     harnessReadinessError.exitCode = 2;
   }
-  if (harnessReadinessError && !allowHarnessNotReady) {
+  // 自動更新器からの呼び出しは、前提が欠けていても止めない。止めると、その前提を
+  // 直す版も含めて更新が一切届かなくなる（2026-09-24 に 0.1.25→0.1.26 が巻き戻された）。
+  // 欠けていることは BUZZASSIST_HARNESS_READY / _BLOCKING で更新器に渡し、state に残る。
+  if (harnessReadinessError && !allowHarnessNotReady && !updaterInstall.updater) {
     console.log("通常セットアップは fail-closed です。前提を直して同じコマンドを再実行してください。");
     console.log("診断またはCanvas単体の確認だけを続ける場合は --allow-harness-not-ready を明示してください。");
     throw harnessReadinessError;
   }
   if (harnessReadinessError) {
-    console.log("BUZZASSIST_HARNESS_READY_OVERRIDE=diagnostic-only");
+    console.log(`BUZZASSIST_HARNESS_READY_OVERRIDE=${updaterInstall.updater ? "updater-install" : "diagnostic-only"}`);
+  }
+  if (updaterInstall.updater) {
+    console.log(`BUZZASSIST_UPDATER_INSTALL=${updaterInstall.signal}`);
   }
 
   // A normal setup must not stage a plugin or modify host configuration before
@@ -1400,7 +1480,7 @@ export async function runSetupAgents() {
     console.log("BUZZASSIST_AUTO_UPDATE_SCHEDULER_CHECK=ok");
     console.log(`BUZZASSIST_AUTO_UPDATE_SCHEDULE=${autoUpdateStatus.schedule}`);
     console.log(`BUZZASSIST_AUTO_UPDATE_HOSTS=${autoUpdateStatus.hosts.join(",")}`);
-    console.log("Stable GitHub Releases are checked daily at 03:17 local time. Updates are verified and rolled back on failure; restart the host to load a newly installed version.");
+    console.log("Stable GitHub Releases are checked daily at 03:17 local time; a check missed while the machine was off or logged out runs at the next login. Updates are verified and rolled back on failure; restart the host to load a newly installed version.");
   } else if (autoUpdateStatus?.planned) {
     console.log("BUZZASSIST_AUTO_UPDATE=planned");
     console.log("BUZZASSIST_AUTO_UPDATE_SCHEDULE=not-registered-dry-run");
@@ -1433,7 +1513,12 @@ export async function runSetupAgents() {
     console.log("Open BUZZASSIST_TUNNEL_ACCESS_URL on the phone to use the same full Excalidraw canvas UI. Basic Auth is only needed when the tunnel was started with --basic-auth.");
   }
 
-  const failedAgents = targetAgents.filter((agent) => !results[agent]?.ok);
+  const { failed: failedAgents, skipped: skippedAgents } = setupFailureVerdict({
+    targetAgents,
+    results,
+    updater: updaterInstall.updater,
+  });
+  if (skippedAgents.length > 0) console.log(`BUZZASSIST_HOST_SKIPPED=${skippedAgents.join(",")}`);
   if (failedAgents.length > 0) {
     throw new Error(
       `BuzzAssist host setup did not complete for: ${failedAgents.map((agent) => agentLabels[agent]).join(", ")}. ` +
