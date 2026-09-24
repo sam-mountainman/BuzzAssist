@@ -84,7 +84,9 @@ npm run tunnel:start -- --project-dir /path/to/user/project
 ```
 
 Canvas Tunnel は既定で Cloudflare（`cloudflared`）を使う。quick tunnel ならアカウントは
-要らない。`cloudflared` が入っていなければ、インストールするようユーザーに伝える。
+要らない。`cloudflared` が入っていなければ、BuzzAssist が固定版の公式リリースを `~/.buzzassist/tools/` へ取得し、
+SHA-256 を照合してから管理者権限なしで使う（`--no-auto-download` か
+`BUZZASSIST_CLOUDFLARED_AUTO_DOWNLOAD=0` で止められる）。ユーザーにインストールを頼む必要はない。
 固定の `canvas.buzzassist.ai` URL を使うときは、ユーザーが `cloudflared tunnel login` を
 1回実行し、そのあと `--cf-hostname canvas.buzzassist.ai` を付けて起動する。
 

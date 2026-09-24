@@ -7,7 +7,7 @@ description: 公式の Excalidraw MCP App（official Excalidraw MCP）で、プ�
 
 ユーザーが公式の Excalidraw MCP を求めたとき、またはプロンプトから図を作る流れを望んだときに
 使う。結果をいま開いているローカルのブラウザーキャンバスに置きたい場合は、リモートの公式
-サーバーではなく、ローカルの `excalidraw_mcp` stdio サーバーを使う。
+サーバーではなく、ローカルの `buzzassist_mcp` stdio サーバーを使う。
 
 ## MCP サーバー
 

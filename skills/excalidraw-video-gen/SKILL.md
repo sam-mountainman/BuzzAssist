@@ -35,7 +35,7 @@ BuzzAssist クラウドモデル（`seedance-2`、`seedance-2-fast`、`kling-v3`
 
 ## 生成前の確認（必須）
 
-`generate_excalidraw_video` / `generate_excalidraw_videos_batch` は `confirmedSettings: true` なしの呼び出しを拒否する（`payloadPreview` を除く）。ユーザーのメッセージで全設定が明示されていない限り、生成前に AskUserQuestion を1回だけ出して確認する。
+`generate_excalidraw_video` / `generate_excalidraw_videos_batch` は `confirmedSettings: true` なしの呼び出しを拒否する（`payloadPreview` を除く）。ユーザーのメッセージで全設定が明示されていない限り、生成前に AskUserQuestion で確認する（1画面1〜3問。残りがあれば下の「段階式の質問順」に従って次の画面で聞く）。
 
 - モデル（Grok Imagine / Seedance 2 / Kling v3 / Veo 3.1 …）
 - 実行先（同じモデルが複数の実行先を持つ場合だけ。例: Grok Imagine → Grok / BuzzAssist、Kling / Seedance → Lovart / BuzzAssist。LovartはBuzzAssistより上に表示して優先）

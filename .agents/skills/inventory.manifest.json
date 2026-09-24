@@ -283,8 +283,8 @@
     {
       "id": "buzzassist:excalidraw-open-canvas",
       "name": "excalidraw-open-canvas",
-      "version": "0.2.0",
-      "contentSha256": "sha256:2e9ee9518e29c8983bc55d1450f83227d4f16048701b970021969df904d26540",
+      "version": "0.2.1",
+      "contentSha256": "sha256:8251078c37b96c61e14180ebdd631451fad26427690fa03f7b74c702870db6d8",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "plugin-runtime-source",
@@ -304,8 +304,8 @@
     {
       "id": "buzzassist:excalidraw-official-mcp",
       "name": "excalidraw-official-mcp",
-      "version": "0.2.0",
-      "contentSha256": "sha256:1c68b327722fa078d513bc7f5fb0ad48964c34f35ed8c878eec272fe8f5f5967",
+      "version": "0.2.1",
+      "contentSha256": "sha256:b098b851fd92e542370922ec30b274d5c70845377e55ec61afe7e442cde0c71c",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "plugin-runtime-source",
@@ -325,8 +325,8 @@
     {
       "id": "buzzassist:excalidraw-image-gen",
       "name": "excalidraw-image-gen",
-      "version": "0.2.0",
-      "contentSha256": "sha256:2a7c9ef31c93ca09c7b92eb1a7742edd12ceb086d3fd6cc87a9584eebd8a5989",
+      "version": "0.2.1",
+      "contentSha256": "sha256:49164d9ec7b81121866bac8e55dba271e210452be7d06c39672434ffa7c9d97f",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "plugin-runtime-source",
@@ -346,8 +346,8 @@
     {
       "id": "buzzassist:excalidraw-video-gen",
       "name": "excalidraw-video-gen",
-      "version": "0.2.0",
-      "contentSha256": "sha256:399a1db47c0fdfa1cbf97e4d49a06e818c9c5a04f1e2a3cc42920d1533ca25c0",
+      "version": "0.2.1",
+      "contentSha256": "sha256:7b0113c16b4ae4e54bc9b3fc1b23795b5f2875691d9d078e4589f6003728c9ec",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "plugin-runtime-source",
