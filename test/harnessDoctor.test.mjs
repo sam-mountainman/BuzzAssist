@@ -24,6 +24,8 @@ function deterministicDoctorRuntime(overrides = {}) {
     },
     pythonRuntime: { ok: true, command: "python", args: [], version: "3.12.2" },
     voiceQualityProbe: async () => true,
+    // 実機の空きに左右されないよう、機械を差し替えるテストはディスクも差し替える。
+    diskFreeBytes: async () => 64 * 1024 ** 3,
     ttsProbe: async () => ({ ok: true, detail: "設定あり", fix: "" }),
     imageModel: "gpt-image-2-codex",
     imageHostProbe: async (model) => ({ ok: true, host: "codex", model, detail: `Codex / ${model}` }),
@@ -545,4 +547,63 @@ test("R6-1: doctor reports the reviewer trust anchor as a required item for a na
   assert.equal(setupCheck.ok, false);
   assert.ok(setup.advisory.includes("reviewer-trust"));
   assert.ok(!setup.blocking.includes("reviewer-trust"));
+});
+
+test("空き容量: ハーネス指定では必須、setup では任意（R6-1 と同じ扱い）", async () => {
+  // 画像を200〜250枚（課金済み）作り終えたあとで書き込みに失敗すると、
+  // 払った分は戻らず、Job は failed で終端になるので全額の作り直しになる。
+  // 「揃っている」と言った直後に金が飛ぶなら、それは揃っていない。
+  // 一方、setup を空き容量で止めると、空きを作るために要る配り直しそのものが
+  // できなくなるので、Harness 未選択では任意にする。
+  const route = async () => ({ command: "fixture-node", args: ["koya-manga-video.mjs", "help"], cwd: root, label: "scripts/koya-manga-video.mjs", mcpTool: "run_video_harness" });
+  const run = (freeBytes, harnessId) => runHarnessDoctor({
+    projectDir: root,
+    harnessId,
+    runtime: deterministicDoctorRuntime({
+      diskFreeBytes: async () => freeBytes,
+      resolveProductionRoute: route,
+      mediaAdapterProbe: async (spec) => ({ ok: true, status: "ready", ...spec }),
+    }),
+  });
+
+  const named = await run(3 * 1024 ** 3, "koya-manga-video");
+  const namedCheck = named.checks.find((check) => check.id === "disk-space");
+  assert.ok(namedCheck, "disk-space が項目として出る");
+  assert.equal(namedCheck.required, true, "ハーネス指定では必須");
+  assert.equal(namedCheck.ok, false, "足りないので通さない");
+  assert.ok(named.blocking.includes("disk-space"), "止める側に入る");
+  assert.match(namedCheck.detail, /3\.0GiB/u, "測った値をそのまま出す");
+  assert.ok(namedCheck.fix.length > 10, "直し方が付く");
+
+  const setup = await run(3 * 1024 ** 3, "");
+  const setupCheck = setup.checks.find((check) => check.id === "disk-space");
+  assert.equal(setupCheck.required, false, "Harness 未選択では任意");
+  assert.ok(!setup.blocking.includes("disk-space"), "setup を止めない");
+});
+
+test("空き容量が足りていれば通し、測った値を報告する", async () => {
+  const report = await runHarnessDoctor({
+    runtime: deterministicDoctorRuntime({ diskFreeBytes: async () => 40 * 1024 ** 3 }),
+  });
+  const disk = report.checks.find((check) => check.id === "disk-space");
+  assert.equal(disk.ok, true);
+  assert.equal(disk.measured, true, "測ったことを記録すること");
+  assert.match(disk.detail, /40\.0GiB/u);
+  assert.ok(!report.blocking.includes("disk-space"));
+});
+
+test("空き容量を測れなかったときは、測れなかったと言う（確かめたとは言わない）", async () => {
+  // 測れないことは運営者の落ち度ではないので止めない。
+  // ただし「空きは足りている」と言ってしまうと、doctor が確かめていないことを
+  // 確かめたと報告することになる——このリポジトリで繰り返し見つけた形。
+  const report = await runHarnessDoctor({
+    runtime: deterministicDoctorRuntime({
+      diskFreeBytes: async () => { throw new Error("statfs unsupported"); },
+    }),
+  });
+  const disk = report.checks.find((check) => check.id === "disk-space");
+  assert.equal(disk.ok, true, "測れないだけで止めないこと");
+  assert.equal(disk.measured, false, "測っていないと記録すること");
+  assert.match(disk.detail, /測れなかった/u);
+  assert.ok(!/空き \d/u.test(disk.detail), "測っていない値を空きとして書かないこと");
 });

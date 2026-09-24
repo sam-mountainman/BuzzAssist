@@ -23,7 +23,7 @@
 
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, statfs } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -98,6 +98,67 @@ async function probeSecretVia(resolve, { label, fix }) {
  * **運営者のエージェントは古い指示を読み、記録には新しい指紋が残る**——
  * 記録が、実際に使われたものと別のものを指すことになる。
  */
+// 本編1本ぶんの作業一式が置ける空きがあるかを見る。
+//
+// なぜ必須か:
+// 画像を200〜250枚（実測 13〜16時間・課金済み）生成し終えたあとで書き込みに
+// 失敗すると、払った分がそのまま消える。しかも Job は failed で終端になり、
+// 同じ入力では死んだ Job に再接続するだけなので、やり直しは全額の再課金になる。
+// 「揃っている」と言った直後に金が飛ぶなら、それは揃っていない。
+//
+// しきい値の出し方（推定であることを明示する。実測した値ではない）:
+//   実測できているのは完成済みのベンチ回 manga-arano-amane-effort-001 だけ。
+//   台本2,850字・完成8分42秒に対して、作業一式 2.7GB（うち 2.6GB は監査の中間物で、
+//   直しを3回まわした履歴を含む）。画像そのものは 195MB、音声は 226MB。
+//   本番尺は台本6,000〜7,500字＝尺比およそ2.6倍なので 2.7GB × 2.6 ≒ 7GB。
+//   これにレンダー中の一時ファイルぶんを足して 8GiB を下限にしている。
+//   **掛け算で出した見積りであって、本番尺を1本通して測った値ではない。**
+//   1本目が終わったら、その実測値に置き換えること。
+const HARNESS_MIN_FREE_BYTES = 8 * 1024 * 1024 * 1024;
+
+function formatGiB(bytes) {
+  return `${(bytes / (1024 ** 3)).toFixed(1)}GiB`;
+}
+
+async function probeDiskSpace(projectDir, runtime = {}) {
+  // 見るのは実行に使う場所。tmp と別ボリュームのことがあるので、
+  // project dir そのものを聞く。
+  let free = null;
+  try {
+    free = typeof runtime.diskFreeBytes === "function"
+      ? Number(await runtime.diskFreeBytes(projectDir))
+      : await (async () => {
+        const stat = await statfs(projectDir);
+        return Number(stat.bavail) * Number(stat.bsize);
+      })();
+  } catch (error) {
+    // 測れないこと自体は運営者の落ち度ではないので、必須で止めない。
+    // ただし「確かめた」とも言わない。
+    return {
+      ok: true,
+      detail: `空き容量を測れなかった（${String(error?.message || error).slice(0, 80)}）`,
+      fix: "",
+      measured: false,
+    };
+  }
+  if (!Number.isFinite(free)) {
+    return { ok: true, detail: "空き容量を測れなかった（値が数値でない）", fix: "", measured: false };
+  }
+  const ok = free >= HARNESS_MIN_FREE_BYTES;
+  return {
+    ok,
+    freeBytes: free,
+    requiredBytes: HARNESS_MIN_FREE_BYTES,
+    measured: true,
+    detail: ok
+      ? `空き ${formatGiB(free)}（目安 ${formatGiB(HARNESS_MIN_FREE_BYTES)} 以上）`
+      : `空き ${formatGiB(free)}。本編1本ぶんの見積り ${formatGiB(HARNESS_MIN_FREE_BYTES)} に足りない`,
+    fix: ok ? "" : "有料生成を始める前に空きを作ること。画像を全部作り終えたあとで書き込みに失敗すると、"
+      + "払った分は戻らず、Job は再開できないので全額の作り直しになる。"
+      + "この目安はベンチ回（台本2,850字で作業一式2.7GB）からの見積りで、本番尺で測った値ではない",
+  };
+}
+
 function probeShippedSkillDrift() {
   const canonicalRoot = path.join(REPO_ROOT, ".agents", "skills");
   const shippedRoot = path.join(homedir(), "plugins", "buzzassist", "plugin", "skills");
@@ -600,6 +661,16 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "",
     ok: capability.ok,
     detail: capability.detail,
     fix: capability.ok ? "" : `この ffmpeg ビルドには本編のレンダーに要るものが足りない: ${capability.missing.join(", ") || capability.detail}。libx264 と aac を含むビルドを入れること（macOS の \`brew install ffmpeg\` は既定で含む）`,
+  });
+
+  // ハーネスを名指しした本番 preflight では必須、Harness 未選択の setup では任意。
+  // reviewer 信頼アンカー（R6-1）と同じ扱い: 空きが要るのは「回すとき」であって
+  // 「設定するとき」ではない。setup を空き容量で止めると、空きを作るために要る
+  // 配り直しそのものができなくなる。
+  add({
+    id: "disk-space",
+    required: Boolean(harnessId),
+    ...await probeDiskSpace(path.resolve(projectDir), runtime),
   });
 
   // --- 音声品質ゲート ---

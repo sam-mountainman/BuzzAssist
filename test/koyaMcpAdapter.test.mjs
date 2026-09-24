@@ -44,6 +44,8 @@ function deterministicDoctorRuntime() {
     },
     pythonRuntime: { ok: true, command: "python", args: [], version: "3.12.2" },
     voiceQualityProbe: async () => true,
+    // 実機の空きに左右されないよう、機械を差し替えるテストはディスクも差し替える。
+    diskFreeBytes: async () => 64 * 1024 ** 3,
     mediaAdapterProbe: async (spec) => ({ ok: true, status: "ready", ...spec }),
     imageModel: "gpt-image-2-codex",
     imageHostProbe: async (model) => ({ ok: true, host: "codex", model, detail: `Codex / ${model}` }),
