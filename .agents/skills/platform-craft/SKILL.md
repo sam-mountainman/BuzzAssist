@@ -59,6 +59,15 @@ node scripts/harness-registry.mjs gaps     # 横断で見た抜け
 - バックオフは上限つき指数。上限が無いと止めたいときに止まらない
 - `get / cancel / resume / recover`は同じMedia Job IDを使い、完成済みartifactを
   再submitしない
+- **失敗した Job は共通の resume 経路で再開できる**（2026-09-24 運営者決定。それまで
+  `failed` は終端で、同じ入力で回し直すと死んだ Job に再接続して何もしなかった）。
+  再開の条件: 完了済みの有料 Media Job は requestKey と artifact SHA で再利用して
+  再課金しない／`recovery-required` は broker の `recover` 経由で、未確定なら
+  `paid-media-recovery-pending` で止まり doctor も adapter も走らない／回復不能
+  （版不一致・stage 不一致・Receipt 確定待ちの残存・workspace や台本の欠落・requestKey 無し）
+  は理由つきで拒否し Job は変えない／Receipt に `resume-from-failed`（直前の失敗、
+  落ちた工程、再利用と再発行の内訳）と画像の失敗行を作り直した事実（件数・再課金回数）を残す。
+  新しい入口も新しい旗も作らない——`run-video-harness resume` と MCP の resume がそのまま入口
 - Receiptへprovider、adapterVersion、providerJobId、requestKey、input/identity hash、
   reservation、usage、cost、artifact SHAを残す。credentialとprovider生responseは残さない
 

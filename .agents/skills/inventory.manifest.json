@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "manifestVersion": "1.4.0",
+  "manifestVersion": "1.5.0",
   "namespace": "buzzassist",
   "classifications": [
     "installed",
@@ -12,8 +12,8 @@
     {
       "id": "buzzassist:platform-craft",
       "name": "platform-craft",
-      "version": "1.2.3",
-      "contentSha256": "sha256:ee255c60da6c6cd7bfe3670b1f9beacb930865d035507fb07dc1b27d7db6b698",
+      "version": "1.3.0",
+      "contentSha256": "sha256:f38e343457ca29e0b6e9ade1e56d314482699a7200def5a7a7b39e494f48dee8",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",
