@@ -14,6 +14,8 @@
 #   BUZZASSIST_PROJECT_DIR  作業フォルダ（既定 ~/BuzzAssist）。--project-dir DIR
 #   BUZZASSIST_VERSION      入れる版（既定は最新の stable Release）。--version X.Y.Z
 # それ以外の引数（--no-launch、--tunnel、--no-install-prerequisites など）は setup-agents にそのまま渡す。
+# 既定では --allow-harness-not-ready を渡し、本番の前提不足は「次にやること」として見せる。
+# 前提がそろわなければ失敗扱いにしたいときは --require-harness-ready（BUZZASSIST_REQUIRE_HARNESS_READY=1）。
 #
 # このファイルは全体を関数の中に置き、最後の1行で呼ぶ。`curl | bash` のとき、途中で起動した
 # プログラムが標準入力から残りのスクリプトを読んでしまうのを防ぐため。
@@ -210,15 +212,24 @@ run_setup() {
   "$NODE_BIN" "${APP}/scripts/setup-agents.mjs" --agents "$HOSTS" --project-dir "$PROJECT_DIR" ${PASSTHROUGH[@]+"${PASSTHROUGH[@]}"} </dev/null 2>&1 | tee "$log"
   local status=${PIPESTATUS[0]}
   set -e
+  local missing
+  missing="$(sed -n 's/^  - \([a-z0-9-]*\): \(.*\)$/\1: \2/p' "$log" | head -20)"
   if [ "$status" -eq 0 ]; then
+    local not_ready=0
+    grep -q '^BUZZASSIST_HARNESS_READY=no' "$log" && not_ready=1
     rm -f "$log"
     say ""
     say "BuzzAssist ${VERSION} を入れました（${HOSTS}）。Claude Code / Codex を新しく開き直すと使えます。"
     say "作業フォルダ: ${PROJECT_DIR}"
+    if [ "$not_ready" = "1" ]; then
+      say ""
+      say "【次にやること】キャンバスと画像・動画の道具は使えます。台本から本編を作る前に、次の準備が残っています:"
+      if [ -n "$missing" ]; then printf '%s\n' "$missing" | sed 's/^/  - /'; fi
+      say "準備ができたかは、作業フォルダで node ${APP}/scripts/harness-doctor.mjs を実行すると確かめられます。"
+      say "（準備がそろうまで、本番の Job は開始時の点検で止まります。導入の失敗ではありません）"
+    fi
     return 0
   fi
-  local missing
-  missing="$(sed -n 's/^  - \([a-z0-9-]*\): \(.*\)$/\1: \2/p' "$log" | head -20)"
   rm -f "$log"
   if [ "$status" -eq 2 ]; then
     printf '\n[BuzzAssist の導入を止めました] 動画ハーネスを回すための前提がまだ足りません（exit 2）。\n' >&2
@@ -226,8 +237,8 @@ run_setup() {
       printf '足りないもの:\n' >&2
       printf '%s\n' "$missing" | sed 's/^/  - /' >&2
     fi
-    printf '直してから、同じ1行をもう一度実行してください。キャンバスだけを先に使うなら、末尾に --allow-harness-not-ready を付けます:\n' >&2
-    printf '  curl -fsSL https://raw.githubusercontent.com/%s/main/install.sh | bash -s -- --allow-harness-not-ready\n' "$BUZZASSIST_REPO" >&2
+    printf '直してから、同じ1行をもう一度実行してください。準備が残っていても道具だけ先に入れるなら、--require-harness-ready を外します（既定は --allow-harness-not-ready）:\n' >&2
+    printf '  curl -fsSL https://raw.githubusercontent.com/%s/main/install.sh | bash\n' "$BUZZASSIST_REPO" >&2
     exit 2
   fi
   fail "setup-agents が失敗しました（exit ${status}）。上の出力の最後のエラーを確認してください。" \
@@ -242,14 +253,23 @@ main() {
   PROJECT_DIR="${BUZZASSIST_PROJECT_DIR:-${HOME_DIR}/BuzzAssist}"
   REQUESTED_VERSION="${BUZZASSIST_VERSION:-}"
   PASSTHROUGH=()
+  REQUIRE_HARNESS_READY="${BUZZASSIST_REQUIRE_HARNESS_READY:-0}"
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --project-dir) [ "$#" -ge 2 ] || fail "--project-dir にフォルダを指定してください。"; PROJECT_DIR="$2"; shift 2 ;;
       --version) [ "$#" -ge 2 ] || fail "--version に版を指定してください。"; REQUESTED_VERSION="$2"; shift 2 ;;
       --agent|--agents|--host) fail "$1 は指定できません。install.sh は入っているホストを自動で全部設定します。" ;;
+      --require-harness-ready) REQUIRE_HARNESS_READY=1; shift ;;
+      --allow-harness-not-ready) shift ;;
       *) PASSTHROUGH+=("$1"); shift ;;
     esac
   done
+  # 道具の導入と、有料の本番を回せる準備は別の話。真っさらな端末では音声品質の依存・
+  # 有料 API の鍵・Codex のログインなど、1行導入では満たせない前提が必ず残るので、
+  # 既定では導入を最後まで終え、足りない準備は「次にやること」として見せる。
+  # 本番 Job は開始時の doctor が今どおり止めるので、ここで止めても安全は増えない。
+  # 前提がそろわない限り失敗扱いにしたいときだけ --require-harness-ready を付ける。
+  if [ "$REQUIRE_HARNESS_READY" != "1" ]; then PASSTHROUGH+=("--allow-harness-not-ready"); fi
   have tar || fail "tar が見つかりません。"
   detect_platform
   ensure_node

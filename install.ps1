@@ -258,6 +258,11 @@ function Install-BuzzAssist {
   foreach ($arg in $passthrough) {
     if ($arg -in @("--agent", "--agents", "--host")) { Stop-Install "$arg は指定できません。install.ps1 は入っているホストを自動で全部設定します。" }
   }
+  # 道具の導入と、有料の本番を回せる準備は別の話（install.sh と同じ理由）。既定では導入を
+  # 最後まで終え、足りない準備は「次にやること」として見せる。本番 Job は開始時の doctor が止める。
+  $requireReady = ($passthrough -contains "--require-harness-ready") -or ($env:BUZZASSIST_REQUIRE_HARNESS_READY -eq "1")
+  $passthrough = @($passthrough | Where-Object { $_ -ne "--require-harness-ready" -and $_ -ne "--allow-harness-not-ready" })
+  if (-not $requireReady) { $passthrough += "--allow-harness-not-ready" }
 
   $nodeExe = Install-Node $toolsDir
   # setup の中の npm と、npm の lifecycle script が同じ Node を使うように。
@@ -285,17 +290,24 @@ function Install-BuzzAssist {
   } finally {
     $ErrorActionPreference = $previousPreference
   }
+  $missing = @($output | Where-Object { $_ -match "^  - [a-z0-9-]+: " } | Select-Object -First 20)
   if ($status -eq 0) {
     Write-Host ""
     Write-Host "BuzzAssist $ver を入れました（$hostList）。Claude Code / Codex を新しく開き直すと使えます。"
     Write-Host "作業フォルダ: $project"
+    if (@($output | Where-Object { $_ -match "^BUZZASSIST_HARNESS_READY=no" }).Count -gt 0) {
+      Write-Host ""
+      Write-Host "【次にやること】キャンバスと画像・動画の道具は使えます。台本から本編を作る前に、次の準備が残っています:"
+      foreach ($line in $missing) { Write-Host ("  - " + $line.Trim().TrimStart("-").Trim()) }
+      Write-Host "準備ができたかは、作業フォルダで node `"$(Join-Path $app 'scripts\harness-doctor.mjs')`" を実行すると確かめられます。"
+      Write-Host "（準備がそろうまで、本番の Job は開始時の点検で止まります。導入の失敗ではありません）"
+    }
     return
   }
   if ($status -eq 2) {
-    $missing = @($output | Where-Object { $_ -match "^  - [a-z0-9-]+: " } | Select-Object -First 20)
     $details = @()
     if ($missing.Count -gt 0) { $details += "足りないもの:"; $details += ($missing | ForEach-Object { $_.Trim() }) }
-    $details += "直してから、同じコマンドをもう一度実行してください。キャンバスだけを先に使うなら、環境変数 BUZZASSIST_SETUP_ARGS に --allow-harness-not-ready を入れて実行します。"
+    $details += "直してから、同じコマンドをもう一度実行してください。準備が残っていても道具だけ先に入れるなら、--require-harness-ready を外して実行します（既定は --allow-harness-not-ready）。"
     Stop-Install "動画ハーネスを回すための前提がまだ足りません（exit 2）。" $details
   }
   Stop-Install "setup-agents が失敗しました（exit $status）。上の出力の最後のエラーを確認してください。" @("ホストの CLI（claude / codex）の導入やログインを直してから、同じコマンドをもう一度実行してください。")

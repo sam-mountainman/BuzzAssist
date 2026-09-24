@@ -35,7 +35,9 @@ test("both installers verify every download and never need administrator rights"
     assert.match(source, /\.buzzassist[\\/]tools[\\/]?/u, `${name}: Node goes to the managed tools directory`);
     assert.doesNotMatch(source, /\bsudo\b|RunAs|-Verb\s+RunAs/u, `${name}: no elevation`);
     assert.match(source, /Claude Code も Codex も見つかりませんでした/u, `${name}: explains how to install a host`);
-    assert.match(source, /--allow-harness-not-ready/u, `${name}: explains the canvas-only escape hatch after exit 2`);
+    assert.match(source, /--allow-harness-not-ready/u, `${name}: finishes the install by default and lists what production still needs`);
+    assert.match(source, /--require-harness-ready/u, `${name}: keeps an opt-in strict mode`);
+    assert.match(source, /次にやること/u, `${name}: shows the remaining production prerequisites as next steps, not as a failure`);
   }
   assert.match(shellScript, /mismatch|一致しません/u);
 });
