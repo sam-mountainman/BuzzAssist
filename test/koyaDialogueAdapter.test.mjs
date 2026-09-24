@@ -190,3 +190,48 @@ test("doctor は契約が指す台詞音声アダプタを測る（ElevenLabs �
   assert.equal(tts.model, "irodori-tts-v4.1-small");
   assert.equal(tts.adapterVersion, "otoshigo-dialogue-server-v1");
 });
+
+test("オトシゴには ElevenLabs 固有の演技タグ（[angry] 等）を付けない", () => {
+  const angry = {
+    utterances: [{ id: "cut-01-u01", text: "ふざけるな！", speakerId: "a", voiceId: "designed:0123456789abcdef" }],
+  };
+  const eleven = prepareKoyaDialogueCut(angry, { id: "cut-01", utteranceIds: ["cut-01-u01"] });
+  assert.match(eleven.inputs[0].providerText, /^\[angry\] /u, "ElevenLabs には従来どおり付ける");
+  const otoshigo = prepareKoyaDialogueCut(angry, { id: "cut-01", utteranceIds: ["cut-01-u01"] }, { dialogueAdapter: OTOSHIGO });
+  assert.equal(otoshigo.inputs[0].performancePrompt, "");
+  assert.equal(otoshigo.inputs[0].providerText, otoshigo.inputs[0].speechText, "送る本文にタグが混ざらない");
+  assert.equal(/\[[a-z_ ]+\]/u.test(buildKoyaDialogueRequest(otoshigo, 0).inputs.map((entry) => entry.text).join(" ")), false, "台詞にタグが入らない");
+});
+
+test("オトシゴの Job は 48kHz の WAV も受け取れると伝える（ElevenLabs の指定は変えない）", async () => {
+  const specs = [];
+  const broker = {
+    start: async (spec) => { specs.push(spec); throw Object.assign(new Error("stop"), { charged: false }); },
+  };
+  for (const adapter of [DEFAULT_KOYA_DIALOGUE_ADAPTER, OTOSHIGO]) {
+    const plan = prepareKoyaDialogueCut(manifest(), cut, { takeCount: 2, dialogueAdapter: adapter });
+    await requestKoyaDialogueMediaJob(plan, 0, { sourceDir: "/unused", mediaJobBroker: broker }).catch(() => {});
+  }
+  assert.deepEqual(specs[0].output.acceptedFormats, ["wav_44100", "wav_24000"]);
+  assert.deepEqual(specs[1].output.acceptedFormats, ["wav_48000", "wav_44100", "wav_24000"]);
+});
+
+test("仲介を API キーで認証するときは Bearer で送り、キーを表に出さない", async () => {
+  const { mediaJobApiKeyFetch } = await import("../lib/paidMediaJobBroker.mjs");
+  const original = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = async (url, init) => {
+    seen.push({ url, headers: init.headers });
+    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const call = mediaJobApiKeyFetch("secret-key-123");
+    const response = await call("https://api.example.invalid/v1/media/jobs/capabilities", { method: "GET", headers: { accept: "application/json" } });
+    assert.equal(response.status, 200);
+    assert.equal(seen[0].headers.authorization, "Bearer secret-key-123");
+    assert.equal(seen[0].headers.accept, "application/json", "呼び出し側のヘッダは残す");
+    assert.throws(() => mediaJobApiKeyFetch(""), /non-empty API key/u);
+  } finally {
+    globalThis.fetch = original;
+  }
+});

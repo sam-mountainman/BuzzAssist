@@ -122,6 +122,16 @@ RunReceiptが確定できない場合、Jobは`failed`にならず、**`awaiting
 | `run-receipt-artifact-drift` | 確定待ちの間に成果物SHAが変わった。productionは自動再実行されず、`resume`は同じblockerで止まり続ける。**唯一の出口は、宣言（`config/harnesses/<id>.harness.json`）と成果物を直したうえで新しいJobを作る**こと。旧Jobは`awaiting-human-review`のまま証跡として残す。課金は`requestKey` journal（同じinput/provider/model/voice/paramsは同じrequest key）で再利用され、済んだMedia Jobを再submitしない |
 | `reviewer-attestation-unsupported-harness` | harness宣言（`config/harnesses/<id>.harness.json`）に`reviewAttestation.subject`が無い／未知。**宣言を直してから新しいJobを作る**。resumeでは直らない |
 
+## 台詞音声の提供元を切り替えるとき
+
+台詞音声の有料アダプタは契約（`config/koya-manga-production-contract.json` の `audio.provider` / `audio.model`）が決め、
+認めるのは `lib/koyaMangaProductionContract.mjs` の `KOYA_DIALOGUE_ADAPTERS` にある組だけです。doctor も本番も
+契約から同じアダプタを引き、doctor が測ったアダプタと契約のアダプタが違えば有料の音声に入りません。
+
+仲介を API キーで呼ぶ提供元（例: 自社の音声サービス）につなぐときは、実行側の環境に
+`BUZZASSIST_MEDIA_JOB_API_BASE`（仲介の住所）、`BUZZASSIST_MEDIA_JOB_API_KEY`（Bearer で送る API キー）、
+`BUZZASSIST_MEDIA_ARTIFACT_ORIGINS`（成果物の取得元）を置きます。設定ファイルの `env` には書きません。
+
 ## 途中で止まった・失敗したJobの再開
 
 どの場合も入口は同じ `node scripts/run-video-harness.mjs resume --job-id ID --project-dir DIR --confirmed`
