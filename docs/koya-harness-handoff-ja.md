@@ -122,6 +122,21 @@ RunReceiptが確定できない場合、Jobは`failed`にならず、**`awaiting
 | `run-receipt-artifact-drift` | 確定待ちの間に成果物SHAが変わった。productionは自動再実行されず、`resume`は同じblockerで止まり続ける。**唯一の出口は、宣言（`config/harnesses/<id>.harness.json`）と成果物を直したうえで新しいJobを作る**こと。旧Jobは`awaiting-human-review`のまま証跡として残す。課金は`requestKey` journal（同じinput/provider/model/voice/paramsは同じrequest key）で再利用され、済んだMedia Jobを再submitしない |
 | `reviewer-attestation-unsupported-harness` | harness宣言（`config/harnesses/<id>.harness.json`）に`reviewAttestation.subject`が無い／未知。**宣言を直してから新しいJobを作る**。resumeでは直らない |
 
+## 途中で止まった・失敗したJobの再開
+
+どの場合も入口は同じ `node scripts/run-video-harness.mjs resume --job-id ID --project-dir DIR --confirmed`
+（MCPは`resume_video_harness_job`、`confirmed: true`必須）です。再開のたびに doctor を測り直し、
+完成済みの有料 Media Job は記録された `requestKey` で再利用するので、払い直しません。
+
+| 止まり方 | 何が起きたか | 再開のしかた |
+|---|---|---|
+| `failed` | 子が例外で落ちた（回線切れ・機械の停止など）。`failed` は終端ではない | そのまま `resume`。落ちた工程から再開し、再開した事実（前回の失敗、再利用／再発行した Media Job）が Job と RunReceipt に残る |
+| 画像の一部が失敗のまま | 画像台帳に `failed` の行が残っている。通常の `resume` はそれを作り直さない | `resume` に `--retry-failed-images`（MCPは`retryFailedImages: true`）。失敗した画像だけを同じ Job のまま作り直す。Job の識別子には入らず、使った事実と作り直した枚数が台帳と RunReceipt に残る |
+| `paid-media-recovery-pending` | 提供元が受理した可能性のある Media Job がある（課金の有無が未確定） | 仲介の `recover` で決着させてから `resume`。子の journal が既定の場所に無いときは `BUZZASSIST_MEDIA_JOB_STATE_DIR` で指す。決着するまで doctor も adapter も走らない |
+| `full-run-lock-held`（人待ち） | 同じ回の制作がもう1本走っている（親だけ落ちて子が生きている等） | 走っている方が終わるのを待ってから `resume`。錠を手で消さない |
+| `awaiting-human-review`（声・衣装） | 人が選んだ声の記録が無い、台本が求める衣装が未登録 | 表示される次のコマンドどおりに選定・登録してから `resume` |
+| `video-harness-failed-job-unrecoverable` | Job の記録が壊れている、作業フォルダが無い等 | 再開できない。理由を読んで新しい Job を作る |
+
 ## Claude Codeへ導入
 
 受領側PCでリポジトリを取得し、リポジトリ直下から実行します。

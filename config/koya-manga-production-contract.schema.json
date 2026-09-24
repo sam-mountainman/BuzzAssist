@@ -136,8 +136,9 @@
         "joinFadeOutMilliseconds", "allowBgm", "allowSignalEffects", "freezeApprovedAudio"
       ],
       "properties": {
-        "provider": { "const": "elevenlabs" },
-        "model": { "const": "eleven_v3" },
+        "provider": { "enum": ["elevenlabs", "otoshigo"] },
+        "model": { "enum": ["eleven_v3", "irodori-tts-v4.1-small"] },
+        "adapterVersion": { "enum": ["elevenlabs-dialogue-server-v1", "otoshigo-dialogue-server-v1"] },
         "generationMode": { "const": "text-to-dialogue-with-timestamps" },
         "takeCount": { "type": "integer", "minimum": 2, "maximum": 8 },
         "languageCode": { "const": "ja" },
