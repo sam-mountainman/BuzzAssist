@@ -40,6 +40,15 @@ import { redactSharedLearningText } from "../lib/harnessFeedbackBundle.mjs";
 import { LEARNING_TARGET_ALIASES, resolveLearningTarget } from "../lib/harnessLearningTargets.mjs";
 import { assertLearningWriteAllowed } from "../lib/harnessLearningGuard.mjs";
 import {
+  ARCHIVE_RECORD_VERSION,
+  CURATE_DEFAULT_GATE_WINDOW_DAYS,
+  CURATE_DEFAULT_STALE_DAYS,
+  archivePathForOverlay,
+  curateOverlayCandidates,
+  effectiveArchiveRecords,
+  knownGateVocabulary,
+} from "../lib/harnessLearningCuration.mjs";
+import {
   LEARNING_INSPECTION_VERSION,
   blockedOriginalDigest,
   describeLearningBlockReasons,
@@ -56,6 +65,7 @@ import {
 import { buildPublicProposalCatalog, renderPublicProposalCatalog } from "../lib/harnessLearningCurator.mjs";
 import { loadSensitiveVocabulary, SENSITIVE_VOCABULARY_DIGEST_PATH } from "./audit-package-tarball.mjs";
 import { collectSensitiveSignals } from "./audit-public-surface.mjs";
+import { loadReceipts } from "./harness-receipts.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LEARN_DIR = path.join(REPO_ROOT, "docs", "learning");
@@ -567,9 +577,13 @@ export function summarizeProposals(proposals, applied, readCanonical = null, has
  * 理由だけを返す——そこは承認と監査の記録そのものなので、機械が書き足すと
  * 何を人が決めたのかが分からなくなる。
  */
-export function planOverlaySync(summary, targets, { homeRoot = homedir() } = {}) {
+export function planOverlaySync(summary, targets, { homeRoot = homedir(), archivedRecords = [] } = {}) {
   const byTarget = new Map();
+  const archivedByTarget = new Map();
   const blocked = [];
+  // 人が退避を決めた（human-verified）項目は overlay から外し、learned-archive.md へ移す。
+  // 退避後に同じ提案が再発していたら記録は効力を失い、overlay へ戻る。
+  const archive = effectiveArchiveRecords(summary, archivedRecords, { humanVerified: HUMAN_VERIFIED });
   for (const entry of summary.filter((item) => !item.applied)) {
     const target = resolveTarget(entry.target);
     // 書き込み前の検査に当たったもの（捕捉時の印か、いま読み直して当たったもの）は
@@ -578,6 +592,11 @@ export function planOverlaySync(summary, targets, { homeRoot = homedir() } = {})
     const reasons = learningBlockReasons(entry, { homeRoot });
     if (reasons.length > 0) {
       blocked.push({ id: entry.id, target, reasons });
+      continue;
+    }
+    if (archive.has(entry.id)) {
+      if (!archivedByTarget.has(target)) archivedByTarget.set(target, []);
+      archivedByTarget.get(target).push({ ...entry, archivedAt: archive.get(entry.id).archivedAt });
       continue;
     }
     if (!byTarget.has(target)) byTarget.set(target, []);
@@ -592,9 +611,117 @@ export function planOverlaySync(summary, targets, { homeRoot = homedir() } = {})
       continue;
     }
     if (!def.overlay) continue;
-    overlays.push({ target, overlay: def.overlay, entries });
+    overlays.push({
+      target,
+      overlay: def.overlay,
+      entries,
+      archive: archivePathForOverlay(def.overlay),
+      archivedEntries: archivedByTarget.get(target) ?? [],
+    });
   }
   return { overlays, held, blocked };
+}
+
+export const ARCHIVE_HEADER = [
+  "<!-- このファイルは harness-learn が自動で書きます。手で編集しないでください。 -->",
+  "",
+  "# 退避した自動項目",
+  "",
+  "`learned-auto.md` から、人の判断（`harness-learn curate --archive`、human-verified）で",
+  "退避した項目です。**作業前に読む対象ではありません**。消してはいないので、同じ指摘が",
+  "再発すれば次の sync で `learned-auto.md` へ戻ります。",
+  "",
+  "長く再発していないことは「もう起きない」とも「その規則が効いている」とも読めるので、",
+  "機械は候補を出すだけで、退避は人が決めます。",
+  "",
+].join("\n");
+
+/** learned-archive.md の本文。overlay と同じ redaction（本文は置換済み・根拠は digest）を通す。 */
+export function renderArchive(entries, now, context = null) {
+  const lines = [ARCHIVE_HEADER];
+  if (context?.vocabularyMissing === true) lines.push(OVERLAY_VOCABULARY_MISSING_NOTE, "");
+  const redaction = entries.length > 0 ? (context ?? overlayRedactionContext()) : null;
+  for (const entry of entries) {
+    lines.push(`- ${redactForOverlay(entry.text, redaction)}`);
+    const digests = [...new Set((entry.evidence || []).map((ev) => evidenceDigest(ev)))];
+    if (digests.length > 0) lines.push(`  - 根拠digest: ${digests.map((digest) => `\`${digest}\``).join(", ")}`);
+    lines.push(
+      `  - 種別: ${entry.kind} / 最後の再発: ${String(entry.lastSeenAt ?? entry.firstSeenAt ?? "").slice(0, 10)}`
+      + ` / 退避: ${String(entry.archivedAt ?? "").slice(0, 10)} / id: \`${entry.id}\``,
+    );
+  }
+  if (entries.length === 0) lines.push("_退避した項目はありません。_");
+  lines.push("", `_最終更新: ${now}_`, "");
+  return lines.join("\n");
+}
+
+function writeMachineOwnedFile(full, text) {
+  const before = fs.existsSync(full) ? fs.readFileSync(full, "utf8") : null;
+  if (before === text) return false;
+  fs.mkdirSync(path.dirname(full), { recursive: true });
+  // 一時ファイル＋rename。書き込み途中で落ちた overlay を
+  // 次のセッションが指示として読むことがないように。
+  const temp = `${full}.${process.pid}.partial`;
+  fs.writeFileSync(temp, text);
+  fs.renameSync(temp, full);
+  return true;
+}
+
+/**
+ * planOverlaySync の計画どおりに、機械所有の2ファイル（learned-auto.md と
+ * learned-archive.md）だけを書き直す。人が書く SKILL.md には触らない。
+ * 退避ファイルは、退避した項目があるか、既にファイルがあるときだけ書く。
+ */
+export function writeOverlayFiles(plan, { now, redaction, repoRoot = REPO_ROOT } = {}) {
+  const written = [];
+  for (const { overlay, entries, archive, archivedEntries = [] } of plan.overlays) {
+    if (writeMachineOwnedFile(path.join(repoRoot, overlay), renderOverlay(entries, now, redaction))) {
+      written.push({ file: overlay, count: entries.length });
+    }
+    if (!archive) continue;
+    const archiveFull = path.join(repoRoot, archive);
+    if (archivedEntries.length === 0 && !fs.existsSync(archiveFull)) continue;
+    if (writeMachineOwnedFile(archiveFull, renderArchive(archivedEntries, now, redaction))) {
+      written.push({ file: archive, count: archivedEntries.length });
+    }
+  }
+  return written;
+}
+
+function overlayRedactionContextForCli(args) {
+  const allowMissingVocabulary = args.allowMissingVocabulary === true;
+  const redaction = overlayRedactionContext({ allowMissingVocabulary });
+  if (redaction.vocabularyMissing) {
+    process.stdout.write(
+      `⚠️  ${SENSITIVE_VOCABULARY_DIGEST_PATH} が無いまま生成します（--allow-missing-vocabulary）。\n`
+      + "    overlay ヘッダに「語彙照合なし」を刻みます。配布前に語彙を作って再 sync してください。\n",
+    );
+  }
+  return redaction;
+}
+
+function reportOverlaySync(plan, written) {
+  for (const { file, count } of written) process.stdout.write(`✅ ${file}（${count}件）\n`);
+  if (written.length === 0 && plan.held.length === 0) process.stdout.write("更新するものはありませんでした\n");
+  if (plan.blocked.length > 0) {
+    process.stdout.write(
+      `⛔ 書き込み前の検査に当たった ${plan.blocked.length} 件は overlay に載せていません（台帳には残っています）。\n`
+      + "    理由は status に出ます。書き直して capture し直してください。\n",
+    );
+  }
+  for (const h of plan.held) {
+    process.stdout.write(
+      `⏸  ${h.target} は review-only なので自動反映しません（${h.count}件保留）\n`
+      + `    ${h.reason ?? "人が書く記録です"}\n`,
+    );
+  }
+  // 正本を書き換えても、ホストが読むのは配布コピー。setup を再実行
+  // しないと、エージェントは古い指示を読み続ける。
+  process.stdout.write(
+    "\n配布し直しが要ります: 正本を書き換えたので、ホストが読む配布コピーは古いままです。\n"
+    + "  node scripts/setup-agents.mjs --agent <host> --project-dir <dir> --no-launch\n"
+    + "  確認: node scripts/harness-doctor.mjs（shipped-skill-drift）\n",
+  );
 }
 
 // hermes の curator が言う「クラスレベルへ寄せる」を、機械的にできる範囲で
@@ -1195,6 +1322,83 @@ export function captureLearningProposal(input, {
   });
 }
 
+/** config/harnesses/*.harness.json を読む。ゲート id の語彙に使う。 */
+function loadHarnessDeclarations(repoRoot = REPO_ROOT) {
+  const dir = path.join(repoRoot, "config", "harnesses");
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir)
+    .filter((name) => name.endsWith(".harness.json"))
+    .sort()
+    .flatMap((name) => {
+      try {
+        return [JSON.parse(fs.readFileSync(path.join(dir, name), "utf8"))];
+      } catch {
+        return [];
+      }
+    });
+}
+
+/**
+ * curate --archive の記録を作る。候補に出ていない項目は退避させない
+ * （機械が「長く再発していない・関連ゲートも出ていない」と確かめた項目に限る）。
+ */
+export function archiveRecordsFor(report, { ids = [], reason, attestation, now } = {}) {
+  if (!attestation?.ok) throw new Error(attestation?.message || "reviewer 名が要ります（--reviewer <名前>）。");
+  if (ids.length === 0) throw new Error("--id <提案ID>[,<提案ID>...] が必要です（curate の候補から選ぶ）");
+  const text = typeof reason === "string" ? reason.trim() : "";
+  if (Array.from(text).length < 5) throw new Error("--reason に退避の理由を書いてください（何を見て、もう要らないと判断したか）");
+  const reasonFindings = inspectLearningText(text);
+  if (reasonFindings.length > 0) {
+    throw new Error(`--reason が書き込み前の検査に当たりました: ${describeLearningBlockReasons(reasonFindings)}`);
+  }
+  const byId = new Map(report.candidates.map((candidate) => [candidate.id, candidate]));
+  const missing = ids.filter((id) => !byId.has(id));
+  if (missing.length > 0) {
+    throw new Error(
+      `退避の候補ではありません: ${missing.join(", ")}。`
+      + "curate（dry-run）が候補に出したものだけを退避できます——最近再発した項目や、"
+      + "関連ゲートが直近の Receipt で落ちている項目は、効いている規則かもしれないので外さない。",
+    );
+  }
+  return ids.map((id) => {
+    const candidate = byId.get(id);
+    return {
+      version: ARCHIVE_RECORD_VERSION,
+      id,
+      target: candidate.target,
+      overlay: candidate.overlay,
+      lastSeenAt: candidate.lastSeenAt,
+      idleDays: candidate.idleDays,
+      relatedGates: candidate.relatedGates,
+      reason: text,
+      reviewer: attestation.attestation.reviewer,
+      attestedBy: attestation.attestation.attestedBy,
+      ...(attestation.attestation.claimedReviewer ? { claimedReviewer: attestation.attestation.claimedReviewer } : {}),
+      archivedAt: now,
+    };
+  });
+}
+
+function printCurateReport(report) {
+  process.stdout.write(
+    `退避候補（dry-run。何も書き換えていません。最後の再発から ${report.staleDays} 日以上、`
+    + `関連ゲートが直近 ${report.gateWindowDays} 日の Receipt で不合格・skip に出ていない項目）\n\n`,
+  );
+  if (report.candidates.length === 0) {
+    process.stdout.write("候補はありません\n");
+  }
+  for (const candidate of report.candidates) {
+    process.stdout.write(`  [${candidate.id}] → ${candidate.target}（${candidate.occurrences}回指摘）\n`);
+    process.stdout.write(`      ${candidate.reason}\n`);
+  }
+  process.stdout.write(
+    `\n見た項目 ${report.considered} 件 / 最近再発して残す ${report.kept.recent} 件 / 関連ゲートが直近に出て残す ${report.kept.gateSeen} 件`
+    + ` / 退避済み ${report.archivedCount} 件\n`
+    + "再発しないのは、その規則が効いているからかもしれません。機械はここで止まり、退避は人が決めます:\n"
+    + "  node scripts/harness-learn.mjs curate --archive --id <id>[,<id>] --reviewer <名前> --reason \"何を見て判断したか\" --human-verified\n",
+  );
+}
+
 /** 台帳・overlay・正本側の記録を書く操作。子エージェントの印があれば拒否する。 */
 export const LEARNING_WRITE_ACTIONS = new Set(["capture", "sync", "promote", "apply", "curate"]);
 
@@ -1269,6 +1473,7 @@ function main() {
 
   const proposals = learningLedgerPaths("proposals").flatMap(readJsonl);
   const applied = learningLedgerPaths("applied").flatMap(readJsonl);
+  const archived = learningLedgerPaths("archived").flatMap(readJsonl);
   // 正本を実際に読んで反映を確かめる。記録を信じない。
   // channel-pack 宛は promote / apply と同じく pack を先に読む（ops-7）。
   const { readCanonical, hashCanonical } = createCanonicalReaders();
@@ -1386,56 +1591,63 @@ function main() {
       // 人が書く正本（canonical）には一切触らない。
       // review-only の宛先は、そこが承認と監査の記録そのものなので
       // 自動反映しない——機械がゲート基準を緩められる余地を作らない。
-      const plan = planOverlaySync(summary, loadTargets());
-      let wrote = 0;
-      const { held } = plan;
+      const plan = planOverlaySync(summary, loadTargets(), { archivedRecords: archived });
       // redaction の材料は1回だけ集める（Channel Pack の走査と digest 語彙の読み込み）。
       // digest 語彙が無ければここで止まる（fail-closed）。--allow-missing-vocabulary
       // でだけ通し、その overlay にはヘッダで印が付く。
-      const allowMissingVocabulary = args.allowMissingVocabulary === true;
-      const redaction = overlayRedactionContext({ allowMissingVocabulary });
-      if (redaction.vocabularyMissing) {
-        process.stdout.write(
-          `⚠️  ${SENSITIVE_VOCABULARY_DIGEST_PATH} が無いまま生成します（--allow-missing-vocabulary）。\n`
-          + "    overlay ヘッダに「語彙照合なし」を刻みます。配布前に語彙を作って再 sync してください。\n",
-        );
-      }
-      for (const { overlay, entries } of plan.overlays) {
-        const def = { overlay };
-        const full = path.join(REPO_ROOT, def.overlay);
-        const next = renderOverlay(entries, now, redaction);
-        const before = fs.existsSync(full) ? fs.readFileSync(full, "utf8") : null;
-        if (before === next) continue;
-        fs.mkdirSync(path.dirname(full), { recursive: true });
-        // 一時ファイル＋rename。書き込み途中で落ちた overlay を
-        // 次のセッションが指示として読むことがないように。
-        const temp = `${full}.${process.pid}.partial`;
-        fs.writeFileSync(temp, next);
-        fs.renameSync(temp, full);
-        process.stdout.write(`✅ ${def.overlay}（${entries.length}件）\n`);
-        wrote += 1;
-      }
-      if (wrote === 0 && held.length === 0) process.stdout.write("更新するものはありませんでした\n");
-      if (plan.blocked.length > 0) {
-        process.stdout.write(
-          `⛔ 書き込み前の検査に当たった ${plan.blocked.length} 件は overlay に載せていません（台帳には残っています）。\n`
-          + "    理由は status に出ます。書き直して capture し直してください。\n",
-        );
-      }
-      for (const h of held) {
-        process.stdout.write(
-          `⏸  ${h.target} は review-only なので自動反映しません（${h.count}件保留）\n`
-          + `    ${h.reason ?? "人が書く記録です"}\n`,
-        );
-      }
-      // 正本を書き換えても、ホストが読むのは配布コピー。setup を再実行
-      // しないと、エージェントは古い指示を読み続ける。
-      process.stdout.write(
-        "\n配布し直しが要ります: 正本を書き換えたので、ホストが読む配布コピーは古いままです。\n"
-        + "  node scripts/setup-agents.mjs --agent <host> --project-dir <dir> --no-launch\n"
-        + "  確認: node scripts/harness-doctor.mjs（shipped-skill-drift）\n",
-      );
+      const redaction = overlayRedactionContextForCli(args);
+      const wrote = writeOverlayFiles(plan, { now, redaction });
+      reportOverlaySync(plan, wrote);
+      break;
+    }
 
+    case "curate": {
+      // 長く再発していない overlay 項目を、退避の候補として列挙する（既定は dry-run）。
+      // 「使われた回数」は overlay では意味を持たない（毎回まるごと読まれる）ので、
+      // 最後の再発日と、関係するゲートが直近の Receipt に出たかで見る。
+      // 再発しないのは「その規則が効いているから」かもしれず、機械には見分けられない。
+      // だから機械は候補を出すだけで、退避は reviewer 名つきの人の判断に限る。
+      const targets = loadTargets();
+      const numberArg = (value, fallback) => (value === undefined || value === true ? fallback : Number(value));
+      const report = curateOverlayCandidates({
+        summary,
+        targets,
+        receipts: loadReceipts(typeof args.receiptsDir === "string" ? path.resolve(args.receiptsDir) : undefined),
+        autoRows: proposals,
+        archivedRecords: archived,
+        knownGateIds: knownGateVocabulary(loadHarnessDeclarations()),
+        now,
+        staleDays: numberArg(args.staleDays, CURATE_DEFAULT_STALE_DAYS),
+        gateWindowDays: numberArg(args.gateWindowDays, CURATE_DEFAULT_GATE_WINDOW_DAYS),
+        isBlocked: (entry) => learningBlockReasons(entry).length > 0,
+      });
+      if (args.archive !== true) {
+        printCurateReport(report);
+        break;
+      }
+      const records = archiveRecordsFor(report, {
+        ids: String(args.id || "").split(",").map((value) => value.trim()).filter(Boolean),
+        reason: args.reason,
+        attestation: attestationFor({
+          reviewer: args.reviewer,
+          isInteractive: Boolean(process.stdin.isTTY),
+          agentAttested: args["agent-attested"] === true || args.agentAttested === true,
+          humanVerified: args["human-verified"] === true || args.humanVerified === true,
+        }),
+        now,
+      });
+      for (const record of records) appendJsonl(ledgerPathFor(record.target, "archived"), record);
+      if (records[0].attestedBy !== HUMAN_VERIFIED) {
+        process.stdout.write(
+          `${records.length} 件の退避を機械の自己申告として記録しました（attestedBy: ${records[0].attestedBy}）。`
+          + "人の確認が無い退避は効力を持たないので、overlay は変えていません。\n",
+        );
+        break;
+      }
+      const plan = planOverlaySync(summary, targets, { archivedRecords: [...archived, ...records] });
+      const written = writeOverlayFiles(plan, { now, redaction: overlayRedactionContextForCli(args) });
+      process.stdout.write(`${records.length} 件を learned-archive.md へ退避しました（削除はしていません。再発すれば overlay へ戻ります）。\n`);
+      reportOverlaySync(plan, written);
       break;
     }
 
