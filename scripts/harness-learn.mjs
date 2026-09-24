@@ -39,6 +39,15 @@ import { loadHarnessDeployments } from "../lib/harnessDeploymentResolver.mjs";
 import { redactSharedLearningText } from "../lib/harnessFeedbackBundle.mjs";
 import { LEARNING_TARGET_ALIASES, resolveLearningTarget } from "../lib/harnessLearningTargets.mjs";
 import {
+  LEARNING_INSPECTION_VERSION,
+  blockedOriginalDigest,
+  describeLearningBlockReasons,
+  inspectLearningProposal,
+  inspectLearningText,
+  learningBlockReasons,
+  neutralizeLearningText,
+} from "../lib/harnessLearningInspection.mjs";
+import {
   digestVocabularyTerm,
   extractVocabularyTokens,
   normalizeVocabularyTerm,
@@ -557,10 +566,19 @@ export function summarizeProposals(proposals, applied, readCanonical = null, has
  * 理由だけを返す——そこは承認と監査の記録そのものなので、機械が書き足すと
  * 何を人が決めたのかが分からなくなる。
  */
-export function planOverlaySync(summary, targets) {
+export function planOverlaySync(summary, targets, { homeRoot = homedir() } = {}) {
   const byTarget = new Map();
+  const blocked = [];
   for (const entry of summary.filter((item) => !item.applied)) {
     const target = resolveTarget(entry.target);
+    // 書き込み前の検査に当たったもの（捕捉時の印か、いま読み直して当たったもの）は
+    // overlay に載せない。overlay は次のセッションが指示として読む場所なので、
+    // 注入文や見えない文字をそこへ運ばない。台帳の行は消さず、status に理由を出す。
+    const reasons = learningBlockReasons(entry, { homeRoot });
+    if (reasons.length > 0) {
+      blocked.push({ id: entry.id, target, reasons });
+      continue;
+    }
     if (!byTarget.has(target)) byTarget.set(target, []);
     byTarget.get(target).push(entry);
   }
@@ -575,7 +593,7 @@ export function planOverlaySync(summary, targets) {
     if (!def.overlay) continue;
     overlays.push({ target, overlay: def.overlay, entries });
   }
-  return { overlays, held };
+  return { overlays, held, blocked };
 }
 
 // hermes の curator が言う「クラスレベルへ寄せる」を、機械的にできる範囲で
@@ -1003,6 +1021,60 @@ function defaultPrivateVocabulary() {
   }
 }
 
+/**
+ * 書き込み前の検査（lib/harnessLearningInspection.mjs）に当たった提案を、削除せず
+ * blocked として残せる形にする。
+ *
+ * 共有台帳は公開リポジトリで追跡されるので、資格情報と端末パスは逐語で残さず
+ * 置き換える（元の文字列は指紋だけ）。ID は置き換え後の本文から作り直す——同じ
+ * 危ない文字列を何度捕捉しても同じ ID になり、台帳の行と ID が自己矛盾しない。
+ * blocked の提案は sync で overlay に載らず、promote / apply でも昇格できない。
+ */
+export function blockProposalIfUnsafe(entry, { homeRoot = homedir(), now = entry?.capturedAt } = {}) {
+  const reasons = inspectLearningProposal(entry, { homeRoot });
+  if (reasons.length === 0) return entry;
+  const neutralized = {
+    ...entry,
+    text: neutralizeLearningText(entry.text, { homeRoot }),
+    evidence: entry.evidence === null || entry.evidence === undefined
+      ? entry.evidence
+      : neutralizeLearningText(entry.evidence, { homeRoot }),
+  };
+  const { id: _previousId, ...withoutId } = neutralized;
+  const blocked = {
+    version: LEARNING_INSPECTION_VERSION,
+    reasons,
+    detectedAt: now ?? null,
+    originalSha256: blockedOriginalDigest(entry),
+  };
+  const next = { ...withoutId, blocked };
+  return { ...next, id: proposalId(next) };
+}
+
+/**
+ * promote / apply の前に見る。blocked の提案と、検査に当たる --note は通さない。
+ *
+ * note は applied 台帳（公開リポジトリで追跡）に残り、正本にも同じ文が要る。
+ * 注入文や端末パスを含む note を通すと、検査を迂回して正本と台帳へ運べてしまう。
+ */
+export function assertPromotableProposal(entry, note = "", { homeRoot = homedir() } = {}) {
+  const reasons = learningBlockReasons(entry, { homeRoot });
+  if (reasons.length > 0) {
+    throw new Error(
+      `${entry?.id} は書き込み前の検査に当たった提案（blocked）なので昇格できません。`
+      + `理由: ${describeLearningBlockReasons(reasons)}。`
+      + "何を直すかの形に書き直して capture し直してください。",
+    );
+  }
+  const noteReasons = inspectLearningText(typeof note === "string" ? note : "", { homeRoot });
+  if (noteReasons.length > 0) {
+    throw new Error(
+      `--note が書き込み前の検査に当たりました: ${describeLearningBlockReasons(noteReasons)}。`
+      + "note は applied 台帳と正本の両方に残るので、この形では記録しません。",
+    );
+  }
+}
+
 export function buildProposal({ kind, target, text, evidence, session, now }) {
   if (!PROPOSAL_KINDS.has(kind)) {
     throw new Error(`kind は ${[...PROPOSAL_KINDS].join(" / ")} のいずれかにしてください: ${kind}`);
@@ -1042,13 +1114,17 @@ export function captureLearningProposal(input, {
   signals = collectSensitiveSignals(REPO_ROOT),
   refreshCatalog = refreshCatalogForSharedLedger,
   privateVocabulary = undefined,
+  homeRoot = homedir(),
 } = {}) {
-  const entry = buildProposal(input);
-  const verdict = channelTermsInSharedEntry(entry, signals);
+  const built = buildProposal(input);
+  const verdict = channelTermsInSharedEntry(built, signals);
   if (!verdict.ok) throw new Error(verdict.message);
   const vocabulary = privateVocabulary === undefined ? defaultPrivateVocabulary() : privateVocabulary;
-  const privateVerdict = privateTermsInSharedEntry(entry, vocabulary);
+  const privateVerdict = privateTermsInSharedEntry(built, vocabulary);
   if (!privateVerdict.ok) throw new Error(privateVerdict.message);
+  // 語彙の照合とは別の層として、文字列の形（注入・隠しコメント・不可視文字・
+  // 資格情報・端末パス）を見る。検出しても捨てずに blocked として残す。
+  const entry = blockProposalIfUnsafe(built, { homeRoot });
   const ledgerPath = ledgerPathResolver(entry.target, "proposals");
   assertCaptureLedgerIsolation(entry.target, ledgerPath, ledgerPathResolver);
   return lock(ledgerPath, () => {
@@ -1170,7 +1246,24 @@ function main() {
     }
 
     case "status": {
-      const pending = summary.filter((entry) => !entry.applied);
+      // 書き込み前の検査に当たったものは、未反映一覧と分けて理由つきで出す。
+      const blockedById = new Map(summary
+        .filter((entry) => !entry.applied)
+        .map((entry) => [entry.id, learningBlockReasons(entry)])
+        .filter(([, reasons]) => reasons.length > 0));
+      const blockedEntries = summary.filter((entry) => blockedById.has(entry.id));
+      const writeBlocked = () => {
+        if (blockedEntries.length === 0) return;
+        process.stdout.write(
+          `\n⛔ blocked ${blockedEntries.length} 件（書き込み前の検査に当たった。overlay に載らず、昇格もできない）\n`,
+        );
+        for (const entry of blockedEntries) {
+          process.stdout.write(`  [${entry.id}] ${entry.kind} → ${entry.target}\n`);
+          process.stdout.write(`      理由: ${describeLearningBlockReasons(blockedById.get(entry.id))}\n`);
+        }
+        process.stdout.write("  何を直すかの形に書き直して capture し直すこと（台帳の行は消さない）。\n");
+      };
+      const pending = summary.filter((entry) => !entry.applied && !blockedById.has(entry.id));
       // 反映済みの判定に使った正本の読み先（channel-pack 宛だけ）。
       const resolution = canonicalResolutionLines(summary.map((entry) => entry.target));
       const writeResolution = () => {
@@ -1179,6 +1272,7 @@ function main() {
       };
       if (pending.length === 0) {
         process.stdout.write("未反映の提案はありません\n");
+        writeBlocked();
         writeResolution();
         break;
       }
@@ -1190,6 +1284,7 @@ function main() {
         process.stdout.write(`      ${entry.text}\n`);
         for (const ev of entry.evidence) process.stdout.write(`      根拠: ${ev}\n`);
       }
+      writeBlocked();
       writeResolution();
       break;
     }
@@ -1256,6 +1351,12 @@ function main() {
         wrote += 1;
       }
       if (wrote === 0 && held.length === 0) process.stdout.write("更新するものはありませんでした\n");
+      if (plan.blocked.length > 0) {
+        process.stdout.write(
+          `⛔ 書き込み前の検査に当たった ${plan.blocked.length} 件は overlay に載せていません（台帳には残っています）。\n`
+          + "    理由は status に出ます。書き直して capture し直してください。\n",
+        );
+      }
       for (const h of held) {
         process.stdout.write(
           `⏸  ${h.target} は review-only なので自動反映しません（${h.count}件保留）\n`
@@ -1293,6 +1394,7 @@ function main() {
       const entry = summary.find((item) => item.id === args.id);
       if (!entry) throw new Error(`提案が見つかりません: ${args.id}`);
       if (entry.applied) throw new Error(`${args.id} は既に昇格済みです`);
+      assertPromotableProposal(entry, args.note);
       const resolvedTarget = requireWritableTarget(entry.target);
       const { rel, full } = resolvedTarget;
       // overlay に載っているのは sync の当然の結果なので、それを拒否の
@@ -1356,6 +1458,7 @@ function main() {
       const entry = summary.find((item) => item.id === args.id);
       if (!entry) throw new Error(`提案が見つかりません: ${args.id}`);
       if (entry.applied) throw new Error(`${args.id} は既に反映済みです`);
+      assertPromotableProposal(entry, args.note);
       const resolvedTarget = requireWritableTarget(entry.target);
       const { rel, full } = resolvedTarget;
       // apply も promote と同じ検証を通す。緩い経路を1つでも残すと、

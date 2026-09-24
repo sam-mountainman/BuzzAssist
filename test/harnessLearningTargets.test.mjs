@@ -104,8 +104,15 @@ test("共有台帳に残る旧名の提案（2026-09-24 時点で 10 件）が�
   }
 
   const plan = planOverlaySync(summary, loadTargets());
-  const counted = new Set(plan.overlays.flatMap((overlay) => overlay.entries.map((entry) => entry.id)));
-  for (const id of legacyIds) assert.ok(counted.has(id), `${id} が sync のどの overlay にも数えられていない`);
+  // 書き込み前の検査に当たった行は overlay ではなく blocked に数えられる（どちらでも宛先は解決済み）。
+  const counted = new Map([
+    ...plan.overlays.flatMap((overlay) => overlay.entries.map((entry) => [entry.id, overlay.target])),
+    ...plan.blocked.map((entry) => [entry.id, entry.target]),
+  ]);
+  for (const id of legacyIds) {
+    assert.ok(counted.has(id), `${id} が sync のどの overlay にも数えられていない`);
+    assert.equal(/^(?:skill|ledger|doc):/u.test(counted.get(id)), false);
+  }
 
   // 台帳の行そのものは書き換えない（ID は kind+target+text 由来で、書き換えると apply 記録と切れる）。
   assert.equal(legacyRows.every((row) => /^(?:skill|ledger|doc):/u.test(row.target)), true);
