@@ -1076,7 +1076,58 @@ export function assertPromotableProposal(entry, note = "", { homeRoot = homedir(
   }
 }
 
-export function buildProposal({ kind, target, text, evidence, session, now }) {
+// 機械の捕捉経路（Receipt からの自動捕捉など）が提案に添える付帯情報。ID には
+// 入れない（同じ観測を別の Receipt から捕捉したときに同じ提案として数えるため）。
+// 自由文を入れさせないよう、キーごとに形を固定する。
+const SHA256_HEX = /^[a-f0-9]{64}$/u;
+const METADATA_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u;
+export const PROPOSAL_METADATA_CREATORS = new Set(["auto-receipt"]);
+export const PROPOSAL_RECEIPT_SOURCES = new Set(["run-receipt", "adapter-run-receipt", "job-state"]);
+
+export function normalizeProposalMetadata(metadata) {
+  if (metadata === undefined || metadata === null) return {};
+  if (typeof metadata !== "object" || Array.isArray(metadata)) throw new Error("metadata は object にしてください");
+  const allowed = new Set(["createdBy", "receiptDigest", "receiptSource", "skillShaAtCapture", "gateIds", "harness"]);
+  const unknown = Object.keys(metadata).filter((key) => !allowed.has(key));
+  if (unknown.length > 0) throw new Error(`metadata に未知のキーがあります: ${unknown.join(", ")}`);
+  const out = {};
+  if (metadata.createdBy !== undefined) {
+    if (!PROPOSAL_METADATA_CREATORS.has(metadata.createdBy)) throw new Error("metadata.createdBy が既知の捕捉経路ではありません");
+    out.createdBy = metadata.createdBy;
+  }
+  if (metadata.receiptDigest !== undefined) {
+    if (!SHA256_HEX.test(String(metadata.receiptDigest))) throw new Error("metadata.receiptDigest は sha256 にしてください");
+    out.receiptDigest = String(metadata.receiptDigest);
+  }
+  if (metadata.receiptSource !== undefined) {
+    if (!PROPOSAL_RECEIPT_SOURCES.has(metadata.receiptSource)) throw new Error("metadata.receiptSource が不正です");
+    out.receiptSource = metadata.receiptSource;
+  }
+  if (metadata.skillShaAtCapture !== undefined) {
+    const value = metadata.skillShaAtCapture;
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("metadata.skillShaAtCapture は object にしてください");
+    const entries = Object.entries(value);
+    if (entries.length > 20 || entries.some(([name, sha]) => !METADATA_ID.test(name) || !SHA256_HEX.test(String(sha)))) {
+      throw new Error("metadata.skillShaAtCapture はスキル名 → sha256 の対応にしてください");
+    }
+    out.skillShaAtCapture = Object.fromEntries(entries.sort(([left], [right]) => left.localeCompare(right)));
+  }
+  if (metadata.gateIds !== undefined) {
+    const ids = Array.isArray(metadata.gateIds) ? metadata.gateIds.map(String) : null;
+    if (!ids || ids.length > 50 || ids.some((id) => !METADATA_ID.test(id))) throw new Error("metadata.gateIds はゲート id の配列にしてください");
+    out.gateIds = [...new Set(ids)].sort();
+  }
+  if (metadata.harness !== undefined) {
+    const { id, version } = metadata.harness || {};
+    if (!METADATA_ID.test(String(id || "")) || (version !== undefined && !METADATA_ID.test(String(version)))) {
+      throw new Error("metadata.harness は { id, version } にしてください");
+    }
+    out.harness = { id: String(id), ...(version !== undefined ? { version: String(version) } : {}) };
+  }
+  return out;
+}
+
+export function buildProposal({ kind, target, text, evidence, session, now, metadata }) {
   if (!PROPOSAL_KINDS.has(kind)) {
     throw new Error(`kind は ${[...PROPOSAL_KINDS].join(" / ")} のいずれかにしてください: ${kind}`);
   }
@@ -1099,6 +1150,7 @@ export function buildProposal({ kind, target, text, evidence, session, now }) {
     evidence: evidence?.trim() || null,
     session: normalizedSession,
     capturedAt: now,
+    ...normalizeProposalMetadata(metadata),
   };
   return { ...entry, id: proposalId(entry) };
 }

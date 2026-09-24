@@ -67,6 +67,8 @@ function runtimeFixture(overrides = {}) {
     productionProfile: async () => ({ profileId: "operator-production" }),
     readDirectory: async () => [],
     env: OPERATOR_ENV,
+    // 既定の学習捕捉は実リポジトリの台帳へ書くので、fixture では必ず差し替える。
+    captureRunLearning: async () => null,
     ...overrides,
   };
 }
@@ -453,4 +455,33 @@ test("resume の retryFailedImages は adapter context にだけ載り、Job ide
 
   await service.resume({ projectDir: "/tmp/video-service-project", jobId: "video-fixture-0123456789abcdef", confirmed: true });
   assert.equal("retryFailedImages" in adapterContexts[1], false, "指定が無ければ context にも載せない");
+});
+
+test("決着した Job の学習捕捉は結果に件数だけを載せ、失敗しても Job の結果を変えない", async () => {
+  const calls = [];
+  const service = createVideoHarnessService(runtimeFixture({
+    runJob: async ({ jobId }) => fixtureJob({ id: jobId, status: "failed", knownRemainingIssues: ["final-audit: x"] }),
+    captureRunLearning: async ({ job, env }) => {
+      calls.push({ status: job.status, env });
+      return { captured: 2, duplicates: 0, candidates: 2, target: "channel-pack:fixture" };
+    },
+  }));
+  const resumed = await service.resume({ projectDir: "/tmp/video-service-project", jobId: "video-fixture-0123456789abcdef", confirmed: true });
+  assert.equal(resumed.status, "failed");
+  assert.deepEqual(calls.map((call) => call.status), ["failed"]);
+  assert.equal(calls[0].env, OPERATOR_ENV, "運営者の環境（子エージェントの印を含む）をそのまま渡す");
+  assert.equal(resumed.learningCapture.captured, 2);
+
+  const failing = createVideoHarnessService(runtimeFixture({
+    runJob: async ({ jobId }) => fixtureJob({ id: jobId, status: "completed" }),
+    captureRunLearning: async () => { throw new Error("台帳を書けない sk-proj-" + "x".repeat(24)); },
+  }));
+  const completed = await failing.resume({ projectDir: "/tmp/video-service-project", jobId: "video-fixture-0123456789abcdef", confirmed: true });
+  assert.equal(completed.status, "completed", "捕捉の失敗で制作の結果を変えない");
+  assert.equal(completed.learningCapture.skippedReason, "capture-error");
+  assert.equal(completed.learningCapture.detail.includes("x".repeat(24)), false, "秘密らしい値を結果へ写さない");
+
+  // plan-only の start は有料処理へ進まないので、学習捕捉もしない。
+  const planned = await failing.start({ projectDir: "/tmp/video-service-project", scriptPath: "/tmp/script.txt", channelPackPath: "/tmp/pack" });
+  assert.equal(planned.learningCapture, undefined);
 });
