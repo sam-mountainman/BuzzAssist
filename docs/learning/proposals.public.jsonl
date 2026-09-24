@@ -73,6 +73,7 @@
 {"id":"f74c7dfa9007","kind":"fact","target":"genre:manga-video-production"}
 {"id":"f7c8baefc7cc","kind":"fact","target":"genre:manga-page-camera"}
 {"id":"f8b11ac1431b","kind":"correction","target":"platform:harness-parallel-execution"}
+{"id":"fad576c47b2c","kind":"fact","target":"platform:platform-craft"}
 {"id":"fbd19cce7f6e","kind":"fact","target":"genre:manga-page-camera"}
 {"id":"fcf0c3ff6772","kind":"fact","target":"genre:narrated-story-video"}
 {"id":"fdd0ce24a66f","kind":"fact","target":"genre:manga-video-production"}
