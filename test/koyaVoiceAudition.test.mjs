@@ -36,7 +36,7 @@ function registry() {
     revision: 3,
     characters: [
       { id: "hero", name: "主人公テスト", kind: "character", role: "fixed", status: "approved" },
-      { id: "rival", name: "タツ", kind: "character", role: "fixed", status: "approved" },
+      { id: "rival", name: "相手役テスト", kind: "character", role: "fixed", status: "approved" },
       { id: "guest", name: "客", kind: "character", role: "per-video", status: "approved", episodeId: "ep-9" },
     ],
     voices: [],
@@ -306,7 +306,7 @@ test("雛形は台帳の人物名と空欄だけを書き、知らない人物�
   assert.equal(template.version, KOYA_VOICE_AUDITION_CANDIDATES_VERSION);
   assert.deepEqual(template.entries.map((entry) => [entry.characterId, entry.characterName, entry.sampleLine, entry.candidates.length]), [
     ["hero", "主人公テスト", "", 0],
-    ["rival", "タツ", "", 0],
+    ["rival", "相手役テスト", "", 0],
   ]);
   assert.throws(() => createKoyaVoiceAuditionCandidatesTemplate({ registry: registry(), characterIds: "ghost" }), /not in the character registry/u);
 });
