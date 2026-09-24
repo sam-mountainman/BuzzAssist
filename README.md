@@ -17,6 +17,35 @@ https://github.com/sam-mountainman/BuzzAssist
 - **スマホや別PCで同じ Excalidraw UI を開く場合は Canvas Tunnel を使います。** 既定は Cloudflare (`cloudflared`) です。PCが起動していて、ローカルのキャンバスサーバーとトンネルが動いている必要があります。
 - **READMEとセットアップ手順は日本語前提です。** コマンド名、モデルID、環境変数だけ英語のままです。
 
+## 1行で導入する（Node.js が入っていないPCでも）
+
+先に Claude Code か Codex（ChatGPT デスクトップアプリ）のどちらかを入れておきます。あとは次の1行だけです。管理者権限は使いません。
+
+macOS / Linux（ターミナル）:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sam-mountainman/BuzzAssist/main/install.sh | bash
+```
+
+Windows（PowerShell）:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -UseBasicParsing https://raw.githubusercontent.com/sam-mountainman/BuzzAssist/main/install.ps1 -OutFile $env:TEMP\buzzassist-install.ps1; & $env:TEMP\buzzassist-install.ps1"
+```
+
+この1行がやること（何度実行しても同じ結果になります）:
+
+- Node.js 22 以上が無ければ、nodejs.org の公式配布物を `SHASUMS256.txt` で照合して `~/.buzzassist/tools/node/` に入れます。PCにもともと入っている Node には触りません。
+- 最新の stable Release を `.sha256` で照合して `~/.buzzassist/app/` に展開します。照合できないものは入れません。
+- 入っているホスト（Claude Code / Codex）を探し、見つけた全部を `setup-agents.mjs --agents <ホスト>` で設定します。自動更新も両方のホストを対象に登録されます。
+- setup は、動画ハーネスに要る ffmpeg / ffprobe（版と SHA-256 を固定した静的ビルド）と、Python の作業環境（`~/.buzzassist/tools/python-venv`、opencv-python-headless<5・numpy・pillow）を `~/.buzzassist/tools/` に入れます。使える Python が無いPCでは、SHA-256 を固定した uv で Python ごと用意します。音声品質ゲート用の重い依存（torch など）と日本語の tesseract は自動では入れず、足りなければ導入方法を表示します。入れたくない場合は `--no-install-prerequisites` を付けます。
+
+作業フォルダは既定で `~/BuzzAssist`（Windows は `%USERPROFILE%\BuzzAssist`）です。変えるときは `BUZZASSIST_PROJECT_DIR` を設定するか、macOS / Linux なら `| bash -s -- --project-dir <フォルダ>` のように渡します。
+
+動画ハーネスの前提（ffmpeg、音声品質の Python、APIキーなど）が足りないと、setup は安全側に止まり、足りないものを日本語で表示して終了します（exit 2）。直してから同じ1行をもう一度実行してください。キャンバスだけ先に使う場合は `--allow-harness-not-ready` を付けます（Windows は環境変数 `BUZZASSIST_SETUP_ARGS` に入れます）。
+
+Windows で「このシステムではスクリプトの実行が無効になっているため…」と出た場合は、上のように `-ExecutionPolicy Bypass` を付けた `powershell` で実行してください。その1回の実行だけに効き、PCの設定は変えません。
+
 ## エージェントURLセットアップ
 
 Codex または Claude Code に次のURLを貼り付けて、「セットアップして」と指示してください。手動でプラグインIDを入力する必要はありません。
@@ -92,7 +121,9 @@ Codex と Claude Code では、PC上のエージェント作業は `BUZZASSIST_C
 
 ## 安全な自動更新
 
-CodexまたはClaude Codeのセットアップに成功すると、BuzzAssistは同じホストを対象に安全な自動更新を登録します。macOSは`launchd`、Windowsはタスクスケジューラを使い、毎日ローカル時刻の03:17にGitHubの正式なstable Releaseだけを確認します。開発途中のmainブランチ、Draft、Prereleaseは自動導入しません。
+CodexまたはClaude Codeのセットアップに成功すると、BuzzAssistは安全な自動更新を登録します。対象は、今回設定したホストに加えて、このPCでBuzzAssistがすでに入っているホスト（Claude Code / Codex の両方）です。どちらの手順で入れても、両方に同じ版が届きます。macOSは`launchd`、Windowsはタスクスケジューラ、Linuxは`systemd`のユーザータイマーを使い、毎日ローカル時刻の03:17にGitHubの正式なstable Releaseだけを確認します。03:17にPCの電源が切れていた・ログアウトしていた日の分は、次のログイン時（Windowsは次に動けるとき）に取り返します。1日に何度起動されても、確認は前回から20時間に1回までです。開発途中のmainブランチ、Draft、Prereleaseは自動導入しません。
+
+更新は、動画ハーネスの前提（ffmpeg、音声品質の Python など）が欠けていても止まりません。欠けていることは`~/.buzzassist/updater/state.json`の`harnessReady` / `harnessBlocking` / `warnings`と更新ログに残ります。前提を直す版も含めて届かなくなるのを防ぐためです（プラグインの導入と MCP の実呼び出し検証は必須のままです）。管理下のプラグインが最新でも、ホストが読んでいるプラグインのキャッシュだけが古い場合は、同じ版で入れ直します。
 
 更新時は次を自動実行します。
 
