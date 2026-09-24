@@ -49,8 +49,9 @@ function usage() {
     "reviewer-key-create --reviewer-key-path /absolute/outside-repo/reviewer-ed25519.pem [--reviewer-public-key-path FILE] [--reviewer-label NAME] [--project-dir DIR]",
     "  Writes a new Ed25519 private key with mode 0600 (public key beside it as .pub), refuses to overwrite either file, refuses paths inside this repository, the project dir, or any git working tree, and prints the keyId plus the trust-list entry the operator registers out of band. Same behavior as scripts/koya-manga-video.mjs reviewer-key-create.",
     "",
-    "signoff --job-id ID --project-dir DIR --reviewer claude|codex [--reviewer-id ID] --reviewer-context-id TASK_OR_SESSION_ID --reviewer-key-path /absolute/reviewer-ed25519.pem [--reviewer-trust-path JSON] [--signoff-path FILE] [--video-path MP4] [--contact-sheet-path PNG] [--force] --pass",
+    "signoff --job-id ID --project-dir DIR --reviewer claude|codex [--reviewer-id ID] --reviewer-context-id TASK_OR_SESSION_ID --reviewer-key-path /absolute/reviewer-ed25519.pem --review-path REVIEW.json [--reviewer-trust-path JSON] [--signoff-path FILE] [--video-path MP4] [--contact-sheet-path PNG] [--force] --pass|--fail",
     `  Independent reviewer only (the reviewer task/session must differ from the production Job). Reads the durable Job's identityDigest from --project-dir, hashes the reviewed MP4 and contact sheet from disk, signs the subject with the private key read from --reviewer-key-path (never from argv), and requires that key to be active in the operator's trust list from ${REVIEWER_TRUST_ENV_GUIDANCE}; --reviewer-trust-path only cross-checks that list and never replaces it. Writes review/contact-sheet-signoff.json in the Job workspace unless --signoff-path is given.`,
+    "  --review-path is the reviewer's scoring file { \"rubricScores\": { <criterion id>: 0-100 }, \"notes\": \"what was watched and judged\", \"findings\": [\"what to change\"] }, scored against every criterion in the Job's review.quality rubric (shown in the production outcome). --pass approves (findings must be empty); --fail asks for changes (at least one finding). Either verdict becomes one round of the quality loop; the Job is final only when a round meets the target score with no criterion below its floor and every machine gate passing. Each round needs a fresh --reviewer-context-id, and every round after the first needs quality/revision-delta.json { previousFailureFingerprint, revisionDelta[, predecessorJobId] } in the Job workspace.",
     "",
     "help",
   ].join("\n");
@@ -84,9 +85,14 @@ export async function main(argv = process.argv.slice(2)) {
     return created;
   }
   if (args.command === "signoff") {
-    if (args.pass !== true) throw new Error("Signoff requires --pass after the contact sheet has actually been inspected.");
+    if ((args.pass === true) === (args.fail === true)) {
+      throw new Error("Signoff requires exactly one of --pass (approve) or --fail (ask for changes), after the MP4 and contact sheet have actually been inspected.");
+    }
     if (typeof args.reviewerKeyPath !== "string") {
       throw new Error("Signoff requires --reviewer-key-path FILE pointing at the reviewer's Ed25519 private key (create one with reviewer-key-create; never pass key material on argv).");
+    }
+    if (typeof args.reviewPath !== "string") {
+      throw new Error("Signoff requires --review-path FILE with { rubricScores, notes, findings } scored against the Job's review.quality rubric.");
     }
     const written = await signNarratedStoryVideoReview({
       projectDir: resolve(args.projectDir || process.cwd()),
@@ -99,8 +105,10 @@ export async function main(argv = process.argv.slice(2)) {
       signoffPath: typeof args.signoffPath === "string" ? resolve(args.signoffPath) : "",
       reviewerPrivateKeyPath: resolve(args.reviewerKeyPath),
       reviewerTrustPath: typeof args.reviewerTrustPath === "string" ? resolve(args.reviewerTrustPath) : "",
+      reviewPath: resolve(args.reviewPath),
       force: args.force === true,
-      pass: true,
+      pass: args.pass === true,
+      fail: args.fail === true,
     });
     print({
       jobId: args.jobId,
@@ -110,8 +118,9 @@ export async function main(argv = process.argv.slice(2)) {
       reviewerKeyId: written.signerKeyId,
       videoSha256: written.videoSha256,
       contactSheetSha256: written.contactSheetSha256,
-      pass: true,
-      next: `Resume the outer Job: node scripts/run-video-harness.mjs resume --job-id ${args.jobId} (the finalizer and the common RunReceipt re-verify this signature against the trust list).`,
+      pass: args.pass === true,
+      approved: written.signoff.approved === true,
+      next: `Resume the outer Job: node scripts/run-video-harness.mjs resume --job-id ${args.jobId} (the finalizer and the common RunReceipt re-verify this signature against the trust list, then record this review as one round of the quality loop).`,
     });
     return written;
   }

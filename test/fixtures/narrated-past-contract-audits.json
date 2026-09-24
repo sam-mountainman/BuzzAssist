@@ -1,0 +1,46 @@
+{
+  "note": "ナレーション物語の過去の監査契約ごとの必須監査一覧（版と監査 id だけ。成果物や台本の中身は含まない）。当時の必須監査を全て満たした回が、宣言に保証を足したあとも不合格にならないことを CI で確かめるために使う。監査契約の版（lib/narratedStoryPipeline.mjs の NARRATED_STORY_AUDIT_CONTRACT_VERSION）を上げたら、上げる前の版の requiredAudits をここへ足す。",
+  "source": "lib/narratedStoryOutcome.mjs の NARRATED_STORY_AUDIT_IDS の git 履歴",
+  "contracts": [
+    {
+      "version": "buzzassist-narrated-story-audit-v1",
+      "requiredAudits": [
+        "audioIntegratedLoudness",
+        "narrationBedSeparation",
+        "perceptualReviewChecks",
+        "duration",
+        "frozenV1AndParentHashes",
+        "parentAudioPcmPreserved",
+        "perceptualReviewBoundToOutput",
+        "perceptualEvidenceHashes",
+        "contactSheetOriginalDetailReviewed",
+        "pixelAudit",
+        "sceneTransitionOwnedByParent",
+        "audioBoundaryBreathV16",
+        "noWholeProgramAcrossfade",
+        "avEndSync"
+      ]
+    },
+    {
+      "version": "buzzassist-narrated-story-audit-v2",
+      "requiredAudits": [
+        "audioIntegratedLoudness",
+        "narrationBedSeparation",
+        "perceptualReviewChecks",
+        "duration",
+        "frozenV1AndParentHashes",
+        "parentAudioPcmPreserved",
+        "perceptualReviewBoundToOutput",
+        "perceptualEvidenceHashes",
+        "contactSheetOriginalDetailReviewed",
+        "pixelAudit",
+        "sceneTransitionOwnedByParent",
+        "audioBoundaryBreathV16",
+        "noWholeProgramAcrossfade",
+        "avEndSync",
+        "bookendTransitionMeasured",
+        "operatorReplacementCleared"
+      ]
+    }
+  ]
+}

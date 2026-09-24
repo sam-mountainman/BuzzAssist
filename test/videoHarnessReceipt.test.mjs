@@ -93,13 +93,17 @@ const CHECKS = Object.freeze({
   avEndSync: true,
   bookendTransitionMeasured: true,
   operatorReplacementCleared: true,
+  qualityLoopPassed: true,
 });
 const SIGNOFF_AUDIT_IDS = Object.freeze([
   "perceptualReviewChecks",
   "perceptualReviewBoundToOutput",
   "perceptualEvidenceHashes",
   "contactSheetOriginalDetailReviewed",
+  "qualityLoopPassed",
 ]);
+// 品質ループの契約 digest（合成値）。合格した回の採点がこの契約に対するものであることを Receipt が見る。
+const QUALITY_CONTRACT_DIGEST = "9".repeat(64);
 // 1秒・16x16の黒映像と無音AACを持つ、ffprobe/ffmpegで実際に全編decode
 // できるprovider-free fixture。ftyp断片や任意bytesを完成証拠にしない。
 const VALID_AV_MP4 = Buffer.from(
@@ -171,11 +175,12 @@ async function completedFixture(root, {
   reportOverrides = {},
   attest = "trusted",
   mutateAfterSigning = null,
+  auditCheckOverrides = {},
 } = {}) {
   const finalVideo = await artifact(root, "final-video", "final.mp4", FULLY_DECODABLE_AV_MP4);
   const contactSheet = await artifact(root, "contact-sheet", "contact-sheet.jpg", "fixture contact sheet");
   const unsigned = {
-    version: "buzzassist-narrated-story-contact-sheet-signoff-v1",
+    version: "buzzassist-narrated-story-contact-sheet-signoff-v2",
     reviewer: "codex-reviewer",
     reviewerContextId: "review-context-001",
     approved: true,
@@ -184,6 +189,12 @@ async function completedFixture(root, {
     contactSheetSha256: contactSheet.sha256,
     findings: [],
     knownRemainingIssues: [],
+    qualityReview: {
+      contractDigest: QUALITY_CONTRACT_DIGEST,
+      evaluatorContextId: "review-context-001",
+      rubricScores: { "script-image-fit": 95 },
+      notes: "合成の採点",
+    },
     reviewedAt: "2026-09-01T00:00:00.000Z",
     ...signoffOverrides,
   };
@@ -216,9 +227,11 @@ async function completedFixture(root, {
         signoffSha256: signoffArtifact.sha256,
         videoSha256: finalVideo.sha256,
         contactSheetSha256: contactSheet.sha256,
+        ...(id === "qualityLoopPassed" ? { contractDigest: QUALITY_CONTRACT_DIGEST } : {}),
       };
     }
   }
+  Object.assign(auditChecks, auditCheckOverrides);
   const report = {
     version: "buzzassist-narrated-story-audit-v1",
     status: "pass",
@@ -919,7 +932,7 @@ test("audit reportが指したsignoff evidenceの実fileが変われば拒否す
   try {
     const outcome = await completedFixture(root);
     await writeFile(join(root, "signoff.json"), JSON.stringify({
-      version: "buzzassist-narrated-story-contact-sheet-signoff-v1",
+      version: "buzzassist-narrated-story-contact-sheet-signoff-v2",
       reviewer: "different-reviewer",
       reviewerContextId: "different-context",
       approved: true,
@@ -936,7 +949,12 @@ test("audit reportが指したsignoff evidenceの実fileが変われば拒否す
 test("narrated signoffは現行contract・現在の成果物SHA・別review contextにfail-closedで結合する", async (t) => {
   const cases = [
     ["旧contract", { signoffOverrides: { version: "buzzassist-narrated-story-contact-sheet-signoff-v0" } }, /signoff contract/u],
+    ["採点の無いv1 signoff", { signoffOverrides: { version: "buzzassist-narrated-story-contact-sheet-signoff-v1" } }, /signoff contract/u],
     ["未承認", { signoffOverrides: { approved: false } }, /signoff contract/u],
+    // 合格した回が別の signoff（別の回）のものなら、今の承認を合格の根拠にしない。
+    ["品質ループの合格が別のsignoffに結合", { auditCheckOverrides: { qualityLoopPassed: { pass: true, signoffSha256: "e".repeat(64), videoSha256: "e".repeat(64), contactSheetSha256: "e".repeat(64), contractDigest: QUALITY_CONTRACT_DIGEST } } }, /auditChecks\.qualityLoopPassed/u],
+    ["採点が別の品質契約", { signoffOverrides: { qualityReview: { contractDigest: "8".repeat(64), evaluatorContextId: "review-context-001", rubricScores: {}, notes: "別の契約の採点" } } }, /品質ループの契約/u],
+    ["品質ループ未合格", { checks: { ...CHECKS, qualityLoopPassed: false } }, /auditChecks\.qualityLoopPassed/u],
     ["別video SHA", { signoffOverrides: { videoSha256: "e".repeat(64) } }, /final-video SHA/u],
     ["別contact sheet SHA", { signoffOverrides: { contactSheetSha256: "e".repeat(64) } }, /contact-sheet SHA/u],
     ["productionと同じcontext", {

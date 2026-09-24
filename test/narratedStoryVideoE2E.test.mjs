@@ -32,9 +32,11 @@ import {
   inspectNarratedStoryRenderGraphs,
   narratedStoryRunPaths,
   narratedVoiceOutputProfile,
+  NARRATED_STORY_AUDIT_CONTRACT_VERSION,
   NARRATED_STORY_SIGNOFF_VERSION,
   writeNarratedReviewSignoff,
 } from "../lib/narratedStoryPipeline.mjs";
+import { narratedQualityPaths } from "../lib/narratedStoryQualityLoop.mjs";
 import {
   OPERATOR_REPLACEMENT_MARKER,
   measureNarratedBookendBoundaries,
@@ -100,6 +102,13 @@ async function createFixtureMedia(root, toolchain) {
 }
 
 const toolchain = await resolveFfmpegToolchain();
+
+/** production が review.quality に書いた評価項目の全部を採点する（合成の点数）。 */
+function reviewScores(outcome, overrides = {}) {
+  const rubric = outcome?.review?.quality?.rubric || [];
+  assert.ok(rubric.length > 0, "production must publish the quality rubric the reviewer scores against");
+  return Object.fromEntries(rubric.map((criterion) => [criterion.id, overrides[criterion.id] ?? 96]));
+}
 
 test("narrated voice output requests Fish at its explicit native WAV rate before 48 kHz render resampling", () => {
   assert.deepEqual(narratedVoiceOutputProfile("fish-audio"), {
@@ -552,8 +561,12 @@ test("Core narrated-story fixture renders, audits, resumes, and emits a receipt 
     "perceptualEvidenceHashes",
     "contactSheetOriginalDetailReviewed",
   ]);
+  // 独立 signoff と品質ループは自動監査の後で判定する。
+  assert.equal(first.auditChecks.qualityLoopPassed.pass, false);
+  assert.equal(first.review.quality.contractDigest.length, 64);
+  assert.ok(first.knownRemainingIssues.includes("audit-qualityLoopPassed-pending-or-failed"));
   for (const auditId of NARRATED_STORY_AUDIT_IDS) {
-    if (!perceptual.has(auditId)) {
+    if (!perceptual.has(auditId) && auditId !== "qualityLoopPassed") {
       assert.equal(
         first.auditChecks[auditId].pass,
         true,
@@ -602,6 +615,9 @@ test("Core narrated-story fixture renders, audits, resumes, and emits a receipt 
 
   // 本物の reviewer 経路: 実 CLI が durable Job の identityDigest を読み、disk の MP4 /
   // contact sheet を hash し、信頼リスト上の鍵で署名する。--force で未署名 fixture を置き換える。
+  // 採点ファイルは production が示した評価項目の全部を採点する（品質ループの1回になる）。
+  const reviewPath = join(reviewerHome, "review-scores.json");
+  await writeFile(reviewPath, JSON.stringify({ rubricScores: reviewScores(first), notes: "全尺を通して見て、画と語りと字幕を確かめた", findings: [] }));
   const signed = await runNarratedCli([
     "signoff",
     "--job-id", planned.job.id,
@@ -609,6 +625,7 @@ test("Core narrated-story fixture renders, audits, resumes, and emits a receipt 
     "--reviewer", "codex",
     "--reviewer-context-id", "fixture-independent-context-02",
     "--reviewer-key-path", reviewerKeyPath,
+    "--review-path", reviewPath,
     "--force",
     "--pass",
   ]);
@@ -667,6 +684,11 @@ test("Core narrated-story fixture renders, audits, resumes, and emits a receipt 
   assert.equal(receipt.reviewerAttestation.signerKeyId, createdKey.keyId, "genre RunReceipt must record the verified reviewer key");
   const passedReport = JSON.parse(await readFile(second.artifacts.auditReport.path, "utf8"));
   assert.equal(passedReport.status, "pass");
+  assert.equal(passedReport.contractVersion, NARRATED_STORY_AUDIT_CONTRACT_VERSION);
+  assert.equal(passedReport.qualityLoop.status, "passed");
+  assert.equal(passedReport.qualityLoop.rounds, 1);
+  assert.equal(passedReport.auditChecks.qualityLoopPassed.signoffSha256, sha256(await readFile(first.review.signoffPath)), "合格した回は今の signoff に結合される");
+  assert.equal(receipt.qualityLoop.status, "passed");
   assert.equal(passedReport.independentSignoff.reviewerAttestation.signerKeyId, createdKey.keyId);
   assert.equal(passedReport.independentSignoff.reviewerAttestation.reviewerLabel, "e2e independent reviewer");
   assert.equal(receipt.mediaJobs.length, 5);
@@ -796,7 +818,7 @@ test("bookends: OP → story → review is rendered as a real MP4, its boundarie
     }), "utf8");
     const env = cleanTrustEnv({ [REVIEWER_TRUST_PATH_ENV]: trustPath });
     const fixture = await createBookendFixtureMedia(join(temp, "fixture-media"), toolchain);
-    const perceptual = new Set(["perceptualReviewChecks", "perceptualReviewBoundToOutput", "perceptualEvidenceHashes", "contactSheetOriginalDetailReviewed"]);
+    const perceptual = new Set(["perceptualReviewChecks", "perceptualReviewBoundToOutput", "perceptualEvidenceHashes", "contactSheetOriginalDetailReviewed", "qualityLoopPassed"]);
     let passing = null;
 
     await t.test("the reference render passes every automatic audit, then finalizes only with a signed independent review", async () => {
@@ -829,27 +851,77 @@ test("bookends: OP → story → review is rendered as a real MP4, its boundarie
       }
       passing = { outcome, manifest, root };
 
-      // 自動監査が通っても、独立 reviewer の署名が無ければ final にしない。署名後の再実行で final-audited。
-      await writeNarratedReviewSignoff({
+      // 自動監査が通っても、独立 reviewer の署名と品質ループの合格が無ければ final にしない。
+      // OP・感想を使う Pack なので、境目の評価項目も採点対象に入っている。
+      assert.ok(outcome.review.quality.rubric.some((criterion) => criterion.id === "bookend-boundaries"));
+      const sign = (reviewerContextId, verdict, overrides = {}, findings = []) => writeNarratedReviewSignoff({
         deploymentRoot: root,
         jobId: BOOKEND_JOB_ID,
         identityDigest: BOOKEND_IDENTITY,
         reviewerHost: "codex",
-        reviewerContextId: "bookend-independent-review-01",
+        reviewerContextId,
         reviewerPrivateKeyPem: reviewer.privateKeyPem,
         env,
-        pass: true,
+        force: true,
+        review: { rubricScores: reviewScores(outcome, overrides), notes: "全尺を通して見て、境目と語りを確かめた", findings },
+        ...(verdict === "pass" ? { pass: true } : { fail: true }),
       });
-      const finalized = await runNarratedStoryVideo({
+      const resume = () => runNarratedStoryVideo({
         ...options,
         mediaJobRunner: async () => { throw new Error("finalize must not regenerate paid media"); },
         mediaJobProbe: async () => { throw new Error("finalize must not reprobe"); },
       }, { allowDirectUnboundJobForTests: true });
+      const { statePath: loopStatePath, revisionDeltaPath } = narratedQualityPaths(narratedStoryRunPaths({ deploymentRoot: root, jobId: BOOKEND_JOB_ID }).runDir);
+      const rounds = async () => JSON.parse(await readFile(loopStatePath, "utf8")).rounds;
+
+      // 1回目: reviewer が「声が違う」で差し戻す。回として記録され、例外ではなく人待ちになる。
+      await sign("bookend-independent-review-01", "fail", { "narration-voice": 50 }, ["感想パートの声が本編の語りと別人に聞こえる"]);
+      const rejected = await resume();
+      assert.equal(rejected.status, "awaiting-human-review");
+      assert.equal(rejected.auditChecks.qualityLoopPassed.pass, false);
+      assert.equal(rejected.auditChecks.perceptualReviewChecks.pass, false, "差し戻しは目視の監査を pass にしない");
+      assert.ok(rejected.knownRemainingIssues.includes("quality-loop-floor-failed:narration-voice"), JSON.stringify(rejected.knownRemainingIssues));
+      assert.ok(rejected.knownRemainingIssues.includes("quality-loop-hard-gate-failed:perceptualReviewChecks"));
+      const fingerprint = rejected.auditChecks.qualityLoopPassed.failureFingerprint;
+      assert.match(fingerprint, /^quality-failure:/u);
+      assert.equal((await rounds()).length, 1);
+      const rejectedReport = JSON.parse(await readFile(rejected.artifacts.auditReport.path, "utf8"));
+      assert.notEqual(rejectedReport.status, "pass");
+      assert.equal(rejectedReport.qualityLoop.rounds, 1, "audit report にもループの状態を残す");
+
+      // 再開しても同じ signoff は二重に記録しない（状態はディスクから引き継ぐ）。
+      const resumed = await resume();
+      assert.equal(resumed.status, "awaiting-human-review");
+      assert.equal(resumed.auditChecks.qualityLoopPassed.failureFingerprint, fingerprint);
+      assert.equal((await rounds()).length, 1);
+
+      // 同じ評価文脈で採点し直した signoff での再確定は人待ち。
+      await sign("bookend-independent-review-01", "pass");
+      const sameContext = await resume();
+      assert.equal(sameContext.status, "awaiting-human-review");
+      assert.ok(sameContext.knownRemainingIssues.includes("quality-loop-fresh-review-required"));
+      assert.equal((await rounds()).length, 1);
+
+      // 新しい文脈でも、修正内容が無ければ人待ち（前回の失敗指紋を示す）。
+      await sign("bookend-independent-review-02", "pass");
+      const noDelta = await resume();
+      assert.equal(noDelta.status, "awaiting-human-review");
+      assert.ok(noDelta.knownRemainingIssues.includes(`quality-loop-revision-delta-required:${fingerprint}`));
+      assert.equal((await rounds()).length, 1);
+
+      // 修正内容を書いて再開すると2回目が記録され、合格して final-audited になる。
+      await writeFile(revisionDeltaPath, JSON.stringify({ previousFailureFingerprint: fingerprint, revisionDelta: "感想パートの声を本編と同じ承認済みの声で聞き直し、別人ではないと確かめた" }));
+      const finalized = await resume();
       assert.equal(finalized.status, "final-audited", JSON.stringify(finalized.knownRemainingIssues));
       assert.deepEqual(finalized.knownRemainingIssues, []);
       assert.ok(Object.values(finalized.auditChecks).every((entry) => entry.pass === true));
+      const loop = await rounds();
+      assert.equal(loop.length, 2);
+      assert.equal(loop[1].previousFailureFingerprint, fingerprint);
       const report = JSON.parse(await readFile(finalized.artifacts.auditReport.path, "utf8"));
-      assert.equal(report.contractVersion, "buzzassist-narrated-story-audit-v2");
+      assert.equal(report.contractVersion, NARRATED_STORY_AUDIT_CONTRACT_VERSION);
+      assert.equal(report.qualityLoop.status, "passed");
+      assert.equal(report.qualityLoop.rounds, 2);
     });
 
     await t.test("a narration take cut mid-word before the story → review boundary fails the measured boundary audio", async () => {

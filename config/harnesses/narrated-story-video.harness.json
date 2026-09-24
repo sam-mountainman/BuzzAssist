@@ -1,6 +1,6 @@
 {
   "id": "narrated-story-video",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "displayName": "ナレーション物語動画（実写素材＋カメラワーク）",
   "note": "クライアント名・チャンネル名はここに書かない。ここは『何が作れるか』の宣言であって、誰のためのものかの記録ではない。",
   "produces": {
@@ -64,7 +64,7 @@
     },
     {
       "id": "external-visual-signoff",
-      "what": "目視サインオフは外部が書いたものだけを受け取る。finalizerは転記のみ",
+      "what": "目視サインオフは外部が書いたものだけを受け取る。finalizerは転記のみ。差し戻し（approved: false）は品質ループの回として記録するが、この保証は承認された signoff でしか pass にしない",
       "evidenceAuditIds": [
         "perceptualReviewBoundToOutput",
         "perceptualEvidenceHashes",
@@ -103,6 +103,14 @@
         "operatorReplacementCleared"
       ],
       "inForceSince": "buzzassist-narrated-story-audit-v2"
+    },
+    {
+      "id": "quality-loop",
+      "what": "完成と呼ぶのは、信頼リストの鍵で署名された独立レビューの回が品質ループに記録され、その回で機械ゲートが全部通り、評価項目の加重平均が目標点以上で、どの項目も下限を下回らないときだけ（台本と画の意味・人物の同一性・語りの声は、視聴者が「話が違う」「別人」「声が違う」と気づくので下限を高くしてある）。届かない回は失敗指紋を残して人待ちで止まり、次の回には前回の失敗指紋と修正内容、前の回で使っていない評価文脈のレビューが要る。止まる条件は目標到達・人の判断・費用・時間・回数・停滞",
+      "evidenceAuditIds": [
+        "qualityLoopPassed"
+      ],
+      "inForceSince": "buzzassist-narrated-story-audit-v3"
     }
   ],
   "entrypoint": "node scripts/run-video-harness.mjs",

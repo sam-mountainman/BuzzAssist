@@ -572,6 +572,68 @@ test("過去の契約の必須監査を全て満たした回は、今の宣言�
   }
 });
 
+test("ナレーション物語: 過去の監査契約を満たした回は品質ループを足した宣言でも合格のまま、今の契約では品質ループの合格が要る", async () => {
+  // 品質ループ（qualityLoopPassed）は監査契約 v3 から。v1・v2 の必須監査を全て満たした過去の回を、
+  // 保証を足した今の宣言で記録しても、当時無かった保証のぶんだけ後から不合格にしない。
+  const { isGateNotInForce } = await import("../lib/harnessRunReceipt.mjs");
+  const { NARRATED_STORY_AUDIT_CONTRACT_VERSION } = await import("../lib/narratedStoryPipeline.mjs");
+  const { NARRATED_STORY_AUDIT_IDS } = await import("../lib/narratedStoryOutcome.mjs");
+  const declaration = JSON.parse(readFileSync(join(root, "config/harnesses/narrated-story-video.harness.json"), "utf8"));
+  const fixture = JSON.parse(readFileSync(join(root, "test/fixtures/narrated-past-contract-audits.json"), "utf8"));
+  const parse = (version) => {
+    const match = /^(.+)-v(\d+)$/u.exec(version);
+    return match ? { series: match[1], number: Number(match[2]) } : null;
+  };
+  const current = parse(NARRATED_STORY_AUDIT_CONTRACT_VERSION);
+  const previous = `${current.series}-v${current.number - 1}`;
+  assert.ok(
+    fixture.contracts.some((entry) => entry.version === previous),
+    `監査契約を ${NARRATED_STORY_AUDIT_CONTRACT_VERSION} に上げたら、${previous} の必須監査を test/fixtures/narrated-past-contract-audits.json に足すこと`,
+  );
+  // 今の契約が出す監査と、宣言の証拠が一対一（対応付けの漏れが無い）。
+  assert.deepEqual([...NARRATED_STORY_AUDIT_IDS].sort(), declaration.guarantees.flatMap((g) => g.evidenceAuditIds).sort());
+  for (const guarantee of declaration.guarantees.filter((g) => g.inForceSince)) {
+    assert.equal(parse(guarantee.inForceSince)?.series, current.series, `${guarantee.id}: inForceSince の系列が監査契約と違う`);
+    assert.equal(
+      isGateNotInForce({ verdict: "skip", notInForce: { since: guarantee.inForceSince, contractVersion: NARRATED_STORY_AUDIT_CONTRACT_VERSION } }),
+      false,
+      `${guarantee.id}: 今の監査契約がまだ ${guarantee.inForceSince} に達していない`,
+    );
+  }
+  const quality = declaration.guarantees.find((g) => g.id === "quality-loop");
+  assert.deepEqual(quality.evidenceAuditIds, ["qualityLoopPassed"]);
+  assert.equal(quality.inForceSince, NARRATED_STORY_AUDIT_CONTRACT_VERSION, "品質ループの保証は、それが入った監査契約の版から");
+
+  const record = (requiredAudits, contractVersion, failing = "") => {
+    const receipt = openRunReceipt({ projectDir: root, harnessId: "narrated-story-video", entrypoint: "scripts/run-video-harness.mjs", action: "audit" });
+    recordGatesFromAuditChecks(receipt, {
+      declaration,
+      checks: Object.fromEntries(requiredAudits.map((id) => [id, id !== failing])),
+      requiredAuditIds: requiredAudits,
+      contractVersion,
+    });
+    return finalizeRunReceipt(receipt, { outcome: "pass", timestamp: NOW });
+  };
+  for (const entry of fixture.contracts) {
+    const past = parse(entry.version);
+    assert.ok(past && past.series === current.series && past.number < current.number, `${entry.version}: 今の監査契約より前の同じ系列であること`);
+    const done = record(entry.requiredAudits, entry.version);
+    assert.equal(done.outcome, "pass", `${entry.version}: 当時の必須監査を全て満たした回が不合格になる（未測定 ${done.summary.skippedGates.join(", ") || "なし"}）`);
+    assert.ok(done.summary.notInForceGates.includes("quality-loop"), "品質ループは当時無かった保証として対象外に数える");
+    assert.equal(done.gates["quality-loop"].verdict, "skip", "測っていないものを pass と書かない");
+    for (const id of entry.requiredAudits) {
+      assert.equal(record(entry.requiredAudits, entry.version, id).outcome, "fail", `${entry.version}: ${id} が落ちても合格になる`);
+    }
+  }
+  // 今の契約では、品質ループの監査が無い（縮んだ）・落ちた回は不合格、合格した回だけが合格。
+  const previousRoster = fixture.contracts.find((entry) => entry.version === previous).requiredAudits;
+  const shrunk = record(previousRoster, NARRATED_STORY_AUDIT_CONTRACT_VERSION);
+  assert.equal(shrunk.outcome, "fail");
+  assert.deepEqual(shrunk.summary.skippedGates, ["quality-loop"]);
+  assert.equal(record([...NARRATED_STORY_AUDIT_IDS], NARRATED_STORY_AUDIT_CONTRACT_VERSION, "qualityLoopPassed").outcome, "fail");
+  assert.equal(record([...NARRATED_STORY_AUDIT_IDS], NARRATED_STORY_AUDIT_CONTRACT_VERSION).outcome, "pass");
+});
+
 test("実在する過去の監査レポートで、記録とレポートの判定が一致する", async (t) => {
   // 合成データだけで検証すると、実際の監査ステップ ID と対応表のずれを見逃す。
   const { readFileSync, existsSync } = await import("node:fs");

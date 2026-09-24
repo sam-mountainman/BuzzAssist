@@ -94,11 +94,15 @@ test("generic MCP definitions expose plan/run, get/list/cancel/resume without se
 
   // narrated signoff / reviewer-key-create の MCP 入口（F-4）。引数名は Koya の MCP 入口と同じ。
   const signoff = definitions.find((definition) => definition.name === TOOL_SIGNOFF_VIDEO_HARNESS_JOB);
-  assert.deepEqual(signoff.inputSchema.required.sort(), ["confirmed", "jobId", "pass", "reviewer", "reviewerContextId", "reviewerKeyPath"]);
+  assert.deepEqual(signoff.inputSchema.required.sort(), ["confirmed", "jobId", "pass", "reviewPath", "reviewer", "reviewerContextId", "reviewerKeyPath"]);
   assert.deepEqual(Object.keys(signoff.inputSchema.properties).sort(), [
-    "confirmed", "contactSheetPath", "force", "jobId", "pass", "projectDir", "reviewer", "reviewerContextId",
+    "confirmed", "contactSheetPath", "force", "jobId", "pass", "projectDir", "reviewPath", "reviewer", "reviewerContextId",
     "reviewerId", "reviewerKeyPath", "reviewerTrustPath", "signoffPath", "videoPath",
   ]);
+  // 採点ファイル（品質ループの1回）と、差し戻し（pass=false）を受ける。
+  assert.match(signoff.inputSchema.properties.reviewPath.description, /rubricScores/u);
+  assert.match(signoff.inputSchema.properties.reviewPath.description, /reviewer-path-not-absolute/u);
+  assert.match(signoff.inputSchema.properties.pass.description, /false asks for changes/u);
   assert.equal(signoff.inputSchema.additionalProperties, false);
   assert.ok(!Object.keys(signoff.inputSchema.properties).some((key) => /pem$|privateKey/iu.test(key)), "鍵の中身を受ける引数は無い");
   assert.match(signoff.inputSchema.properties.reviewerKeyPath.description, /FILE path/u);
@@ -249,6 +253,7 @@ test("F-4: narrated signoff / reviewer-key-create MCP entries carry only paths a
     reviewerKeyPath: "/secure/outside-repo/reviewer-ed25519.pem",
     videoPath: join(dir, "final.mp4"),
     contactSheetPath: join(dir, "contact-sheet.png"),
+    reviewPath: join(dir, "review-scores.json"),
     pass: true,
   };
 
@@ -272,7 +277,14 @@ test("F-4: narrated signoff / reviewer-key-create MCP entries carry only paths a
   assert.equal(flag("--reviewer-trust-path"), operatorCopy);
   assert.equal(flag("--video-path"), join(dir, "final.mp4"));
   assert.equal(flag("--contact-sheet-path"), join(dir, "contact-sheet.png"));
+  assert.equal(flag("--review-path"), join(dir, "review-scores.json"));
   assert.ok(call.argv.includes("--force") && call.argv.includes("--pass"));
+  assert.equal(call.argv.includes("--fail"), false);
+
+  // 差し戻し（pass=false）は --fail として子 CLI へ届く（採点ファイルの findings は子 CLI が検査する）。
+  await actions.signoff({ ...base, pass: false });
+  assert.ok(invocations.at(-1).argv.includes("--fail"));
+  assert.equal(invocations.at(-1).argv.includes("--pass"), false);
   assert.ok(!call.argv.some((value) => /BEGIN|"reviewers"/u.test(value)));
 
   // 信頼アンカー規則は service と同じ helper: env 不一致 → conflict、env 未設定 → unconfigured（CLI を呼ばない）。
@@ -295,6 +307,7 @@ test("F-4: narrated signoff / reviewer-key-create MCP entries carry only paths a
     { videoPath: "final.mp4" },
     { contactSheetPath: "../contact-sheet.png" },
     { signoffPath: "review/signoff.json" },
+    { reviewPath: "review-scores.json" },
     { projectDir: "." },
   ]) {
     await assert.rejects(actions.signoff({ ...base, ...relative }), /^Error: reviewer-path-not-absolute: /u, JSON.stringify(relative));
@@ -308,7 +321,9 @@ test("F-4: narrated signoff / reviewer-key-create MCP entries carry only paths a
   await assert.rejects(actions.signoff({ ...base, reviewerPrivateKeyPem: "-----BEGIN PRIVATE KEY-----" }), /key material/u);
   await assert.rejects(actions.signoff({ ...base, reviewerKeyPath: "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----" }), /key or trust-list material/u);
   await assert.rejects(actions.signoff({ ...base, confirmed: false }), /confirmed=true/u);
-  await assert.rejects(actions.signoff({ ...base, pass: false }), /pass=true/u);
+  await assert.rejects(actions.signoff({ ...base, pass: undefined }), /pass=true \(approve\) or pass=false/u);
+  await assert.rejects(actions.signoff({ ...base, pass: "yes" }), /pass=true \(approve\) or pass=false/u);
+  await assert.rejects(actions.signoff({ ...base, reviewPath: undefined }), /reviewPath \(an absolute FILE path\) is required/u);
   await assert.rejects(actions.signoff({ ...base, jobId: "video-koya-0123456789abcdef" }), /run_koya_manga_pipeline action=signoff/u);
   await assert.rejects(actions.signoff({ ...base, jobId: "video-missing-0123456789abcdef" }), /durable Video Harness Job/u);
 
@@ -479,14 +494,14 @@ test("the real MCP server registers all generic harness tools and list uses the 
 
       const missingJob = await client.callTool({
         name: TOOL_SIGNOFF_VIDEO_HARNESS_JOB,
-        arguments: { projectDir, jobId: "video-missing-0123456789abcdef", confirmed: true, reviewer: "codex", reviewerContextId: "task-x", reviewerKeyPath: narratedKeyPath, pass: true },
+        arguments: { projectDir, jobId: "video-missing-0123456789abcdef", confirmed: true, reviewer: "codex", reviewerContextId: "task-x", reviewerKeyPath: narratedKeyPath, reviewPath: join(keyHome, "review-scores.json"), pass: true },
       });
       assert.equal(missingJob.isError, true);
       assert.match(missingJob.content[0].text, /durable Video Harness Job/u);
 
       const pemArg = await client.callTool({
         name: TOOL_SIGNOFF_VIDEO_HARNESS_JOB,
-        arguments: { projectDir, jobId: "video-missing-0123456789abcdef", confirmed: true, reviewer: "codex", reviewerContextId: "task-x", reviewerKeyPath: "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----", pass: true },
+        arguments: { projectDir, jobId: "video-missing-0123456789abcdef", confirmed: true, reviewer: "codex", reviewerContextId: "task-x", reviewerKeyPath: "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----", reviewPath: join(keyHome, "review-scores.json"), pass: true },
       });
       assert.equal(pemArg.isError, true);
       assert.match(pemArg.content[0].text, /key or trust-list material/u);

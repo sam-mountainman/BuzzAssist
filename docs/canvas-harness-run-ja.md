@@ -114,8 +114,11 @@ Harness adapter、lock、Canvas投影を別々に組み立てない。
 - `signoff_video_harness_job`: **narrated-story-video Job専用**の独立reviewer工程。
   `scripts/narrated-story-video.mjs signoff`を`run_koya_manga_pipeline action=signoff`と同じ引数名
   （`reviewer`, `reviewerContextId`, `reviewerKeyPath`, 任意の`reviewerTrustPath` / `videoPath` /
-  `contactSheetPath` / `signoffPath` / `force`, `pass: true`）で呼び、`confirmed: true`必須。
-  reviewer context は production Job の generator context と別でなければならない。秘密鍵は
+  `contactSheetPath` / `signoffPath` / `force`）に、採点ファイル`reviewPath`（Job の
+  `review.quality` の評価項目すべての点数 `rubricScores`・所見 `notes`・直す点 `findings`）と
+  判定`pass`（`true`＝承認、`false`＝差し戻し）を足して呼び、`confirmed: true`必須。
+  承認でも差し戻しでも品質ループの1回として記録され、合格した回が無い限り final にならない。
+  reviewer context は production Job の generator context と別で、前の回で使っていないものでなければならない。秘密鍵は
   `reviewerKeyPath`の**fileから**だけ読み、鍵の中身らしい引数名（`*Pem`, `*PrivateKey` 等）や
   PEM文字列・信頼リスト本文を含む値は拒否する。koya-manga-video Job をここへ渡すと拒否され、
   Koya は `run_koya_manga_pipeline action=signoff` を使う。有料APIは呼ばない。
