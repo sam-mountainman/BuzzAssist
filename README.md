@@ -42,7 +42,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -UseBasicParsing htt
 
 作業フォルダは既定で `~/BuzzAssist`（Windows は `%USERPROFILE%\BuzzAssist`）です。変えるときは `BUZZASSIST_PROJECT_DIR` を設定するか、macOS / Linux なら `| bash -s -- --project-dir <フォルダ>` のように渡します。
 
-動画ハーネスの前提（ffmpeg、音声品質の Python、APIキーなど）が足りないと、setup は安全側に止まり、足りないものを日本語で表示して終了します（exit 2）。直してから同じ1行をもう一度実行してください。キャンバスだけ先に使う場合は `--allow-harness-not-ready` を付けます（Windows は環境変数 `BUZZASSIST_SETUP_ARGS` に入れます）。
+この1行は、動画ハーネスの前提（音声品質の Python、APIキー、Codex のログインなど）が足りなくても導入を最後まで終え、足りないものを「次にやること」として日本語で表示します。キャンバスと画像・動画の道具はそのまま使えます。台本から本編を作る Job は、準備がそろうまで開始時の点検で止まります。前提がそろわなければ導入自体を失敗扱いにしたいときは `--require-harness-ready` を付けます（Windows は環境変数 `BUZZASSIST_SETUP_ARGS` に入れます）。
 
 Windows で「このシステムではスクリプトの実行が無効になっているため…」と出た場合は、上のように `-ExecutionPolicy Bypass` を付けた `powershell` で実行してください。その1回の実行だけに効き、PCの設定は変えません。
 

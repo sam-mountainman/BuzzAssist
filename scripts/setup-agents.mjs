@@ -511,6 +511,8 @@ export const DISTRIBUTABLE_CONFIG_ENTRIES = Object.freeze([
 const NEVER_DISTRIBUTE = new Set([
   "channel-packs", "client-work", ".codex-tmp", "node_modules",
   "proposals.jsonl", "applied.jsonl",
+  // 自己改善の退避記録（curate --archive）。reviewer 名を含む運用記録で、配布物の中身ではない。
+  "archived.jsonl",
 ]);
 
 // Node 20 の fs.cp は、Windows で filter に "\\?\D:\..." 形式（名前空間つき）のパスを渡す。
