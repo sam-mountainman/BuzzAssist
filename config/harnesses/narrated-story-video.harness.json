@@ -1,6 +1,6 @@
 {
   "id": "narrated-story-video",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "displayName": "ナレーション物語動画（実写素材＋カメラワーク）",
   "note": "クライアント名・チャンネル名はここに書かない。ここは『何が作れるか』の宣言であって、誰のためのものかの記録ではない。",
   "produces": {
@@ -27,7 +27,7 @@
     },
     {
       "id": "presenter-video",
-      "what": "本人の撮影素材（レビュー章を付ける場合のみ）",
+      "what": "感想パートの人物素材。Channel Packのbookends.review.presenterで必須と宣言した場合、Packに無ければ有料生成の前に止める（代用の絵で埋めない）",
       "blocking": false
     }
   ],
@@ -81,12 +81,28 @@
     },
     {
       "id": "bookend-audio-breath",
-      "what": "OP→本編／本編→感想では映像トランジション中に次の声を重ねず、字幕なしlead-in後に字幕と次ナレーションを同時開始する。完成MP4で無音秒数・最大レベル・発話重複ゼロ・AV終端同期を測る",
+      "what": "OP→本編／本編→感想の境目を完成MP4で実測する: 語りの末尾が切れていない、境目にデジタル無音の穴が無い、転換と字幕なしlead-inの間は語りを重ねずBGMだけが鳴る、lead-inの終わりで次の語りと最初の字幕が同時に始まる、境目でクリップしない、映像フレーム数と音声尺が計画どおりで終端が揃う。bookendsを使わないPackでは境目が無いことを計画で確かめる",
       "evidenceAuditIds": [
         "audioBoundaryBreathV16",
         "noWholeProgramAcrossfade",
         "avEndSync"
       ]
+    },
+    {
+      "id": "bookend-transition-visual",
+      "what": "Channel Packが宣言した境目の転換（hard-cut / fade-through-black / film-burn）が、宣言した区間に実在することを完成MP4のフレーム差分・輝度で実測する。転換の外にはみ出さない、lead-inが入る側のきれいな静止フレームである",
+      "evidenceAuditIds": [
+        "bookendTransitionMeasured"
+      ],
+      "inForceSince": "buzzassist-narrated-story-audit-v2"
+    },
+    {
+      "id": "operator-replacement-cleared",
+      "what": "台本に「運営者の差し替え必須」印（本人の実体験で差し替える一人称の文など）が残っていれば有料生成へ進まず、声と字幕にした文に印が無いことを最終監査で確かめる",
+      "evidenceAuditIds": [
+        "operatorReplacementCleared"
+      ],
+      "inForceSince": "buzzassist-narrated-story-audit-v2"
     }
   ],
   "entrypoint": "node scripts/run-video-harness.mjs",

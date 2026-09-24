@@ -185,6 +185,7 @@ test("staged plugin verification rejects a tree that contains the full proposals
       "mcp/server.mjs",
       "config/harness-deployments.example.json",
       "lib/harnessDeploymentResolver.mjs",
+      "lib/narratedStoryBookends.mjs",
       "lib/narratedStoryOutcome.mjs",
       "lib/narratedStoryPipeline.mjs",
       "lib/narratedStoryVideo.mjs",

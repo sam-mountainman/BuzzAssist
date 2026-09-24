@@ -33,7 +33,19 @@ import {
   narratedStoryRunPaths,
   narratedVoiceOutputProfile,
   NARRATED_STORY_SIGNOFF_VERSION,
+  writeNarratedReviewSignoff,
 } from "../lib/narratedStoryPipeline.mjs";
+import {
+  OPERATOR_REPLACEMENT_MARKER,
+  measureNarratedBookendBoundaries,
+  rehydrateBookendPlan,
+} from "../lib/narratedStoryBookends.mjs";
+import {
+  BOOKEND_FIXTURE_SCRIPT,
+  bookendFixtureAdapters,
+  createBookendFixtureMedia,
+  writeBookendPack,
+} from "./fixtures/narratedBookendFixture.mjs";
 import { _testing as adapterTesting } from "../lib/videoHarnessAdapters.mjs";
 import { projectVideoHarnessJob } from "../lib/videoHarnessCanvasAdapter.mjs";
 import { createVideoHarnessJob, runVideoHarnessJob } from "../lib/videoHarnessJob.mjs";
@@ -735,5 +747,208 @@ test("Core narrated-story fixture renders, audits, resumes, and emits a receipt 
     }
     await rm(temp, { recursive: true, force: true });
     await rm(reviewerHome, { recursive: true, force: true });
+  }
+});
+
+// ---- bookends（OP → 本編 → 感想）--------------------------------------------------
+
+const BOOKEND_JOB_ID = "video-narrated-story-video-b00ce0de00000001";
+const BOOKEND_IDENTITY = "b".repeat(64);
+
+async function runBookendFixture({ root, env, fixture, script = BOOKEND_FIXTURE_SCRIPT, packOptions = {}, adapterOptions = {}, jobId = BOOKEND_JOB_ID }) {
+  const payloadDir = join(root, "signed-channel-pack-payload");
+  await writeBookendPack(payloadDir, toolchain, packOptions);
+  const scriptPath = join(root, "raw-script.txt");
+  await writeFile(scriptPath, `${script}\n`, "utf8");
+  const adapters = bookendFixtureAdapters(fixture, adapterOptions);
+  const options = {
+    command: "full",
+    scriptPath,
+    channelPackDir: payloadDir,
+    jobId,
+    jobIdentityDigest: BOOKEND_IDENTITY,
+    deploymentRoot: root,
+    mediaJobRunner: adapters.mediaJobRunner,
+    mediaJobProbe: adapters.mediaJobProbe,
+    ffmpegToolchain: toolchain,
+    env,
+  };
+  const outcome = await runNarratedStoryVideo(options, { allowDirectUnboundJobForTests: true });
+  return { outcome, adapters, options };
+}
+
+test("bookends: OP → story → review is rendered as a real MP4, its boundaries pass the measured audit, and a cut narration tail or a removed transition fails", {
+  skip: toolchain.ok ? false : "ffmpeg/ffprobe is unavailable",
+}, async (t) => {
+  const temp = await mkdtemp(join(os.tmpdir(), "narrated-bookends-e2e-"));
+  const originalFetch = globalThis.fetch;
+  let networkCalls = 0;
+  globalThis.fetch = async () => {
+    networkCalls += 1;
+    throw new Error("bookend fixture E2E forbids external network access");
+  };
+  try {
+    const reviewer = generateReviewerKeyPair();
+    const trustPath = join(temp, "operator-reviewer-trust.json");
+    await writeFile(trustPath, JSON.stringify({
+      version: REVIEWER_TRUST_VERSION,
+      reviewers: [createReviewerTrustEntry({ publicKeyPem: reviewer.publicKeyPem, label: "bookend e2e reviewer" })],
+    }), "utf8");
+    const env = cleanTrustEnv({ [REVIEWER_TRUST_PATH_ENV]: trustPath });
+    const fixture = await createBookendFixtureMedia(join(temp, "fixture-media"), toolchain);
+    const perceptual = new Set(["perceptualReviewChecks", "perceptualReviewBoundToOutput", "perceptualEvidenceHashes", "contactSheetOriginalDetailReviewed"]);
+    let passing = null;
+
+    await t.test("the reference render passes every automatic audit, then finalizes only with a signed independent review", async () => {
+      const root = join(temp, "pass");
+      const { outcome, adapters, options } = await runBookendFixture({ root, env, fixture });
+      assert.equal(outcome.status, "awaiting-human-review", JSON.stringify(outcome.knownRemainingIssues));
+      // 本編 3 枚の画像、声 5 本（本編 3 + 感想 2）、BGM 1 本。人物素材の感想パートは画像を生成しない。
+      assert.equal(adapters.calls.generation, 9);
+      assert.equal(adapters.calls.kinds.filter((kind) => kind === "image.generation").length, 3);
+      assert.equal(adapters.calls.probe, 3);
+      for (const auditId of NARRATED_STORY_AUDIT_IDS) {
+        if (perceptual.has(auditId)) continue;
+        assert.equal(outcome.auditChecks[auditId].pass, true, `${auditId}: ${outcome.auditChecks[auditId].detail}`);
+      }
+      const boundaryAudio = outcome.auditChecks.audioBoundaryBreathV16.measurement;
+      assert.deepEqual(boundaryAudio.boundaries.map((entry) => entry.id), ["openingToStory", "storyToReview"]);
+      assert.equal(boundaryAudio.end.captionCount, 5);
+      assert.deepEqual(
+        outcome.auditChecks.bookendTransitionMeasured.measurement.boundaries.map((entry) => [entry.id, entry.type, entry.pass]),
+        [["openingToStory", "film-burn", true], ["storyToReview", "film-burn", true]],
+      );
+      await runRuntime(toolchain.ffmpeg, ["-hide_banner", "-v", "error", "-xerror", "-i", outcome.artifacts.previewVideo.path, "-f", "null", "-"]);
+      const manifestText = await readFile(outcome.artifacts.generationManifest.path, "utf8");
+      const manifest = JSON.parse(manifestText);
+      assert.deepEqual(manifest.bookends.parts.map((part) => part.id), ["opening", "story", "review"]);
+      assert.equal(manifest.bookends.parts[2].visual, "presenter-video");
+      for (const forbidden of ["最初の物語", "感想の一文目", "---感想---", "#ff8c2a"]) {
+        assert.equal(manifestText.includes(forbidden), false, `generation manifest leaked ${forbidden}`);
+        assert.equal(JSON.stringify(outcome).includes(forbidden), false, `outcome leaked ${forbidden}`);
+      }
+      passing = { outcome, manifest, root };
+
+      // 自動監査が通っても、独立 reviewer の署名が無ければ final にしない。署名後の再実行で final-audited。
+      await writeNarratedReviewSignoff({
+        deploymentRoot: root,
+        jobId: BOOKEND_JOB_ID,
+        identityDigest: BOOKEND_IDENTITY,
+        reviewerHost: "codex",
+        reviewerContextId: "bookend-independent-review-01",
+        reviewerPrivateKeyPem: reviewer.privateKeyPem,
+        env,
+        pass: true,
+      });
+      const finalized = await runNarratedStoryVideo({
+        ...options,
+        mediaJobRunner: async () => { throw new Error("finalize must not regenerate paid media"); },
+        mediaJobProbe: async () => { throw new Error("finalize must not reprobe"); },
+      }, { allowDirectUnboundJobForTests: true });
+      assert.equal(finalized.status, "final-audited", JSON.stringify(finalized.knownRemainingIssues));
+      assert.deepEqual(finalized.knownRemainingIssues, []);
+      assert.ok(Object.values(finalized.auditChecks).every((entry) => entry.pass === true));
+      const report = JSON.parse(await readFile(finalized.artifacts.auditReport.path, "utf8"));
+      assert.equal(report.contractVersion, "buzzassist-narrated-story-audit-v2");
+    });
+
+    await t.test("a narration take cut mid-word before the story → review boundary fails the measured boundary audio", async () => {
+      const root = join(temp, "tail-cut");
+      const { outcome } = await runBookendFixture({
+        root,
+        env,
+        fixture,
+        adapterOptions: { truncatedLastStoryVoice: true, lastStoryTextHash: sha256("終わりの場面です。") },
+      });
+      assert.equal(outcome.status, "awaiting-human-review");
+      const check = outcome.auditChecks.audioBoundaryBreathV16;
+      assert.equal(check.pass, false);
+      assert.match(check.detail, /storyToReview:outgoing-narration-tail-cut/u);
+      const storyToReview = check.measurement.boundaries.find((entry) => entry.id === "storyToReview");
+      assert.ok(storyToReview.metrics.tailDeltaDb > -12, `tail must sit at speech level: ${storyToReview.metrics.tailDeltaDb}`);
+      assert.equal(outcome.auditChecks.bookendTransitionMeasured.pass, true, "the picture transition itself is intact");
+      assert.ok(outcome.knownRemainingIssues.includes("audit-audioBoundaryBreathV16-pending-or-failed"));
+      const report = JSON.parse(await readFile(outcome.artifacts.auditReport.path, "utf8"));
+      assert.equal(report.status, "failed");
+    });
+
+    await t.test("the same MP4 with its transitions frozen fails the measured transition audit while its audio still passes", async () => {
+      assert.ok(passing, "reference render is required");
+      const { outcome, manifest, root } = passing;
+      const plan = rehydrateBookendPlan({ bookends: manifest.bookends, segments: manifest.segments });
+      const [first, second] = plan.boundaries;
+      const frozenPath = join(root, "transitions-frozen.mp4");
+      const graph = "[0:v]split=3[s][r1][r2];"
+        + `[s][r1]freezeframes=first=${first.effectStartFrame}:last=${first.effectEndFrame - 1}:replace=${first.effectStartFrame - 1}[f1];`
+        + `[f1][r2]freezeframes=first=${second.effectStartFrame}:last=${second.effectEndFrame - 1}:replace=${second.effectStartFrame - 1}[v]`;
+      await runRuntime(toolchain.ffmpeg, [
+        "-hide_banner", "-loglevel", "error", "-y", "-i", outcome.artifacts.previewVideo.path,
+        "-filter_complex", graph, "-map", "[v]", "-map", "0:a", "-map", "0:s",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "copy", "-c:s", "copy", frozenPath,
+      ]);
+      const measured = await measureNarratedBookendBoundaries({
+        ffmpeg: toolchain.ffmpeg,
+        ffprobe: toolchain.ffprobe,
+        videoPath: frozenPath,
+        voiceStemPath: outcome.artifacts.voiceStem.path,
+        plan,
+      });
+      assert.equal(measured.visual.pass, false);
+      for (const boundary of measured.visual.boundaries) {
+        assert.ok(boundary.problems.includes("transition-effect-not-observed"), `${boundary.id}: ${boundary.problems.join(", ")}`);
+        assert.ok(boundary.problems.includes("film-burn-white-gate-not-observed"), `${boundary.id}: ${boundary.problems.join(", ")}`);
+      }
+      assert.equal(measured.audio.pass, true, "only the picture was changed");
+      // 同じ記録から元の MP4 を測り直せば通る（記録だけで再監査できる）。
+      const remeasured = await measureNarratedBookendBoundaries({
+        ffmpeg: toolchain.ffmpeg,
+        ffprobe: toolchain.ffprobe,
+        videoPath: outcome.artifacts.previewVideo.path,
+        voiceStemPath: outcome.artifacts.voiceStem.path,
+        plan,
+      });
+      assert.equal(remeasured.visual.pass, true);
+      assert.equal(remeasured.audio.pass, true);
+    });
+
+    await t.test("an operator-replacement marker stops the Job before any paid call", async () => {
+      const root = join(temp, "operator-marker");
+      const script = BOOKEND_FIXTURE_SCRIPT.replace("感想の二文目です。", `${OPERATOR_REPLACEMENT_MARKER}実は私も同じ経験をしました。`);
+      const { outcome, adapters } = await runBookendFixture({ root, env, fixture, script, jobId: "video-narrated-story-video-b00ce0de00000002" });
+      assert.equal(outcome.status, "awaiting-operator-input");
+      assert.deepEqual(outcome.knownRemainingIssues, ["operator-replacement-required:r002"]);
+      assert.equal(adapters.calls.generation, 0);
+      assert.equal(adapters.calls.probe, 0);
+      assert.equal(outcome.auditChecks.operatorReplacementCleared.pass, false);
+    });
+
+    await t.test("a required presenter the Pack does not supply, or a Pack-declared blocker, stops before paid generation", async () => {
+      const missingPresenter = await runBookendFixture({
+        root: join(temp, "no-presenter"),
+        env,
+        fixture,
+        packOptions: { presenter: null },
+        jobId: "video-narrated-story-video-b00ce0de00000003",
+      });
+      assert.equal(missingPresenter.outcome.status, "awaiting-media");
+      assert.ok(missingPresenter.outcome.knownRemainingIssues.includes("channel-pack-config-required:bookends.review.presenter-media-required"));
+      assert.equal(missingPresenter.adapters.calls.generation, 0);
+      const declared = await runBookendFixture({
+        root: join(temp, "declared-blocker"),
+        env,
+        fixture,
+        packOptions: { blockers: [{ id: "review-bed-not-received", what: "the review song has not been delivered" }] },
+        jobId: "video-narrated-story-video-b00ce0de00000004",
+      });
+      assert.equal(declared.outcome.status, "awaiting-operator-input");
+      assert.deepEqual(declared.outcome.knownRemainingIssues, ["channel-pack-declared-blocker:review-bed-not-received"]);
+      assert.equal(declared.adapters.calls.generation, 0);
+      assert.equal(declared.adapters.calls.probe, 0);
+    });
+
+    assert.equal(networkCalls, 0, "bookend fixture adapters must not touch the network");
+  } finally {
+    globalThis.fetch = originalFetch;
+    await rm(temp, { recursive: true, force: true });
   }
 });

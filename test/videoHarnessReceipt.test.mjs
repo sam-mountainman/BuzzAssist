@@ -91,6 +91,8 @@ const CHECKS = Object.freeze({
   audioBoundaryBreathV16: true,
   noWholeProgramAcrossfade: true,
   avEndSync: true,
+  bookendTransitionMeasured: true,
+  operatorReplacementCleared: true,
 });
 const SIGNOFF_AUDIT_IDS = Object.freeze([
   "perceptualReviewChecks",
