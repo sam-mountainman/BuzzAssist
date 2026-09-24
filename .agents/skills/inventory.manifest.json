@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "manifestVersion": "1.9.0",
+  "manifestVersion": "1.10.0",
   "namespace": "buzzassist",
   "classifications": [
     "installed",
@@ -129,8 +129,8 @@
     {
       "id": "buzzassist:manga-video-production",
       "name": "manga-video-production",
-      "version": "1.5.0",
-      "contentSha256": "sha256:d4442c02bb336c45a14ed560832efd96a9c23ff003b412b7991e5722fd74bd63",
+      "version": "1.6.0",
+      "contentSha256": "sha256:d58da66ad70df12a5a9e81950f79dde4a6b934cf833f269e0866eb0cdcb48f49",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",

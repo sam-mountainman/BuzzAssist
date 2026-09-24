@@ -42,7 +42,7 @@ node scripts/koya-manga-video.mjs handoff-verify \
 漫画動画ハーネスの制作ラインは、声を自動では決めません。話す人物全員と主人公（ナレーションは主人公の声で読む）について、人が2候補以上を匿名で聴き比べて選んだ記録が台帳に無いと、有料の画像生成の前（新しい回）、manifest作成時、有料の音声生成の前のいずれかで止まります。上位Jobは失敗ではなく承認待ち（`awaiting-human-review`）になり、止まった理由には選定が必要な人物IDと記録コマンドが入ります。
 
 - 束に入る声の情報は、人の選定記録から作った`koya-handoff-voice-selection-v1`だけです。採用者・採用理由・候補集合IDはSHA-256に置き換え、採用ラベル、候補表、試聴URL、score、personaは入れません。自動選定の記録や項目が欠けた記録は束に入れません。`handoff-verify`はこの形以外の`casting`を拒否します
-- 上位Jobは実行と再開のたびに束の人物と声を作業場の台帳へ上書きで戻します。束から来た人物の声を受領側の作業場で選んでも、次の再開で消えます。声は送り手の制作PCで`node scripts/build-manga-video.mjs voice-library-audition`→全候補の試聴→`voice-library-approve`で記録し、`handoff-export`で束を作り直して署名し、新しい束で新しいJobを開始します
+- 上位Jobは実行と再開のたびに束の人物と声を作業場の台帳へ上書きで戻します。束から来た人物の声を受領側の作業場で選んでも、次の再開で消えます。声は送り手の制作PCで記録します。契約の台詞音声がElevenLabsのあいだは`node scripts/build-manga-video.mjs voice-library-audition`→全候補の試聴→`voice-library-approve`、オトシゴなどElevenLabs以外のときは`node scripts/koya-manga-video.mjs voice-audition`（候補ファイルの雛形→`--confirm-paid-preview`で全候補に同じ台詞1行を読ませる）→全候補の試聴→`voice-approve --approved-by <聴いた人>`です。記録したら`handoff-export`で束を作り直して署名し、新しい束で新しいJobを開始します
 - 回ごとに作業場で登録した人物は束で上書きされないので、作業場で選定を記録し、同じJobを再開できます
 - この記録が入る前に作った束では、全員の声が「選定記録なし」になり、音声生成へ進めません。上の手順で束を作り直します
 

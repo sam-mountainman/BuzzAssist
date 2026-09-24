@@ -154,11 +154,23 @@ Koya の本番経路は**声を自動で選ばない**。鍵があるだけで�
   契約が `narrationVoicePolicy=protagonist-voice` なので、ナレーション全行がその人の声になる。
   **固定キャストの声を全部決めても、その回の主人公の声は決まらない。**
 
-**未解決（2026-09-24 時点）**: 一時停止を解除する経路が正規入口に無い。
-ゲートが案内するのは `scripts/build-manga-video.mjs voice-library-audition` だが、
-このスクリプトは CLAUDE.md がベンチマーク専用と定めているもので、
-`scripts/koya-manga-video.mjs` の action 一覧に `voice-library-*` は無い。
-解除が要るときは、この穴を埋めてから進むこと。埋めずに旧スクリプトで回避しない。
+**一時停止の解除（2026-09-24 追加）**: 正規入口は `scripts/koya-manga-video.mjs` の
+`voice-audition` → `voice-approve`。提供元に依らず、契約が指す台詞 adapter で試聴を作る。
+
+1. `voice-audition --episode-id <台帳の範囲。固定キャストは global> --character-ids a,b`
+   が候補ファイルの雛形を書く（既にあれば上書きしない）。人物ごとに台本の台詞1行
+   （`sampleLine`。オトシゴには `[angry]` 等のタグを書かない）と、提供元の声一覧から
+   選んだ声IDを2〜5個書く。
+2. `voice-audition --candidates-path <file> --confirm-paid-preview` が全候補に同じ1行を
+   有料で読ませ、A〜E だけの試聴ページ・非公開の対応表・selections を書く。
+   確認フラグが無ければ件数だけ出して止まる（終了コード3）。SHA が合う試聴音は払い直さない。
+3. 全候補を聴き、selections に `winnerLabel`・`selectionReason`・`previewConfirmed=true` を書く。
+4. `voice-approve --selections-path <file> --approved-by <聴いた人の名前>` が verdicts を先に
+   保存してから対応表を開き、上の条件を満たす記録を台帳へ書く。
+
+契約の台詞 adapter と提供元が違う声（オトシゴの契約で ElevenLabs の声など）は、
+人が選んだ記録があっても音声ゲートが止める。ElevenLabs の契約のあいだは、ゲートの案内は
+従来の `build-manga-video.mjs voice-library-*`（Voice Library の無料試聴）のまま。
 
 ### 場所（2026-09-18 追加）
 

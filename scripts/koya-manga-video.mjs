@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 import { runKoyaCharacterAttributeGate } from "../lib/koyaCharacterAttributeAudit.mjs";
@@ -43,7 +43,14 @@ import {
   selectKoyaCharacterStylingVariation,
 } from "../lib/koyaMangaProduction.mjs";
 import { createKoyaOuterJobBinding } from "../lib/koyaOuterJobBinding.mjs";
-import { resolveKoyaMangaProductionContract } from "../lib/koyaMangaProductionContract.mjs";
+import { resolveKoyaDialogueAdapter, resolveKoyaMangaProductionContract } from "../lib/koyaMangaProductionContract.mjs";
+import {
+  approveKoyaVoiceAudition,
+  createKoyaVoiceAuditionCandidatesTemplate,
+  createKoyaVoiceAuditionPlan,
+  koyaVoiceAuditionPaths,
+  writeKoyaVoiceAuditionPlan,
+} from "../lib/koyaVoiceAudition.mjs";
 import { disposeMediaGenerationResources } from "../lib/mediaGeneration.mjs";
 import {
   composeCharacterCandidateQaSheet,
@@ -125,7 +132,7 @@ function usage() {
     "Koya manga video production (fail-closed)",
     "",
     "node scripts/koya-manga-video.mjs <action> [options]",
-    "actions: contract, channel-contract, wardrobe-readiness, character-bootstrap-status, character-registration-reconcile, character-roster-review-draft, character-roster-audit, cast-readiness, story-review-draft, story-audit, location-plan, location-generate, location-import, location-anchor-review-draft, location-anchor-audit, location-review-draft, location-register, thumbnail-plan-draft, thumbnail-audit, handoff-export, handoff-verify, handoff-restore, plan, images, character-review-refresh, character-candidate-migrate-blind, character-candidate-import, character-style-generate, character-style-import, character-style-review-refresh, character-style-record-failure, character-style-compose, character-style-select, character-attribute-gate, character-approve, character-identity-refresh, character-identity-repair, character-identity-repack, character-register, prepare, speech, video-substitute, adjust-gap, standard-cut, repair-onset, repair-tail, sync-contract, refresh-bubbles, render, audit, reviewer-key-create, signoff, full, status",
+    "actions: contract, channel-contract, wardrobe-readiness, character-bootstrap-status, character-registration-reconcile, character-roster-review-draft, character-roster-audit, cast-readiness, story-review-draft, story-audit, location-plan, location-generate, location-import, location-anchor-review-draft, location-anchor-audit, location-review-draft, location-register, thumbnail-plan-draft, thumbnail-audit, handoff-export, handoff-verify, handoff-restore, voice-audition, voice-approve, plan, images, character-review-refresh, character-candidate-migrate-blind, character-candidate-import, character-style-generate, character-style-import, character-style-review-refresh, character-style-record-failure, character-style-compose, character-style-select, character-attribute-gate, character-approve, character-identity-refresh, character-identity-repair, character-identity-repack, character-register, prepare, speech, video-substitute, adjust-gap, standard-cut, repair-onset, repair-tail, sync-contract, refresh-bubbles, render, audit, reviewer-key-create, signoff, full, status",
     "common: --project-dir DIR --episode-id ID --script-path FILE --title TITLE --protagonist-speaker-id ID_OR_EXACT_NAME --character-bible-path JSON [--story-review-path JSON] [--source-face-review-path JSON] [--generator-host codex|claude|legacy-migration] [--generator-id ID] [--generator-context-id TASK_OR_SESSION_ID] [--retry-failed] [--image-concurrency N|auto] [--qa-concurrency N] [--speech-concurrency N|auto] [--image-fallback-model MODEL] [--qa-fallback-provider grok]",
     "wardrobe-readiness: --episode-id ID [--script-path FILE] [--wardrobe-review-path JSON] (free script-driven outfit gate; writes canvas/assets/<episode-id>/wardrobe-readiness.json. exit 0 = every checked character has an outfit for every scene, exit 2 = pending slots. images/full refuse to start without a passing report for the exact script)",
     "story-audit: --script-path FILE --story-review-path JSON --protagonist-speaker-id ID_OR_EXACT_NAME (read-only; binds reversal beats and human policy checks to the exact script SHA-256)",
@@ -177,6 +184,8 @@ function usage() {
     "handoff-export: [--output-dir DIR] [--bundle-id ID] [--character-ids id1,id2] [--visual-profile-ids id1] [--force] (exports only approved Koya data and SHA evidence; excludes candidate mappings, sessions and credentials)",
     "images/full wardrobe override: --wardrobe-readiness-override-reason TEXT starts the paid images without a passing wardrobe-readiness report; the reason is recorded in the inventory and the episode state and reported by the final audit",
     "speech: R194 voice quality gate is always on; [--take-count 2..8] [--max-adaptive-takes 2..8]; --no-voice-quality-gate requires --voice-quality-gate-override-reason",
+    "voice-audition: [--episode-id REGISTRY_SCOPE (default global = fixed cast)] --character-ids id1,id2 [--candidates-path JSON] writes a koya-voice-audition-candidates-v1 template (never overwrites); then --candidates-path JSON [--confirm-paid-preview] has every candidate voice read the same sampleLine through the contract's voice.dialogue adapter and writes the anonymous A-E listening page, the private mapping and the selections file. Without --confirm-paid-preview it only prints how many paid previews are pending (exit 3); existing previews whose SHA-256 still matches are reused, never paid again.",
+    "voice-approve: [--episode-id REGISTRY_SCOPE] [--selections-path JSON] --approved-by NAME (the person who listened; records winnerLabel, selectionReason and previewConfirmed=true in the verdicts before opening the private mapping, then writes the human voice selection (selectionVersion 2) to the character registry)",
     "handoff-verify: --bundle-dir DIR (read-only full manifest/SHA/path/symlink verification)",
     "handoff-restore: --bundle-dir DIR (requires the matching installed production contract, then merges approved registry/profile data)",
   ].join("\n");
@@ -1070,6 +1079,75 @@ switch (args.action) {
     });
     print(result.payload);
     exitCode = result.exitCode;
+    break;
+  }
+  case "voice-audition": {
+    const episodeId = args.episodeId || "global";
+    const resolvedContract = await resolveKoyaMangaProductionContract({
+      projectDir,
+      contractPath: common.contractPath || undefined,
+      overridePath: common.overridePath || undefined,
+    });
+    const dialogueAdapter = resolveKoyaDialogueAdapter(resolvedContract);
+    const registry = await readCharacterRegistry({ projectDir });
+    const paths = koyaVoiceAuditionPaths({ projectDir, episodeId });
+    const candidatesPath = typeof args.candidatesPath === "string" ? resolve(args.candidatesPath) : paths.candidatesPath;
+    if (args.characterIds) {
+      const template = createKoyaVoiceAuditionCandidatesTemplate({
+        registry,
+        episodeId,
+        characterIds: String(args.characterIds),
+        dialogueAdapter,
+      });
+      await mkdir(dirname(candidatesPath), { recursive: true });
+      try {
+        await writeFile(candidatesPath, `${JSON.stringify(template, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+      } catch (error) {
+        if (error?.code !== "EEXIST") throw error;
+        print({ status: "candidates-file-exists", candidatesPath, next: "edit that file, then rerun voice-audition with --candidates-path (without --character-ids)" });
+        break;
+      }
+      print({
+        status: "candidates-template-written",
+        candidatesPath,
+        adapter: template.adapter,
+        characterIds: template.entries.map((entry) => entry.characterId),
+        next: "fill sampleLine and 2 to 5 candidate voiceIds per character, then rerun voice-audition with --candidates-path and --confirm-paid-preview",
+      });
+      break;
+    }
+    const candidates = JSON.parse(await readFile(candidatesPath, "utf8"));
+    const plan = createKoyaVoiceAuditionPlan({ candidates, registry, dialogueAdapter, episodeId });
+    const result = await writeKoyaVoiceAuditionPlan({
+      projectDir,
+      plan,
+      confirmPaidPreview: args.confirmPaidPreview === true,
+    });
+    print({
+      status: result.status,
+      planId: result.planId,
+      adapter: result.adapter,
+      pendingPreviews: result.pendingPreviews,
+      estimatedCharacters: result.estimatedCharacters,
+      rendered: result.rendered,
+      reused: result.reused,
+      listeningPage: result.status === "awaiting-selection" ? result.htmlPath : "",
+      selectionsPath: result.status === "awaiting-selection" ? result.selectionsPath : "",
+    });
+    if (result.status === "awaiting-paid-confirmation") exitCode = 3;
+    break;
+  }
+  case "voice-approve": {
+    const episodeId = args.episodeId || "global";
+    const paths = koyaVoiceAuditionPaths({ projectDir, episodeId });
+    const selectionsPath = typeof args.selectionsPath === "string" ? resolve(args.selectionsPath) : paths.selectionsPath;
+    const selections = JSON.parse(await readFile(selectionsPath, "utf8"));
+    print(await approveKoyaVoiceAudition({
+      projectDir,
+      episodeId,
+      selections,
+      approvedBy: typeof args.approvedBy === "string" ? args.approvedBy : "",
+    }));
     break;
   }
   case "status": {
