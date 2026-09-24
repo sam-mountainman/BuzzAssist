@@ -15,19 +15,21 @@ test("benchmark manga style skill keeps candidate identity separate from style r
   const contracts = await read("skills/excalidraw-benchmark-manga-style/references/prompt-contracts.md");
   const rubric = await read("skills/excalidraw-benchmark-manga-style/references/style-rubric.md");
 
-  assert.match(skill, /Generate three candidates per new or redesigned character/);
-  assert.match(skill, /exactly two facial STYLE-ONLY references/);
-  assert.match(skill, /linework-male-v2\.png.*first/);
-  assert.match(skill, /Do not request garment, skin, shoe, fabric, or material close-ups/);
-  assert.match(skill, /approved character identity sheet;[\s\S]*benchmark STYLE-ONLY references/);
-  assert.match(skill, /check the requested asset filenames and the canvas JSON/);
+  // 2026-09-24 に本文を日本語化した。固定している規則は英語版と同じで、文言だけ日本語へ移した。
+  // prompt-contracts のコードブロックは画像モデルへ渡す英語のプロンプト本文なので英語のまま照合する。
+  assert.match(skill, /新キャラと作り直すキャラには、既定で1人につき3案の候補を生成する/);
+  assert.match(skill, /顔の STYLE-ONLY 参照をちょうど2枚/);
+  assert.match(skill, /linework-male-v2\.png.*1枚目/);
+  assert.match(skill, /服・肌・靴・布地・素材の接写を要求しない/);
+  assert.match(skill, /承認済みのキャラクター identity シート[\s\S]*ベンチマークの STYLE-ONLY 参照/);
+  assert.match(skill, /依頼したアセットの\s*ファイル名とキャンバスの JSON を確かめ/);
 
   assert.match(contracts, /Lightweight candidate-card contract/);
   assert.match(contracts, /one front-facing full-body view plus exactly three head studies/);
   assert.match(contracts, /Approved turnaround contract/);
-  assert.match(contracts, /Exclude the failed old sheet from image inputs/);
-  assert.match(rubric, /Pass requires at least 45\/50/);
-  assert.match(rubric, /Fatal: a benchmark person's identity is reproduced/);
+  assert.match(contracts, /失敗した旧シートは画像入力から外し/);
+  assert.match(rubric, /合格には 45\/50 以上が必要/);
+  assert.match(rubric, /致命的：ベンチマークの人物の identity が再現されている/);
 });
 
 test("distributed visual profile uses the flat benchmark grammar and current style pack", async () => {

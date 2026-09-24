@@ -1,86 +1,89 @@
-# Benchmark style rubric
+# ベンチマーク画風ルーブリック（Benchmark style rubric）
 
-Score each category from 0 to 5 at native resolution. Pass requires at least 45/50, with no fatal failure and at least 4/5 in categories 1–4.
+各項目を原寸で 0〜5 点で採点する。合格には 45/50 以上が必要で、致命的な不合格が無く、
+項目1〜4がそれぞれ 4/5 以上であること。
 
-## 1. Linework
+## 1. 線（Linework）
 
-- 5: mostly uniform thin charcoal/black contour, visually equivalent to about 1–2 px at 640×360; only small emphasis changes.
-- 3: generally clean but some thick or highly varied contours.
-- 0: gritty, sketchy, cross-hatched, brushy, or thick action-manga ink.
+- 5: ほぼ均一で細いチャコール／黒の輪郭線。640×360 で見て約1〜2px 相当。強弱の変化は小さな強調だけ。
+- 3: おおむねきれいだが、太い輪郭や強弱の大きい輪郭が一部にある。
+- 0: 荒々しい、ラフ、クロスハッチング、筆のタッチが強い、またはアクション漫画のような太いインク。
 
-Fatal: heavy black contour or cross-hatching dominates the face or clothing.
+致命的：太く黒い輪郭やクロスハッチングが、顔や服を支配している。
 
-## 2. Face grammar
+## 2. 顔の文法（Face grammar）
 
-- 5: smooth simple contour; eyes made from few clean strokes; nose is one minimal line/mark; mouth is small and simple; no facial-plane modeling.
-- 3: mostly simple but visible cheekbone, detailed lips, deep eye sockets, or excess wrinkle lines.
-- 0: realistic, game-like, yakuza-like, or gritty seinen face.
+- 5: 滑らかで単純な輪郭。目は少ないきれいな線でできている。鼻は最小限の線か印1つ。口は小さく単純。顔の面の立体描写が無い。
+- 3: おおむね単純だが、頬骨、描き込んだ唇、深い眼窩、多すぎるしわの線が見える。
+- 0: 写実的、ゲーム的、ヤクザ風、または荒々しい青年漫画（seinen）風の顔。
 
-Fatal: a benchmark person's identity is reproduced, or different cast members share one face.
+致命的：ベンチマークの人物の identity が再現されている、または別のキャストが1つの顔を共有している。
 
-## 3. Hair
+## 3. 髪（Hair）
 
-- 5: a few broad graphic masses with one or two flat highlight bands.
-- 3: correct silhouette but too many strand lines or glossy highlights.
-- 0: photoreal strands, dense texture, or sculpted 3D hair.
+- 5: いくつかの大きなグラフィックな塊と、1〜2本の平らなハイライトの帯。
+- 3: シルエットは正しいが、毛筋の線が多すぎる、または光沢のあるハイライト。
+- 0: 写真のような毛筋、密な質感、または彫刻のような 3D の髪。
 
-## 4. Shading and material
+## 4. 影と素材（Shading and material）
 
-- 5: pale flat skin, at most one restrained cel-shadow shape; clothing uses broad flat fills and very few folds.
-- 3: extra gradients or material texture, but the image still reads as flat anime.
-- 0: realistic skin, pores, stubble, fabric texture, strong rim light, or cinematic rendering.
+- 5: 淡く平らな肌、控えめなセル影の形は多くて1つ。服は大きな平塗りで、しわはごく少ない。
+- 3: 余分なグラデーションや素材の質感があるが、平らなアニメ絵としては読める。
+- 0: 写実的な肌、毛穴、無精ひげ、布の質感、強いリムライト、または映画的な描画。
 
-Fatal: 3D or photoreal appearance.
+致命的：3D または写真のような見た目。
 
-## 5. Palette
+## 5. パレット（Palette）
 
-- 5: light, clean, slightly pastel cream/blue/green/pink/brown palette with restrained contrast.
-- 3: mostly correct but too dark, saturated, glossy, or orange-teal.
-- 0: gritty, neon, crushed-black, or cinematic color grade.
+- 5: 明るくきれいで、ややパステル寄りのクリーム・青・緑・ピンク・茶のパレット。コントラストは控えめ。
+- 3: おおむね正しいが、暗すぎる、彩度が高すぎる、光沢がある、またはオレンジとティールに寄っている。
+- 0: 荒々しい、ネオン、黒つぶれ、または映画的なカラーグレード。
 
-## 6. Background density
+## 6. 背景の密度（Background density）
 
-- 5: believable room/street with correct scale but visibly simpler and lower-detail than the character.
-- 3: correct location with too much texture or blur.
-- 0: photoreal environment, empty generic gradient, or unrelated world.
+- 5: 部屋や通りとして信じられ、スケールも正しいが、キャラクターより目に見えて単純で描き込みが少ない。
+- 3: 場所は正しいが、質感やぼかしが多すぎる。
+- 0: 写真のような環境、何も無い汎用グラデーション、または関係のない世界。
 
-## 7. Character distinction
+## 7. キャラクターの描き分け（Character distinction）
 
-- 5: every cast member differs in face, eyes, brows, hair silhouette, age, build, and wardrobe while sharing the same drawing style.
-- 3: two characters share several features but remain distinguishable.
-- 0: duplicated identity or attribute transfer.
+- 5: キャスト全員が、同じ画風を共有しながら、顔・目・眉・髪のシルエット・年齢・体格・服装で違う。
+- 3: 2人がいくつかの特徴を共有しているが、見分けはつく。
+- 0: identity の重複、または属性が別のキャラへ移っている。
 
-Fatal: same face for two named characters.
+致命的：名前のある2人が同じ顔。
 
-## 8. Identity continuity
+## 8. identity の一貫性（Identity continuity）
 
-- 5: the same approved character keeps face, hair, age, build, clothing, glasses, and accessories across all views/cuts.
-- 3: small drift that does not change recognition.
-- 0: identity changes across angles or scenes.
+- 5: 同じ承認済みキャラクターが、すべてのビュー・カットで顔・髪・年齢・体格・服・眼鏡・アクセサリーを保っている。
+- 3: 見分けが変わらない程度の小さなずれ。
+- 0: 角度やシーンによって identity が変わる。
 
-## 9. Composition and bubble space
+## 9. 構図と吹き出しの余白（Composition and bubble space）
 
-- 5: simple eye-level close-up/medium/wide matching the reference rhythm, clear silhouettes, and clean outer negative space for a later vertical balloon.
-- 3: readable but centered, crowded, or overly cinematic.
-- 0: collage, extreme lens, cropped face, or critical hand/prop hidden.
+- 5: 参照のリズムに合う、目線の高さの単純な寄り／ミディアム／引き。シルエットがはっきりし、あとで置く縦書き吹き出しのための外側の余白がきれいに空いている。
+- 3: 読めるが、中央寄り、詰め込みすぎ、または映画的すぎる。
+- 0: コラージュ、極端なレンズ、顔の見切れ、または重要な手や小道具が隠れている。
 
-## 10. Delivery quality
+## 10. 納品品質（Delivery quality）
 
-- 5: one full-bleed 16:9 frame, native resolution at least 1280×720, no baked text/bubble/logo/watermark, independent canvas element.
-- 3: correct frame with minor cleanup needed.
-- 0: contact sheet used as a scene, low-resolution export, or embedded typography.
+- 5: 全面の 16:9 フレーム1枚、原寸は 1280×720 以上、文字・吹き出し・ロゴ・透かしの焼き込み無し、独立したキャンバス要素。
+- 3: フレームは正しいが、軽い手直しが要る。
+- 0: 一覧シート（contact sheet）をシーンとして使っている、低解像度の書き出し、または文字組みが埋め込まれている。
 
-Fatal: generated dialogue text, subtitles, or speech bubbles are baked into the artwork.
+致命的：生成したセリフの文字、字幕、吹き出しがアートワークに焼き込まれている。
 
-## Correction map
+## 修正の対応表（Correction map）
 
-| Failure | Change before regenerating |
+表内のバッククォートで囲んだ語句は、英語のプロンプトへそのまま足す文言。
+
+| 失敗 | 再生成の前に変えること |
 |---|---|
-| Too realistic/cinematic | Remove identity images created in the wrong style; add `fewest possible strokes`, `one flat shadow`, and `no facial planes`; attach a close benchmark face. |
-| Too shonen/gritty | Add `no action-hero anatomy`, `no yakuza face`, `emotion from posture, not wrinkles or muscles`; use a calm dialogue reference. |
-| Hair too detailed | Add `broad graphic masses, one flat highlight band, no individual strands`; attach a hair/profile crop. |
-| Background too detailed | Attach an environment-only crop and require lower detail than the character. |
-| Character copied from benchmark | Remove that frame from identity refs, place STYLE-ONLY refs last, and explicitly forbid its face/hair/clothes/body. |
-| Different cast members look alike | Generate separately; strengthen written identity deltas; approve candidates before multi-character scenes. |
-| Scene drifts after a good sheet | Use the approved sheet as reference 1 and attach two benchmark frames last; repeat the full scene contract instead of a short style label. |
-| Model ignores style after two attempts | Change the benchmark crop to a closer shot type and rebuild the identity sheet; do not keep rerunning the same request. |
+| 写実的・映画的すぎる | 違う画風で作った identity 画像を外す。`fewest possible strokes`、`one flat shadow`、`no facial planes` を足す。近いベンチマークの顔を添付する。 |
+| 少年漫画的・荒々しすぎる | `no action-hero anatomy`、`no yakuza face`、`emotion from posture, not wrinkles or muscles` を足す。落ち着いた会話の参照を使う。 |
+| 髪の描き込みが多すぎる | `broad graphic masses, one flat highlight band, no individual strands` を足す。髪／横顔のクロップを添付する。 |
+| 背景の描き込みが多すぎる | 環境だけのクロップを添付し、キャラクターより描き込みを少なくするよう求める。 |
+| ベンチマークからキャラクターをコピーした | そのフレームを identity 参照から外し、STYLE-ONLY 参照を最後に置き、その顔・髪・服・体を明示的に禁じる。 |
+| 別のキャスト同士が似て見える | 別々に生成する。文章上の identity の違いを強める。複数人のシーンの前に候補を承認する。 |
+| 良いシートのあとでシーンがずれる | 承認済みシートを参照1にし、ベンチマークフレーム2枚を最後に添付する。短い画風ラベルで済ませず、シーン契約を全文繰り返す。 |
+| 2回試してもモデルが画風を無視する | ベンチマークのクロップをより寄りのショットに変え、identity シートを作り直す。同じ依頼を回し続けない。 |

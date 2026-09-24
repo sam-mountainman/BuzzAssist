@@ -1,113 +1,136 @@
 ---
 name: excalidraw-benchmark-manga-style
-description: Generate original manga character sheets and 16:9 story scenes in BuzzAssist/Excalidraw while locking the drawing style and atmosphere to supplied reference videos or images without copying their character identities. Use when the user asks to match a benchmark manga video's character feel, linework, flat coloring, backgrounds, composition, or overall taste; when a generated character looks too realistic, cinematic, shonen, gritty, or unlike the reference; or when building a reusable channel-specific visual harness from YouTube/video/image references.
+description: 参考動画・参考画像（ベンチマーク）の画風と雰囲気だけを固定し、そこに出てくる人物の identity はコピーせずに、オリジナルの漫画キャラクター設定画と 16:9 の本編シーンを BuzzAssist/Excalidraw で生成する。「参考動画（benchmark manga video）のキャラの雰囲気に合わせて」「線・フラットな塗り・背景・構図・全体のテイストを寄せて」と言われたとき、生成したキャラがリアルすぎる・映画っぽい・少年漫画っぽい・劇画調で荒々しい・参考と似ていないとき（too realistic / cinematic / shonen / gritty / unlike the reference）、YouTube・動画・画像の参考からチャンネル専用に使い回せる画風ハーネス（visual harness）を作るときに使う。
 ---
 
-# Benchmark manga style lock
+# ベンチマーク漫画の画風固定（Benchmark manga style lock）
 
-Treat this as a low-freedom production workflow. A written style paragraph alone is not sufficient. Keep high-resolution benchmark frames attached throughout character design and scene generation, and reject outputs that drift.
+自由度の低い制作手順として扱う。画風を文章で書いた段落だけでは足りない。キャラクター
+デザインとシーン生成のあいだずっと高解像度のベンチマークフレームを添付し続け、ずれた
+出力は不合格にする。
 
-## Required resources
+## 必要なもの
 
-- Use the BuzzAssist canvas tools. Open the project canvas before generation.
-- Read [references/style-rubric.md](references/style-rubric.md) before judging any output.
-- Read [references/prompt-contracts.md](references/prompt-contracts.md) before constructing character-sheet or scene prompts.
-- Run `node skills/excalidraw-benchmark-manga-style/scripts/verify-style-pack.mjs --project-dir <project-dir> --write` when the project uses the bundled benchmark filenames. Fix every reported missing or low-resolution reference before generation.
+- BuzzAssist のキャンバスツールを使う。生成の前にプロジェクトのキャンバスを開く。
+- 出力を判定する前に [references/style-rubric.md](references/style-rubric.md) を読む。
+- キャラクターシートやシーンのプロンプトを組み立てる前に [references/prompt-contracts.md](references/prompt-contracts.md) を読む。
+- プロジェクトが同梱のベンチマークのファイル名を使っている場合は `node skills/excalidraw-benchmark-manga-style/scripts/verify-style-pack.mjs --project-dir <project-dir> --write` を実行する。報告された参照の欠けと低解像度は、生成の前にすべて直す。
 
-Do not bundle or publish frames from a third-party video inside the distributable skill. Keep user-supplied benchmark frames project-local under `canvas/assets/style-references/`.
+第三者の動画のフレームを、配布するスキルの中に同梱・公開しない。ユーザーが用意した
+ベンチマークフレームは、プロジェクト内の `canvas/assets/style-references/` に置く。
 
-## 1. Build the style pack
+## 1. スタイルパックを作る
 
-Create at least these independent reference elements on the canvas:
+キャンバスに、少なくとも次の独立した参照要素を作る。
 
-1. male facial close-up/profile;
-2. female facial close-up;
-3. medium dialogue/composition frame;
-4. gesture or prop interaction frame;
-5. daylight exterior;
-6. night exterior;
-7. warm interior;
-8. neutral interior.
+1. 男性の顔の寄り／横顔
+2. 女性の顔の寄り
+3. ミディアムの会話・構図フレーム
+4. 身ぶりや小道具を扱うフレーム
+5. 昼の屋外
+6. 夜の屋外
+7. 暖色の屋内
+8. ニュートラルな屋内
 
-Use the highest available source resolution. Prefer 1920×1080. Never combine the eight frames into a contact sheet: each frame must remain an independent image element and file. Crop out subtitles, speech bubbles, logos, and UI when possible.
+手に入る最高解像度の元素材を使う。1920×1080 を優先する。8枚のフレームを1枚の
+一覧シート（contact sheet）にまとめない。各フレームは独立した画像要素・独立したファイルのまま
+保つ。字幕・吹き出し・ロゴ・UI は、できる限りクロップで外す。
 
-Mark every benchmark frame as STYLE-ONLY. The depicted people are not cast members.
+すべてのベンチマークフレームを STYLE-ONLY として印を付ける。描かれている人物はキャストではない。
 
-## 2. Separate identity from style
+## 2. identity と画風を分ける
 
-Always order references as:
+参照は常に次の順に並べる。
 
-1. approved character identity sheet;
-2. approved expression/angle sheet when needed;
-3. benchmark STYLE-ONLY references.
+1. 承認済みのキャラクター identity シート
+2. 必要なら、承認済みの表情・角度シート
+3. ベンチマークの STYLE-ONLY 参照
 
-State the reference ranges explicitly in the prompt. Identity references decide who appears. Style references decide only linework, face-drawing grammar, hair treatment, cel shading, palette, background finish, camera language, and visual density.
+プロンプトでは、どの参照がどの範囲かを明示する。identity 参照は「誰が出るか」を決める。
+画風参照が決めるのは、線、顔の描き方の文法、髪の処理、セル影、パレット、背景の仕上げ、
+カメラの言語、視覚的な情報密度だけ。
 
-Never ask the model to preserve a face from a benchmark frame. Never let a benchmark person enter `characters.json`.
+ベンチマークフレームの顔を保つようモデルに頼まない。ベンチマークの人物を
+`characters.json` へ入れない。
 
-For a new character, generate from written traits plus STYLE-ONLY references. For a redesign, do not reuse an old identity sheet whose rendering style already failed; preserve its written age, silhouette, hair, build, clothing, and accessories, then redraw the identity from scratch.
+新キャラは、文章で書いた特徴と STYLE-ONLY 参照から生成する。作り直し（redesign）の場合、
+描画スタイルがすでに不合格になった古い identity シートを再利用しない。文章上の年齢・
+シルエット・髪・体格・服・アクセサリーは保ったまま、identity をゼロから描き直す。
 
-## 3. Generate character candidates
+## 3. キャラクター候補を生成する
 
-- Generate three candidates per new or redesigned character by default.
-- Put every candidate in a separate canvas image element.
-- Use GPT Image 2 through the local Codex route at 16:9, High, 2K unless the user specifies another valid route.
-- Use the lightweight candidate-card contract from [references/prompt-contracts.md](references/prompt-contracts.md). Do not request garment, skin, shoe, fabric, or material close-ups at this stage; they push the rendering toward game-art realism.
-- Attach exactly two facial STYLE-ONLY references for the first candidate round. Use the same two files in the same order for every cast member so the shared style signal remains stable.
-- With the bundled pack, use `manga-channel-style-linework-male-v2.png` first and `manga-channel-style-linework-female-v2.png` second. Do not change that ordering based on the candidate's gender.
-- Keep different cast members visibly different in face shape, eye shape, eyebrows, hair silhouette, age cues, build, and wardrobe.
-- A candidate card is intentionally one board containing one full-body view and three head angles. It must not be confused with the eight independent style references.
+- 新キャラと作り直すキャラには、既定で1人につき3案の候補を生成する。
+- 候補はそれぞれ別のキャンバス画像要素にする。
+- ユーザーが別の有効な経路を指定しない限り、GPT Image 2 をローカルの Codex 経路で、16:9・High・2K で使う。
+- [references/prompt-contracts.md](references/prompt-contracts.md) の軽量な候補カード契約（Lightweight candidate-card contract）を使う。この段階では服・肌・靴・布地・素材の接写を要求しない。接写を求めると、描画がゲームアート的な写実へ寄るため。
+- 最初の候補ラウンドには、顔の STYLE-ONLY 参照をちょうど2枚添付する。共有する画風の信号を安定させるため、キャスト全員で同じ2ファイルを同じ順で使う。
+- 同梱パックでは、`manga-channel-style-linework-male-v2.png` を1枚目、`manga-channel-style-linework-female-v2.png` を2枚目にする。候補の性別によってこの順番を変えない。
+- キャスト同士は、顔の形・目の形・眉・髪のシルエット・年齢の手がかり・体格・服装で、目に見えて違うようにする。
+- 候補カードは、意図して1枚のボードに全身1点と頭部3方向を収めたもの。8枚の独立した画風参照と混同しない。
 
-Inspect all candidates at native resolution. Reject any candidate with a fatal rubric failure. Approve only a candidate scoring at least 45/50 and at least 4/5 in linework, face grammar, hair, and shading.
+すべての候補を原寸で確認する。ルーブリックの致命的な不合格が1つでもある候補は落とす。
+承認するのは、合計 45/50 以上で、かつ線・顔の文法・髪・影の各項目が 4/5 以上の候補だけ。
 
-If every candidate fails, do not repeat the same prompt. Apply the failure-specific correction from the rubric, strengthen the STYLE-ONLY reference contract, and regenerate a new candidate set.
+全候補が不合格なら、同じプロンプトを繰り返さない。ルーブリックにある失敗別の修正を当て、
+STYLE-ONLY 参照の契約を強め、新しい候補セットを生成し直す。
 
-If the first candidate round still shows angular cheek planes, deep wrinkles, oversized brows, muscular anatomy, heavy shadows, cross-hatching, individual hair strands, material texture, glossy/game-art rendering, or a copied benchmark person, stop before scene generation. Correct the candidate stage first.
+最初の候補ラウンドに、角ばった頬の面、深いしわ、大きすぎる眉、筋肉質な体、重い影、
+クロスハッチング、1本ずつ描いた髪、素材の質感、光沢のある／ゲームアート的な描画、
+ベンチマークの人物のコピーがまだ出ているなら、シーン生成へ進む前に止める。先に候補の
+段階を直す。
 
-## 4. Register the identity pack
+## 4. identity パックを登録する
 
-After approval:
+承認後に次を行う。
 
-1. generate a clean front/side/back turnaround in the same locked style;
-2. generate an expression/head-angle sheet;
-3. register the approved turnaround and expression sheet in `canvas/characters.json`;
-4. store channel style separately from identity;
-5. record the rubric score and benchmark pack id in character notes or workflow metadata.
+1. 同じ固定画風で、きれいな正面・横・背面の三面図を生成する
+2. 表情・頭部角度のシートを生成する
+3. 承認した三面図と表情シートを `canvas/characters.json` に登録する
+4. チャンネルの画風は identity と分けて保存する
+5. ルーブリックの点数とベンチマークパックの id を、キャラクターの notes かワークフローのメタデータに記録する
 
-Do not register an unapproved candidate.
+承認していない候補を登録しない。
 
-## 5. Generate a scene proof
+## 5. シーンの試し刷りを作る
 
-Before producing a full episode, generate three proof frames:
+1本分をまとめて作る前に、次の3枚の試し刷り（proof）を生成する。
 
-- one close-up;
-- one waist-up dialogue frame;
-- one wider environment frame.
+- 寄り1枚
+- 腰から上の会話フレーム1枚
+- 引きの環境フレーム1枚
 
-Use the scene contract from [references/prompt-contracts.md](references/prompt-contracts.md). Keep the approved identity first and attach two or three scene-relevant STYLE-ONLY frames last. Reserve outer negative space for the later deterministic vertical speech bubble; never draw text or balloons into the image.
+[references/prompt-contracts.md](references/prompt-contracts.md) のシーン契約を使う。
+承認済みの identity を先頭に置き、シーンに合う STYLE-ONLY フレーム2〜3枚を最後に添付する。
+あとから決定論的に重ねる縦書き吹き出しのために、外側に何も無い余白を空けておく。
+画像の中に文字や吹き出しを描かせない。
 
-Inspect the proof frames against the same rubric. Character-sheet success alone is not enough: scene rendering often drifts back toward realistic or cinematic detail.
+試し刷りも同じルーブリックで確認する。キャラクターシートが合格しただけでは足りない。
+シーンの描画は、写実や映画的なディテールへ戻りやすいため。
 
-## 6. Quality loop
+## 6. 品質ループ
 
-For each failed proof:
+不合格の試し刷りごとに次を行う。
 
-1. name the exact mismatched dimensions from the rubric;
-2. change references or prompt constraints that control those dimensions;
-3. generate a new independent proof frame;
-4. compare it side by side with the benchmark at 100% and enlarged view;
-5. keep only passing outputs on the final test row.
+1. ルーブリックのどの項目が合っていないかを名指しする
+2. その項目を左右する参照かプロンプトの制約を変える
+3. 独立した新しい試し刷りを生成する
+4. ベンチマークと並べ、100% と拡大表示で比べる
+5. 最終テスト行には合格した出力だけを残す
 
-Do not call an output complete because it is attractive or internally consistent. Complete only when it matches the benchmark's visual information density and every fatal condition is absent.
+見た目が魅力的だから、あるいはそれ自体で一貫しているからという理由で完成と呼ばない。
+完成とするのは、ベンチマークの視覚的な情報密度に合い、致命的な条件が1つも無いときだけ。
 
-## Canvas output rules
+## キャンバスへの出力ルール
 
-- Keep style references, candidates, and proof scenes as separate elements.
-- Preserve native files at 1280×720 minimum; prefer 1672×941 or 1920×1080.
-- Use SVG overlays for speech bubbles. Do not rasterize bubbles into the generated scene.
-- Label test rows with character name, native dimensions, profile version, and pass/fail status.
-- Delete or clearly mark failed comparison outputs so they cannot be mistaken for approved production assets.
+- 画風参照・候補・試し刷りのシーンは、それぞれ別の要素にする。
+- 元ファイルは最低 1280×720 で保存する。1672×941 か 1920×1080 を優先する。
+- 吹き出しは SVG オーバーレイで重ねる。生成したシーンに吹き出しをラスタライズして焼き込まない。
+- テスト行には、キャラクター名・原寸・プロファイルの版・合否を書いたラベルを付ける。
+- 比較で不合格になった出力は、削除するか、承認済みの本番素材と取り違えないようにはっきり印を付ける。
 
-## Long-running generation recovery
+## 時間のかかる生成からの復旧
 
-Local Codex image jobs can finish after the MCP call reaches its waiting limit. When a generation call times out, do not immediately submit duplicate jobs. First check the requested asset filenames and the canvas JSON for completed image elements. Re-run only missing jobs.
+ローカル Codex の画像ジョブは、MCP 呼び出しの待ち時間の上限を過ぎてから終わることがある。
+生成の呼び出しがタイムアウトしても、すぐに重複ジョブを投げない。まず依頼したアセットの
+ファイル名とキャンバスの JSON を確かめ、完成済みの画像要素があるか調べる。足りない
+ジョブだけを再実行する。

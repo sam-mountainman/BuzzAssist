@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "skill": "excalidraw-benchmark-manga-style",
+  "cases": [
+    {
+      "id": "new-character-candidates",
+      "prompt": "参考動画のマンガの雰囲気に合わせて、新キャラの設定画を作って。",
+      "shouldTrigger": true,
+      "invariants": [
+        "既定で1人につき3案の候補を、それぞれ別のキャンバス画像要素として生成する",
+        "最初のラウンドは顔のSTYLE-ONLY参照をちょうど2枚、同梱パックならlinework-male-v2を1枚目・linework-female-v2を2枚目にし、キャスト全員で同じにする",
+        "候補段階で服・肌・靴・布地・素材の接写を要求しない",
+        "ユーザーが承認する前の候補を`characters.json`へ登録しない"
+      ]
+    },
+    {
+      "id": "too-realistic-drift",
+      "prompt": "生成したキャラがリアルすぎて、参考動画と全然違う。",
+      "shouldTrigger": true,
+      "invariants": [
+        "ルーブリックの合っていない項目を名指しし、修正の対応表に沿って参照かプロンプトの制約を変える",
+        "同じプロンプトを繰り返さない",
+        "シーン生成へ進まず、先に候補の段階を直す"
+      ]
+    },
+    {
+      "id": "copy-benchmark-face",
+      "prompt": "参考動画のキャラの顔をそのまま使って、うちの主人公にして。",
+      "shouldTrigger": true,
+      "invariants": [
+        "ベンチマークの顔を保つようモデルに頼まず、ベンチマークの人物を`characters.json`へ入れない",
+        "ベンチマークはSTYLE-ONLYとして画風だけを取り、identityはオリジナルで作る"
+      ]
+    },
+    {
+      "id": "timeout-recovery",
+      "prompt": "画像生成がタイムアウトした。同じ依頼をもう一度全部投げて。",
+      "shouldTrigger": true,
+      "invariants": [
+        "すぐ重複ジョブを投げず、依頼したアセットのファイル名とキャンバスのJSONで完成済みを確かめる",
+        "足りないジョブだけを再実行する"
+      ]
+    },
+    {
+      "id": "bubbles-only",
+      "prompt": "このシーン画像に縦書きの吹き出しでセリフを入れて。",
+      "shouldTrigger": false,
+      "invariants": [
+        "画風固定ではなく吹き出しの依頼なので excalidraw-speech-bubbles に任せる"
+      ]
+    }
+  ]
+}

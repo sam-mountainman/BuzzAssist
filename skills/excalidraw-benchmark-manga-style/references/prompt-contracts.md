@@ -1,8 +1,9 @@
-# Prompt contracts
+# プロンプト契約（Prompt contracts）
 
-Replace bracketed values. Keep the reference-role language intact.
+角括弧の値を差し替えて使う。参照の役割を示す文言（reference-role language）はそのまま残す。
+コードブロックの中は画像モデルへ渡すプロンプト本文なので、英語のまま使い、訳さない。
 
-## Lightweight candidate-card contract
+## 軽量な候補カード契約（Lightweight candidate-card contract）
 
 ```text
 Create one simple 2D manga CHARACTER CANDIDATE CARD for an original [gender/role] character. Landscape 16:9, pure white background, generous spacing. Show one front-facing full-body view plus exactly three head studies: front, 3/4, and profile. Keep every view recognizably the same original character. No material swatches, fabric close-ups, skin close-ups, shoe close-ups, captions, or readable text.
@@ -16,11 +17,13 @@ CAST SEPARATION: This character must be visibly different from [other cast] in f
 STRICTLY AVOID: realistic facial planes, cheekbones, pores, stubble, detailed lips, deep wrinkles, gritty seinen rendering, muscular shonen or yakuza-game anatomy, thick aggressive ink, cross-hatching, dense fabric texture, many hair strands, glossy cinematic lighting, 3D, text, logo, watermark, UI.
 ```
 
-For a redesign, use the old sheet only as a written-trait source unless it already passes the style rubric. If it must be attached, say it supplies silhouette/clothing identity only and must be completely redrawn in the STYLE-ONLY grammar.
+作り直し（redesign）では、古いシートがすでに画風ルーブリックに合格している場合を除き、
+文章上の特徴を拾う元としてだけ使う。どうしても添付する場合は、シルエットと服の identity
+だけを与えるもので、STYLE-ONLY の文法で完全に描き直す必要があるとプロンプトに書く。
 
-## Approved turnaround contract
+## 承認後の三面図契約（Approved turnaround contract）
 
-Use this only after one candidate card passes the rubric and the user approves the identity.
+候補カードの1枚がルーブリックに合格し、ユーザーがその identity を承認したあとにだけ使う。
 
 ```text
 Reference image 1 is the approved CHARACTER IDENTITY. Preserve this exact original face, hair, age, build, clothing, and accessories. Reference images 2-3 are CHANNEL STYLE-ONLY and determine rendering style only.
@@ -28,7 +31,7 @@ Reference image 1 is the approved CHARACTER IDENTITY. Preserve this exact origin
 Create one clean 2D manga CHARACTER TURNAROUND on a pure white 16:9 canvas. Show front, left profile, and back full-body standing views of the exact same approved character, plus front, 3/4, and profile head views. Use mostly uniform thin black outlines, smooth simple face contours, a minimal single-line nose, small mouth, broad graphic hair masses, pale flat skin, at most one restrained cel-shadow shape, broad clothing fills, and very few fold lines. No material studies, no realistic texture, no labels, no text, no logo, no watermark.
 ```
 
-## Expression-sheet contract
+## 表情シート契約（Expression-sheet contract）
 
 ```text
 Reference images 1-[N] are the approved identity pack. Keep this exact original identity in every cell. Reference images [M]-[K] are STYLE-ONLY and must never determine identity.
@@ -36,7 +39,7 @@ Reference images 1-[N] are the approved identity pack. Keep this exact original 
 Create a clean 16:9 expression and head-angle sheet on white. Include neutral, worried, relieved, angry, surprised, sad, speaking, and listening expressions plus front, profile, 3/4, slight high, and slight low angles. Preserve the same simple line density, flat palette, minimal nose/mouth, broad hair masses, and one-shadow cel treatment as the approved turnaround. No text or labels.
 ```
 
-## Scene contract
+## シーン契約（Scene contract）
 
 ```text
 Reference images 1-[N] are the only CHARACTER IDENTITY sources. Preserve each named character's exact approved face, hair, age, build, clothing, glasses, and accessories. Keep the cast visibly distinct.
@@ -50,12 +53,12 @@ Composition: [shot type/camera]. Place [subject] on [side]. Reserve [opposite ou
 STRICTLY AVOID: realistic facial planes, pores, stubble, detailed lips, deep wrinkles, muscular shonen/yakuza rendering, thick aggressive ink, cross-hatching, dense texture, glossy cinematic light, 3D, captions, speech bubbles, logos, watermark, collage, split screen.
 ```
 
-## Reference counts
+## 参照の枚数
 
-- New character candidate: exactly 2 facial STYLE-ONLY references, no identity image. Keep the files and ordering identical across the first round for every cast member.
-- Redesign candidate: written traits plus the same exactly 2 facial STYLE-ONLY references. Exclude the failed old sheet from image inputs; read its clothing/silhouette as text only.
-- Approved turnaround: 1 approved candidate identity image, then the same 2 facial STYLE-ONLY references.
-- Single-character scene: 1–2 approved identity images, then 2 STYLE-ONLY references.
-- Multi-character scene: one optimized identity image per character, then 1 STYLE-ONLY reference. Generate single-character proofs first.
+- 新キャラの候補: 顔の STYLE-ONLY 参照をちょうど2枚、identity 画像は無し。最初のラウンドでは、キャスト全員でファイルと順番を同じにする。
+- 作り直しの候補: 文章上の特徴に加えて、同じ顔の STYLE-ONLY 参照をちょうど2枚。失敗した旧シートは画像入力から外し、服とシルエットは文章としてだけ読む。
+- 承認後の三面図: 承認した候補の identity 画像1枚、続けて同じ顔の STYLE-ONLY 参照2枚。
+- 1人のシーン: 承認済みの identity 画像1〜2枚、続けて STYLE-ONLY 参照2枚。
+- 複数人のシーン: キャラクターごとに最適化した identity 画像を1枚ずつ、続けて STYLE-ONLY 参照1枚。先に1人ずつの試し刷りを作る。
 
-Prefer a style reference matching the requested shot type: close-up for faces, medium dialogue for two-shots, and environment-only for wide shots.
+求めるショットの種類に合った画風参照を優先する。顔には寄り、ツーショットにはミディアムの会話、引きには環境だけのフレームを使う。
