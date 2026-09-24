@@ -8,6 +8,7 @@ import {
   SKILL_APPROVAL_REQUIREMENT_ENV,
   assertVideoHarnessProductionProfile,
 } from "../lib/videoHarnessProductionProfile.mjs";
+import { loadSkillPolicyManifests } from "../lib/skillInventory.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
@@ -32,19 +33,25 @@ test("本番の記録は、宣言された全スキルの承認状態を毎回�
   }
 });
 
-test("承認を本番の条件にするのは環境変数で切り替え、未承認のスキルがあれば止まる", async () => {
-  // いまはどのスキルも未承認。既定では記録するだけで止めない（止めると本番が全部止まる）。
-  const relaxed = await assertVideoHarnessProductionProfile({ job: koyaJob(), repoRoot: root, env: {} });
-  const unapproved = relaxed.declaredSkills.filter((row) => row.approvalState !== "current");
-  if (unapproved.length === 0) {
-    // 全部承認済みなら、止める側でも通ること。
-    await assertVideoHarnessProductionProfile({ job: koyaJob(), repoRoot: root, env: { [SKILL_APPROVAL_REQUIREMENT_ENV]: "1" } });
-    return;
-  }
+test("未承認のスキルがあれば本番は止まり、外すのは明示の 0 だけ", async () => {
+  // 運営者の決定（2026-09-24）: 未承認なら止める。6 本の承認が記録済みなので、既定で通ること。
+  const strict = await assertVideoHarnessProductionProfile({ job: koyaJob(), repoRoot: root, env: {} });
+  assert.ok(strict.declaredSkills.every((row) => row.approvalState === "current"), "宣言された全スキルが人の承認に束縛されていること");
+
+  // 在庫の承認が古い（内容が変わった）と、既定では止まる。"0" のときだけ通す。
+  const policy = await loadSkillPolicyManifests(root);
+  const stale = structuredClone(policy);
+  for (const skill of stale.inventory.skills) if (skill.approval) skill.approval.contentSha256 = "sha256:" + "0".repeat(64);
+  const loadPolicy = async () => stale;
   await assert.rejects(
-    () => assertVideoHarnessProductionProfile({ job: koyaJob(), repoRoot: root, env: { [SKILL_APPROVAL_REQUIREMENT_ENV]: "1" } }),
+    () => assertVideoHarnessProductionProfile({ job: koyaJob(), repoRoot: root, loadPolicy, env: {} }),
     /has no human approval bound to its current content/u,
   );
-  // "1" 以外は止めない（"true" や空を許可と読まない）。
-  await assertVideoHarnessProductionProfile({ job: koyaJob(), repoRoot: root, env: { [SKILL_APPROVAL_REQUIREMENT_ENV]: "true" } });
+  await assert.rejects(
+    () => assertVideoHarnessProductionProfile({ job: koyaJob(), repoRoot: root, loadPolicy, env: { [SKILL_APPROVAL_REQUIREMENT_ENV]: "false" } }),
+    /has no human approval/u,
+    "\"false\" や空を許可と読まない",
+  );
+  const relaxed = await assertVideoHarnessProductionProfile({ job: koyaJob(), repoRoot: root, loadPolicy, env: { [SKILL_APPROVAL_REQUIREMENT_ENV]: "0" } });
+  assert.ok(relaxed.declaredSkills.every((row) => row.approvalState === "stale"), "外したときも承認状態は記録に残ること");
 });
