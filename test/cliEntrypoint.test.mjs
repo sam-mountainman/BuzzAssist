@@ -58,6 +58,9 @@ test("harness CLIs copied into a directory with spaces and Japanese run their ma
     await mkdir(join(root, "scripts"), { recursive: true });
     await mkdir(join(root, "config"), { recursive: true });
     await cp(resolve("lib", "cliEntrypoint.mjs"), join(root, "lib", "cliEntrypoint.mjs"));
+    // harness-parallel-agents は子へ「学習を書かない」印を渡すために読む（2026-09-24）。
+    // 複製し忘れると import で落ち、main() に届く前に exit 1 になる。
+    await cp(resolve("lib", "harnessLearningGuard.mjs"), join(root, "lib", "harnessLearningGuard.mjs"));
     await cp(resolve("config", "harnesses"), join(root, "config", "harnesses"), { recursive: true });
     for (const name of scripts) await cp(resolve("scripts", name), join(root, "scripts", name));
 
