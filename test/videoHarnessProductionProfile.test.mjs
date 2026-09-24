@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   SKILL_APPROVAL_REQUIREMENT_ENV,
   assertVideoHarnessProductionProfile,
 } from "../lib/videoHarnessProductionProfile.mjs";
 
-const root = resolve(new URL("..", import.meta.url).pathname);
+const root = fileURLToPath(new URL("..", import.meta.url));
 
 // 実際のハーネス宣言と在庫 manifest を使う。合成の manifest だと「在庫の SHA が
 // 古い」「宣言のスキルが在庫に無い」の経路を通らず、承認だけを見た気になる。
