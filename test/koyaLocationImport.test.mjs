@@ -231,6 +231,78 @@ test("imported boards pass the full official route: anchor review, final review,
   });
 });
 
+test("承認済みの絵を直して作った継続ビューは derived で取り込め、アンカーへの拘束の代わりに目の確認を要る", async () => {
+  // 例: 承認済みのボードの一部（看板）だけを、そのボードを添付して描き直した。
+  // アンカーは添付していないので anchor とは書けない。書けば作り話の記録になる。
+  await withProject("koya-location-derived-", async ({ root, projectDir, authority }) => {
+    const locationId = "sample-street";
+    const common = { projectDir, locationBible: authority.locationBible, showBible: authority.showBible, locationId };
+    const sourceDir = join(root, "downloads");
+    const priorBytes = boardPng("previously-approved-view-2");
+    const priorPath = join(sourceDir, "previously-approved-view-2.png");
+    const prepared = await writeSyntheticImport({
+      authority,
+      locationId,
+      sourceDir,
+      mutate: async ({ map }) => {
+        await mkdir(sourceDir, { recursive: true });
+        await writeFile(priorPath, priorBytes);
+        map.boards[1].referenceImages = [{ path: priorPath, sha256: sha256(priorBytes), role: "derived" }];
+      },
+    });
+    const imported = await importKoyaLocationBoards({ authority, locationId, importMapPath: prepared.mapPath });
+    assert.equal(imported.complete, true);
+    const manifest = await readJson(imported.manifestPath);
+    assert.equal(manifest.entries[1].anchorSha256, "", "アンカーを添付していないボードにアンカーの SHA を書かない");
+    assert.equal(manifest.entries[2].anchorSha256, prepared.sources[0].sha256, "ほかの継続ビューは従来どおりアンカーに拘束する");
+
+    const anchorDraft = await createKoyaLocationAnchorReviewDraft(common);
+    const anchorReview = passAnchorChecks(structuredClone(anchorDraft));
+    anchorReview.reviewer = { host: "codex", id: "anchor-reviewer", contextId: "session-anchor-reviewer" };
+    anchorReview.reviewedAt = "2026-09-18T01:00:00.000Z";
+    assert.equal((await auditKoyaLocationAnchorReview({ ...common, review: anchorReview })).pass, true);
+    const reviewsDir = join(projectDir, "canvas", "reviews");
+    await mkdir(reviewsDir, { recursive: true });
+    const anchorReviewPath = join(reviewsDir, "street-anchor.json");
+    await writeFile(anchorReviewPath, `${JSON.stringify(anchorReview, null, 2)}\n`);
+
+    const draft = await createKoyaLocationReviewDraft({ ...common, anchorReviewPath });
+    assert.match(draft.instructions, /edited from previously approved images/u);
+    assert.match(draft.instructions, new RegExp(manifest.entries[1].boardId, "u"));
+    const review = passBoardChecks(structuredClone(draft));
+    review.reviewer = { host: "codex", id: "final-reviewer", contextId: "session-final-reviewer" };
+    review.reviewedAt = "2026-09-18T02:00:00.000Z";
+    const audit = await auditKoyaLocationReview({ ...common, review });
+    assert.equal(audit.pass, true, audit.failures.join("\n"));
+
+    const unchecked = structuredClone(review);
+    const continuityKey = Object.keys(unchecked.boards[1].checks).find((key) => /architecture/iu.test(key));
+    assert.ok(continuityKey, "建築の一致を見る確認項目がある");
+    unchecked.boards[1].checks[continuityKey] = false;
+    const refused = await auditKoyaLocationReview({ ...common, review: unchecked });
+    assert.equal(refused.pass, false);
+    assert.match(refused.failures.join("\n"), /edited from previously approved images, not drawn from the anchor/u);
+  });
+});
+
+test("継続ビューの参照が other だけなら、derived と書かない限り従来どおりアンカー参照を要る", async () => {
+  await withProject("koya-location-derived-other-", async ({ root, authority }) => {
+    const sourceDir = join(root, "downloads");
+    const prepared = await writeSyntheticImport({
+      authority,
+      locationId: "sample-street",
+      sourceDir,
+      mutate: async ({ map, sources }) => {
+        map.boards[1].referenceImages = [{ path: sources[2].path, sha256: sources[2].sha256, role: "other" }];
+      },
+    });
+    await assert.rejects(
+      importKoyaLocationBoards({ authority, locationId: "sample-street", importMapPath: prepared.mapPath }),
+      /role "anchor" reference, or list the approved images it was edited from as role "derived"/u,
+    );
+  });
+});
+
 test("location import rejects invalid maps and writes nothing", async () => {
   const cases = [
     {
@@ -332,7 +404,7 @@ test("location import rejects invalid maps and writes nothing", async () => {
     {
       name: "reference role outside the allowlist",
       mutate: ({ map }) => { map.boards[0].referenceImages[0].role = "photo"; },
-      match: /role must be one of: anchor, style, other/u,
+      match: /role must be one of: anchor, derived, style, other/u,
     },
     {
       name: "other location",
