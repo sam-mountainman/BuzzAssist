@@ -39,6 +39,13 @@
         "bundled": true,
         "productionAllowed": true,
         "developmentOnly": false
+      },
+      "approval": {
+        "reviewer": "sam-mountainman",
+        "approvedAt": "2026-09-24T09:09:24.780Z",
+        "version": "1.3.0",
+        "contentSha256": "sha256:f38e343457ca29e0b6e9ade1e56d314482699a7200def5a7a7b39e494f48dee8",
+        "attestedBy": "human-verified"
       }
     },
     {
@@ -71,6 +78,13 @@
         "bundled": true,
         "productionAllowed": true,
         "developmentOnly": false
+      },
+      "approval": {
+        "reviewer": "sam-mountainman",
+        "approvedAt": "2026-09-24T09:09:24.217Z",
+        "version": "1.0.0",
+        "contentSha256": "sha256:b61bde2792edad4007e376df872691b5efc5eb1d77f58d44d53aec2253ca63bf",
+        "attestedBy": "human-verified"
       }
     },
     {
@@ -103,6 +117,13 @@
         "bundled": true,
         "productionAllowed": true,
         "developmentOnly": false
+      },
+      "approval": {
+        "reviewer": "sam-mountainman",
+        "approvedAt": "2026-09-24T09:09:24.297Z",
+        "version": "1.3.0",
+        "contentSha256": "sha256:e27d1662b1e685cd73feba2bf0d2717ffc549eaaecc3e8d8f22c58d4d021ba6e",
+        "attestedBy": "human-verified"
       }
     },
     {
@@ -135,6 +156,13 @@
         "bundled": true,
         "productionAllowed": true,
         "developmentOnly": false
+      },
+      "approval": {
+        "reviewer": "sam-mountainman",
+        "approvedAt": "2026-09-24T09:09:24.553Z",
+        "version": "1.4.0",
+        "contentSha256": "sha256:d9fb6321c5e5aa7a06240edda25bf9f98286895f05767eaae00e01585ab0c07e",
+        "attestedBy": "human-verified"
       }
     },
     {
@@ -167,6 +195,13 @@
         "bundled": true,
         "productionAllowed": true,
         "developmentOnly": false
+      },
+      "approval": {
+        "reviewer": "sam-mountainman",
+        "approvedAt": "2026-09-24T09:09:24.369Z",
+        "version": "1.0.1",
+        "contentSha256": "sha256:ee956794fe0c67481452e7c2248f1043d9670b49f665f1b7ff628e50bfdcd0f2",
+        "attestedBy": "human-verified"
       }
     },
     {
@@ -199,6 +234,13 @@
         "bundled": true,
         "productionAllowed": true,
         "developmentOnly": false
+      },
+      "approval": {
+        "reviewer": "sam-mountainman",
+        "approvedAt": "2026-09-24T09:09:24.687Z",
+        "version": "1.2.2",
+        "contentSha256": "sha256:bd6da78763a5de317710f489487b506e508dc0edfe4fa22b0362c3ce7845c639",
+        "attestedBy": "human-verified"
       }
     },
     {
@@ -411,7 +453,7 @@
     {
       "id": "buzzassist:core-plugin",
       "name": "buzzassist",
-      "version": "0.1.25",
+      "version": "0.1.26",
       "owner": "BuzzAssist maintainers",
       "origin": "project-bundle",
       "manifestPaths": [

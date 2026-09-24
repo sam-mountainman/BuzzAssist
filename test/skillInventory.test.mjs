@@ -290,17 +290,22 @@ test("installation root and version are derived from the host cache path or the 
 test("buildSkillInventory detects a host cache missing a bundled skill end to end", async () => {
   const home = await mkdtemp(join(tmpdir(), "buzzassist-home-"));
   try {
-    const cacheRoot = join(home, ".claude", "plugins", "cache", "buzzassist", "buzzassist", "0.1.25");
+    // 在庫 manifest の plugin の版と同じ版の cache を作る。版を決め打ちすると、
+    // 版を上げるたびに「古い版の cache」として別扱いになり、この試験が壊れる。
+    const { inventory } = await loadSkillPolicyManifests(projectDir);
+    const pluginVersion = inventory.plugins.find((plugin) => plugin.name === "buzzassist" || plugin.id.endsWith("core-plugin"))?.version;
+    assert.ok(pluginVersion, "在庫 manifest に plugin の版があること");
+    const cacheRoot = join(home, ".claude", "plugins", "cache", "buzzassist", "buzzassist", pluginVersion);
     await mkdir(join(cacheRoot, "skills", "platform-craft"), { recursive: true });
     await mkdir(join(cacheRoot, ".claude-plugin"), { recursive: true });
-    await writeFile(join(cacheRoot, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "buzzassist", version: "0.1.25" }));
+    await writeFile(join(cacheRoot, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "buzzassist", version: pluginVersion }));
     await writeFile(join(cacheRoot, "skills", "platform-craft", "SKILL.md"), "---\nname: platform-craft\n---\nold copy\n");
     const report = await buildSkillInventory({ projectDir, includeGlobal: true, includePluginCache: true, homeDir: home });
     assert.equal(report.analysis.ok, true);
     assert.equal(report.analysis.hostSyncOk, false);
     assert.equal(report.analysis.missingInstalledCopies.length, 1);
     const [entry] = report.analysis.missingInstalledCopies;
-    assert.equal(entry.installRoot.endsWith("/0.1.25"), true);
+    assert.equal(entry.installRoot.endsWith(`/${pluginVersion}`), true);
     assert.equal(entry.host, "claude-code");
     assert.equal(entry.expected, 16);
     assert.equal(entry.present, 1);
@@ -321,6 +326,9 @@ test("a human approval is bound to the skill version and content SHA, and anythi
   const manifest = structuredClone(policy.inventory);
   const skill = manifest.skills.find((entry) => entry.classification?.productionAllowed === true);
   assert.ok(skill, "本番許可のスキルが1つはあること");
+  // 実物の manifest には承認が入っている（2026-09-24）。この試験は束縛の規則を見るので、
+  // 承認の無い状態から始める。
+  delete skill.approval;
   assert.equal(skillApprovalState(skill), "none");
 
   const approval = { reviewer: "人の名前", approvedAt: "2026-09-24T00:00:00.000Z", version: skill.version, contentSha256: skill.contentSha256, attestedBy: "human-verified" };
