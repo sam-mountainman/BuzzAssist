@@ -23,6 +23,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
+import { childAgentEnvironment } from "../lib/harnessLearningGuard.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -151,7 +152,7 @@ export async function probeEngine(engineId, { timeoutMs = 60_000 } = {}) {
     let stdout = "";
     let stderr = "";
     let settled = false;
-    const child = spawn(binary, args, { cwd: REPO_ROOT, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(binary, args, { cwd: REPO_ROOT, env: childAgentEnvironment(process.env), stdio: ["pipe", "pipe", "pipe"] });
     child.stdin.on("error", () => { /* 相手が先に終了していれば無視 */ });
     child.stdin.end(probeTask.prompt);
     const timer = setTimeout(() => {
@@ -241,6 +242,10 @@ async function runTask(task, { engine, binary, outDir, disableMcp, readOnly, def
     let settled = false;
     const child = spawn(binary, args, {
       cwd: path.resolve(task.cwd ?? REPO_ROOT),
+      // 子には「学習を書かない」印を渡す。子が並列に capture / sync すると同じ台帳の
+      // 取り合いになり、同じ観測が子の数だけ別の回数として数えられる。捕捉したい
+      // 内容は結果本文で親へ返させ、親が確かめてから capture する。
+      env: childAgentEnvironment(process.env),
       stdio: ["pipe", "pipe", "pipe"],
       // タイムアウトで孫（CLIが産むツールプロセス）まで止められるよう
       // 独立したプロセスグループで起動する。

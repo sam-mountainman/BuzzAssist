@@ -38,6 +38,7 @@ import { isDirectCli } from "../lib/cliEntrypoint.mjs";
 import { loadHarnessDeployments } from "../lib/harnessDeploymentResolver.mjs";
 import { redactSharedLearningText } from "../lib/harnessFeedbackBundle.mjs";
 import { LEARNING_TARGET_ALIASES, resolveLearningTarget } from "../lib/harnessLearningTargets.mjs";
+import { assertLearningWriteAllowed } from "../lib/harnessLearningGuard.mjs";
 import {
   LEARNING_INSPECTION_VERSION,
   blockedOriginalDigest,
@@ -1115,7 +1116,11 @@ export function captureLearningProposal(input, {
   refreshCatalog = refreshCatalogForSharedLedger,
   privateVocabulary = undefined,
   homeRoot = homedir(),
+  env = process.env,
 } = {}) {
+  // 子エージェントの印があれば、台帳へ書く前に止める（Canvas feedback や Receipt の
+  // 自動捕捉もこの関数を通るので、CLI だけでなくここでも見る）。
+  assertLearningWriteAllowed(env, "capture");
   const built = buildProposal(input);
   const verdict = channelTermsInSharedEntry(built, signals);
   if (!verdict.ok) throw new Error(verdict.message);
@@ -1137,6 +1142,9 @@ export function captureLearningProposal(input, {
     return { entry, ledgerPath, appended: !duplicate, catalog };
   });
 }
+
+/** 台帳・overlay・正本側の記録を書く操作。子エージェントの印があれば拒否する。 */
+export const LEARNING_WRITE_ACTIONS = new Set(["capture", "sync", "promote", "apply", "curate"]);
 
 function parseArgs(argv) {
   const out = { action: argv[0] };
@@ -1200,6 +1208,11 @@ function main() {
   if (!args.action || args.action === "--help" || args.action === "-h") {
     printHelp();
     process.exit(args.action ? 0 : 2);
+  }
+
+  // 書き込み系は、子エージェントの印があれば台帳を読む前に止める。
+  if (LEARNING_WRITE_ACTIONS.has(args.action) && !(args.action === "curate" && args.archive !== true)) {
+    assertLearningWriteAllowed(process.env, args.action);
   }
 
   const proposals = learningLedgerPaths("proposals").flatMap(readJsonl);

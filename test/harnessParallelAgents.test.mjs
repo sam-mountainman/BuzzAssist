@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+
+import { LEARNING_WRITE_FORBIDDEN_ENV } from "../lib/harnessLearningGuard.mjs";
 
 import { classifyProbeOutcome, maskSecrets, probeEngine, runAgentTasks, selectEngine } from "../scripts/harness-parallel-agents.mjs";
 
@@ -104,4 +109,32 @@ test("read-only を要求したら、保証できないエンジンは選ばな�
   probed = 0;
   await assert.rejects(() => selectEngine("auto", { readOnly: true, probe }), /使えるエージェントCLIがありません/u);
   assert.equal(probed, 1, "codex だけをプローブし、claude は起動しないこと");
+});
+
+test("起動する子エージェントには、学習を書かない印を環境変数で渡す", { skip: process.platform === "win32" }, async () => {
+  // 子が並列に capture / sync すると同じ台帳の取り合いになり、同じ観測が子の数だけ
+  // 別の回数として数えられる。子は結果本文で親へ返す。
+  const dir = mkdtempSync(join(tmpdir(), "parallel-agent-env-"));
+  try {
+    const fake = join(dir, "fake-claude");
+    writeFileSync(fake, [
+      "#!/usr/bin/env node",
+      "process.stdin.resume();",
+      "process.stdin.on('end', () => {",
+      `  process.stdout.write('flag=' + (process.env.${LEARNING_WRITE_FORBIDDEN_ENV} || 'none'));`,
+      "});",
+    ].join("\n"));
+    chmodSync(fake, 0o755);
+    const summary = await runAgentTasks([{ id: "t1", prompt: "x" }], {
+      engineInfo: { engineId: "claude", binary: fake },
+      outDir: join(dir, "out"),
+      concurrency: 1,
+      timeoutMs: 20_000,
+    });
+    assert.equal(summary.tasks[0].status, "completed");
+    assert.equal(summary.tasks[0].resultPreview, "flag=child-agent");
+    assert.equal(process.env[LEARNING_WRITE_FORBIDDEN_ENV], undefined, "親の環境へ印が漏れた");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
