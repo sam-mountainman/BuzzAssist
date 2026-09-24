@@ -13,9 +13,13 @@ import {
   findMissingInstalledCopies,
   installationForPath,
   loadSkillPolicyManifests,
+  recordSkillApproval,
   scanInstalledSkillRoots,
   shippedSkillContent,
+  skillApprovalState,
+  validateSkillInventoryManifest,
 } from "../lib/skillInventory.mjs";
+import { runSkillInventoryCli } from "../scripts/skill-inventory.mjs";
 
 const projectDir = fileURLToPath(new URL("..", import.meta.url));
 
@@ -307,5 +311,77 @@ test("buildSkillInventory detects a host cache missing a bundled skill end to en
     assert.equal(report.analysis.staleInstalledCopies.length, 1, "the present-but-different copy is stale, not missing");
   } finally {
     await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("a human approval is bound to the skill version and content SHA, and anything else is stale", async () => {
+  // skill-creator の合否条件「評価結果と人間承認が版・差分SHAへ拘束されている」を置く場所が
+  // 無く、承認をどこにも束縛できなかった。
+  const policy = await loadSkillPolicyManifests(projectDir);
+  const manifest = structuredClone(policy.inventory);
+  const skill = manifest.skills.find((entry) => entry.classification?.productionAllowed === true);
+  assert.ok(skill, "本番許可のスキルが1つはあること");
+  assert.equal(skillApprovalState(skill), "none");
+
+  const approval = { reviewer: "人の名前", approvedAt: "2026-09-24T00:00:00.000Z", version: skill.version, contentSha256: skill.contentSha256, attestedBy: "human-verified" };
+  skill.approval = approval;
+  assert.deepEqual(validateSkillInventoryManifest(manifest), []);
+  assert.equal(skillApprovalState(skill), "current");
+  assert.equal(skillApprovalState(skill, "sha256:" + "0".repeat(64)), "stale", "正本が変われば承認は古い");
+  assert.equal(skillApprovalState({ ...skill, version: "9.9.9" }), "stale", "版が変われば承認は古い");
+  assert.equal(skillApprovalState({ ...skill, approval: { ...approval, attestedBy: "agent-self-attested" } }), "stale", "機械の申告は承認ではない");
+
+  for (const broken of [
+    { ...approval, reviewer: "" },
+    { ...approval, approvedAt: "いつか" },
+    { ...approval, version: "v1" },
+    { ...approval, contentSha256: "abc" },
+    { ...approval, attestedBy: "agent-self-attested" },
+    "承認済み",
+  ]) {
+    skill.approval = broken;
+    assert.ok(validateSkillInventoryManifest(manifest).length > 0, `不正な承認を受け付けた: ${JSON.stringify(broken)}`);
+  }
+
+  // 分析は、本番許可なのに承認が今の版に束縛されていないスキルを並べる。
+  const report = await buildSkillInventory({ projectDir });
+  const production = report.skills.filter((record) => record.sourceRole === "project-canonical" && record.classification.productionAllowed);
+  assert.ok(production.length > 0);
+  assert.equal(report.analysis.unapprovedProductionSkills.length, production.filter((record) => record.approvalState !== "current").length);
+  assert.ok(report.analysis.ok, "承認の有無は ok（正本の整合）を変えない。止めるなら --require-approval で明示する");
+});
+
+test("recording an approval needs the approver's own interactive terminal and binds the current SHA", async () => {
+  const policy = await loadSkillPolicyManifests(projectDir);
+  const skill = policy.inventory.skills.find((entry) => entry.classification?.productionAllowed === true);
+  const sandbox = await mkdtemp(join(tmpdir(), "skill-approval-"));
+  try {
+    const copy = async (relativePath) => {
+      await mkdir(join(sandbox, relativePath, ".."), { recursive: true });
+      await writeFile(join(sandbox, relativePath), await (await import("node:fs/promises")).readFile(join(projectDir, relativePath)));
+    };
+    const { relative } = await import("node:path");
+    await copy(relative(projectDir, policy.inventoryPath));
+    await copy(relative(projectDir, policy.profilesPath));
+    await copy(skill.canonicalPath);
+
+    const base = { projectDir: sandbox, skillId: skill.id, reviewer: "人の名前", now: () => "2026-09-24T00:00:00.000Z" };
+    await assert.rejects(() => recordSkillApproval({ ...base, humanVerified: false, isInteractive: true }), /--human-verified/u);
+    await assert.rejects(() => recordSkillApproval({ ...base, humanVerified: true, isInteractive: false }), /対話端末/u);
+    await assert.rejects(() => recordSkillApproval({ ...base, reviewer: "", humanVerified: true, isInteractive: true }), /reviewer/u);
+    await assert.rejects(() => runSkillInventoryCli(["--project-dir", sandbox, "--approve", skill.id, "--reviewer", "人の名前", "--human-verified"], { isInteractive: false }), /対話端末/u);
+
+    const result = await recordSkillApproval({ ...base, humanVerified: true, isInteractive: true });
+    assert.equal(result.approval.contentSha256, skill.contentSha256);
+    assert.equal(result.approval.version, skill.version);
+    const written = JSON.parse(await (await import("node:fs/promises")).readFile(join(sandbox, relative(projectDir, policy.inventoryPath)), "utf8"));
+    const recorded = written.skills.find((entry) => entry.id === skill.id);
+    assert.equal(skillApprovalState(recorded), "current");
+
+    // 正本が変わったあとの承認は、SHA を先に更新しないと書けない。
+    await writeFile(join(sandbox, skill.canonicalPath), "---\nname: " + skill.name + "\n---\n変えた\n");
+    await assert.rejects(() => recordSkillApproval({ ...base, humanVerified: true, isInteractive: true }), /contentSha256 が正本と一致しない/u);
+  } finally {
+    await rm(sandbox, { recursive: true, force: true });
   }
 });

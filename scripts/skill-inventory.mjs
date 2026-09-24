@@ -2,20 +2,22 @@
 
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildSkillInventory } from "../lib/skillInventory.mjs";
+import { buildSkillInventory, recordSkillApproval } from "../lib/skillInventory.mjs";
 
 function parseArgs(argv) {
   const args = { declaredSkillIds: [] };
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
-    if (["--include-global", "--include-plugin-cache", "--json", "--fail-on-external-divergence"].includes(token)) {
+    if (["--include-global", "--include-plugin-cache", "--json", "--fail-on-external-divergence", "--require-approval", "--human-verified"].includes(token)) {
       args[token.slice(2).replace(/-([a-z])/gu, (_match, letter) => letter.toUpperCase())] = true;
       continue;
     }
-    if (["--project-dir", "--profile", "--declared-skill"].includes(token)) {
+    if (["--project-dir", "--profile", "--declared-skill", "--approve", "--reviewer"].includes(token)) {
       const value = argv[index + 1];
       if (!value || value.startsWith("--")) throw new Error(`${token} requires a value`);
       if (token === "--declared-skill") args.declaredSkillIds.push(value);
+      else if (token === "--approve") args.approve = value;
+      else if (token === "--reviewer") args.reviewer = value;
       else args[token === "--profile" ? "profileId" : "projectDir"] = value;
       index += 1;
       continue;
@@ -49,6 +51,7 @@ function printHumanReport(report) {
   process.stdout.write(`External divergent hashes: ${report.analysis.externalDivergentHashes.length}\n`);
   process.stdout.write(`Exact mirrors (incl. shipped depth-rewrite copies): ${report.analysis.exactMirrors.length}\n`);
   process.stdout.write(`Same generic name across explicit scopes: ${report.analysis.crossScopeSameNames.length}\n`);
+  process.stdout.write(`Production skills without a human approval bound to the current version/SHA: ${report.analysis.unapprovedProductionSkills.length}\n`);
   if (report.profile) {
     const allowedSkills = report.profile.skills.filter((entry) => entry.allowed).length;
     const allowedPlugins = report.profile.plugins.filter((entry) => entry.allowed).length;
@@ -83,6 +86,12 @@ function printHumanReport(report) {
       process.stdout.write(`  - ${entry.installRoot} (version ${entry.version}, bundled ${entry.bundledVersion})\n`);
     });
   }
+  if (report.analysis.unapprovedProductionSkills.length > 0) {
+    process.stdout.write("\nUnapproved production skills (record a human approval with --approve <id> --reviewer <name> --human-verified from that person's terminal):\n");
+    report.analysis.unapprovedProductionSkills.forEach((entry) => {
+      process.stdout.write(`  - ${entry.id} ${entry.version} (${entry.approvalState})\n`);
+    });
+  }
   if (report.analysis.externalDivergentHashes.length > 0) {
     process.stdout.write("\nExternal differences (read-only observation; not a BuzzAssist project collision):\n");
     report.analysis.externalDivergentHashes.forEach((entry) => {
@@ -91,8 +100,19 @@ function printHumanReport(report) {
   }
 }
 
-export async function runSkillInventoryCli(argv = process.argv.slice(2)) {
+export async function runSkillInventoryCli(argv = process.argv.slice(2), options = {}) {
   const args = parseArgs(argv);
+  if (args.approve) {
+    const result = await recordSkillApproval({
+      projectDir: resolve(args.projectDir || process.cwd()),
+      skillId: args.approve,
+      reviewer: args.reviewer,
+      humanVerified: Boolean(args.humanVerified),
+      isInteractive: options.isInteractive ?? process.stdin.isTTY === true,
+    });
+    process.stdout.write(`${result.skillId} ${result.approval.version} を人の承認として記録しました（reviewer: ${result.approval.reviewer}、SHA ${result.approval.contentSha256.slice(7, 19)}）\n`);
+    return result;
+  }
   const report = await buildSkillInventory({
     projectDir: resolve(args.projectDir || process.cwd()),
     includeGlobal: Boolean(args.includeGlobal),
@@ -104,6 +124,7 @@ export async function runSkillInventoryCli(argv = process.argv.slice(2)) {
   else printHumanReport(report);
   if (!report.analysis.ok) process.exitCode = 2;
   if (args.failOnExternalDivergence && (report.analysis.externalDivergentHashes.length > 0 || !report.analysis.hostSyncOk)) process.exitCode = 3;
+  if (args.requireApproval && report.analysis.unapprovedProductionSkills.length > 0) process.exitCode = 4;
   return report;
 }
 
