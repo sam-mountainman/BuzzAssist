@@ -209,15 +209,17 @@ test("two-stage slots give the same artifacts and verdicts as the serial run, an
   // 重なったことは上の overlapSeen で確かめている。壁時計の比較は、タイマーの粒度が粗い Windows の CI
   // （setTimeout が 15ms 刻み）では差が出ない回があった（2026-09-25、serial=636ms overlapped=628ms）。
   // Windows では記録だけにし、ほかの OS では短くなることまで見る。
-  const shorter = runs.overlapped.elapsedMs < runs.serial.elapsedMs * 0.85;
-  const timingNote = `重ねた回が直列より短い（serial=${runs.serial.elapsedMs}ms overlapped=${runs.overlapped.elapsedMs}ms）`;
-  // CI の共有ランナーでも壁時計はぶれる（macOS の Node 22 で落ちた、2026-09-25）。CI では記録だけにする。
-  if (process.platform === "win32" || process.env.CI) {
-    if (!shorter) t.diagnostic(`${timingNote}: タイマーの粒度か共有ランナーの負荷で差が出なかった`);
-  } else {
-    assert.ok(shorter, timingNote);
+  // CI の共有ランナーでも壁時計はぶれる（macOS の Node 20・22 で落ちた、2026-09-25）。CI と Windows では記録だけにする。
+  const relaxTiming = process.platform === "win32" || Boolean(process.env.CI);
+  for (const [label, elapsedMs] of [["重ねた回", runs.overlapped.elapsedMs], ["並列の回", runs.parallel.elapsedMs]]) {
+    const shorter = elapsedMs < runs.serial.elapsedMs * 0.85;
+    const timingNote = `${label}が直列より短い（serial=${runs.serial.elapsedMs}ms ${label}=${elapsedMs}ms）`;
+    if (relaxTiming) {
+      if (!shorter) t.diagnostic(`${timingNote}: タイマーの粒度か共有ランナーの負荷で差が出なかった`);
+    } else {
+      assert.ok(shorter, timingNote);
+    }
   }
-  assert.ok(runs.parallel.elapsedMs < runs.serial.elapsedMs * 0.85);
 });
 
 test("generation stays within the smaller of the machine-wide paid-image slots and the channel limit", async () => {
