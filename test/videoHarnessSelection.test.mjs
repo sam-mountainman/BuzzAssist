@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { analyzeHarnessRequest, loadHarnesses } from "../scripts/harness-registry.mjs";
-import { selectVideoHarness, VIDEO_HARNESS_CHOICE_REQUIRED_CODE } from "../lib/videoHarnessJob.mjs";
+import {
+  decideVideoHarness,
+  selectVideoHarness,
+  VIDEO_HARNESS_CHOICE_REQUIRED_CODE,
+  VIDEO_HARNESS_NO_MATCH_CODE,
+  VIDEO_HARNESS_UNKNOWN_CODE,
+} from "../lib/videoHarnessJob.mjs";
 
 // 依頼文からハーネスを選ぶとき、否定の節（〜は使わず、〜ではなく、〜なし、〜じゃなくて、
 // not / without）の中の語まで加点していた。「漫画、固定キャスト、吹き出しは使わず、朗読動画に
@@ -79,6 +85,33 @@ test("既存の選択結果は変わらない", () => {
   assert.equal(selectVideoHarness({ harnesses, want: "感動する実話の朗読" }).harness.id, "narrated-story-video");
   // 「昔ばなし」「お話し」は否定の「なし」ではない。
   assert.equal(selectVideoHarness({ harnesses, want: "昔ばなしの朗読" }).harness.id, "narrated-story-video");
+});
+
+test("判定は例外を投げない decideVideoHarness にあり、start と plan-request が同じ判定を使う", () => {
+  const selected = decideVideoHarness({ harnesses, want: "漫画の動画が作りたい" });
+  assert.equal(selected.status, "selected");
+  assert.equal(selected.harness.id, "koya-manga-video");
+  assert.equal(selected.rows.length, harnesses.length, "全ハーネスの解析結果を返す（理由を並べるため）");
+
+  const tied = decideVideoHarness({ harnesses, want: "漫画の朗読動画にしたい" });
+  assert.equal(tied.status, "choice-required");
+  assert.equal(tied.reasonCode, "tied-top-score");
+  assert.deepEqual(tied.choiceRows.map((row) => row.harness.id).sort(), ["koya-manga-video", "narrated-story-video"]);
+  assert.equal(decideVideoHarness({ harnesses, want: "漫画は使わない" }).reasonCode, "only-negated-terms");
+  assert.equal(decideVideoHarness({ harnesses, want: "漫画と朗読の両方の良さを持つ動画にしたい" }).status, "choice-required");
+
+  assert.equal(decideVideoHarness({ harnesses, want: "料理のレシピを書いて" }).status, "no-match");
+  assert.equal(decideVideoHarness({ harnesses, harnessId: "no-such-harness" }).status, "unknown-harness");
+  const explicit = decideVideoHarness({ harnesses, harnessId: "narrated-story-video", want: "漫画" });
+  assert.equal(explicit.status, "selected");
+  assert.equal(explicit.selectedBy, "explicit", "明示 ID は依頼文より優先");
+
+  // 例外に言い換えるときは理由コードを付ける（以前は一致なし・未知の ID にコードが無かった）。
+  assert.throws(() => selectVideoHarness({ harnesses, want: "料理のレシピを書いて" }), (error) => error.code === VIDEO_HARNESS_NO_MATCH_CODE);
+  assert.throws(
+    () => selectVideoHarness({ harnesses, harnessId: "no-such-harness" }),
+    (error) => error.code === VIDEO_HARNESS_UNKNOWN_CODE && /未知のハーネス/u.test(error.message),
+  );
 });
 
 test("解析結果は肯定・否定の語を分けて返す", () => {
