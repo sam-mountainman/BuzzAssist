@@ -46,6 +46,12 @@ function usage() {
     "  script-review / produce / rerender / post-publish / research）と戦略の作業フォルダのブリーフの状態から、次の工程の推奨と",
     "  代案（workflow）を返す。種類を決めきれなければ1問を返す（答えは --request-kind）。戦略スキルは実行しない。",
     "start  --harness ID --script-path FILE --channel-pack BUNDLE [--strategy-brief FILE] [--script-quality-work-dir DIR] [--confirmed] [--reviewer-trust-path JSON] [--host-model ID]",
+    "start  --channel ID --script-path FILE [--strategy-brief FILE] [--script-quality-work-dir DIR] [--confirmed] ...",
+    "  --channel: 作業フォルダ・署名済み Channel Pack・ハーネスをチャンネルの台帳から決める（--project-dir / --channel-pack /",
+    "  --harness を渡すと台帳と照合し、違えば channel-input-conflict）。台帳の strategy.requireBrief が true なら、合格した",
+    "  --strategy-brief（verdict が pass）が無ければ有料の処理の前・Job を作る前に止める（channel-strategy-brief-required /",
+    "  channel-strategy-brief-not-passed。plan-request が推奨する工程を添える）。外部の制作のチャンネルは start しない",
+    "  （channel-production-external）。--channel が無くても Pack・作業フォルダが台帳のチャンネルに当たれば同じ関門を通る。",
     "",
     "--script-quality-work-dir DIR（start。任意）: 台本の品質ループ（node scripts/script-quality-loop.mjs）の作業フォルダ。",
     "  省くと --script-path のあるフォルダ（台本スキルが script.md・script-package.json を出すフォルダで、ループの状態と",
@@ -57,7 +63,9 @@ function usage() {
     "--strategy-brief FILE（plan-request / start。任意）: 企画ブリーフ（buzzassist-strategy-brief-v1）。plan-request は",
     "  node scripts/strategy-brief.mjs verdict の合否と根拠の状態を理由に出し、start はブリーフの SHA-256 を",
     "  options.strategyBriefSha256 に残す（Job の識別子に入る。MCP では options.strategyBriefSha256 を渡す）。",
-    "  今は必須ではなく、合否で止めない（未合格・根拠の取り直しが要ることは結果の strategyBrief に出る）。",
+    "  必須にするかはチャンネルの台帳の strategy.requireBrief で決まる（台帳のチャンネルでなければ合否で止めない）。",
+    "  ブリーフのファイルの場所は Job の metadata に残り、resume は start のときの SHA と今のファイルの SHA を比べて、",
+    "  違えば strategy-brief-changed-since-start（無ければ strategy-brief-missing-at-resume）で止める（新しい Job として start する）。",
     "resume --job-id ID --project-dir DIR --confirmed [--reviewer-trust-path JSON] [--retry-failed-images] [--host-model ID]",
     "status --job-id ID --project-dir DIR",
     "cancel --job-id ID --project-dir DIR",
@@ -190,10 +198,16 @@ async function main() {
     }
     case "start": {
       if (!args.scriptPath) throw new Error("start には --script-path が要る。");
-      if (!args.channelPack) throw new Error("本番上位Jobには署名済み --channel-pack が要る。");
-      const { options, strategyBrief } = await strategyBriefStartOptions(args, await optionsFrom(args));
+      if (args.channel === true) throw new Error("--channel にはチャンネルの台帳の id が要る。");
+      const channelId = typeof args.channel === "string" ? args.channel : "";
+      // --channel なら作業フォルダ・Pack・ハーネスは台帳から決まる（渡せば台帳と照合する）。
+      if (!args.channelPack && !channelId) throw new Error("本番上位Jobには署名済み --channel-pack（または --channel）が要る。");
+      if (args.strategyBrief === true) throw new Error("--strategy-brief には企画ブリーフのファイルの path が要る。");
+      const { options, strategyBrief } = channelId
+        ? { options: await optionsFrom(args), strategyBrief: null }
+        : await strategyBriefStartOptions(args, await optionsFrom(args));
       const result = await videoHarnessService.start({
-        projectDir,
+        projectDir: channelId && typeof args.projectDir !== "string" ? undefined : projectDir,
         scriptPath: resolve(args.scriptPath),
         harnessId: typeof args.harness === "string" ? args.harness : "",
         want: typeof args.want === "string" ? args.want : "",
@@ -202,6 +216,8 @@ async function main() {
         confirmed: args.confirmed === true,
         reviewerTrustPath: reviewerTrustPathFrom(args),
         invocation: cliHostInvocation(args),
+        channelId,
+        strategyBriefPath: typeof args.strategyBrief === "string" ? resolve(args.strategyBrief) : "",
       });
       print(strategyBrief ? { ...result, strategyBrief } : result);
       if (result.execution.started && result.status !== "completed") {
