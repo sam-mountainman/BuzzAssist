@@ -284,6 +284,9 @@ BuzzAssistを次の3層に固定する。
 - [ ] BuzzAssist固有Skillの本文を日本語正本にする
 - [ ] `buzzassist:skill-creator`を管理・curation用の共通正本として設計する
 - [ ] 端末にある4系統の`skill-creator`を比較し、Codex内蔵版は変更せず、曖昧なgeneric名の競合を解消する
+  - 2026-09-25 比較済み（`docs/skill-inventory-profiles-ja.md`の「同名 Skill の棚卸し」）。BuzzAssist 正本は
+    `buzzassist:`で区別でき名前の変更は不要。残る競合は端末全体の汎用版同士で、端末側の整理が要る（未実施）。
+    `.codex/skills`のアダプターは Codex では重複になるだけなので外す提案（未実施）
 - [ ] 機械置換で壊れた`Codex -p` / `Codex.ai`等の記述を原典と照合して直す
 - [ ] `skill-creator`は削除せず、運営者の動画生成hot pathから管理権限だけ分離する
 - [ ] profileを最低3つに分ける
