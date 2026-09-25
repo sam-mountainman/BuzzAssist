@@ -513,7 +513,22 @@ test("公式経路: 運営者の画を取り込み、画の有料 Media Job は0
   const projectCanvas = (current) => projectVideoHarnessJob(current, {
     feedbackCollector: async () => ({ version: "buzzassist-canvas-feedback-collection-v1", ok: true, operation: "collect-feedback", jobId: current.id, captured: 0 }),
   });
-  const runOuter = () => runVideoHarnessJob({ projectDir: project, jobId: planned.job.id, prepare, doctor, adapter: outerAdapter, projectCanvas, validateProductionProfile });
+  // 外側の Job は、計画のときの canonical identity（lib/・scripts/ の全ファイル・Skill・宣言などの SHA）と
+  // 今の checkout を毎回比べ、違えば adapter を呼ばずに blocked-preflight で返る。以前はその回の結果を
+  // 確かめずに前の回の coreOutcome を読んでいたので、試験の途中で別の作業が同じ checkout の scripts/ を
+  // 書き換えると、「署名済みレビューが保留のまま」という別の失敗に見えた（重い並列の中で1度だけ落ちた件。
+  // 署名の後に scripts/ へファイルを1つ置くと、同じ理由コードで毎回再現した）。回ごとに結果を空にし、
+  // adapter が走らなかったら外側の Job の状態と理由をそのまま出す。
+  const runOuter = async () => {
+    coreOutcome = null;
+    const outer = await runVideoHarnessJob({ projectDir: project, jobId: planned.job.id, prepare, doctor, adapter: outerAdapter, projectCanvas, validateProductionProfile });
+    assert.ok(
+      coreOutcome,
+      `外側の Job が adapter を呼ばずに ${outer.status} で返った: ${JSON.stringify(outer.blockers || [])} ${JSON.stringify(outer.knownRemainingIssues || [])}`
+      + "（canonical-identity-drift なら、試験の途中でこの checkout の lib/・scripts/・Skill・宣言が書き換わっている）",
+    );
+    return outer;
+  };
 
   // 1回目: 画と設定画のループは合格している。声を作った後、声のテイクのループの合格を待って、描かずに止まる。
   const loopStopOuter = await runOuter();
