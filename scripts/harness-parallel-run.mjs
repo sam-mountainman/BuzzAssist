@@ -23,6 +23,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
+import {
+  MACHINE_SLOT_POOLS,
+  machineSlotLeaseEnv,
+  releaseMachineSlot,
+  tryAcquireMachineSlot,
+} from "../lib/machineSlots.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -185,6 +191,18 @@ export function validatePlan(plan) {
     if (job.locks !== undefined && !Array.isArray(job.locks)) {
       errors.push(`${id}: locks は配列にしてください`);
     }
+    // 端末全体の枠（lib/machineSlots.mjs）。有料 API の呼び出しと同じ枠を数える。
+    if (job.slots !== undefined) {
+      if (!Array.isArray(job.slots)) {
+        errors.push(`${id}: slots は配列にしてください（例: ["paid-speech"]）`);
+      } else {
+        for (const pool of job.slots) {
+          if (!Object.hasOwn(MACHINE_SLOT_POOLS, pool)) {
+            errors.push(`${id}: slots に未知の枠 ${pool} があります（使えるのは ${Object.keys(MACHINE_SLOT_POOLS).join(", ")}）`);
+          }
+        }
+      }
+    }
   }
 
   for (const job of jobs) {
@@ -244,6 +262,7 @@ const HEARTBEAT_STALE_MS = 5 * 60_000;
 // のに書き込みは続く——最悪の形。木ごと止めてからロックを外す。
 const liveChildren = new Set();
 const heldLockHandles = new Set();
+const heldSlotHandles = new Set();
 let interrupted = false;
 
 function lockDirFor(key) {
@@ -334,7 +353,7 @@ function normalizeLocks(job, baseDir) {
 // 書けてしまい、`a` と `b/../a` が同じログを上書きして証跡が混ざる。
 const SAFE_JOB_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 
-async function runJob(job, { logDir, defaults, dryRun, planStartedAt }) {
+async function runJob(job, { logDir, defaults, dryRun, planStartedAt, slotHandles = [] }) {
   const cwd = path.resolve(job.cwd ?? defaults.cwd ?? REPO_ROOT);
   const args = job.args ?? [];
   const startedAt = Date.now();
@@ -365,7 +384,8 @@ async function runJob(job, { logDir, defaults, dryRun, planStartedAt }) {
     }
     const child = spawn(job.command, args, {
       cwd,
-      env: { ...process.env, ...(defaults.env ?? {}), ...(job.env ?? {}) },
+      // ジョブのために取った枠は子へ渡す（子の中の有料呼び出しはまずそれを使う）。
+      env: { ...process.env, ...(defaults.env ?? {}), ...(job.env ?? {}), ...machineSlotLeaseEnv(slotHandles) },
       stdio: ["ignore", "pipe", "pipe"],
       // 独立したプロセスグループで起動する。こうしないと、タイムアウトで
       // 子だけを殺しても孫（codex exec や ffmpeg が産むもの）が生き残り、
@@ -436,6 +456,7 @@ async function runJob(job, { logDir, defaults, dryRun, planStartedAt }) {
     cwd,
     needs: job.needs ?? [],
     locks: job.locks ?? [],
+    slots: job.slots ?? [],
     envKeys: Object.keys(job.env ?? {}),
     timeoutMs: job.timeoutMs ?? null,
     expectExitCode: expected,
@@ -476,7 +497,9 @@ export async function shutdownRunner(signal) {
   }
   for (const handle of heldLockHandles) releaseCrossProcessLock(handle);
   heldLockHandles.clear();
-  process.stderr.write("ロックを外しました。\n");
+  for (const handle of heldSlotHandles) releaseMachineSlot(handle);
+  heldSlotHandles.clear();
+  process.stderr.write("ロックと端末全体の枠を外しました。\n");
 }
 
 export async function executePlan(plan, options = {}) {
@@ -555,9 +578,28 @@ export async function executePlan(plan, options = {}) {
         }
       }
 
+      // 端末全体の枠。別のセッションの有料生成（broker・画像生成）と同じ枠を数える。
+      // 取れなければロックも返して、次の周回でやり直す（全部か何も取らないか）。
+      const slotHandles = [];
+      if (!dryRun && (job.slots ?? []).length > 0) {
+        let slotBlocked = false;
+        for (const pool of job.slots) {
+          const handle = tryAcquireMachineSlot(pool, { label: `harness-parallel-run ${plan.planId ?? ""}:${id}` });
+          if (!handle) { slotBlocked = true; break; }
+          slotHandles.push(handle);
+          heldSlotHandles.add(handle);
+        }
+        if (slotBlocked) {
+          for (const handle of slotHandles) { releaseMachineSlot(handle); heldSlotHandles.delete(handle); }
+          for (const handle of acquired) { releaseCrossProcessLock(handle); heldLockHandles.delete(handle); }
+          blockedByExternalLock = true;
+          continue;
+        }
+      }
+
       for (const lock of locks) heldLocks.add(lock);
       pending.delete(id);
-      const task = runJob(job, { logDir, defaults, dryRun, planStartedAt: startedAt })
+      const task = runJob(job, { logDir, defaults, dryRun, planStartedAt: startedAt, slotHandles })
         .catch((error) => ({
           // spawn 前の失敗（cwd が不正など）もジョブ1件の失敗として扱う。
           // 例外のまま投げると計画全体が落ちて証跡が残らない。
@@ -575,6 +617,7 @@ export async function executePlan(plan, options = {}) {
         .finally(() => {
           for (const lock of locks) heldLocks.delete(lock);
           for (const handle of acquired) { releaseCrossProcessLock(handle); heldLockHandles.delete(handle); }
+          for (const handle of slotHandles) { releaseMachineSlot(handle); heldSlotHandles.delete(handle); }
           running.delete(task);
         });
       running.add(task);
@@ -647,6 +690,11 @@ function printHelp() {
 
   locks に同じパスを書いたジョブは同時に走りません。needs の依存が
   失敗した場合そのジョブは skipped になり、終了コードは非0になります。
+
+  "slots": ["paid-speech"] / ["paid-image"] を書いたジョブは、端末全体の枠
+  （~/.buzzassist/locks/slots/。BUZZASSIST_STATE_DIR で変更可）が空くまで待ちます。
+  別のセッションの有料の音声・画像生成と同じ枠を数え、取った枠は子へ渡します
+  （上限は BUZZASSIST_MACHINE_SLOTS_PAID_SPEECH / _PAID_IMAGE、既定 4 / 16）。
 `);
 }
 
