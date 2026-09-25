@@ -228,6 +228,10 @@ OSのクリップボードやGUI自動操作を主要経路にしない。
   決着しなければ `paid-media-recovery-pending` で止まり、送り直さない。課金されていない失敗は自動で
   送り直す。課金された画像の失敗は `resume --retry-failed-images` のときだけ作り直し、回数が台帳と
   Receipt に残る（それ以外の課金された失敗は `paid-media-failed-charged` で止まる）。
+- Windows では、字幕の頁と OP を配置の root から 89 字深い作業フォルダ（`.media/narrated-story-video/<Job>/render/`
+  の `subtitles`・`bookends`）で描く。root + 89 字が 238 字を越えると子の ffmpeg を起動できないので、有料の処理の前に
+  `windows-work-path-too-long` で止まる（plan-only の preflight と doctor の `windows-work-path` も同じ判定）。
+  配置の root とプロジェクトのフォルダを短い場所へ移し、Job を作り直す。
 - 走っていないgate、fixture fallback、別出力へ結び付いたsignoffをpassにしない。
 
 ## 独立 signoff の署名
