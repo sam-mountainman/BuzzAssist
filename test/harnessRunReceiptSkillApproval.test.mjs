@@ -43,16 +43,16 @@ function receiptWith(skillApproval) {
 }
 
 test("承認前の正本スキルで作った事実を、スキルの id・版・sha256 で残し、改変を digest で検出する", () => {
-  assert.equal(RUN_RECEIPT_SCHEMA_REVISION, 4);
+  assert.ok(RUN_RECEIPT_SCHEMA_REVISION >= 4, "skillApproval は版 4 から");
   assert.equal(RUN_RECEIPT_SKILL_APPROVAL_IN_FORCE_SINCE, 4);
   const receipt = receiptWith(profileRecord());
-  assert.equal(receipt.schemaRevision, 4);
+  assert.equal(receipt.schemaRevision, RUN_RECEIPT_SCHEMA_REVISION);
   assert.equal(receipt.skillApproval.version, RUN_RECEIPT_SKILL_APPROVAL_VERSION);
   assert.equal(receipt.skillApproval.recorded, true);
   assert.equal(receipt.skillApproval.checkout, "development");
   assert.equal(receipt.skillApproval.builtWithUnapprovedSkills, true);
   assert.deepEqual(receipt.skillApproval.unapprovedSkills.map((row) => row.id), ["buzzassist:sample-craft", "buzzassist:sample-genre"], "id 順に並べる");
-  assert.deepEqual(verifyRunReceiptSkillApproval(receipt), { ok: true, status: "recorded", revision: 4, failures: [] });
+  assert.deepEqual(verifyRunReceiptSkillApproval(receipt), { ok: true, status: "recorded", revision: RUN_RECEIPT_SCHEMA_REVISION, failures: [] });
   // 承認前の正本で作っても、Receipt の合否は変えない（止めずに記録する）。
   assert.equal(receipt.outcome, "pass");
   // 承認の状態は入力の digest に入れない（同じ入力・同じ Job の記録が承認で別物にならない）。
@@ -86,7 +86,7 @@ test("承認済みの写し・記録を渡されなかった Receipt・形の崩
     { recorded: unprovided.skillApproval.recorded, checkout: unprovided.skillApproval.checkout, built: unprovided.skillApproval.builtWithUnapprovedSkills },
     { recorded: false, checkout: "", built: null },
   );
-  assert.deepEqual(verifyRunReceiptSkillApproval(unprovided), { ok: true, status: "unrecorded", revision: 4, failures: [] });
+  assert.deepEqual(verifyRunReceiptSkillApproval(unprovided), { ok: true, status: "unrecorded", revision: RUN_RECEIPT_SCHEMA_REVISION, failures: [] });
   assert.equal(redactForPlatform(unprovided).skillApproval.recorded, false);
 
   // builtWithUnapprovedSkills の申告は信じず、未承認のスキルの列から導く。

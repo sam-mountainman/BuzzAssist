@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -23,10 +23,11 @@ import {
 } from "../lib/videoHarnessJob.mjs";
 import { projectVideoHarnessJob } from "../lib/videoHarnessCanvasAdapter.mjs";
 import { createVideoHarnessRunReceipt } from "../lib/videoHarnessReceipt.mjs";
-import { RUN_RECEIPT_SCHEMA_REVISION, verifyRunReceiptInvocation } from "../lib/harnessRunReceipt.mjs";
+import { RUN_RECEIPT_SCHEMA_REVISION, verifyRunReceiptCodeIdentity, verifyRunReceiptInvocation } from "../lib/harnessRunReceipt.mjs";
 import { resolveCanvasRunStateFile } from "../lib/canvasRunState.mjs";
 import { createKoyaOuterJobBinding } from "../lib/koyaOuterJobBinding.mjs";
-import { stableJson } from "../lib/koyaMangaProductionContract.mjs";
+import { koyaContractDigest, stableJson } from "../lib/koyaMangaProductionContract.mjs";
+import { appendFinalizeRun, nextCodeIdentityRebind } from "../lib/videoHarnessUpdateFinalize.mjs";
 import {
   KOYA_REVIEWER_TRUST_JSON_ENV,
   KOYA_REVIEWER_TRUST_VERSION,
@@ -1570,5 +1571,99 @@ test("漫画: Job に固定した制作契約（v53〜v56）の必須監査で�
         await rm(root, { recursive: true, force: true });
       }
     });
+  }
+});
+
+// ---------------------------------------------------------------------------------------------
+// 更新をまたいで確定させる Job（resume --finalize-after-update）。Job 層がコードの同一性を今のコードへ付け替え、
+// 計画時の値を codeIdentityRebind に残す。共通 Receipt は計画時の宣言・Job に固定した契約の版で測り、
+// 新しい版の必須監査を後から求めない。更新をまたいだ事実は codeIdentity 欄に残る。
+// ---------------------------------------------------------------------------------------------
+
+function reboundJob(baseJob, plannedCanonicalIdentity, { pinnedProductionContract = null } = {}) {
+  const planned = { ...baseJob, canonicalIdentity: plannedCanonicalIdentity };
+  const rebind = appendFinalizeRun(nextCodeIdentityRebind(planned, {
+    currentCanonicalIdentity: baseJob.canonicalIdentity,
+    inputIdentityDigest: "7".repeat(64),
+    pinnedProductionContract,
+    at: "2026-09-26T00:00:00.000Z",
+  }), { at: "2026-09-26T00:10:00.000Z", refusedPaidCalls: 0, mediaJobs: { reused: 1, recovered: 0, reissued: 0, issued: 0, carried: 0 } });
+  return { ...baseJob, codeIdentityRebind: rebind };
+}
+
+test("更新をまたいで確定した narrated Job は計画時の宣言で測り、今の宣言の版の監査を後から求めず、その事実を Receipt に残す", async () => {
+  const root = await mkdtemp(join(tmpdir(), "video-receipt-finalize-after-update-"));
+  try {
+    const currentDeclarationSha256 = sha256(await readFile(NARRATED_DECLARATION_PATH));
+    const v7 = await pastNarratedAudits(`${NARRATED_SERIES}-v7`);
+    const outcome = await completedFixture(root, {
+      checks: onlyChecks(v7),
+      includeRequiredAuditIds: false,
+      reportOverrides: { contractVersion: `${NARRATED_SERIES}-v7` },
+    });
+    // 今の宣言へ付け替えた Job（計画は古い宣言）。付け替えを知らない測り方だと v8 へ引き上げて落ちる。
+    const current = plannedJob(root, currentDeclarationSha256);
+    const job = reboundJob(current, { harnessDeclaration: { path: NARRATED_DECLARATION_PATH, sha256: OLDER_DECLARATION_SHA } });
+    await assert.rejects(createVideoHarnessRunReceipt({ job: current, outcome }), /共通RunReceiptがpassにならなかった/u);
+    const result = await createVideoHarnessRunReceipt({ job, outcome, now: () => "2026-09-26T00:20:00.000Z" });
+    assert.equal(result.receipt.outcome, "pass", JSON.stringify(result.receipt.summary));
+    assert.deepEqual(result.receipt.summary.notInForceGates, ["script-quality-accepted"], "計画時の版に無かった保証は対象外");
+    const section = result.receipt.codeIdentity;
+    assert.equal(section.crossedUpdate, true);
+    assert.equal(section.planned.harnessDeclarationSha256, OLDER_DECLARATION_SHA);
+    assert.equal(section.finalized.harnessDeclarationSha256, currentDeclarationSha256);
+    assert.equal(section.reuseOnly.refusedPaidCalls, 0);
+    assert.equal(section.reuseOnly.lastRun.mediaJobs.reused, 1);
+    assert.equal(verifyRunReceiptCodeIdentity(result.receipt).ok, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("漫画: 更新でリポジトリの契約が上がっても、付け替えた Job は固定した契約の写しの必須監査で確定し、写しが変われば確定しない", async () => {
+  const root = await mkdtemp(join(tmpdir(), "video-koya-finalize-after-update-"));
+  try {
+    const current = JSON.parse(await readFile(join(process.cwd(), "config/koya-manga-production-contract.json"), "utf8"));
+    const past = JSON.parse(await readFile(fileURLToPath(new URL("./fixtures/koya-past-contract-audits.json", import.meta.url)), "utf8"));
+    const v55 = structuredClone(current);
+    v55.version = "koya-manga-production-v55";
+    delete v55.scriptQualityGate;
+    v55.requiredAudits = [...past.contracts.find((entry) => entry.version === "koya-manga-production-v55").requiredAudits];
+    const contractPath = join(root, "koya-contract.json");
+    await writeFile(contractPath, `${JSON.stringify(v55, null, 2)}\n`);
+    const fixture = await completedKoyaOuterFixture(root, { contractPath });
+    assert.equal(fixture.job.resolvedProductionContract.contractVersion, "koya-manga-production-v55");
+
+    // 更新: 同じ場所の契約が今の版（v56）に変わる。付け替えを知らない Job は確定できない（今までどおり）。
+    await writeFile(contractPath, `${JSON.stringify(current, null, 2)}\n`);
+    await assert.rejects(createVideoHarnessRunReceipt({ job: fixture.job, outcome: fixture.outcome }), /解決済み制作契約/u);
+
+    const pinnedPath = join(root, "finalize-after-update", "pinned-production-contract.json");
+    await mkdir(dirname(pinnedPath), { recursive: true });
+    await writeFile(pinnedPath, `${JSON.stringify(v55, null, 2)}\n`);
+    const pinnedProductionContract = {
+      path: pinnedPath,
+      sha256: sha256(await readFile(pinnedPath)),
+      contractVersion: v55.version,
+      contractDigest: koyaContractDigest(v55),
+      source: "job-pinned-at-doctor",
+    };
+    // 計画は古いコード（0.1.26）、確定は今のコード（0.1.28）。要約に要る欄だけを合成で持たせる。
+    const currentJob = { ...fixture.job, canonicalIdentity: { core: { version: "0.1.28", sha256: "8".repeat(64) } } };
+    const plannedCanonicalIdentity = { core: { version: "0.1.26", sha256: "6".repeat(64) } };
+    const job = reboundJob(currentJob, plannedCanonicalIdentity, { pinnedProductionContract });
+    const result = await createVideoHarnessRunReceipt({ job, outcome: fixture.outcome });
+    assert.equal(result.receipt.outcome, "pass", JSON.stringify(result.receipt.summary));
+    assert.deepEqual(result.receipt.summary.notInForceGates, ["script-quality-accepted"], "v56 で足した台本の関門を後から求めない");
+    assert.equal(result.receipt.codeIdentity.crossedUpdate, true);
+    assert.equal(result.receipt.codeIdentity.pinnedProductionContract.contractVersion, "koya-manga-production-v55");
+    assert.equal(result.receipt.codeIdentity.planned.coreVersion, "0.1.26");
+    assert.equal(result.receipt.codeIdentity.finalized.coreVersion, "0.1.28");
+
+    // 固定した写しが付け替えの後に変わったら確定しない。
+    await writeFile(pinnedPath, `${JSON.stringify({ ...v55, description: "changed" }, null, 2)}\n`);
+    await assert.rejects(createVideoHarnessRunReceipt({ job, outcome: fixture.outcome }), /固定した制作契約の写し/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });
