@@ -251,7 +251,18 @@ function Install-BuzzAssist {
   if (-not $homeDir) { Stop-Install "USERPROFILE が設定されていません。" }
   $toolsDir = if ($env:BUZZASSIST_TOOLS_DIR) { $env:BUZZASSIST_TOOLS_DIR } else { Join-Path $homeDir ".buzzassist\tools" }
   $appRoot = if ($env:BUZZASSIST_APP_DIR) { $env:BUZZASSIST_APP_DIR } else { Join-Path $homeDir ".buzzassist\app" }
-  $project = if ($ProjectDir) { $ProjectDir } elseif ($env:BUZZASSIST_PROJECT_DIR) { $env:BUZZASSIST_PROJECT_DIR } else { Join-Path $homeDir "BuzzAssist" }
+  # 作業フォルダの既定: 既に使っている端末では、自動更新の設定に記録された作業フォルダを引き継ぐ
+  # （やり直しのためにこのコマンドを打った運営者に、別の空の作業フォルダを作らないため）。
+  $previousProject = ""
+  $updaterConfig = Join-Path $homeDir ".buzzassist\updater\config.json"
+  if (-not $ProjectDir -and -not $env:BUZZASSIST_PROJECT_DIR -and (Test-Path -LiteralPath $updaterConfig)) {
+    try {
+      $recorded = [string]((Get-Content -LiteralPath $updaterConfig -Raw -Encoding UTF8 | ConvertFrom-Json).projectDir)
+      if ($recorded -and (Test-Path -LiteralPath $recorded)) { $previousProject = $recorded }
+    } catch { $previousProject = "" }
+  }
+  $project = if ($ProjectDir) { $ProjectDir } elseif ($env:BUZZASSIST_PROJECT_DIR) { $env:BUZZASSIST_PROJECT_DIR } elseif ($previousProject) { $previousProject } else { Join-Path $homeDir "BuzzAssist" }
+  if ($previousProject -and $project -eq $previousProject) { Write-Host "前回の作業フォルダを引き継ぎます: $project" }
   $requested = if ($Version) { $Version } else { [string]$env:BUZZASSIST_VERSION }
   $passthrough = @($SetupArgs | Where-Object { $_ })
   if ($env:BUZZASSIST_SETUP_ARGS) { $passthrough += ($env:BUZZASSIST_SETUP_ARGS -split "\s+" | Where-Object { $_ }) }

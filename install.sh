@@ -11,7 +11,7 @@
 #      node scripts/setup-agents.mjs --agents <ホスト> を実行する
 #
 # 環境変数（引数でも指定できる）:
-#   BUZZASSIST_PROJECT_DIR  作業フォルダ（既定 ~/BuzzAssist）。--project-dir DIR
+#   BUZZASSIST_PROJECT_DIR  作業フォルダ（既定は、前に設定した端末なら自動更新に記録された作業フォルダ、無ければ ~/BuzzAssist）。--project-dir DIR
 #   BUZZASSIST_VERSION      入れる版（既定は最新の stable Release）。--version X.Y.Z
 # それ以外の引数（--no-launch、--tunnel、--no-install-prerequisites など）は setup-agents にそのまま渡す。
 # 既定では --allow-harness-not-ready を渡し、本番の前提不足は「次にやること」として見せる。
@@ -250,7 +250,7 @@ main() {
   [ -n "$HOME_DIR" ] || fail "HOME が設定されていません。"
   TOOLS_DIR="${BUZZASSIST_TOOLS_DIR:-${HOME_DIR}/.buzzassist/tools}"
   APP_ROOT="${BUZZASSIST_APP_DIR:-${HOME_DIR}/.buzzassist/app}"
-  PROJECT_DIR="${BUZZASSIST_PROJECT_DIR:-${HOME_DIR}/BuzzAssist}"
+  PROJECT_DIR="${BUZZASSIST_PROJECT_DIR:-}"
   REQUESTED_VERSION="${BUZZASSIST_VERSION:-}"
   PASSTHROUGH=()
   REQUIRE_HARNESS_READY="${BUZZASSIST_REQUIRE_HARNESS_READY:-0}"
@@ -273,6 +273,16 @@ main() {
   have tar || fail "tar が見つかりません。"
   detect_platform
   ensure_node
+  # 作業フォルダの既定: 既に使っている端末では、自動更新の設定に記録された作業フォルダを
+  # 引き継ぐ。やり直しのためにこの1行を打った運営者に、別の空の作業フォルダを作らないため。
+  if [ -z "$PROJECT_DIR" ]; then
+    local updater_config="${HOME_DIR}/.buzzassist/updater/config.json"
+    if [ -f "$updater_config" ]; then
+      PROJECT_DIR="$("$NODE_BIN" -e 'try { const v = require(process.argv[1]).projectDir; process.stdout.write(typeof v === "string" ? v : ""); } catch {}' "$updater_config" 2>/dev/null || true)"
+      [ -n "$PROJECT_DIR" ] && [ -d "$PROJECT_DIR" ] && say "前回の作業フォルダを引き継ぎます: ${PROJECT_DIR}" || PROJECT_DIR=""
+    fi
+    [ -n "$PROJECT_DIR" ] || PROJECT_DIR="${HOME_DIR}/BuzzAssist"
+  fi
   resolve_release
   install_release
   detect_hosts
