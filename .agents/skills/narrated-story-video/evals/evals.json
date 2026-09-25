@@ -60,6 +60,26 @@
         "前の回で使っていない reviewer context で --review-path つきの signoff をやり直す",
         "平均が目標に届いても、意味の一致・同一性・声の下限割れがあれば完成と言わない"
       ]
+    },
+    {
+      "id": "narrated-operator-images",
+      "prompt": "本編の画は ChatGPT で全部作ってある。これを使って台本から動画にして。有料の画像生成はしないで。",
+      "shouldTrigger": true,
+      "invariants": [
+        "Pack の image.source が operator-file であることを確かめ、取り込みの記録を start の --operator-image-manifest で渡す",
+        "各画を途中の成果物の品質ループに合格させてから Job を始め、記録の assetLoop に合格した版を書く",
+        "会話の URL を公開面に出さず、broker の画と混在させない"
+      ]
+    },
+    {
+      "id": "narrated-asset-loop-pause",
+      "prompt": "Job が awaiting-human-review で止まった。assetQualityLoop.pending に声のテイクが並んでる。撮り直して先へ進めて。",
+      "shouldTrigger": true,
+      "invariants": [
+        "有料で撮り直さず、pending の対象を別の評価文脈の asset-quality-loop で採点・記録する",
+        "声のテイクは直前の地の文と続けて聞いて採点する",
+        "ループを回してから同じ Job を resume する"
+      ]
     }
   ]
 }

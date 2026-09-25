@@ -22,7 +22,9 @@ node scripts/run-video-harness.mjs start \
   --confirmed
 ```
 
-ホストがMCPを使えるときは同じ入力を`run_video_harness`へ渡す。個別の画像生成、
+ホストがMCPを使えるときは同じ入力を`run_video_harness`へ渡す。`run_video_harness` /
+`resume_video_harness_job` を呼ぶときは、自分のモデル ID が分かれば `hostModel`（CLI は `--host-model`）を
+渡す。分からなければ付けない（推測で埋めない。Job の識別子には入らない）。個別の画像生成、
 Fish Audio、ElevenLabs、字幕、retime、finalize用scriptを手で順番につながない。
 旧版・benchmark・archiveは本番Jobから呼ばない。
 
@@ -40,6 +42,20 @@ Fish Audio、ElevenLabs、字幕、retime、finalize用scriptを手で順番に�
 - API key、秘密鍵、未公開台本本文をChannel PackやRunReceiptへ入れない。
 - 台本はJob固有workspaceへコピーし、SHA-256で拘束する。
 - 台本解析で人間判断が残る場合は、有料生成前にまとめて提示して停止する。
+- `--script-path` は生テキストのほか、台本パッケージ（`script-package.json`、形式
+  `buzzassist-narrated-script-package-v1`、スキーマ `config/narrated-story-script-package.schema.json`）か、
+  Pack の `scriptIntake.markdown` で本編・感想の見出しを宣言した `script.md` を受け取る。見出し・注記は
+  声にしない。宣言の無い Markdown や、見出しらしい行を含む生テキストは推測せずに止まる。
+
+## 配役・読み・BGM
+
+- 地の文は Pack の `voice`、「」内の台詞は台本パッケージの `speakers[].castRole` → Pack の `cast.roles`
+  の声で読む。使えない（blocked）役・宣言の無い役・権利根拠の無い役が台本に出れば、有料生成の前に止まる
+  （宣言の無い役を語りの声で読むのは、Pack が `undeclaredRoles: "narrator"` と明示したときだけ）
+- 字幕の表記と声の読みは、台本パッケージの `readings` で分ける。字幕は台本の表記のまま、声には読みを
+  渡す。音声品質ゲートの CER は声に渡した読みで測る
+- 本編の曲は Pack の `musicPlan` の区分ごとに、台本の各場面へ割り当てる。使う区分の曲が未受領なら、
+  有料生成の前に `music-section-pending` で止まる。感想パートの曲は `bookends.review.music`
 
 ## 制作DAG
 
@@ -76,6 +92,69 @@ Fish Audio、ElevenLabs、字幕、retime、finalize用scriptを手で順番に�
 切れていないこと、宣言した区間に転換が実在すること、転換中に字幕が無いこと、音の二重化や
 クリップが無いことを見る。閾値は基準版と壊した版を同じ測定にかけて決めてある
 （根拠は`lib/narratedStoryBookends.mjs`の各定数）。生成側の「こう作った」を根拠にpassにしない。
+
+## 見た目（字幕・カメラ・感想の配置・回ごとの OP 映像）
+
+見た目の値は全部 Channel Pack の `narrated-story.json` で宣言する。公開 Core はチャンネルの値を持たない。
+
+- `subtitles`: 焼き込み字幕。書体は Pack 内のファイル。字幕の字は台本の表記で、声の読みではない。
+  書体に無い字・1行に入らない語は、有料生成の前に止まる
+- `camera`: 場面の画のゆっくりした寄り引きの型（`slow-push-in` / `slow-pull-out` / `pan-left` /
+  `pan-right` / `static`）と速さ。同じ画の文（話者ごとに分けた場面）は1つの動きで通し、動きを
+  始め直さない。台本パッケージの場面は `camera` で型を指定できる（Pack に無い型は止まる）
+- `bookends.review.layout`: 感想パートの配置（`plain` / `tv-left-presenter-right`）。人物の映像が
+  無ければ人物の枠は空のまま（代わりの人物を描かない）。台本パッケージの感想の文は `layout`・
+  `tvScene`・`captionOnlySeconds`（声を作らず字幕だけを出す文。0.5〜30秒。感想パートの最初の文には
+  使えない）を持てる
+- `bookends.opening.kind: "episode-video"`: 回ごとの OP 映像。OP の動画と感想パートの人物の映像
+  （`presenter.episodeVideo`）は、取り込みの記録（`buzzassist-operator-video-manifest-v1`）を
+  `run-video-harness.mjs start --operator-video-manifest FILE`（MCP / `--options-json` では
+  `options.operatorVideoManifestPath`）で渡す。Job の識別子に入り、plan-only でも検査する
+
+監査契約 v6 から、この4つを完成 MP4 のフレームで測る（`burnedSubtitlesMeasured`・
+`cameraMotionMeasured`・`reviewLayoutMeasured`・`episodeOpeningProvenance`）。字幕は輝度（Y）で測る。
+宣言していない機能は「描いていない」ことを確かめて通る。
+
+## 運営者が用意した画（image.source: operator-file）
+
+本編の画をハーネスの外（運営者の web 画面・Codex・ローカルモデルなど）で作るチャンネルは、Pack の
+`narrated-story.json` で `image.source: "operator-file"` と `image.operatorFile`（`manifest.location:
+"job-option"`・`expectedSize`・`tolerancePx`・`approvedReferences`・`requireAssetLoopPass`）を宣言する。
+
+- 取り込みの記録（`buzzassist-operator-image-manifest-v1`）は `run-video-harness.mjs start
+  --operator-image-manifest FILE`（MCP では `options.operatorImageManifestPath`）で渡す。Job の識別子に入る
+- 全部の場面を記録から取り、broker の画と混在させない。sha256・場面の過不足・使い回しの理由・
+  承認済みの参照・寸法・品質ループの合格のどれかが合わなければ、有料の処理の前に `operator-image-*` で止まる
+- 画の Media Job は作らず、費用は `operator-external-contract` として記録する。会話の URL は私有の
+  Job フォルダにだけ残り、公開面（生成記録・監査・RunReceipt・Canvas）は sha256 だけ
+- 画を差し替えたら、記録の sha256 を直して同じ Job を resume する（声と BGM は払い直さない）
+- 自動監査 `sceneImageProvenance` が、描いた画を Media Job の受領記録か取り込みの記録と照合する
+
+## 途中の成果物の品質ループ（監査契約 v5 から）
+
+本編の画・その参照の人物の設定画・採用する声のテイクは、途中の成果物の品質ループ
+（`node scripts/asset-quality-loop.mjs`、本体 `lib/assetQualityLoop.mjs`）に合格した版でなければ描かない。
+
+- broker の画と声のテイクは、Job の作業フォルダ（`.media/narrated-story-video/<Job>/`）で、場面 id・
+  文 id を対象 id にして回す。作った文脈は `production:<Job>` で、この文脈では採点できない
+- 運営者の画は、取り込みの記録の各行に `assetLoop: { statePath, passedSha256 }` を書き、記録のフォルダで
+  ループを回してから Job を始める。参照は同じフォルダの人物の設定画（character）のループで合格した版で
+  なければ通らない
+- 声の測定は `quality/voice-take-measurements/<文 id>.json` に置かれ、ループの機械ゲートになる。評価者は
+  直前の地の文と続けて聞き、声の連続と台詞だけ浮いていないかを採点する。ループが合格させたテイクを採用する
+- 未合格があれば、描かず BGM も依頼せずに `awaiting-human-review` で止まり、工程・対象 id・理由コードと
+  `assetQualityLoop.pending` を返す。有料の再生成はしない。ループを回してから同じ Job を resume する
+- 確定の前にも、描いた画と採用したテイクが今も合格した版かを照合する
+- 対象が多い回（長い動画の声のテイク・本編の画）は `sheet --batch` / `record --batch` で1つの評価文脈が
+  まとめて採点できる（1回 50 件まで。人の確認は対象ごとに `verify`）
+
+## サムネ
+
+サムネは Job の成果物にも RunReceipt の保証にも入れず、Job の外で作る。計画と検査は
+`node scripts/thumbnail-plan.mjs draft|audit --harness narrated-story-video`（漫画と同じ
+`lib/thumbnailPlan.mjs`）。決まりは署名済み Pack の `narrated-story.json` の `thumbnail` 節に置き、
+節が無い Pack ではサムネを計画しない（チャンネル固有の値を推測で埋めない）。手順・final の条件は
+`references/thumbnail-ja.md` にある。サムネを計画・検査するときに読む。
 
 ## 並列実行
 
@@ -114,6 +193,10 @@ OSのクリップボードやGUI自動操作を主要経路にしない。
 - 不足入力や曖昧なrouteは有料呼び出し前に停止する。
 - 人間の知覚確認が必要なら`awaiting-human-review`として同じJob IDを保持する。
 - 中断、429、通信断、再起動後は共通Job APIからresumeする。
+- 決着していない有料 Media Job（`recovery-required`）は、broker の recover で決着させてから進む。
+  決着しなければ `paid-media-recovery-pending` で止まり、送り直さない。課金されていない失敗は自動で
+  送り直す。課金された画像の失敗は `resume --retry-failed-images` のときだけ作り直し、回数が台帳と
+  Receipt に残る（それ以外の課金された失敗は `paid-media-failed-charged` で止まる）。
 - 走っていないgate、fixture fallback、別出力へ結び付いたsignoffをpassにしない。
 
 ## 独立 signoff の署名
@@ -170,8 +253,14 @@ subject を署名する唯一の経路であり、finalize と RunReceipt は `v
 
 独立 signoff は、承認でも差し戻しでも品質ループの1回になる（中核は `lib/qualityLoop.mjs`、
 このジャンルの評価項目は `lib/narratedStoryQualityLoop.mjs`）。合格は、機械ゲートが全部通り、
-評価項目の加重平均が目標点以上で、どの項目も下限を下回らないこと。台本と画の意味の一致・
-人物の同一性・語りの声は下限 80、ほかは 60。平均が目標に届いても1項目の下限割れは不合格。
+評価項目の加重平均が目標点以上で、どの項目も下限を下回らないこと。平均が目標に届いても1項目の
+下限割れは不合格。
+
+合格点・項目ごとの下限・重みは品質契約（`lib/narratedStoryQualityLoop.mjs`）とループのコードだけが持ち、
+評価者には見せない。評価者として採点するときは、Job の `review.quality` のシート（評価項目の id・名前・
+説明・0〜100 の尺度・契約の digest）だけで採点し、合格点・下限・前の回の点数を探しに行かない
+（見ると採点がそれに寄る）。前の回と同じ所見の評価は `quality-feedback-not-updated` で拒否されるので、
+回ごとに今の MP4 を見て所見を書く。
 
 届かない回は失敗指紋を残して `awaiting-human-review` で止まる（例外にはしない）。次の回には、
 前の回で使っていない `--reviewer-context-id` と、Job の作業領域の `quality/revision-delta.json`
@@ -191,6 +280,10 @@ subject を署名する唯一の経路であり、finalize と RunReceipt は `v
 - 契約に列挙された全gateの実測pass
 - 現在のMP4へ拘束され、信頼リスト上の active な reviewer 鍵で署名された独立contact-sheet signoff
 - 品質ループに合格した回があり、その回の signoff が今の MP4 に結び付いた承認であること（`qualityLoopPassed`）
+- 声と人物の実測 pass（`voiceTakeQuality`・`voiceCastRouting`・`characterIdentityReviewed`）
+- 途中の成果物の品質ループと画の来歴の実測 pass（`sceneImageAssetLoopPassed`・`characterAssetLoopPassed`・
+  `voiceTakeAssetLoopPassed`・`sceneImageProvenance`）と、監査契約 v6 の見た目の4監査（宣言していない
+  機能は描いていないことの確認）
 - `knownRemainingIssues`が空
 - Canvas Runが最終成果物と同じartifact SHAを表示
 
