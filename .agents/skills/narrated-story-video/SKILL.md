@@ -107,30 +107,41 @@ Fish Audio、ElevenLabs、字幕、retime、finalize用scriptを手で順番に�
 クリップが無いことを見る。閾値は基準版と壊した版を同じ測定にかけて決めてある
 （根拠は`lib/narratedStoryBookends.mjs`の各定数）。生成側の「こう作った」を根拠にpassにしない。
 
-## 見た目（字幕・カメラ・感想の配置・回ごとの OP 映像）
+## 見た目（字幕・カメラ・場面の切り替え・感想の配置・重ね物・回ごとの OP 映像）
 
-見た目の値は全部 Channel Pack の `narrated-story.json` で宣言する。公開 Core はチャンネルの値を持たない。
+見た目の値は全部 Channel Pack の `narrated-story.json` で宣言する。公開 Core はチャンネルの値を持たない
+（既定の画像・位置・色も持たない）。
 
 - `subtitles`: 焼き込み字幕。書体は Pack 内のファイル。字幕の字は台本の表記で、声の読みではない。
   書体に無い字・1行に入らない語は、有料生成の前に止まる
 - `camera`: 場面の画のゆっくりした寄り引きの型（`slow-push-in` / `slow-pull-out` / `pan-left` /
   `pan-right` / `static`）と速さ。同じ画の文（話者ごとに分けた場面）は1つの動きで通し、動きを
   始め直さない。台本パッケージの場面は `camera` で型を指定できる（Pack に無い型は止まる）
+- `sceneTransition`: 本編の場面の切り替え。`{ "type": "crossfade", "durationSeconds": 0.1〜2 }` を宣言した
+  ときだけ混ぜ、無ければ cut。尺と字幕・声の時刻は変わらない（前後の場面を伸ばして重ねる）。短い場面の
+  隣では重なりを縮め、2フレームに満たなければ cut のまま描いて計画に `reduced` を残す
 - `bookends.review.layout`: 感想パートの配置（`plain` / `tv-left-presenter-right`）。人物の映像が
   無ければ人物の枠は空のまま（代わりの人物を描かない）。台本パッケージの感想の文は `layout`・
   `tvScene`・`captionOnlySeconds`（声を作らず字幕だけを出す文。0.5〜30秒。感想パートの最初の文には
-  使えない）を持てる
-- `bookends.opening.kind: "episode-video"`: 回ごとの OP 映像。OP の動画と感想パートの人物の映像
-  （`presenter.episodeVideo`）は、取り込みの記録（`buzzassist-operator-video-manifest-v1`）を
+  使えない）を持てる。TV 枠の中身は `tv.content` で `still`（既定）/ `scene-motion`（本編でその場面に
+  当てたカメラの型で動かす）/ `operator-video`（取り込みの記録の枠 `review-tv` の動画。必須で、音は
+  使わず、短ければ頭から繰り返す）
+- `overlays`: Pack に置いた PNG を、本編・感想パートの宣言の区間と位置に重ねる。重ねる部ごとに
+  `faceRegions`（顔の出うる範囲）を宣言する——顔の範囲は Core には分からないため。画面の外、焼き込み字幕・
+  TV 枠・人物の枠・顔の範囲と重なる置き場所は、有料生成の前に止まる。OP と境目の転換には重ねない
+- `bookends.opening.kind: "episode-video"`: 回ごとの OP 映像。OP の動画・感想パートの人物の映像
+  （`presenter.episodeVideo`）・TV 枠の動画は、取り込みの記録（`buzzassist-operator-video-manifest-v1`）を
   `run-video-harness.mjs start --operator-video-manifest FILE`（MCP / `--options-json` では
   `options.operatorVideoManifestPath`）で渡す。Job の識別子に入り、plan-only でも検査する
 
-監査契約 v6 から、この4つを完成 MP4 のフレームで測る（`burnedSubtitlesMeasured`・
+監査契約 v6 から、字幕・カメラ・感想の配置・OP の来歴を完成 MP4 のフレームで測る（`burnedSubtitlesMeasured`・
 `cameraMotionMeasured`・`reviewLayoutMeasured`・`episodeOpeningProvenance`）。字幕は輝度（Y）で測る。
-宣言していない機能は「描いていない」ことを確かめて通る。
+監査契約 v9（宣言 1.12.0）から、場面の切り替えと重ね物も測る（`sceneTransitionMeasured`・`fixedOverlaysMeasured`）。
+`reviewLayoutMeasured` は、TV の中身が動く型なら区間の始まりと終わりの変わり方まで測り、止まった画での
+代用を落とす。どれも、宣言していない機能は「描いていない」ことを確かめて通る。
 
-監査契約 v7 から、回ごとの OP 映像と感想パートの人物の映像も、途中の成果物の品質ループ（工程 video-clip）に
-合格した版でなければ使わない。取り込みの記録のフォルダで、先に `node scripts/asset-quality-loop.mjs measure-video`
+監査契約 v7 から、取り込んだ運営者の映像（回ごとの OP 映像・感想パートの人物の映像。後から足した TV 枠の動画も
+同じ経路）は、途中の成果物の品質ループ（工程 video-clip）に合格した版でなければ使わない。取り込みの記録のフォルダで、先に `node scripts/asset-quality-loop.mjs measure-video`
 で測ってからループを回し、記録の各行に `assetLoop: { statePath, passedSha256 }` を書く。無い・未合格なら、
 有料の処理の前に `video-clip-asset-loop-not-passed:<枠>:<理由>` の `awaiting-human-review` で止まる。
 人物が写る映像は同一性と手指を人が確かめる（そのまま公開面に出るため）。
@@ -304,8 +315,8 @@ subject を署名する唯一の経路であり、finalize と RunReceipt は `v
 - 途中の成果物の品質ループと画の来歴の実測 pass（`sceneImageAssetLoopPassed`・`characterAssetLoopPassed`・
   `voiceTakeAssetLoopPassed`・`sceneImageProvenance`）と、監査契約 v6 の見た目の4監査（宣言していない
   機能は描いていないことの確認）
-- 監査契約 v7・v8 の実測 pass（運営者の映像のループの合格 `operatorVideoAssetLoopPassed`、台本の受け入れ
-  `scriptQualityAccepted`）
+- 監査契約 v7〜v9 の実測 pass（運営者の映像のループの合格 `operatorVideoAssetLoopPassed`、台本の受け入れ
+  `scriptQualityAccepted`、場面の切り替え `sceneTransitionMeasured`、重ね物 `fixedOverlaysMeasured`）
 - `knownRemainingIssues`が空
 - Canvas Runが最終成果物と同じartifact SHAを表示
 
