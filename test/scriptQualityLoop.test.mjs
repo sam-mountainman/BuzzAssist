@@ -474,7 +474,34 @@ test("評価者を宣言した組は全員そろった時点で1回として閉�
   assert.deepEqual((await record(root, { scriptPath: "drafts/draft.md", versionLabel: "v1b", stage: "revision", revisionDelta: "直していない", reviewPath: await panelReview("a4", reviewOf("ctx-a4", "eval-a", DRAFT, { baseScriptSha256: sha(DRAFT) })) })).issues, ["script-quality-script-unchanged:v1"]);
 });
 
+test("受け入れ方 each-evaluator は Pack で選び、平均だけ目標を越える組を合格にしない（average なら合格）", async (t) => {
+  const run = async (acceptance) => {
+    const { root, contract } = await startPanel(t, acceptance);
+    await writeFile(join(root, "drafts/draft.md"), DRAFT);
+    const high = scores(Object.fromEntries(contract.rubric.map((row) => [row.id, 100])), contract);
+    // どの項目も下限は割らない（意味の保持 90・差し替え印 100）が、総合点は目標（90）に届かない。
+    const floorsKept = { "review-first-person-marker": 100, "meaning-preservation": 90 };
+    const low = scores(Object.fromEntries(contract.rubric.map((row) => [row.id, floorsKept[row.id] ?? 84])), contract);
+    await record(root, { scriptPath: "drafts/draft.md", versionLabel: "v1", stage: "draft", reviewPath: await writeReview(root, "a", review({ context: "ctx-a", script: DRAFT, evaluatorId: "eval-a", rubricScores: high })) });
+    return record(root, { reviewPath: await writeReview(root, "b", review({ context: "ctx-b", script: DRAFT, evaluatorId: "eval-b", rubricScores: low })) });
+  };
+  const averaged = await run({ mode: "average", evaluators: ["eval-a", "eval-b"] });
+  assert.equal(averaged.state.status, "passed");
+  const each = await run({ mode: "each-evaluator", evaluators: ["eval-a", "eval-b"] });
+  assert.equal(each.recorded, true);
+  assert.notEqual(each.state.status, "passed");
+  assert.ok(each.round.score >= each.state.script.contract.limits.targetScore, "平均は目標に届いている");
+  assert.deepEqual(each.round.acceptance.failures, ["evaluator-below-minimum:eval-b"]);
+  assert.match(each.detail, /evaluator-below-minimum:eval-b/u);
+  assert.equal(each.state.script.contract.acceptance.mode, "each-evaluator");
+});
+
 test("組の宣言が壊れた Pack は blocker で止め、黙って1人の組へ戻さない", () => {
+  const blockedEach = (acceptance) => normalizeScriptChannelConfig({ version: SCRIPT_QUALITY_CHANNEL_CONFIG_VERSION, acceptance }).blockers;
+  assert.deepEqual(blockedEach({ mode: "each-evaluator" }), ["script-quality.acceptance.evaluators-required"]);
+  assert.deepEqual(blockedEach({ mode: "each-evaluator", evaluators: ["a"], minimumEvaluatorScore: 70 }), ["script-quality.acceptance.minimumEvaluatorScore"]);
+  assert.deepEqual(blockedEach({ mode: "average", evaluators: ["a"], minimumEvaluatorScore: 85 }), ["script-quality.acceptance.minimumEvaluatorScore-each-evaluator-only"]);
+  assert.deepEqual(blockedEach({ mode: "each-evaluator", evaluators: ["a", "b"], minimumEvaluatorScore: 85 }), []);
   const blocked = (acceptance) => normalizeScriptChannelConfig({ version: SCRIPT_QUALITY_CHANNEL_CONFIG_VERSION, acceptance }).blockers;
   assert.deepEqual(blocked({ evaluators: ["a", "a"] }), ["script-quality.acceptance.evaluators.a-duplicated"]);
   assert.deepEqual(blocked({ evaluators: ["script-writer"] }), ["script-quality.acceptance.evaluators.id"]);

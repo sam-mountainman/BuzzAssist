@@ -302,9 +302,39 @@ test("評価者を宣言した契約では、欠けた回は平均と下限を�
   assert.throws(() => normalizeQualityAcceptance({ mode: "no-such-mode" }), /Unknown quality acceptance mode/u);
   assert.throws(() => normalizeQualityAcceptance({ evaluators: ["a", "a"] }), /must not repeat/u);
   assert.equal(normalizeQualityAcceptance(undefined).mode, "average");
+  assert.throws(() => normalizeQualityAcceptance({ mode: "each-evaluator" }), /requires declared evaluators/u);
   // 受け入れ方の失敗が無い回の失敗指紋は、今までと同じ値。
   assert.equal(
     deriveFailureFingerprint({ floorFailures: ["x"], acceptanceFailures: [] }),
     deriveFailureFingerprint({ floorFailures: ["x"] }),
   );
+});
+
+test("each-evaluator は宣言した評価者それぞれの総合点と項目の下限を見て、平均だけ目標を越える回を合格にしない", () => {
+  const each = { ...contract, acceptance: { mode: "each-evaluator", evaluators: ["eval-a", "eval-b"] } };
+  const average = { ...contract, acceptance: { mode: "average", evaluators: ["eval-a", "eval-b"] } };
+  const low = scores(Object.fromEntries(contract.rubric.map((criterion) => [criterion.id, 86])));
+  const reviews = [panelReview("ctx-a", "eval-a"), panelReview("ctx-b", "eval-b", { scores: low })];
+  // 平均は 93 で目標（92）を越え、どの項目も下限を割らない。
+  const byAverage = recordQualityRound({ ...panelBase(average), contract: average, state: declaredState(average), reviews });
+  assert.equal(byAverage.status, "passed");
+  const byEach = recordQualityRound({ ...panelBase(each), contract: each, state: declaredState(each), reviews });
+  assert.notEqual(byEach.status, "passed");
+  assert.ok(byEach.rounds[0].score >= contract.limits.targetScore, "平均は目標に届いている");
+  assert.deepEqual(byEach.rounds[0].acceptance.failures, ["evaluator-below-minimum:eval-b"]);
+  assert.deepEqual(byEach.rounds[0].acceptance.evaluators.map((row) => row.meetsMinimum), [true, false]);
+  assert.notEqual(byEach.rounds[0].failureFingerprint, deriveFailureFingerprint({ rawReviews: reviews, contract: each }), "受け入れ方の失敗は指紋に入る");
+  // 片方欠けも合格にしない。
+  const partial = recordQualityRound({ ...panelBase(each), contract: each, state: declaredState(each), reviews: [panelReview("ctx-a", "eval-a")] });
+  assert.deepEqual(partial.rounds[0].acceptance.failures, ["evaluator-missing:eval-b"]);
+  // 評価者ごとの項目の下限割れは、その評価者の失敗として残る。
+  const floor = scores({ "character-continuity": 70 });
+  const floored = recordQualityRound({ ...panelBase(each), contract: each, state: declaredState(each), reviews: [panelReview("ctx-a", "eval-a"), panelReview("ctx-b", "eval-b", { scores: floor })] });
+  assert.deepEqual(floored.rounds[0].acceptance.failures, ["evaluator-floor-failed:eval-b:character-continuity"]);
+  // 評価者ごとの総合点の下限を目標とは別に宣言できる。
+  const relaxed = { ...contract, acceptance: { mode: "each-evaluator", evaluators: ["eval-a", "eval-b"], minimumEvaluatorScore: 85 } };
+  const relaxedRound = recordQualityRound({ ...panelBase(relaxed), contract: relaxed, state: declaredState(relaxed), reviews });
+  assert.equal(relaxedRound.status, "passed");
+  assert.throws(() => normalizeQualityAcceptance({ mode: "average", evaluators: ["a"], minimumEvaluatorScore: 85 }), /each-evaluator/u);
+  assert.throws(() => normalizeQualityAcceptance({ mode: "each-evaluator", evaluators: ["a"], minimumEvaluatorScore: 120 }), /minimumEvaluatorScore/u);
 });

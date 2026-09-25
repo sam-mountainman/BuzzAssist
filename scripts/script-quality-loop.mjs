@@ -96,7 +96,9 @@ export function scriptQualityHelp() {
             Pack の script-quality.json が acceptance.evaluators で評価者を宣言していれば、採点は
             「評価の組」に入り、宣言した評価者が全員そろった時点で1回として閉じる。組が開いている間は
             record --work-dir <dir> --review <採点ファイル> だけでよい（版・工程・台本は組を開いた記録を使う）。
-            別の版の採点・作った文脈・前の回や組の中で使った文脈・宣言外の評価者・2件目は組に入れない
+            別の版の採点・作った文脈・前の回や組の中で使った文脈・宣言外の評価者・2件目は組に入れない。
+            合否は acceptance.mode で決まる: average（既定。評価者の平均）/ each-evaluator（評価者それぞれの
+            総合点が minimumEvaluatorScore（無ければ目標点）以上で、各自の項目の下限も満たす）
 
   status    今の状態。deliverable は合格して、その版の台本が今も同じバイト列のときだけ
     --work-dir <dir> [--require-pass]   未合格なら終了コード 4
