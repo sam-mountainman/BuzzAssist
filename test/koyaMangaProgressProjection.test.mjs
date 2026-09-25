@@ -23,7 +23,9 @@ import {
   wavSummary,
 } from "../lib/koyaMangaProgressSnapshot.mjs";
 import { _testing as adapterTesting, projectVideoHarnessJob } from "../lib/videoHarnessCanvasAdapter.mjs";
-import { MAKER, now, reviewFor, stageInputs, writeReview } from "./fixtures/assetQualityFixtures.mjs";
+import { MAKER, now, reviewFor, stageInputs, synthVideo, writeReview } from "./fixtures/assetQualityFixtures.mjs";
+import { makeGradientPng } from "./fixtures/operatorImageFixture.mjs";
+import { passKoyaAssetQualityLoop } from "./helpers/koyaAssetQualityFixture.mjs";
 import {
   approveNewCharacter,
   createKoyaProgressJob,
@@ -499,4 +501,47 @@ test("途中の投影の要素 ID が他の要素と衝突したら、上書き�
   await assert.rejects(projectCanvasRunProgress({ projectDir }, snapshot), /衝突/u);
   const scene = await readScene(projectDir);
   assert.equal(scene.elements.length, 1, "衝突したら何も書かない");
+});
+
+test("カットを動画に差し替えた回は、差し替えのクリップの品質ループ（video-clip）の合否を開始フレームのタイルで出す", async (t) => {
+  const projectDir = await project(t);
+  const job = await createKoyaProgressJob(projectDir, { adapterResult: { status: "video-substitution-blocked" } });
+  const workspace = job.executionProjectDir;
+  await writeCharacterApprovalPending(workspace);
+  await approveNewCharacter(workspace);
+  await writeMidProduction(workspace);
+  const paths = koyaPaths(workspace);
+  // 差し替えの無い回は section を出さない。
+  const before = await readKoyaMangaProgressSnapshot(job);
+  assert.equal(before.sections.some((section) => section.id === "video-clip"), false);
+
+  // cut-01 にクリップを結び付ける（開始フレームは画、クリップは合成の短い動画）。
+  const cutDir = join(paths.episodeDir, "video-substitution", "cut-01");
+  await mkdir(cutDir, { recursive: true });
+  const startFrame = join(cutDir, "start-frame.png");
+  await writeFile(startFrame, makeGradientPng(160, 90, 77));
+  const clip = join(cutDir, "clip-cut-01.mp4");
+  await synthVideo(clip, { salt: "progress-clip", seconds: 1 });
+  const manifest = JSON.parse(await readFile(paths.manifest, "utf8"));
+  manifest.cuts[0].videoSubstitution = { status: "applied", model: "kling-v2-6", clipPath: clip, clipSha256: sha256(await readFile(clip)), startFramePath: startFrame };
+  await writeFile(paths.manifest, JSON.stringify(manifest));
+
+  const waiting = await readKoyaMangaProgressSnapshot(job);
+  const section = waiting.sections.find((entry) => entry.id === "video-clip");
+  assert.ok(section, "差し替えのある回は section を出す");
+  assert.deepEqual(section.items.map((item) => [item.key, item.status]), [["cut-01", "awaiting-approval"]]);
+  assert.deepEqual(section.items[0].lines, ["クリップ: kling-v2-6", "品質ループ: 未開始"]);
+  assert.equal(section.items[0].media.kind, "image", "タイルは開始フレーム（投影は画と音声だけを描く）");
+  assert.ok(waiting.summaryLines.includes("動画クリップ: 合格 0 / 1"));
+
+  // Koya の品質ループの作業フォルダ（canvas/）で合格させると、合格と出る。
+  await passKoyaAssetQualityLoop({ workDir: paths.canvasDir, stage: "video-clip", subjectId: `${EPISODE_ID}.video.cut-01`, assetPath: clip });
+  const passed = await readKoyaMangaProgressSnapshot(job);
+  const passedSection = passed.sections.find((entry) => entry.id === "video-clip");
+  assert.deepEqual(passedSection.items[0].lines, ["クリップ: kling-v2-6", "品質ループ: 合格"]);
+  assert.equal(passedSection.items[0].status, "complete");
+  assert.ok(passed.summaryLines.includes("動画クリップ: 合格 1 / 1"));
+  const result = await projectCanvasRunProgress({ projectDir }, passed, { sourceRoot: workspace });
+  assert.equal(result.ok, true);
+  assert.equal(JSON.stringify(await readScene(projectDir)).includes(workspace), false, "投影の中に作業場の絶対パスは出ない");
 });

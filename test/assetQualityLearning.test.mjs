@@ -240,3 +240,22 @@ test("品質ループの record は不合格の回でだけ、verify は人の�
   assert.equal(agent.counted, false);
   assert.equal(agent.learning, null);
 });
+
+test("動画クリップ（video-clip）の不合格も、両ハーネスとも Channel Pack の非公開台帳へ工程・落ちた機械ゲートだけで積む", async () => {
+  for (const [harnessId, target] of [["koya-manga-video", "channel-pack:koya"], ["narrated-story-video", "channel-pack:narrated-story"]]) {
+    const harness = captureHarness();
+    const { contract } = createAssetQualityContract({ harnessId, stage: "video-clip" });
+    const input = failingRound({
+      state: { contractDigest: contract.digest, asset: { harnessId, stage: "video-clip", subjectId: SUBJECT, versions: [] } },
+      round: { floorFailures: ["motion-integrity"], failedGateIds: ["video-audio-declared", "video-full-decode"] },
+    });
+    const result = await captureAssetLearning({ event: "round", ...input, contract, env: {}, now, captureOptions: harness.options });
+    assert.equal(result.target, target);
+    assert.equal(result.captured, 1);
+    const [row] = harness.rows;
+    assert.match(row.evidence, new RegExp(`harness=${harnessId} stage=video-clip round=2 floors=1 gates=2 `, "u"));
+    assert.match(row.text, /動画クリップ/u);
+    assert.deepEqual(row.gateIds, ["motion-integrity", "video-audio-declared", "video-full-decode"]);
+    for (const forbidden of [SUBJECT, "合成の所見", "private-folder"]) assert.equal(JSON.stringify(row).includes(forbidden), false, `${forbidden} を運ばない`);
+  }
+});
