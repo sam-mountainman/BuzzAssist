@@ -98,6 +98,11 @@ const CHECKS = Object.freeze({
   voiceTakeQuality: true,
   voiceCastRouting: true,
   characterIdentityReviewed: true,
+  // 監査契約 v5: 場面の画の出どころと、途中の成果物の品質ループ。
+  sceneImageProvenance: true,
+  sceneImageAssetLoopPassed: true,
+  voiceTakeAssetLoopPassed: true,
+  characterAssetLoopPassed: true,
 });
 const SIGNOFF_AUDIT_IDS = Object.freeze([
   "perceptualReviewChecks",

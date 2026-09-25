@@ -574,8 +574,10 @@ test("過去の契約の必須監査を全て満たした回は、今の宣言�
 
 test("ナレーション物語: 過去の監査契約を満たした回は保証を足した宣言でも合格のまま、今の契約では足した保証の合格が要る", async () => {
   // 品質ループ（qualityLoopPassed）は監査契約 v3、声の監査（voiceTakeQuality・voiceCastRouting）と
-  // 人物の同一性（characterIdentityReviewed）は v4 から。当時の必須監査を全て満たした過去の回を、
-  // 保証を足した今の宣言で記録しても、当時無かった保証のぶんだけ後から不合格にしない。
+  // 人物の同一性（characterIdentityReviewed）は v4、途中の成果物の品質ループ（sceneImageAssetLoopPassed・
+  // voiceTakeAssetLoopPassed・characterAssetLoopPassed）と場面の画の出どころ（sceneImageProvenance）は v5 から。
+  // 当時の必須監査を全て満たした過去の回を、保証を足した今の宣言で記録しても、当時無かった保証のぶんだけ
+  // 後から不合格にしない。
   const { isGateNotInForce } = await import("../lib/harnessRunReceipt.mjs");
   const { NARRATED_STORY_AUDIT_CONTRACT_VERSION } = await import("../lib/narratedStoryPipeline.mjs");
   const { NARRATED_STORY_AUDIT_IDS } = await import("../lib/narratedStoryOutcome.mjs");
@@ -609,10 +611,19 @@ test("ナレーション物語: 過去の監査契約を満たした回は保証
   const identity = declaration.guarantees.find((g) => g.id === "character-identity");
   assert.deepEqual(identity.evidenceAuditIds, ["characterIdentityReviewed"]);
   for (const added of [voice, identity]) {
+    assert.equal(added.inForceSince, `${current.series}-v4`, `${added.id}: それが入った監査契約の版から`);
+  }
+  const { NARRATED_ASSET_LOOP_AUDIT_IDS, NARRATED_ASSET_LOOP_SINCE } = await import("../lib/narratedStoryAssetLoops.mjs");
+  const assetLoop = declaration.guarantees.find((g) => g.id === "asset-quality-loop");
+  assert.deepEqual(assetLoop.evidenceAuditIds, [...NARRATED_ASSET_LOOP_AUDIT_IDS]);
+  const provenance = declaration.guarantees.find((g) => g.id === "scene-image-provenance");
+  assert.deepEqual(provenance.evidenceAuditIds, ["sceneImageProvenance"]);
+  for (const added of [assetLoop, provenance]) {
     assert.equal(added.inForceSince, NARRATED_STORY_AUDIT_CONTRACT_VERSION, `${added.id}: それが入った監査契約の版から`);
   }
+  assert.equal(NARRATED_ASSET_LOOP_SINCE, NARRATED_STORY_AUDIT_CONTRACT_VERSION, "関門が効力を持つ版と宣言の inForceSince が同じ");
   // 人の判断に依存する保証は、何を人が判断するのかを宣言に書く。
-  for (const id of ["external-visual-signoff", "quality-loop", "character-identity"]) {
+  for (const id of ["external-visual-signoff", "quality-loop", "character-identity", "asset-quality-loop"]) {
     assert.ok(String(declaration.guarantees.find((g) => g.id === id)?.human || "").length > 10, `${id}: human が無い`);
   }
   const sinceNumber = (guarantee) => parse(guarantee.inForceSince || `${current.series}-v1`).number;
@@ -644,8 +655,11 @@ test("ナレーション物語: 過去の監査契約を満たした回は保証
   const previousRoster = fixture.contracts.find((entry) => entry.version === previous).requiredAudits;
   const shrunk = record(previousRoster, NARRATED_STORY_AUDIT_CONTRACT_VERSION);
   assert.equal(shrunk.outcome, "fail");
-  assert.deepEqual([...shrunk.summary.skippedGates].sort(), ["character-identity", "voice-quality"]);
-  for (const id of ["qualityLoopPassed", "voiceTakeQuality", "voiceCastRouting", "characterIdentityReviewed"]) {
+  assert.deepEqual([...shrunk.summary.skippedGates].sort(), ["asset-quality-loop", "scene-image-provenance"]);
+  for (const id of [
+    "qualityLoopPassed", "voiceTakeQuality", "voiceCastRouting", "characterIdentityReviewed",
+    "sceneImageProvenance", "sceneImageAssetLoopPassed", "voiceTakeAssetLoopPassed", "characterAssetLoopPassed",
+  ]) {
     assert.equal(record([...NARRATED_STORY_AUDIT_IDS], NARRATED_STORY_AUDIT_CONTRACT_VERSION, id).outcome, "fail", `${id} が落ちても合格になる`);
   }
   assert.equal(record([...NARRATED_STORY_AUDIT_IDS], NARRATED_STORY_AUDIT_CONTRACT_VERSION).outcome, "pass");

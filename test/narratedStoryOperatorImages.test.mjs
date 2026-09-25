@@ -50,11 +50,18 @@ import {
 } from "./fixtures/narratedBookendFixture.mjs";
 import {
   FIXTURE_REFERENCE_SHA256,
+  FIXTURE_REFERENCE_SHEET,
   fixtureConversationUrl,
   replaceImage,
   writeManifest,
   writeOperatorImageFolder,
 } from "./fixtures/operatorImageFixture.mjs";
+import {
+  passOperatorImageLoops,
+  passPendingNarratedAssetLoops,
+  recordAssetLoopRound,
+  runPastAssetLoops,
+} from "./fixtures/narratedAssetLoopFixture.mjs";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const toolchain = await resolveFfmpegToolchain();
@@ -110,8 +117,11 @@ async function writePack(dir, config) {
   await writeFile(join(dir, "narrated-story.json"), `${JSON.stringify(config, null, 2)}\n`, "utf8");
 }
 
-/** 取り込みの記録（1本目は 1px 広い画、2本目は決まった寸法の画）と、台本と Pack を並べる。 */
-async function setupRoot(root, { packOptions = {}, scenes = null } = {}) {
+/**
+ * 取り込みの記録（1本目は 1px 広い画、2本目は決まった寸法の画）と、台本と Pack を並べる。
+ * loops: 運営者のフォルダで、本編の画と参照の設定画の品質ループを本物の実装で合格させ、記録に assetLoop を書く。
+ */
+async function setupRoot(root, { packOptions = {}, scenes = null, loops = false } = {}) {
   const payloadDir = join(root, "signed-channel-pack-payload");
   await writePack(payloadDir, packConfig(packOptions));
   const scriptPath = join(root, "raw-script.txt");
@@ -121,7 +131,16 @@ async function setupRoot(root, { packOptions = {}, scenes = null } = {}) {
     { sceneId: "s001", width: 321, height: 180 },
     { sceneId: "s002", width: 320, height: 180 },
   ]);
-  return { payloadDir, scriptPath, operatorDir, ...folder };
+  const loopSetup = loops
+    ? await passOperatorImageLoops({
+      folder: operatorDir,
+      manifestPath: folder.manifestPath,
+      manifest: folder.manifest,
+      referenceSheets: new Map([[FIXTURE_REFERENCE_SHA256, FIXTURE_REFERENCE_SHEET]]),
+      writeManifest,
+    })
+    : null;
+  return { payloadDir, scriptPath, operatorDir, ...folder, approvedReferencesPath: loopSetup?.approvedReferencesPath || "" };
 }
 
 /** 有料の画の Media Job が1件でも来たら落とす fixture adapter。 */
@@ -217,7 +236,14 @@ test("Pack の宣言: operator-file は画風の指示を要らず、durable Job
 test("plan-only: 取り込みの記録を読むだけで検査し、manifest が無い・broker の Pack に渡した、を名指しで返す", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "narrated-operator-plan-"));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const { payloadDir, scriptPath, manifestPath } = await setupRoot(root);
+  const { payloadDir, scriptPath, manifestPath, manifest, operatorDir } = await setupRoot(root);
+  // 品質ループの記録（assetLoop）の無い取り込みは、有料の処理の前に場面 ID と理由コードで止まる。
+  const unlooped = await inspectNarratedStoryPlan({ scriptPath, channelPackDir: payloadDir, operatorImageManifestPath: manifestPath, projectDir: root });
+  assert.deepEqual(unlooped.blockers, [
+    "scene-image-asset-loop-not-passed:s001:record-required",
+    "scene-image-asset-loop-not-passed:s002:record-required",
+  ]);
+  await passOperatorImageLoops({ folder: operatorDir, manifestPath, manifest, referenceSheets: new Map([[FIXTURE_REFERENCE_SHA256, FIXTURE_REFERENCE_SHEET]]), writeManifest });
   const ready = await inspectNarratedStoryPlan({ scriptPath, channelPackDir: payloadDir, operatorImageManifestPath: manifestPath, projectDir: root });
   assert.equal(ready.ok, true, ready.blockers.join(", "));
   assert.equal(ready.imageSource, "operator-file");
@@ -341,6 +367,61 @@ test("公式経路: 取り込みの検査に落ちたら、有料の probe も M
   }
 });
 
+test("公式経路: 運営者の画の品質ループが合格していなければ、有料の probe も Media Job も出さずに人待ちで止まり、場面 ID と理由コードを返す", {
+  skip: toolchain.ok ? false : "ffmpeg/ffprobe is unavailable",
+}, async (t) => {
+  const temp = await mkdtemp(join(tmpdir(), "narrated-operator-loop-stop-"));
+  t.after(() => rm(temp, { recursive: true, force: true }));
+  const { env } = await reviewerSetup(temp);
+  const fixture = await createBookendFixtureMedia(join(temp, "fixture-media"), toolchain);
+  const run = async (setup, jobId) => {
+    const adapters = operatorAdapters(fixture);
+    const outcome = await runNarratedStoryVideo({
+      command: "full",
+      scriptPath: setup.scriptPath,
+      channelPackDir: setup.payloadDir,
+      jobId,
+      jobIdentityDigest: IDENTITY,
+      deploymentRoot: setup.root,
+      mediaJobRunner: adapters.mediaJobRunner,
+      mediaJobProbe: adapters.mediaJobProbe,
+      ffmpegToolchain: toolchain,
+      voiceQualityGate: passingVoiceQualityGate,
+      operatorImageManifestPath: setup.manifestPath,
+      env,
+    }, { allowDirectUnboundJobForTests: true });
+    assert.equal(adapters.calls.generation, 0, "no paid Media Job");
+    assert.equal(adapters.probedKinds.length, 0, "no adapter probe");
+    return outcome;
+  };
+
+  // 取り込みの記録に品質ループの記録（assetLoop）が無い。
+  const bareRoot = join(temp, "bare");
+  const bare = { root: bareRoot, ...await setupRoot(bareRoot) };
+  const unlooped = await run(bare, "video-narrated-story-video-0per100p5t0p0001");
+  assert.equal(unlooped.status, "awaiting-human-review");
+  assert.deepEqual(unlooped.knownRemainingIssues, [
+    "scene-image-asset-loop-not-passed:s001:record-required",
+    "scene-image-asset-loop-not-passed:s002:record-required",
+  ]);
+  assert.equal(unlooped.execution.paidGenerationAttempted, false);
+  assert.equal(unlooped.auditChecks.sceneImageAssetLoopPassed.pass, false);
+  assert.deepEqual(unlooped.assetQualityLoop.pending.map((row) => [row.stage, row.sceneId, row.reason]), [
+    ["scene-image", "s001", "record-required"],
+    ["scene-image", "s002", "record-required"],
+  ]);
+
+  // ループは合格していたが、人が本編の画の人物の同一性を否とした（合格の後の人の確認は、その版の合格を取り消す）。
+  const rejectedRoot = join(temp, "rejected");
+  const looped = { root: rejectedRoot, ...await setupRoot(rejectedRoot, { loops: true }) };
+  const { verifyAssetLoop } = await import("./fixtures/narratedAssetLoopFixture.mjs");
+  await verifyAssetLoop({ workDir: looped.operatorDir, stage: "scene-image", subjectId: "s001", assetPath: join(looped.operatorDir, "images", "s001.png"), checks: ["identity"], verdict: "reject" });
+  const rejected = await run(looped, "video-narrated-story-video-0per100p5t0p0002");
+  assert.equal(rejected.status, "awaiting-human-review");
+  assert.deepEqual(rejected.knownRemainingIssues, ["scene-image-asset-loop-not-passed:s001:human-rejected:identity"]);
+  assert.equal(rejected.artifacts.previewVideo, undefined);
+});
+
 test("公式経路: 運営者の画を取り込み、画の有料 Media Job は0件で後段の監査・署名・品質ループ・Receipt・Canvas まで通り、会話の URL は私有の Job フォルダにしか残らない", {
   skip: toolchain.ok ? false : "ffmpeg/ffprobe is unavailable",
 }, async (t) => {
@@ -364,7 +445,8 @@ test("公式経路: 運営者の画を取り込み、画の有料 Media Job は0
   process.env[REVIEWER_TRUST_PATH_ENV] = trustPath;
   const project = join(temp, "project");
   await mkdir(project, { recursive: true });
-  const { payloadDir, scriptPath, manifestPath, manifest } = await setupRoot(project);
+  // 運営者は取り込む前に、自分のフォルダで本編の画と参照の設定画の品質ループを合格させてある。
+  const { payloadDir, scriptPath, manifestPath, manifest } = await setupRoot(project, { loops: true });
   const fixture = await createBookendFixtureMedia(join(temp, "fixture-media"), toolchain);
   const adapters = operatorAdapters(fixture);
   const validateProductionProfile = async () => ({ profileId: "operator-production", fixture: "narrated-operator-image-e2e" });
@@ -430,14 +512,28 @@ test("公式経路: 運営者の画を取り込み、画の有料 Media Job は0
   });
   const runOuter = () => runVideoHarnessJob({ projectDir: project, jobId: planned.job.id, prepare, doctor, adapter: outerAdapter, projectCanvas, validateProductionProfile });
 
+  // 1回目: 画と設定画のループは合格している。声を作った後、声のテイクのループの合格を待って、描かずに止まる。
+  const loopStopOuter = await runOuter();
+  const loopStop = coreOutcome;
+  assert.equal(loopStopOuter.status, "awaiting-human-review", JSON.stringify(loopStop.knownRemainingIssues));
+  assert.deepEqual(loopStop.knownRemainingIssues, [
+    "voice-take-asset-loop-not-passed:s001:loop-not-started",
+    "voice-take-asset-loop-not-passed:s002:loop-not-started",
+  ]);
+  assert.equal(loopStop.auditChecks.sceneImageAssetLoopPassed.pass, true, loopStop.auditChecks.sceneImageAssetLoopPassed.detail);
+  assert.equal(loopStop.auditChecks.characterAssetLoopPassed.pass, true, loopStop.auditChecks.characterAssetLoopPassed.detail);
+  assert.equal(loopStop.artifacts.previewVideo, undefined, "合格の前に描かない");
+  assert.deepEqual(adapters.calls.kinds.filter((kind) => kind === "music.generation"), [], "合格の前に BGM を依頼しない");
+  await passPendingNarratedAssetLoops(loopStop);
+
   const firstOuter = await runOuter();
   const first = coreOutcome;
   assert.equal(firstOuter.status, "awaiting-human-review", JSON.stringify(first.knownRemainingIssues));
   assert.equal(first.status, "awaiting-human-review", JSON.stringify(first.knownRemainingIssues));
-  // 画の Media Job は0件。声2本と BGM 1本だけが有料の経路を通る。画の adapter は probe しない。
+  // 画の Media Job は0件。声2本と BGM 1本だけが有料の経路を通る（再開は声を払い直さない）。画の adapter は probe しない。
   assert.deepEqual(adapters.calls.kinds.filter((kind) => kind === "image.generation"), []);
   assert.equal(adapters.calls.generation, 3);
-  assert.deepEqual([...adapters.probedKinds].sort(), ["music.generation", "voice.synthesis"]);
+  assert.deepEqual([...new Set(adapters.probedKinds)].sort(), ["music.generation", "voice.synthesis"]);
   assert.equal(first.mediaJobs.length, 3);
   assert.equal(first.mediaJobs.some((row) => row.kind === "image.generation"), false);
   assert.deepEqual(first.imageSource, {
@@ -535,7 +631,7 @@ test("再開: 取り込んだ画が差し替わったら気づき、manifest の
   t.after(() => rm(root, { recursive: true, force: true }));
   const { env } = await reviewerSetup(root);
   const fixture = await createBookendFixtureMedia(join(root, "fixture-media"), toolchain);
-  const { payloadDir, scriptPath, manifestPath, manifest, operatorDir } = await setupRoot(root);
+  const { payloadDir, scriptPath, manifestPath, manifest, operatorDir, approvedReferencesPath } = await setupRoot(root, { loops: true });
   const adapters = operatorAdapters(fixture);
   const jobId = "video-narrated-story-video-0perat0rresume01";
   const base = {
@@ -550,8 +646,9 @@ test("再開: 取り込んだ画が差し替わったら気づき、manifest の
     operatorImageManifestPath: manifestPath,
     env,
   };
-  const first = await runNarratedStoryVideo({ ...base, mediaJobRunner: adapters.mediaJobRunner, mediaJobProbe: adapters.mediaJobProbe }, { allowDirectUnboundJobForTests: true });
+  const first = await runPastAssetLoops(() => runNarratedStoryVideo({ ...base, mediaJobRunner: adapters.mediaJobRunner, mediaJobProbe: adapters.mediaJobProbe }, { allowDirectUnboundJobForTests: true }));
   assert.equal(first.status, "awaiting-human-review", JSON.stringify(first.knownRemainingIssues));
+  assert.ok(first.artifacts.previewVideo, "声のテイクのループが合格した後に描く");
   const paidAfterFirst = adapters.calls.generation;
   const noPaid = {
     mediaJobRunner: async () => { throw new Error("resume must not re-bill voices or music"); },
@@ -564,15 +661,33 @@ test("再開: 取り込んだ画が差し替わったら気づき、manifest の
   const same = await runNarratedStoryVideo({ ...base, ...noPaid }, { allowDirectUnboundJobForTests: true });
   assert.equal(same.artifacts.previewVideo.sha256, first.artifacts.previewVideo.sha256);
 
-  // 画だけ差し替えて manifest を直し忘れた: 実測の sha256 が manifest と違うので、有料の処理の前に止まる。
+  // 画だけ差し替えて manifest を直し忘れた: 実測の sha256 が manifest と（品質ループで合格した版とも）違うので、
+  // 有料の処理の前に止まる。
   const replaced = await replaceImage(operatorDir, "s002", 320, 180, 61);
   const forgot = await runNarratedStoryVideo({ ...base, ...noPaid }, { allowDirectUnboundJobForTests: true });
   assert.equal(forgot.status, "awaiting-operator-input");
-  assert.deepEqual(forgot.knownRemainingIssues, ["operator-image-sha256-mismatch:s002"]);
+  assert.deepEqual(forgot.knownRemainingIssues, ["operator-image-sha256-mismatch:s002", "operator-image-asset-loop-pass-mismatch:s002"]);
 
-  // manifest を直すと別の入力として作り直す。声と BGM は同じ requestKey の完成品を使い、払い直さない。
+  // manifest の画の sha256 だけを直しても、合格した版ではない画は取り込まない。
   manifest.scenes[1].image.sha256 = sha256(replaced);
   await writeManifest(manifestPath, manifest);
+  const unreviewed = await runNarratedStoryVideo({ ...base, ...noPaid }, { allowDirectUnboundJobForTests: true });
+  assert.deepEqual(unreviewed.knownRemainingIssues, ["operator-image-asset-loop-pass-mismatch:s002"]);
+  // 記録の合格の sha256 だけを書き換えても（ループで採点していない画）、本体のループが合格していないので描かない。
+  manifest.scenes[1].assetLoop.passedSha256 = sha256(replaced);
+  await writeManifest(manifestPath, manifest);
+  const forged = await runNarratedStoryVideo({ ...base, ...noPaid }, { allowDirectUnboundJobForTests: true });
+  assert.equal(forged.status, "awaiting-human-review");
+  assert.deepEqual(forged.knownRemainingIssues, ["scene-image-asset-loop-not-passed:s002:sha256-mismatch"]);
+  assert.equal(forged.execution.paidGenerationAttempted, false, "有料の処理の前に止まる");
+
+  // 差し替えた画を品質ループで採点し直して合格させると、別の入力として作り直す。声と BGM は同じ requestKey の
+  // 完成品を使い、払い直さない（声のテイクのループの合格もそのまま使える）。
+  await recordAssetLoopRound({
+    workDir: operatorDir, stage: "scene-image", subjectId: "s002", assetPath: join(operatorDir, "images", "s002.png"),
+    generatorContextId: "fixture-operator-maker", route: "chatgpt-web",
+    references: [FIXTURE_REFERENCE_SHA256], approvedReferencesPath, charactersVisible: true,
+  });
   const rebuilt = await runNarratedStoryVideo({ ...base, ...noPaid }, { allowDirectUnboundJobForTests: true });
   assert.equal(rebuilt.status, "awaiting-human-review", JSON.stringify(rebuilt.knownRemainingIssues));
   assert.equal(adapters.calls.generation, paidAfterFirst, "no new paid Media Job");

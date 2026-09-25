@@ -22,6 +22,7 @@ import {
 } from "../lib/narratedStoryPipeline.mjs";
 import { NARRATED_SCRIPT_PACKAGE_FORMAT } from "../lib/narratedStoryScriptPackage.mjs";
 import { bookendFixtureAdapters, createBookendFixtureMedia, passingVoiceQualityGate } from "./fixtures/narratedBookendFixture.mjs";
+import { runPastAssetLoops } from "./fixtures/narratedAssetLoopFixture.mjs";
 
 const execFile = promisify(execFileCallback);
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
@@ -170,7 +171,8 @@ test("公式経路: 区分ごとに運営者の曲と生成した曲を当てて
     await writeFile(scriptPath, packagedScript(story), "utf8");
     const adapters = bookendFixtureAdapters(fixture);
     const specs = [];
-    const outcome = await runNarratedStoryPipeline({
+    // 途中の成果物の品質ループ（本編の画・声のテイク）で止まったら、本物のループで合格させて再開する。
+    const outcome = await runPastAssetLoops(() => runNarratedStoryPipeline({
       scriptPath,
       channelPackDir: pack,
       jobId,
@@ -181,7 +183,7 @@ test("公式経路: 区分ごとに運営者の曲と生成した曲を当てて
       voiceQualityGate: passingVoiceQualityGate,
       jobIdentityDigest: "f".repeat(64),
       env: {},
-    });
+    }));
     return { outcome, specs, runDir: narratedStoryRunPaths({ deploymentRoot: root, jobId }).runDir };
   };
   const pending = await run([

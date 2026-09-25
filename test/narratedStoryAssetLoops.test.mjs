@@ -19,6 +19,7 @@ import {
   operatorSceneLoopSubject,
   reverifyNarratedAssetLoops,
 } from "../lib/narratedStoryAssetLoops.mjs";
+import { NARRATED_STORY_AUDIT_IDS } from "../lib/narratedStoryOutcome.mjs";
 import { narratedVoiceTakeMeasurementReport } from "../lib/narratedStoryVoiceQuality.mjs";
 import { recordAssetLoopRound, sha256, verifyAssetLoop, writeApprovedReferences } from "./fixtures/narratedAssetLoopFixture.mjs";
 import { makeGradientPng } from "./fixtures/operatorImageFixture.mjs";
@@ -55,7 +56,8 @@ async function writeMeasurement(runDir, takes) {
   }
 }
 
-test("関門は監査契約 v5 から効く（読めない版は要る側に倒す）", () => {
+test("監査の id は outcome の一覧と揃い、関門は監査契約 v5 から効く（読めない版は要る側に倒す）", () => {
+  for (const id of NARRATED_ASSET_LOOP_AUDIT_IDS) assert.ok(NARRATED_STORY_AUDIT_IDS.includes(id), `${id} が outcome の監査一覧に無い`);
   assert.equal(narratedAssetLoopsRequired("buzzassist-narrated-story-audit-v4"), false, "当時関門が無かった版は従来どおり");
   assert.equal(narratedAssetLoopsRequired("buzzassist-narrated-story-audit-v5"), true);
   assert.equal(narratedAssetLoopsRequired("buzzassist-narrated-story-audit-v6"), true);

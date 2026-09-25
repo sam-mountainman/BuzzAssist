@@ -68,6 +68,13 @@ export async function recordAssetLoopRound({
   if (!before.started) {
     const started = await startAssetQualityLoop({ workDir, harnessId, stage, subjectId, generatorContextId, generatorHost: producerHost });
     if (!started.started) throw new Error(`fixture could not start the ${stage} loop: ${started.issues.join(", ")}`);
+  } else if (before.state?.status !== "active") {
+    // 合格・人待ちで止まったループに、直した版を採点させるときは始め直す（前の状態は history に残る）。
+    const restarted = await startAssetQualityLoop({
+      workDir, harnessId, stage, subjectId, generatorContextId, generatorHost: producerHost,
+      restart: true, restartReason: "差し替えた版を採点する（合成）",
+    });
+    if (!restarted.started) throw new Error(`fixture could not restart the ${stage} loop: ${restarted.issues.join(", ")}`);
   }
   const state = (await assetQualityStatus({ workDir, stage, subjectId })).state;
   const contract = state.asset.contract;
@@ -133,6 +140,45 @@ export function verifyAssetLoop({ workDir, stage, subjectId, assetPath, checks, 
     humanVerified: true,
     isInteractive: true,
   });
+}
+
+/**
+ * 運営者の画のフォルダ（取り込みの記録のあるフォルダ＝品質ループの作業フォルダ）で、記録の全部の場面の
+ * 本編の画のループと、記録が宣言した参照の人物の設定画のループを合格させ、記録に assetLoop を書く。
+ * referenceSheets: sha256 → 設定画のバイト列（記録が参照する承認済みの設定画そのもの）
+ */
+export async function passOperatorImageLoops({ folder, manifestPath, manifest, referenceSheets = new Map(), writeManifest }) {
+  const anchor = Buffer.concat([Buffer.from("fixture-anchor-sheet-"), Buffer.from(String(referenceSheets.size))]);
+  const anchorPath = path.join(folder, "refs", "anchor.png");
+  await mkdir(path.dirname(anchorPath), { recursive: true });
+  // 設定画の参照に使う基準画（PNG として読める最小の形。中身は合成）。
+  await writeFile(anchorPath, Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), anchor]));
+  const anchorSha = sha256(await readFile(anchorPath));
+  const approved = await writeApprovedReferences(path.join(folder, "refs", "approved.json"), [anchorSha, ...referenceSheets.keys()]);
+  let index = 0;
+  for (const [sheetSha, bytes] of referenceSheets) {
+    index += 1;
+    const sheetPath = path.join(folder, "refs", `sheet-${index}.png`);
+    await writeFile(sheetPath, bytes);
+    if (sha256(bytes) !== sheetSha) throw new Error("fixture reference sheet bytes do not match their sha256");
+    await recordAssetLoopRound({
+      workDir: folder, stage: "character", subjectId: `c${String(index).padStart(2, "0")}`, assetPath: sheetPath,
+      generatorContextId: "fixture-sheet-maker", route: "chatgpt-web", references: [anchorSha], approvedReferencesPath: approved,
+    });
+  }
+  for (const scene of manifest.scenes) {
+    const imagePath = path.join(folder, ...scene.image.path.split("/"));
+    const refs = scene.referenceSha256s || [];
+    const status = await recordAssetLoopRound({
+      workDir: folder, stage: "scene-image", subjectId: scene.sceneId, assetPath: imagePath,
+      generatorContextId: "fixture-operator-maker", route: "chatgpt-web",
+      references: refs, approvedReferencesPath: approved, charactersVisible: refs.length > 0,
+    });
+    if (status.pass !== true) throw new Error(`fixture scene loop did not pass for ${scene.sceneId}: ${status.issues.join(", ")}`);
+    scene.assetLoop = { statePath: `quality/assets/scene-image--${scene.sceneId}.json`, passedSha256: sha256(await readFile(imagePath)) };
+  }
+  await writeManifest(manifestPath, manifest);
+  return { approvedReferencesPath: approved };
 }
 
 /**

@@ -1,6 +1,6 @@
 {
   "id": "narrated-story-video",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "displayName": "ナレーション物語動画（実写素材＋カメラワーク）",
   "note": "クライアント名・チャンネル名はここに書かない。ここは『何が作れるか』の宣言であって、誰のためのものかの記録ではない。",
   "produces": {
@@ -29,6 +29,11 @@
       "id": "presenter-video",
       "what": "感想パートの人物素材。Channel Packのbookends.review.presenterで必須と宣言した場合、Packに無ければ有料生成の前に止める（代用の絵で埋めない）",
       "blocking": false
+    },
+    {
+      "id": "asset-quality-loop-reviews",
+      "what": "本編の画・その参照の人物の設定画・採用する声のテイクの、作った文脈とは別の評価文脈の採点と、要る人の確認（node scripts/asset-quality-loop.mjs）。無ければ描く前に人待ちで止まる（有料の再生成はしない）",
+      "blocking": true
     }
   ],
   "guarantees": [
@@ -132,6 +137,25 @@
         "characterIdentityReviewed"
       ],
       "inForceSince": "buzzassist-narrated-story-audit-v4"
+    },
+    {
+      "id": "asset-quality-loop",
+      "what": "本編の画・その参照の人物の設定画・採用する声のテイクは、途中の成果物の品質ループ（lib/assetQualityLoop.mjs）に合格した版でなければ描かない。合格は、作った文脈とは別の評価文脈の採点が機械ゲートと評価項目の下限・目標点を通り、要る人の確認（人物の同一性・手指の安全）が揃い、使うファイルの sha256 が合格した版と同じであること。broker の画と声のテイクは Job の作業フォルダで、運営者の画は取り込みの記録の assetLoop.statePath が指す作業フォルダでループを回す。本編の画の合格した版が並べて見た参照と、運営者の画の記録が宣言した参照は、同じ作業フォルダの人物の設定画のループで合格した版そのものでなければならない。声のテイクは CER・UTMOS の測定を声のテイクの工程の measurement（文ごとに quality/voice-take-measurements/<文の id>.json）として置き、声の品質ゲートに通ったテイクの中からループが合格させたテイクを採用する。合格していない対象があれば工程・対象 id・理由コードを返して描く前に人待ちで止まり、有料の再生成は回さない。確定の前にも、描いた画と採用したテイクが今も合格した版のままかを照合する",
+      "human": "採点は作った文脈とは別の評価者が回ごとに新しい文脈で行う。画は原寸で、声は直前の地の文と続けて聞いて（声の連続、台詞だけ浮いていないか）採点する。人物の同一性と公開面の画の手指の安全は、対話端末から人が確認する（機械は人の確認を記録できない）",
+      "evidenceAuditIds": [
+        "sceneImageAssetLoopPassed",
+        "voiceTakeAssetLoopPassed",
+        "characterAssetLoopPassed"
+      ],
+      "inForceSince": "buzzassist-narrated-story-audit-v5"
+    },
+    {
+      "id": "scene-image-provenance",
+      "what": "描いた場面の画のファイルを読み直し、完了した有料の Media Job（image.generation）の受領記録の artifact か、運営者の画の取り込みの記録（元の画の sha256・合わせ方・合わせた画の sha256）のどちらか一方と sha256 で結び付いていることを確かめる。運営者の画を取り込む Job に画の有料 Media Job が1件でもあれば落とす。会話の URL などの本文は私有の Job フォルダにだけ残し、公開面には sha256 だけを出す",
+      "evidenceAuditIds": [
+        "sceneImageProvenance"
+      ],
+      "inForceSince": "buzzassist-narrated-story-audit-v5"
     }
   ],
   "entrypoint": "node scripts/run-video-harness.mjs",

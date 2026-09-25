@@ -21,6 +21,7 @@ import {
   normalizeNarratedVoiceQualityConfig,
 } from "../lib/narratedStoryVoiceQuality.mjs";
 import { bookendFixtureAdapters, createBookendFixtureMedia } from "./fixtures/narratedBookendFixture.mjs";
+import { runPastAssetLoops } from "./fixtures/narratedAssetLoopFixture.mjs";
 
 /** 指定した id（segment#take）だけを落とす合成のゲート。受け取った checks を記録する。 */
 function scriptedGate({ failing = new Set(), dropMetric = new Set(), missing = new Set(), available = true } = {}) {
@@ -189,18 +190,29 @@ test("公式経路: QA 実行系が無ければ有料生成の前に止まり、
     const adapters = bookendFixtureAdapters(fixture);
     const specs = [];
     const probes = [];
-    const outcome = await runNarratedStoryPipeline({
+    // 途中の成果物の品質ループ（本編の画・声のテイク）で止まったら、本物のループで合格させて再開する。
+    const outcome = await runPastAssetLoops(() => runNarratedStoryPipeline({
       scriptPath,
       channelPackDir: pack,
       jobId,
       deploymentRoot: root,
-      mediaJobRunner: async (spec) => { specs.push(spec); return adapters.mediaJobRunner(spec); },
+      mediaJobRunner: async (spec) => {
+        specs.push(spec);
+        const made = await adapters.mediaJobRunner(spec);
+        // 撮り直しは本物と同じく別の音（別のバイト列）になる。最後の標本の1バイトだけ変えた有効な WAV。
+        if (spec.kind === "voice.synthesis" && spec.input?.take > 1) {
+          const bytes = Buffer.from(made.bytes);
+          bytes[bytes.length - 1] ^= spec.input.take;
+          return { ...made, bytes };
+        }
+        return made;
+      },
       mediaJobProbe: async (adapter) => { probes.push(adapter); return adapters.mediaJobProbe(adapter); },
       ffmpegToolchain: toolchain,
       voiceQualityGate: gate,
       jobIdentityDigest: "b2".repeat(32),
       env: {},
-    });
+    }));
     return { outcome, specs, probes, runDir: narratedStoryRunPaths({ deploymentRoot: root, jobId }).runDir };
   };
   const unavailable = await run("video-narrated-story-video-00000000000000e1", scriptedGate({ available: false }));
@@ -222,10 +234,15 @@ test("公式経路: QA 実行系が無ければ有料生成の前に止まり、
   const manifest = JSON.parse(await readFile(join(retaken.runDir, "generation-manifest.json"), "utf8"));
   assert.equal(manifest.voiceQuality.segments.find((row) => row.segmentId === "s002").selectedTake, 2);
 
+  // 上限まで撮り直しても品質ゲートに通るテイクが無い文は、声のテイクの品質ループでも救えない。
+  // ほかの対象のループが合格しても、描かず（BGM も依頼せず）に人待ちで止まり、理由を文の ID で返す。
   const failed = await run("video-narrated-story-video-00000000000000e3", scriptedGate({ failing: new Set(["s001#1", "s001#2"]) }));
+  assert.equal(failed.outcome.status, "awaiting-human-review");
+  assert.deepEqual(failed.outcome.knownRemainingIssues, ["voice-take-asset-loop-not-passed:s001:voice-quality-gate-failed"]);
   assert.equal(failed.outcome.auditChecks[NARRATED_VOICE_QUALITY_AUDIT_ID].pass, false);
-  assert.ok(failed.outcome.knownRemainingIssues.includes(`audit-${NARRATED_VOICE_QUALITY_AUDIT_ID}-pending-or-failed`));
-  const report = JSON.parse(await readFile(join(failed.runDir, "audit", "automatic-audit.json"), "utf8"));
-  assert.equal(report.status, "failed", "自動監査の段で落ちたことを報告に残す");
-  assert.ok(report.knownRemainingIssues.includes(`audit-${NARRATED_VOICE_QUALITY_AUDIT_ID}-failed`));
+  assert.equal(failed.outcome.auditChecks.voiceTakeAssetLoopPassed.pass, false);
+  assert.equal(failed.outcome.artifacts.previewVideo, undefined, "描かない");
+  assert.equal(failed.specs.filter((spec) => spec.kind === "music.generation").length, 0, "合格の前に曲の代金を払わない");
+  const measurement = JSON.parse(await readFile(join(failed.runDir, "quality", "voice-take-measurements", "s001.json"), "utf8"));
+  assert.deepEqual(measurement.checks.map((row) => [row.id, row.status]), [["s001#1", "fail"], ["s001#2", "fail"]], "落ちたテイクの測定も、その文の measurement に残す");
 });

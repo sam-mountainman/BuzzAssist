@@ -21,6 +21,7 @@ import { createPaidMediaJobBroker, paidMediaRequestIdentity } from "../lib/paidM
 import { _testing as adapterTesting, executeVideoHarnessAdapter } from "../lib/videoHarnessAdapters.mjs";
 import { _testing as jobTesting } from "../lib/videoHarnessJob.mjs";
 import { bookendFixtureAdapters, createBookendFixtureMedia, passingVoiceQualityGate } from "./fixtures/narratedBookendFixture.mjs";
+import { runPastAssetLoops } from "./fixtures/narratedAssetLoopFixture.mjs";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const noSleep = async () => {};
@@ -315,8 +316,11 @@ test("公式経路: 止まった回は決着していない Media Job と journa
   assert.ok(held.knownRemainingIssues.includes(`media-job-failure:${PAID_MEDIA_RECOVERY_PENDING_CODE}`), held.knownRemainingIssues.join(", "));
   assert.equal(server.calls.posts.length, postsAfterStop);
   recoverReady = true;
-  const resumed = await run();
+  // recover で決着させた後は、途中の成果物の品質ループ（本編の画・声のテイク）の合格を待って止まる。
+  // 本物のループで合格させて再開しても、決着した声は再課金しない。
+  const resumed = await runPastAssetLoops(run);
   assert.equal(resumed.status, "awaiting-human-review", resumed.knownRemainingIssues.join(", "));
+  assert.ok(resumed.artifacts.previewVideo, "合格の後に描く");
   assert.equal(server.calls.posts.filter((key) => key === pending[0].requestKey).length, 1, "recover で完成した声を再課金しない");
   assert.ok(resumed.mediaJobs.every((row) => row.status === "completed"));
   assert.deepEqual(await listUnsettledPaidMediaJobs(stateDir), []);

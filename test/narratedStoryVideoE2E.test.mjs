@@ -49,6 +49,7 @@ import {
   passingVoiceQualityGate,
   writeBookendPack,
 } from "./fixtures/narratedBookendFixture.mjs";
+import { passPendingNarratedAssetLoops, runPastAssetLoops } from "./fixtures/narratedAssetLoopFixture.mjs";
 import { _testing as adapterTesting } from "../lib/videoHarnessAdapters.mjs";
 import { projectVideoHarnessJob } from "../lib/videoHarnessCanvasAdapter.mjs";
 import { createVideoHarnessJob, runVideoHarnessJob } from "../lib/videoHarnessJob.mjs";
@@ -521,6 +522,35 @@ test("Core narrated-story fixture renders, audits, resumes, and emits a receipt 
   }
   process.env[REVIEWER_TRUST_PATH_ENV] = trustPath;
 
+  // 1回目: 画2枚と声2本を作ったところで、途中の成果物の品質ループ（本編の画・声のテイク）の合格を待って
+  // 描かずに止まる。BGM はまだ依頼しない。足りないもの（工程・対象 id・理由コード）を Job に返す。
+  const loopStopOuter = await runVideoHarnessJob({
+    projectDir: temp,
+    jobId: planned.job.id,
+    prepare,
+    doctor,
+    adapter: outerAdapter,
+    projectCanvas,
+    validateProductionProfile,
+  });
+  const loopStop = coreOutcome;
+  assert.equal(loopStopOuter.status, "awaiting-human-review");
+  assert.equal(loopStop.status, "awaiting-human-review");
+  assert.deepEqual(loopStop.knownRemainingIssues, [
+    "scene-image-asset-loop-not-passed:s001:loop-not-started",
+    "scene-image-asset-loop-not-passed:s002:loop-not-started",
+    "voice-take-asset-loop-not-passed:s001:loop-not-started",
+    "voice-take-asset-loop-not-passed:s002:loop-not-started",
+  ]);
+  assert.deepEqual(loopStopOuter.knownRemainingIssues, loopStop.knownRemainingIssues, "Job に同じ理由コードが返る");
+  assert.equal(generationCalls, 4, "BGM は品質ループの合格の後に依頼する");
+  assert.equal(loopStop.artifacts.previewVideo, undefined, "合格の前に描かない");
+  assert.equal(loopStop.mediaJobs.length, 4, "作った画と声の Media Job は Job へ報告する（再開で払い直さない）");
+  for (const row of loopStop.assetQualityLoop.pending) {
+    assert.equal(row.generatorContextId, `production:${planned.job.id}`, "作った文脈（評価できない文脈）を示す");
+  }
+  await passPendingNarratedAssetLoops(loopStop);
+
   const firstOuter = await runVideoHarnessJob({
     projectDir: temp,
     jobId: planned.job.id,
@@ -535,8 +565,8 @@ test("Core narrated-story fixture renders, audits, resumes, and emits a receipt 
   assert.equal(first.status, "awaiting-human-review");
   assert.equal(first.execution.paidGenerationAttempted, true);
   assert.equal(first.execution.legacyAssetFallbackUsed, false);
-  assert.equal(generationCalls, 5, "two images, two voices and one BGM must use typed media jobs");
-  assert.equal(probeCalls, 3, "every selected adapter must be probed before generation");
+  assert.equal(generationCalls, 5, "two images, two voices and one BGM must use typed media jobs (the resume reuses the completed ones)");
+  assert.equal(probeCalls, 6, "every selected adapter must be probed before generation (again on the resume; probes are non-billable)");
   assert.equal(first.mediaJobs.length, 5);
   assert.equal(first.adapterProbes.length, 3);
   assert.deepEqual(first.runtimeMetadata, {
@@ -676,7 +706,7 @@ test("Core narrated-story fixture renders, audits, resumes, and emits a receipt 
   assert.ok(Object.values(second.auditChecks).every((item) => item.pass === true));
   assert.equal(second.mediaJobs.length, 5);
   assert.equal(generationCalls, 5);
-  assert.equal(probeCalls, 3);
+  assert.equal(probeCalls, 6);
   assert.equal(networkCalls, 0, "fixture adapters and probes must not touch the network");
   assert.equal((await stat(second.artifacts.finalVideo.path)).size > 0, true);
   assert.equal((await stat(second.runReceiptPath)).size > 0, true);
@@ -802,7 +832,8 @@ async function runBookendFixture({ root, env, fixture, script = BOOKEND_FIXTURE_
     voiceQualityGate: passingVoiceQualityGate,
     env,
   };
-  const outcome = await runNarratedStoryVideo(options, { allowDirectUnboundJobForTests: true });
+  // 途中の成果物の品質ループ（本編の画・声のテイク）で止まったら、本物のループで合格させて再開する。
+  const outcome = await runPastAssetLoops(() => runNarratedStoryVideo(options, { allowDirectUnboundJobForTests: true }));
   return { outcome, adapters, options };
 }
 
@@ -835,7 +866,8 @@ test("bookends: OP → story → review is rendered as a real MP4, its boundarie
       // 本編 3 枚の画像、声 5 本（本編 3 + 感想 2）、BGM 1 本。人物素材の感想パートは画像を生成しない。
       assert.equal(adapters.calls.generation, 9);
       assert.equal(adapters.calls.kinds.filter((kind) => kind === "image.generation").length, 3);
-      assert.equal(adapters.calls.probe, 3);
+      // probe は品質ループで止まった回と再開の回の2回（非課金）。有料の生成は再開で払い直さない。
+      assert.equal(adapters.calls.probe, 6);
       for (const auditId of NARRATED_STORY_AUDIT_IDS) {
         if (perceptual.has(auditId)) continue;
         assert.equal(outcome.auditChecks[auditId].pass, true, `${auditId}: ${outcome.auditChecks[auditId].detail}`);

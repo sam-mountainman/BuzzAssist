@@ -185,6 +185,7 @@ test("公式経路: 役の声で台詞を作り、blocked の役があれば1円
   }
   const { runNarratedStoryPipeline, narratedStoryRunPaths } = await import("../lib/narratedStoryPipeline.mjs");
   const { bookendFixtureAdapters, createBookendFixtureMedia, passingVoiceQualityGate } = await import("./fixtures/narratedBookendFixture.mjs");
+  const { runPastAssetLoops } = await import("./fixtures/narratedAssetLoopFixture.mjs");
   const root = await mkdtemp(join(tmpdir(), "narrated-cast-run-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const pack = join(root, "pack");
@@ -197,7 +198,8 @@ test("公式経路: 役の声で台詞を作り、blocked の役があれば1円
     const adapters = bookendFixtureAdapters(fixture);
     const specs = [];
     const probes = [];
-    const outcome = await runNarratedStoryPipeline({
+    // 途中の成果物の品質ループ（本編の画・声のテイク）で止まったら、本物のループで合格させて再開する。
+    const outcome = await runPastAssetLoops(() => runNarratedStoryPipeline({
       scriptPath,
       channelPackDir: pack,
       jobId,
@@ -208,7 +210,7 @@ test("公式経路: 役の声で台詞を作り、blocked の役があれば1円
       voiceQualityGate: passingVoiceQualityGate,
       jobIdentityDigest: "e".repeat(64),
       env: {},
-    });
+    }));
     return { outcome, specs, probes, runDir: narratedStoryRunPaths({ deploymentRoot: root, jobId }).runDir };
   };
   const blocked = await run([{ id: "s01", text: "「ぼくもいく」", speaker: "c-kid" }], "video-narrated-story-video-00000000000000b1");

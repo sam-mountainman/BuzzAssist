@@ -296,6 +296,7 @@ test("公式経路: 台本パッケージから、字幕は表記・声は読み
   }
   const { runNarratedStoryPipeline, narratedStoryRunPaths } = await import("../lib/narratedStoryPipeline.mjs");
   const { bookendFixtureAdapters, createBookendFixtureMedia, passingVoiceQualityGate } = await import("./fixtures/narratedBookendFixture.mjs");
+  const { runPastAssetLoops } = await import("./fixtures/narratedAssetLoopFixture.mjs");
   const root = await mkdtemp(join(tmpdir(), "narrated-script-package-run-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const pack = join(root, "pack");
@@ -307,7 +308,8 @@ test("公式経路: 台本パッケージから、字幕は表記・声は読み
   const adapters = bookendFixtureAdapters(fixture);
   const specs = [];
   const jobId = "video-narrated-story-video-00000000000000aa";
-  const outcome = await runNarratedStoryPipeline({
+  let loopStop = null;
+  const outcome = await runPastAssetLoops(() => runNarratedStoryPipeline({
     scriptPath,
     channelPackDir: pack,
     jobId,
@@ -318,8 +320,14 @@ test("公式経路: 台本パッケージから、字幕は表記・声は読み
     voiceQualityGate: passingVoiceQualityGate,
     jobIdentityDigest: "d".repeat(64),
     env: {},
-  });
+  }), { onStop: (stopped) => { loopStop = stopped; } });
+  // 途中の成果物の品質ループは、画は場面ごと（imageKey）に1つ、声は話者の区切りごとに1つ。
+  assert.ok(loopStop, "生成の後、描く前に品質ループの合格を待って止まる");
+  const pendingOf = (stage) => loopStop.assetQualityLoop.pending.filter((row) => row.stage === stage).map((row) => row.subjectId).sort();
+  assert.deepEqual(pendingOf("scene-image"), ["s01", "s02"]);
+  assert.equal(pendingOf("voice-take").length, 3);
   assert.equal(outcome.status, "awaiting-human-review", outcome.knownRemainingIssues.join(", "));
+  assert.ok(outcome.artifacts.previewVideo, "合格の後に描く");
   const images = specs.filter((spec) => spec.kind === "image.generation");
   const voices = specs.filter((spec) => spec.kind === "voice.synthesis");
   assert.equal(images.length, 2, "場面は2つ");
