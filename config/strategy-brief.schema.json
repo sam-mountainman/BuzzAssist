@@ -231,7 +231,7 @@
       "required": ["id", "kind", "path", "sha256", "state", "collected"],
       "properties": {
         "id": { "$ref": "#/$defs/itemId" },
-        "kind": { "enum": ["snapshot", "audience-run", "metrics", "referrals", "production-instructions", "market-research", "other"] },
+        "kind": { "enum": ["snapshot", "audience-run", "metrics", "referrals", "production-instructions", "market-research", "planning-document", "other"], "description": "planning-document は戦略の道具の作業文書（企画の判断を書いた文書）" },
         "path": {
           "type": "string",
           "minLength": 1,

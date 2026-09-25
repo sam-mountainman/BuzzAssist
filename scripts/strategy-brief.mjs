@@ -12,6 +12,8 @@
 //        [--audience-run <4分析の run フォルダ>] [--work-dir <dir>] [--out <下書き>]
 //   node scripts/strategy-brief.mjs applicability --brief <ブリーフ> [--evidence <id> --applies yes|no --reason "..."] \
 //        [--context <判定した会話ID>] [--work-dir <dir>] [--out <書き出し先>]
+//   node scripts/strategy-brief.mjs draft --from-hyp <戦略の道具の作業フォルダ> --channel <id> [--previous <前のブリーフ>] \
+//        [--strategy-skill-dir <戦略の道具の採用版の置き場>] [--work-dir <dir>] [--out <下書き>]
 //
 // 企画の判断はホストのエージェントと運営者がする。ここは形の検査・根拠の照合・版ごとの採点の記録だけで、
 // モデルを呼ばない。実装の正本は lib/strategyBrief.mjs と lib/strategyBriefQualityLoop.mjs（中核は lib/qualityLoop.mjs）。
@@ -23,6 +25,7 @@ import { dirname, resolve } from "node:path";
 
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
 import { readStrategyBrief, strategySkillFingerprint, validateStrategyBrief } from "../lib/strategyBrief.mjs";
+import { draftStrategyBriefFromTool } from "../lib/strategyBriefDraft.mjs";
 import { captureStrategyBriefLearning } from "../lib/strategyBriefLearning.mjs";
 import { draftNextStrategyBrief } from "../lib/strategyBriefNext.mjs";
 import {
@@ -41,6 +44,7 @@ const VALUE_OPTIONS = new Set([
   "--revision-delta", "--blocking-condition", "--skill-dir",
   "--from", "--metrics", "--referrals", "--audience-run", "--out",
   "--evidence", "--applies", "--context",
+  "--from-hyp", "--channel", "--previous", "--strategy-skill-dir",
 ]);
 const REPEATABLE_OPTIONS = new Set(["--producer-context"]);
 const FLAG_OPTIONS = new Set(["--json", "--restart", "--require-pass", "--help", "-h"]);
@@ -131,6 +135,18 @@ export function strategyBriefHelp() {
     [--evidence <id> --applies yes|no --reason "..."]  1件の判定を書く（ブリーフの SHA が変わる）
     [--context <id>]               判定した会話・タスクの ID
     [--out <file>]                 ブリーフを書き換えず、判定を足したブリーフをこのファイルに書く（既存は上書きしない）
+
+  draft        戦略の道具の作業フォルダからブリーフの下書きを組み立てる（照合と下書きだけ。戦略の道具のスクリプトは
+               実行せず、文書の中身も読まない）。4分析の run（現行のものだけ）・指標と関連元の集計・取得スナップショット・
+               作業文書の SHA・根拠の表 evidence.csv の行を根拠（provisional）に集め、strategy-handoff.json があれば
+               優先して取り込む。前のブリーフの問い・見る人・約束・回収・制作条件・仮説・未確認事項を引き継ぐ。
+               機械で埋められない欄（企画の判断そのもの）は needsAuthoring に、どの成果物から埋めるかと一緒に返す。
+               上位の AI がそれを読んで埋める（人が毎回手で書く前提にしない）。形は docs/strategy-handoff-spec-ja.md
+    --from-hyp <dir> --channel <id>
+    [--previous <前のブリーフ>]       引き継ぐ前の版。根拠の行には前の版の前提が付く
+    [--strategy-skill-dir <dir>]    戦略の道具の採用版の置き場。指紋を provenance.strategySkill に書く
+    [--work-dir <dir>]              既定は --from-hyp のフォルダ。--from-hyp を含むフォルダだけ
+    [--out <file>]                  下書きを作業フォルダの中に書く（既存のファイルは上書きしない）
 
   --work-dir を省くと、--brief のあるフォルダを作業フォルダにする。根拠のパスは作業フォルダからの相対。
 
@@ -306,8 +322,21 @@ export async function runStrategyBriefCli(argv = process.argv.slice(2), {
         throw error;
       }
     }
+    case "draft": {
+      const result = await draftStrategyBriefFromTool({
+        fromDir: typeof args.fromHyp === "string" ? resolve(args.fromHyp) : "",
+        channelId: args.channel,
+        previousPath: typeof args.previous === "string" ? resolve(args.previous) : "",
+        strategySkillDir: typeof args.strategySkillDir === "string" ? resolve(args.strategySkillDir) : "",
+        workDir: typeof args.workDir === "string" ? resolve(args.workDir) : "",
+        outPath: typeof args.out === "string" ? resolve(args.out) : "",
+        ...injected,
+      });
+      stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+      return { exitCode: 0, result };
+    }
     default:
-      throw new Error(`不明なアクション: ${args.action}（validate / fingerprint / start / sheet / record / status / verdict / next / applicability）`);
+      throw new Error(`不明なアクション: ${args.action}（validate / fingerprint / start / sheet / record / status / verdict / next / applicability / draft）`);
   }
 }
 
