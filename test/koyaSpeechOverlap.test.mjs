@@ -44,7 +44,9 @@ async function prepare(project) {
 
 /** 作業場ごとに違う根の path と、作った時刻（prepare の adoptedAt など）を揃えて比べる。 */
 function comparable(value, root) {
-  return JSON.parse(JSON.stringify(value).split(root).join("<root>")
+  // JSON の中では Windows のパスの "\\" が2つになるので、JSON に書いた形の root でも置き換える。
+  const escapedRoot = JSON.stringify(String(root)).slice(1, -1);
+  return JSON.parse(JSON.stringify(value).split(escapedRoot).join("<root>").split(root).join("<root>")
     .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/gu, "<time>"));
 }
 

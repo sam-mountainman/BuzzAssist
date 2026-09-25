@@ -59,6 +59,8 @@ test("漫画のサムネの検査・下書き・文言の SHA・対象 id は、
  * （2026-09-25 の CI）。使い回しの判定（距離と失敗の文言）はそのまま比べ、この SHA は形だけを見る。
  */
 function maskScalerHashes(value) {
+  // 失敗の文言に入る距離の数値も縮小の実装に依る（macOS 0.0000 / Ubuntu 0.0098）。判定の有無と文言の形は比べる。
+  if (typeof value === "string") return value.replace(/distance=\d+(?:\.\d+)?/gu, "distance=<n>");
   if (Array.isArray(value)) return value.map(maskScalerHashes);
   if (value && typeof value === "object") {
     return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
