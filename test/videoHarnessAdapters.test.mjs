@@ -219,7 +219,11 @@ test("Windows taskkill nonzero falls back to the exact child and records the fai
   assert.deepEqual(signals, ["SIGTERM"]);
 });
 
-test("Windows tree and exact-child termination failure rejects within a bounded settle watchdog", { timeout: 2_000 }, async () => {
+// 打ち切りの見張りが設定の猶予（各 10ms）で決着することを、壁時計（500ms 未満）で見ていた。負荷の高い端末では
+// 偽の子しか使わないこの試験でも 1.3 秒かかって落ちた（同じ試験を 4 本並列で回して1回）。setTimeout・setInterval を
+// 試験の時計に差し替え、決着までに進めた時計の長さで見る。既定の猶予（5 秒・2 秒）で待つ壊れ方なら数千 ms 進む。
+test("Windows tree and exact-child termination failure rejects within a bounded settle watchdog", { timeout: 60_000 }, async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
   let spawnCalls = 0;
   const child = new EventEmitter();
   child.pid = 54321;
@@ -236,21 +240,34 @@ test("Windows tree and exact-child termination failure rejects within a bounded 
     setImmediate(() => killer.emit("close", 1, null));
     return killer;
   };
-  const startedAt = Date.now();
+  let settled = false;
+  const outcome = _testing.runChild("fixture.exe", [], {
+    cwd: process.cwd(),
+    platform: "win32",
+    spawnProcess,
+    timeoutMs: 10,
+    terminationGraceMs: 10,
+    terminationSettleMs: 10,
+  }).then(
+    () => { throw new Error("runChild resolved although the child never exited"); },
+    (error) => { throw error; },
+  ).finally(() => { settled = true; });
+  outcome.catch(() => {});
+  // 偽の taskkill の終了（setImmediate）と約束の連鎖を流してから、試験の時計を 5ms ずつ進める。
+  let virtualMs = 0;
+  while (!settled && virtualMs < 10_000) {
+    await new Promise((resolveTurn) => setImmediate(resolveTurn));
+    if (settled) break;
+    t.mock.timers.tick(5);
+    virtualMs += 5;
+  }
   await assert.rejects(
-    _testing.runChild("fixture.exe", [], {
-      cwd: process.cwd(),
-      platform: "win32",
-      spawnProcess,
-      timeoutMs: 10,
-      terminationGraceMs: 10,
-      terminationSettleMs: 10,
-    }),
+    outcome,
     (error) => error.code === "CHILD_TERMINATION_FAILED"
       && error.termination.failed === true
       && error.termination.attempts.length === 2,
   );
-  assert.ok(Date.now() - startedAt < 500, "termination failure must not wait forever");
+  assert.ok(virtualMs <= 200, `termination failure must settle within the configured windows, not wait forever (${virtualMs}ms)`);
 });
 
 test("Windows child exit before taskkill close still returns complete immutable termination evidence", { timeout: 2_000 }, async () => {

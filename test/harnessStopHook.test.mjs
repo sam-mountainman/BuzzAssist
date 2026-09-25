@@ -348,6 +348,11 @@ test("完成の主張の判定: 否定・伝聞・仮定・path の「パス」�
   }
 });
 
+// 実プロセスを起動する試験の待ちの上限。フックが止まったときに気づくための見張りで、速さの基準ではない。
+// 負荷の高い端末ではシェルと node の起動・読み込みだけで 20 秒を超え、spawnSync が子を殺して status が
+// null で落ちた（同じ試験を 4 本並列で回して3回）。止めない長さはフックの見張りを試験の時計で確かめる。
+const PROCESS_HANG_GUARD_MS = 120_000;
+
 test("実プロセス: 起動行をシェルで動かし、stdin の JSON に stdout の JSON で答える（両ホストの起動行）", () => {
   const fx = fixture();
   try {
@@ -363,7 +368,7 @@ test("実プロセス: 起動行をシェルで動かし、stdin の JSON に st
     for (const [label, command, extraEnv] of [["claude", claude, {}], ["codex", codex, { PLUGIN_ROOT: ROOT }]]) {
       session += 1;
       const input = JSON.stringify(stopInput(fx, { session_id: `process-${session}`, last_assistant_message: "動画が完成しました。" }));
-      const result = spawnSync(command, { shell: true, cwd: tmpdir(), input, env: { ...env, ...extraEnv }, encoding: "utf8", timeout: 20_000 });
+      const result = spawnSync(command, { shell: true, cwd: tmpdir(), input, env: { ...env, ...extraEnv }, encoding: "utf8", timeout: PROCESS_HANG_GUARD_MS });
       assert.equal(result.status, 0, `${label}: ${result.stderr}`);
       const output = JSON.parse(result.stdout);
       assert.equal(output.decision, "block", label);
@@ -372,7 +377,7 @@ test("実プロセス: 起動行をシェルで動かし、stdin の JSON に st
     // plugin root が渡らなくても exit 0 で何も出さない。
     const missing = spawnSync(readJson("hooks/codex-hooks.json").hooks.Stop[0].hooks[0].command, {
       shell: true, cwd: tmpdir(), input: JSON.stringify(stopInput(fx, { session_id: "process-x", last_assistant_message: "動画が完成しました。" })),
-      env: { ...env, PLUGIN_ROOT: "", CLAUDE_PLUGIN_ROOT: "" }, encoding: "utf8", timeout: 20_000,
+      env: { ...env, PLUGIN_ROOT: "", CLAUDE_PLUGIN_ROOT: "" }, encoding: "utf8", timeout: PROCESS_HANG_GUARD_MS,
     });
     assert.equal(missing.status, 0);
     assert.equal(missing.stdout, "");
@@ -381,14 +386,47 @@ test("実プロセス: 起動行をシェルで動かし、stdin の JSON に st
   }
 });
 
-test("実プロセス: 入力が閉じなくても短時間で exit 0 で終わり、何も出さない", async () => {
+test("入力が閉じなくても、見張りの時計で exit 0 を呼び、何も出さない（停止を待たせない長さ）", async (t) => {
+  // 停止を待たせないことを、実プロセスの壁時計（起動を含めて 15 秒未満）で見ていた。起動の重さは端末の
+  // 負荷しだいなので、見張りの長さは試験の時計で確かめる: 入力が閉じないまま、進めた長さで exit(0) が呼ばれる。
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { PassThrough, Writable } = await import("node:stream");
+  const stdin = new PassThrough();
+  let out = "";
+  const exits = [];
+  const running = runStopHookCli({
+    stdin,
+    stdout: new Writable({ write(chunk, _enc, done) { out += chunk.toString(); done(); } }),
+    stderr: new Writable({ write(_chunk, _enc, done) { done(); } }),
+    env: { ...process.env, [STOP_HOOK_STATE_DIR_ENV]: join(tmpdir(), "stop-hook-never") },
+    home: tmpdir(),
+    exit: (code) => { exits.push(code); },
+  });
+  stdin.write("{\"hook_event_name\":\"Stop\",");
+  let virtualMs = 0;
+  while (exits.length === 0 && virtualMs < 60_000) {
+    t.mock.timers.tick(100);
+    virtualMs += 100;
+  }
+  assert.deepEqual(exits, [0], "入力が閉じないまま待ち続けた");
+  assert.ok(virtualMs <= 5_000, `停止を待たせすぎる（${virtualMs}ms）`);
+  stdin.end();
+  assert.equal(await running, 0);
+  assert.equal(out, "");
+});
+
+test("実プロセス: 入力が閉じなくても、自分で exit 0 で終わり、何も出さない", { timeout: PROCESS_HANG_GUARD_MS }, async (t) => {
   const child = spawn(process.execPath, [HOOK], { cwd: ROOT, env: { ...process.env, [STOP_HOOK_STATE_DIR_ENV]: join(tmpdir(), "stop-hook-never") }, stdio: ["pipe", "pipe", "pipe"] });
+  t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); });
   let stdout = "";
   child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.stdin.on("error", () => {});
   child.stdin.write("{\"hook_event_name\":\"Stop\",");
   const started = Date.now();
   const code = await new Promise((resolve) => child.on("close", resolve));
+  // 入力は最後まで閉じていない（終わったのはフック自身の見張り）。壁時計は起動を含むので記録だけにする。
+  assert.equal(child.stdin.writableEnded, false);
   assert.equal(code, 0);
   assert.equal(stdout, "");
-  assert.ok(Date.now() - started < 15_000, `終わるまでに時間がかかりすぎた: ${Date.now() - started}ms`);
+  t.diagnostic(`起動から終了まで ${Date.now() - started}ms`);
 });

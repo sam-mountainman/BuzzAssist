@@ -12,6 +12,7 @@ import {
   buildHookResponse,
   detectHookHost,
   hookEventLogPath,
+  runHookCli,
 } from "../scripts/harness-learn-hook.mjs";
 import { PLUGIN_HOOK_MANIFESTS, stagePluginHooks } from "../scripts/setup-agents.mjs";
 
@@ -19,7 +20,12 @@ const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const HOOK = join(ROOT, "scripts", "harness-learn-hook.mjs");
 const readJson = (relative) => JSON.parse(readFileSync(join(ROOT, ...relative.split("/")), "utf8"));
 
-function runHook(input, { env = {}, timeoutMs = 10_000 } = {}) {
+// 実プロセスを起動する試験の待ちの上限。フックが止まったときに気づくための見張りで、速さの基準ではない。
+// 負荷の高い端末では node の起動と読み込みだけで 10 秒を超え、spawnSync が子を殺して status が null で
+// 落ちた（同じ試験を 4 本並列で回して4回）。速さ（入力を待たせないこと）は下の試験の時計で確かめる。
+const PROCESS_HANG_GUARD_MS = 120_000;
+
+function runHook(input, { env = {}, timeoutMs = PROCESS_HANG_GUARD_MS } = {}) {
   const result = spawnSync(process.execPath, [HOOK], {
     cwd: ROOT,
     input: typeof input === "string" ? input : JSON.stringify(input),
@@ -150,13 +156,48 @@ test("記録にどちらのホストから来たかを残す（Codex の起動�
   assert.doesNotMatch(readJson("hooks/codex-hooks.json").hooks.UserPromptSubmit[0].hooks[0].command, /--host/u);
 });
 
-test("入力が閉じなくても短時間で exit 0 で終わり、ユーザーの入力を待たせない", async () => {
+test("入力が閉じなくても、見張りの時計で exit 0 を呼び、何も出さない（入力を待たせない長さ）", async (t) => {
+  // 入力を待たせないことを、実プロセスの壁時計（起動を含めて 5 秒未満）で見ていた。負荷の高い端末では
+  // node の起動だけで数秒かかり、見張りが正しく働いていても落ちた（同じ試験を 4 本並列で回して4回）。
+  // 見張りの長さは試験の時計で確かめる: 入力が閉じないまま、時計を進めた長さで exit(0) が呼ばれること。
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { PassThrough } = await import("node:stream");
+  const stdin = new PassThrough();
+  let out = "";
+  const exits = [];
+  const running = runHookCli({
+    stdin,
+    stdout: { write: (chunk) => { out += chunk; return true; } },
+    env: { ...process.env, [HOOK_EVENT_LOG_ENV]: "off" },
+    exit: (code) => { exits.push(code); },
+  });
+  stdin.write("{\"hook_event_name\":\"UserPromptSubmit\",");
+  let virtualMs = 0;
+  while (exits.length === 0 && virtualMs < 60_000) {
+    t.mock.timers.tick(100);
+    virtualMs += 100;
+  }
+  assert.deepEqual(exits, [0], "入力が閉じないまま待ち続けた");
+  assert.ok(virtualMs <= 2_000, `入力を待たせすぎる（${virtualMs}ms）`);
+  stdin.end();
+  assert.equal(await running, 0);
+  assert.equal(out, "");
+});
+
+test("実プロセス: 入力が閉じなくても、自分で exit 0 で終わる", { timeout: PROCESS_HANG_GUARD_MS }, async (t) => {
   const child = spawn(process.execPath, [HOOK], { cwd: ROOT, env: { ...process.env, [HOOK_EVENT_LOG_ENV]: "off" }, stdio: ["pipe", "pipe", "pipe"] });
+  t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); });
+  let stdout = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.stdin.on("error", () => {});
   child.stdin.write("{\"hook_event_name\":\"UserPromptSubmit\",");
   const started = Date.now();
   const code = await new Promise((resolve) => child.on("close", resolve));
+  // 入力は最後まで閉じていない（終わったのはフック自身の見張り）。壁時計は起動を含むので記録だけにする。
+  assert.equal(child.stdin.writableEnded, false);
   assert.equal(code, 0);
-  assert.ok(Date.now() - started < 5000, `終わるまでに時間がかかりすぎた: ${Date.now() - started}ms`);
+  assert.equal(stdout, "");
+  t.diagnostic(`起動から終了まで ${Date.now() - started}ms`);
 });
 
 test("両ホストのフック定義は UserPromptSubmit（学習）と Stop（完成前チェック）だけで、plugin.json から参照され、同じスクリプトを起動する", () => {
@@ -190,12 +231,12 @@ test("実際のフック起動行を、plugin root を与えたシェルで動�
   // Codex は PLUGIN_ROOT を環境変数で渡す（起動行は node -e がシェルに依らず解決する）。
   const codex = readJson("hooks/codex-hooks.json").hooks.UserPromptSubmit[0].hooks[0].command;
   for (const [label, command, extraEnv] of [["claude", claude, {}], ["codex", codex, { PLUGIN_ROOT: ROOT }]]) {
-    const result = spawnSync(command, { shell: true, cwd: tmpdir(), input, env: { ...env, ...extraEnv }, encoding: "utf8", timeout: 20_000 });
+    const result = spawnSync(command, { shell: true, cwd: tmpdir(), input, env: { ...env, ...extraEnv }, encoding: "utf8", timeout: PROCESS_HANG_GUARD_MS });
     assert.equal(result.status, 0, `${label}: ${result.stderr}`);
     assert.match(JSON.parse(result.stdout).hookSpecificOutput.additionalContext, /harness-self-improvement/u, label);
   }
   // plugin root が渡らなくても、入力は止めない（何も出さずに exit 0）。
-  const missing = spawnSync(codex, { shell: true, cwd: tmpdir(), input, env: { ...env, PLUGIN_ROOT: "", CLAUDE_PLUGIN_ROOT: "" }, encoding: "utf8", timeout: 20_000 });
+  const missing = spawnSync(codex, { shell: true, cwd: tmpdir(), input, env: { ...env, PLUGIN_ROOT: "", CLAUDE_PLUGIN_ROOT: "" }, encoding: "utf8", timeout: PROCESS_HANG_GUARD_MS });
   assert.equal(missing.status, 0);
   assert.equal(missing.stdout, "");
 });
