@@ -66,7 +66,7 @@ export function externalCallHelp() {
                                   台帳の置き場。--work-dir なら <dir>/quality/external-calls.jsonl
                                   （公開リポジトリの追跡対象の中には書かない）
     --session <id>                呼び出し元（このホスト）の会話・タスクの ID
-    --caller-host <claude-code|codex>   省略時は環境から推す
+    --caller-host <claude-code|codex|antigravity>   省略時は環境から推す（Antigravity は推せないので明示）
     --status <${EXTERNAL_CALL_STATUSES.join("|")}>
                                   既定 complete。出力が空なら complete でも empty として残す
     --incomplete-reason <code>    未完の理由のコード（例: empty-response, usage-limit, connection-reset）

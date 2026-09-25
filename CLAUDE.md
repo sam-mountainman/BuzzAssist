@@ -45,6 +45,15 @@ Claude Code と Codex のどちらから実行しても同じ結果になる。
 dry-run、正本への反映には reviewer 名が要る。自動で正本を書き換える作りに
 していないのは、それが「自分で自分に合格を出す」構造になるため。
 
+# 外部モデル呼び出しの記録 — 呼んだ側が残す
+
+Antigravity 経由の Gemini など外部モデルを呼んだら、呼び出し元のこのホストが、呼び出しのたびに
+`node scripts/harness-external-call.mjs record --host <antigravity|codex|claude> --model <id> --purpose "<用途>" --input <渡した本文のファイル> --output <返った本文のファイル> --work-dir <台本の作業フォルダ> --session <この会話のID>`
+で記録する。Antigravity にはフックの仕組みが無く、呼ばれた側では記録できないため。台帳には入出力の
+SHA・モデル・時刻・呼び出し元の会話 ID だけが残り、本文は保存しない。空返答・途中切れは
+`--status empty|truncated` で未完として残す（出力が空なら自動で empty になる）。返った id は台本の品質ループ
+（`node scripts/script-quality-loop.mjs record --external-call <id>`）へ渡し、その版は呼んだ文脈とは別の文脈で採点する。
+
 # BuzzAssist Agent Setup
 
 When the user gives this repository URL and asks to set it up, do the setup end to end.

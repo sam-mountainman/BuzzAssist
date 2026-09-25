@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, writeFile, appendFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   EXTERNAL_CALL_RECORD_VERSION,
@@ -147,6 +148,21 @@ test("壊れた台帳の行は黙って飛ばさない", async (t) => {
   await recordExternalCall(base(ws));
   await appendFile(ws.ledgerPath, "{壊れた行\n");
   await assert.rejects(readExternalCallLedger(ws.ledgerPath), /2 行目が壊れています/u);
+});
+
+test("ホストの指示ファイルが、呼び出しの記録は呼んだ側が残すこと・Antigravity は自分で capture することを言う", async () => {
+  const root = fileURLToPath(new URL("..", import.meta.url));
+  const gemini = await readFile(join(root, "GEMINI.md"), "utf8");
+  assert.match(gemini, /Antigravity にはフックの仕組みが無い/u);
+  assert.match(gemini, /harness-learn\.mjs capture/u);
+  assert.match(gemini, /呼び出し元のホストが/u);
+  assert.match(gemini, /harness-external-call\.mjs record/u);
+  for (const name of ["CLAUDE.md", "AGENTS.md"]) {
+    const text = await readFile(join(root, name), "utf8");
+    assert.match(text, /harness-external-call\.mjs record --host/u, name);
+    assert.match(text, /本文は保存しない/u, name);
+    assert.match(text, /script-quality-loop\.mjs record --external-call/u, name);
+  }
 });
 
 test("CLI は id を1行目に出し、--help では何も記録しない", async (t) => {

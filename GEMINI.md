@@ -35,9 +35,31 @@ Claude Code と Codex のどちらから実行しても同じ結果になる。
 
 - `.agents/skills/harness-self-improvement/SKILL.md`
 
+**Antigravity にはフックの仕組みが無い。** Claude Code と Codex では、訂正らしい発言を
+フック（UserPromptSubmit）が見つけて捕捉を促すが、Antigravity では誰も促さない。
+訂正・禁止・繰り返しの指摘を受けたら、その場で自分で次を打つ:
+
+```bash
+node scripts/harness-learn.mjs capture --kind <correction|constraint|preference|fact> \
+  --target <宛先> --text "何をどう直すか" --evidence "何を観測したか" --session "<この会話のID>"
+```
+
+台本の直し・訂正の宛先は `channel-pack:narrated-story-script`（チャンネルの非公開台帳）。
+発言を逐語で写さず、何を直すかの形に書き直す。訂正に当たらなければ何もしなくてよい。
+
 入口は `node scripts/harness-learn.mjs`。捕捉は何も書き換えず、統合は既定で
 dry-run、正本への反映には reviewer 名が要る。自動で正本を書き換える作りに
 していないのは、それが「自分で自分に合格を出す」構造になるため。
+
+# 外部モデルの呼び出しの記録
+
+外部モデルの呼び出しは、**呼び出し元のホストが**
+`node scripts/harness-external-call.mjs record` で記録する（入出力の SHA・モデル・時刻・
+呼び出し元の会話 ID だけで、本文は保存しない）。Antigravity にはフックが無く、呼ばれた側では
+記録できないため。Claude Code / Codex から台本の手直しなどを頼まれて Antigravity が答えるときは、
+呼んだ側が記録するので、ここでは記録しない（二重に数えない）。Antigravity 自身が別のモデルを
+呼んだときは、Antigravity が呼び出し元として `--caller-host antigravity` で記録する。
+返った id は台本の品質ループ（`node scripts/script-quality-loop.mjs record --external-call <id>`）が参照する。
 
 # BuzzAssist Agent Setup
 
