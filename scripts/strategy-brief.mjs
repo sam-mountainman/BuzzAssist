@@ -8,6 +8,8 @@
 //   node scripts/strategy-brief.mjs record --brief <ブリーフ> --review <採点ファイル> [--work-dir <dir>]
 //   node scripts/strategy-brief.mjs status [--work-dir <dir> | --brief <ブリーフ>] [--require-pass]
 //   node scripts/strategy-brief.mjs verdict --brief <ブリーフ> [--work-dir <dir>] [--require-pass]
+//   node scripts/strategy-brief.mjs next --from <前のブリーフ> --metrics <指標の集計 JSON> [--referrals <JSON>] \
+//        [--audience-run <4分析の run フォルダ>] [--work-dir <dir>] [--out <下書き>]
 //
 // 企画の判断はホストのエージェントと運営者がする。ここは形の検査・根拠の照合・版ごとの採点の記録だけで、
 // モデルを呼ばない。実装の正本は lib/strategyBrief.mjs と lib/strategyBriefQualityLoop.mjs（中核は lib/qualityLoop.mjs）。
@@ -20,6 +22,7 @@ import { dirname, resolve } from "node:path";
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
 import { readStrategyBrief, strategySkillFingerprint, validateStrategyBrief } from "../lib/strategyBrief.mjs";
 import { captureStrategyBriefLearning } from "../lib/strategyBriefLearning.mjs";
+import { draftNextStrategyBrief } from "../lib/strategyBriefNext.mjs";
 import {
   STRATEGY_BRIEF_QUALITY_STATE_FILE,
   recordStrategyBriefRound,
@@ -32,6 +35,7 @@ import {
 const VALUE_OPTIONS = new Set([
   "--work-dir", "--generator-context", "--generator-host", "--reason", "--brief", "--review",
   "--revision-delta", "--blocking-condition", "--skill-dir",
+  "--from", "--metrics", "--referrals", "--audience-run", "--out",
 ]);
 const REPEATABLE_OPTIONS = new Set(["--producer-context"]);
 const FLAG_OPTIONS = new Set(["--json", "--restart", "--require-pass", "--help", "-h"]);
@@ -99,6 +103,16 @@ export function strategyBriefHelp() {
                古い根拠があれば strategy-evidence-refresh-required（日数では決めない）。採点した版から
                根拠の確かさを上げた書き換えは strategy-brief-evidence-upgraded-without-review:<id>
     --brief <file> [--work-dir <dir>] [--require-pass]     pass でなければ終了コード 4
+
+  next         公開後の数字から次のブリーフの下書きを作る（照合と下書きだけ。数字の解釈と次の企画の判断は
+               ホストのエージェントと運営者がする）。前のブリーフの postPublish.metrics を実際の数字と照らし、
+               期待の数値があれば満たした／届かなかったを残す点・変える点の候補にして、数字のファイルを根拠に
+               結び付ける。無い数字は missing（推測で埋めない）、一部の行だけの値は partial で比べない。
+               4分析の run は report-manifest.json が現行のものだけを根拠にする（stale は理由つきで外す）
+    --from <前のブリーフ> --metrics <指標の集計 JSON（schema 1.1）>
+    [--referrals <関連元の集計 JSON（schema 1.0）>] [--audience-run <run フォルダ>]
+    [--work-dir <dir>]             既定は前のブリーフのフォルダ。数字のファイルはこの中に置く
+    [--out <file>]                 下書きのブリーフだけをこのファイルに書く（既存のファイルは上書きしない）
 
   --work-dir を省くと、--brief のあるフォルダを作業フォルダにする。根拠のパスは作業フォルダからの相対。
 
@@ -229,8 +243,21 @@ export async function runStrategyBriefCli(argv = process.argv.slice(2), {
       }
       return { exitCode: args.requirePass && !result.pass ? 4 : 0, result };
     }
+    case "next": {
+      const result = await draftNextStrategyBrief({
+        fromPath: typeof args.from === "string" ? resolve(args.from) : "",
+        metricsPath: typeof args.metrics === "string" ? resolve(args.metrics) : "",
+        referralsPath: typeof args.referrals === "string" ? resolve(args.referrals) : "",
+        audienceRunPath: typeof args.audienceRun === "string" ? resolve(args.audienceRun) : "",
+        workDir: typeof args.workDir === "string" ? resolve(args.workDir) : "",
+        outPath: typeof args.out === "string" ? resolve(args.out) : "",
+        ...injected,
+      });
+      stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+      return { exitCode: 0, result };
+    }
     default:
-      throw new Error(`不明なアクション: ${args.action}（validate / fingerprint / start / sheet / record / status / verdict）`);
+      throw new Error(`不明なアクション: ${args.action}（validate / fingerprint / start / sheet / record / status / verdict / next）`);
   }
 }
 
