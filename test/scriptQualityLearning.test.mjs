@@ -163,7 +163,13 @@ test("品質ループの record は、合格しなかった回でだけ学習の
   await writeFile(join(root, "draft.md"), SCRIPT_TEXT);
   await startScriptQualityLoop({ workDir: root, generatorContextId: "ctx-writer", now });
   const harness = captureHarness();
-  const captureLearning = (input) => captureScriptRoundLearning({ ...input, env: {}, now, captureOptions: harness.options });
+  // ループは作業フォルダを渡すので、学習を積むチャンネルを台帳から引く。試験では端末の本物の配置表を読まない。
+  const captureLearning = (input) => {
+    assert.equal(input.workDir, root, "ループは作業フォルダを学習の捕捉へ渡す");
+    return captureScriptRoundLearning({
+      ...input, env: {}, now, captureOptions: harness.options, resolveChannel: async () => ({ channelId: "", selectedBy: null }),
+    });
+  };
   const scores = (overrides) => Object.fromEntries(CONTRACT.rubric.map((row) => [row.id, overrides[row.id] ?? (row.id === "review-first-person-marker" ? 100 : 96)]));
   const reviewFile = async (name, context, rubricScores, extra = {}) => {
     await writeFile(join(root, "quality", "reviews", `${name}.json`), JSON.stringify({

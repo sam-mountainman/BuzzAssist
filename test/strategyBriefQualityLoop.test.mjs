@@ -233,6 +233,22 @@ test("前の版から根拠の確かさを上げた版は、その事実を版�
   assert.deepEqual(result.version.evidenceStateUpgrades, [{ id: "e-metrics", from: "provisional", to: "verified", sameFile: true }]);
 });
 
+test("不合格の回の学習の捕捉へ、作業フォルダとブリーフの channel.id を渡す（積むチャンネルを台帳から引く手がかり）", async (t) => {
+  const { root, first } = await setup(t);
+  await start(root);
+  const inputs = [];
+  const captureLearning = async (input) => {
+    inputs.push(input);
+    return { captured: 0, skippedReason: "disabled" };
+  };
+  const failing = await writeReview(root, "r1-low", review({ context: "ctx-eval-1", briefSha256: first.sha256, rubricScores: scores({ "promise-payoff": 30 }) }));
+  const result = await record(root, { briefPath: first.rel, reviewPath: failing, captureLearning });
+  assert.equal(result.recorded, true);
+  assert.equal(inputs.length, 1);
+  assert.equal(inputs[0].workDir, path.resolve(root));
+  assert.equal(inputs[0].briefChannelId, first.brief.channel.id);
+});
+
 test("不合格の回の学習候補は id だけで、ブリーフの制作条件のハーネスの Channel Pack 宛へ積む", async () => {
   const state = { status: "active", contractDigest: "d".repeat(64), startedAt: "2026-09-26T00:00:00.000Z" };
   const round = { index: 1, failureFingerprint: `quality-failure:${"a".repeat(24)}`, floorFailures: ["promise-payoff"], failedGateIds: ["evidence-files-match"] };

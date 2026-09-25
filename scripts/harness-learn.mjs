@@ -2148,6 +2148,8 @@ function printHelp() {
   reject / rollback で使える。sync と curate では使わない）:
     台帳（config/harness-deployments.json の channels）のチャンネルで作った Job の学習は、ハーネス単位の
     Channel Pack の台帳ではなく、そのチャンネルの保存先に積む（Job の確定時の自動の捕捉と Canvas feedback も同じ）。
+    品質ループ（台本・途中の成果物・企画ブリーフ）の自動の捕捉も、制作の Job・作業フォルダ（Job の台本の作業フォルダ・
+    projectDir・strategy.workDir）・ブリーフの channel.id から台帳のチャンネルが分かれば、そのチャンネルの保存先に積む。
     保存先は channelLearning の { "target": "channel-pack:<id>", "channel": "<チャンネルの id>", "root": "<dir>" }、
     宣言が無ければ学習の置き場（${LEARNING_DIR_ENV} か ~/.buzzassist/learning）の channels/<チャンネルの id>。
     提案と反映記録は <root>/docs/learning/、宛先の正本（要求台帳）は <root>/<正本の相対 path>。

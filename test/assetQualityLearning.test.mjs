@@ -197,7 +197,13 @@ test("品質ループの record は不合格の回でだけ、verify は人の�
   const stage = "character";
   await startAssetQualityLoop({ workDir: root, harnessId: "koya-manga-video", stage, subjectId: SUBJECT, generatorContextId: "ctx-maker", now });
   const harness = captureHarness();
-  const captureLearning = (input) => captureAssetLearning({ ...input, env: {}, now, captureOptions: harness.options });
+  // ループは作業フォルダを渡すので、学習を積むチャンネルを台帳から引く。試験では端末の本物の配置表を読まない。
+  const captureLearning = (input) => {
+    assert.equal(input.workDir, root, "ループは作業フォルダを学習の捕捉へ渡す");
+    return captureAssetLearning({
+      ...input, env: {}, now, captureOptions: harness.options, resolveChannel: async () => ({ channelId: "", selectedBy: null }),
+    });
+  };
   const writeVersion = async (n) => {
     await writeFile(join(root, "assets", `v${n}.png`), png(`v${n}`));
     return { rel: `assets/v${n}.png`, sha: sha(png(`v${n}`)) };

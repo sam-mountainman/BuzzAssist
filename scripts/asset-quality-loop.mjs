@@ -330,7 +330,7 @@ export async function runAssetQualityCli(argv = process.argv.slice(2), {
       if (!args.json && result.learning) {
         stdout.write(result.learning.skippedReason
           ? `学習候補は積んでいません（${result.learning.skippedReason}）\n`
-          : `学習候補 ${result.learning.captured} 件を ${result.learning.target} へ積みました（既にあったもの ${result.learning.duplicates} 件）\n`);
+          : `学習候補 ${result.learning.captured} 件を ${result.learning.target}${result.learning.channelId ? `（チャンネル ${result.learning.channelId} の保存先）` : ""} へ積みました（既にあったもの ${result.learning.duplicates} 件）\n`);
       }
       return { exitCode: result.recorded || result.alreadyRecorded ? 0 : 3, result };
     }
