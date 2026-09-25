@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://buzzassist.local/schemas/narrated-story-script-package-v1.json",
+  "title": "BuzzAssist narrated-story script package v1",
+  "description": "ナレーション物語の公式経路が直接受け取る台本パッケージ（script-package.json）。本編・感想・話者・読み・BGM の区分・場面の意図を持つ。チャンネル固有の値（役名・区分名・区切り行の文言）はこの形の中の値として入り、Core には書かない。lib/narratedStoryScriptPackage.mjs の validateNarratedScriptPackage と同じ規則。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "story"],
+  "properties": {
+    "format": {
+      "const": "buzzassist-narrated-script-package-v1"
+    },
+    "title": {
+      "type": "string",
+      "maxLength": 2000,
+      "description": "企画名。声にも字幕にもしない"
+    },
+    "sourceMarkdown": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256"],
+      "description": "人が読む正本（script.md）の SHA-256。生成記録に残し、パッケージと正本の対応を後から確かめる",
+      "properties": {
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "bytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "speakers": {
+      "type": "array",
+      "description": "話者と Channel Pack の役（cast.roles のキー）の対応。narrator は予約語で、Pack の voice（語りの声）が読む",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "castRole"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$", "not": { "const": "narrator" } },
+          "castRole": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$" }
+        }
+      }
+    },
+    "story": {
+      "type": "array",
+      "minItems": 1,
+      "description": "本編。1要素が1つの場面（画1枚）。話者が narrator 以外なら「」の中がその話者の台詞、外は地の文として分けて読む。「」が無ければ全文がその話者の台詞",
+      "items": { "$ref": "#/$defs/storySegment" }
+    },
+    "reviewMarker": {
+      "type": "string",
+      "minLength": 1,
+      "description": "本編と感想の区切り。書くなら Channel Pack の bookends.review.scriptMarker と一致しなければならない（別チャンネル向けの台本の取り違えを止める）"
+    },
+    "review": {
+      "type": "array",
+      "description": "感想パート。Channel Pack が bookends.review を宣言しているときだけ使える",
+      "items": { "$ref": "#/$defs/reviewSegment" }
+    },
+    "readings": {
+      "type": "array",
+      "description": "字幕の表記と声の読みを分ける。表記（display）は字幕にそのまま出し、声には読み（spoken）を渡す",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["segmentId", "display", "spoken"],
+        "properties": {
+          "segmentId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+          "display": { "type": "string", "minLength": 1 },
+          "spoken": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "segmentText": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "pattern": "^[^#\\r\\n][^\\r\\n]*$"
+    },
+    "storySegment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "text"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "text": { "$ref": "#/$defs/segmentText" },
+        "speaker": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "sceneIntent": { "type": "string", "maxLength": 2000, "description": "画面の意図（場所・人物・寄り引き）。画像の指示に使う" },
+        "musicSection": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$", "description": "BGM の区分（Channel Pack の musicPlan.sections[].id）" }
+      }
+    },
+    "reviewSegment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "text"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "text": { "$ref": "#/$defs/segmentText" },
+        "speaker": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "sceneIntent": { "type": "string", "maxLength": 2000 },
+        "operatorReplacementRequired": {
+          "type": "boolean",
+          "description": "運営者本人の体験へ差し替える文。true の間は声にも字幕にもせず、有料生成の前に止まる"
+        }
+      }
+    }
+  }
+}
