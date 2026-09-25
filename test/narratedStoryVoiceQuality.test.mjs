@@ -15,7 +15,9 @@ import {
 } from "../lib/narratedStoryQualityLoop.mjs";
 import {
   NARRATED_VOICE_QUALITY_AUDIT_ID,
+  NARRATED_VOICE_TAKE_MEASUREMENT_VERSION,
   gateNarratedVoiceTakes,
+  narratedVoiceTakeMeasurementReport,
   normalizeNarratedVoiceQualityConfig,
 } from "../lib/narratedStoryVoiceQuality.mjs";
 import { bookendFixtureAdapters, createBookendFixtureMedia } from "./fixtures/narratedBookendFixture.mjs";
@@ -79,6 +81,44 @@ test("ゲートに落ちたテイクは採用せず撮り直す。読み（spoke
   assert.equal(JSON.stringify(result.report).includes("文字起こし"), false, "報告に文字起こしを残さない");
   assert.equal(JSON.stringify(result.report).includes("おかえり"), false, "報告に台本の文を残さない");
   assert.equal(result.report.segments.find((row) => row.segmentId === "s02").takes[0].hardFail, true);
+});
+
+test("測定は声のテイクの工程の measurement になる: 全テイクの判定と数値の指標を、テイクの sha256 に結び付けて文を持たずに残す", async () => {
+  const segments = [
+    { id: "s01", text: "戸を開けずに待った。", spokenText: "戸をひらけずに待った。" },
+    { id: "s02", text: "「おかえり」" },
+  ];
+  const result = await gateNarratedVoiceTakes({
+    segments,
+    takesBySegment: new Map(segments.map((segment) => [segment.id, [{ take: 1, path: `/work/${segment.id}.wav`, receipt: receipt(segment.id) }]])),
+    retake: async (segment, take) => ({ path: `/work/${segment.id}.take${take}.wav`, receipt: receipt(segment.id, take) }),
+    maxTakes: 2,
+    gate: scriptedGate({ failing: new Set(["s02#1"]) }),
+  });
+  // 候補: 文ごとの全テイクと、ゲートに通ったか（品質ループが採用するテイクをこの中から選ぶ）。
+  assert.deepEqual(result.candidates.get("s02").map((row) => [row.take, row.machinePass]), [[1, false], [2, true]]);
+  assert.deepEqual(result.candidates.get("s01").map((row) => [row.take, row.machinePass]), [[1, true]]);
+  assert.deepEqual(result.measurements.map((row) => `${row.segmentId}#${row.take}:${row.status}`), ["s01#1:pass", "s02#1:fail", "s02#2:pass"]);
+
+  const sha = (seed) => seed.repeat(64);
+  const shaByPath = new Map([["/work/s01.wav", sha("a")], ["/work/s02.wav", sha("b")], ["/work/s02.take2.wav", sha("c")]]);
+  const report = narratedVoiceTakeMeasurementReport(result.measurements, shaByPath);
+  assert.equal(report.version, NARRATED_VOICE_TAKE_MEASUREMENT_VERSION);
+  assert.deepEqual(report.requiredMetrics, ["utmos", "cer"]);
+  assert.deepEqual(report.checks.map((row) => [row.id, row.status, row.inputSha256.audio]), [
+    ["s01#1", "pass", sha("a")],
+    ["s02#1", "fail", sha("b")],
+    ["s02#2", "pass", sha("c")],
+  ]);
+  assert.deepEqual(report.checks[0].metrics, { utmos: 4.1, cer: 0.02 }, "数値の指標だけを残す");
+  const text = JSON.stringify(report);
+  for (const forbidden of ["文字起こし", "おかえり", "ひらけずに", "/work/"]) assert.equal(text.includes(forbidden), false, `measurement leaked: ${forbidden}`);
+  // ループの機械ゲートと同じ判定（voiceQualityPenalty）で、落ちたテイクは落ち、通ったテイクは通る。
+  const { voiceQualityPenalty } = await import("../lib/voiceQualityGate.mjs");
+  const verdict = (id) => voiceQualityPenalty(report.checks.find((row) => row.id === id), { requiredMetrics: report.requiredMetrics }).hardFail;
+  assert.deepEqual(["s01#1", "s02#1", "s02#2"].map(verdict), [false, true, false]);
+  // sha256 を読めなかったテイクは載せない（載っていないテイクはループの機械ゲートに通らない）。
+  assert.deepEqual(narratedVoiceTakeMeasurementReport(result.measurements, new Map([["/work/s01.wav", sha("a")]])).checks.map((row) => row.id), ["s01#1"]);
 });
 
 test("上限まで撮り直しても合格のテイクが無い・必須の指標が測れない・結果が返らないテイクは監査を落とす", async () => {
