@@ -292,7 +292,21 @@ BuzzAssistを次の3層に固定する。
   - General Work: Office、Finance、HR、Legal、Sales等
 - [ ] Operator Productionでは`yt-analytics`と`yt-quality-loop`を候補から外す
 - [ ] `yt-analytics`のglobal版とplugin版の二重登録・内容差を解消する
-- [ ] `yt-quality-loop`のStop/UserPromptSubmit hookが動画制作Jobへ介入しないことを保証する
+- [x] `yt-quality-loop`のStop/UserPromptSubmit hookが動画制作Jobへ介入しないことを保証する
+  （2026-09-25、yt-quality-loop 1.8.x のフックのコードを読んで確かめた。yt-quality-loop 側は変更していない）
+  - Stop: フック入力の`cwd`と`session_id`から`<cwd>/.yt-loop/sessions/<session_id>/state.json`を読み、
+    無い・`active`でないときは何も出さない。`{"decision":"block"}`で終了を止めてループの続きを指示するのは、
+    **同じ会話・同じ作業フォルダーで yt-quality-loop のループが動いているときだけ**
+  - UserPromptSubmit: 入力を書き換えず、止めもしない。毎回`YT_LOOP_SESSION_ID=<id>`の1行を文脈へ足し、
+    同じ会話にループがあればその状態を足す
+  - `run-video-harness` / `koya-manga-video` / `narrated-story-video`の Job はホストのフックの外で走る子プロセスなので、
+    Job の続行判定や入力には触れない。ハーネスが起動する子エージェント（`codex exec` / `claude -p`）は
+    別の会話IDなので、上の1行が文脈に足されるだけで止められない
+  - 残る介入は「ループを動かしている会話で制作 Job を回す」ときだけ。doctor の任意項目
+    `yt-quality-loop-hooks`が、Claude Code / Codex でプラグインが有効か、作業フォルダーに動いているループが
+    あるかを見て知らせる（`lib/ytQualityLoopHooks.mjs`）。ループの状態ファイルは BuzzAssist から書き換えない
+  - Codex のプラグインフックは信頼レビュー後にだけ動く（上の harness-learn の項と同じ）。有効化されていても
+    未レビューなら走らないが、doctor は安全側に「有効」として数える
 - [ ] Cowork系は削除せずGeneral Work profileへ隔離する
 - [ ] HyperFrames / Remotion / Koyaの経路を用途で明示し、正式Harnessが暗黙選択しないようにする
 - [ ] `claude-mem`と`codex-mcp`は、修復して使うか無効化するかを明示決定する

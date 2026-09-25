@@ -196,7 +196,7 @@ npm run manga-video:preflight -- \
 ## 移植しなかったもの
 
 - 同じ本文の`akapen-main`/`akapen-repo`複製: 実体が同一のため二重導入しない。`bestofn-main`/`bestofn-repo`は同一ではなく、音声対応済みのrepo版だけを現行参照とする。
-- 169-byteプレースホルダーだけの `yt-quality-loop`: 関連path 21ファイルはすべて同一の`CLAUDE.md`で、実行コード・Skill本文・設定は存在しない。機能があるものとして扱わない。
+- `yt-quality-loop`: **このフォルダー（`~/まさお`）の中の**関連path 21ファイルはすべて同一の169-byte`CLAUDE.md`で、ここに実行コードは無い。ただし**実装そのものは別にある**（2026-09-25 訂正）。別の作業フォルダーの独立したリポジトリ（1.8.x）が本体で、Claude Code / Codex のプラグインとして Stop / UserPromptSubmit フックとスキルを入れる。BuzzAssist へは移植せず、`operator-production`でも hard deny のまま。フックが制作 Job へ介入するかの確認と doctor の検査は`docs/buzzassist-video-harness-master-roadmap-ja.md`の該当項目にある。
 - YouTube Analytics経路: 調査記事に分析の概念はあるが、このフォルダーに認証済みAnalytics connector/pluginの実装はない。BuzzAssistの`operator-production`も`yt-analytics*` / `yt-quality-loop*` / `youtube-analytics*`をhard denyしており、本統合の対象外とする。
 - 無限自己改善: 費用と時間を浪費し、品質の自己申告を強めるため不採用。
 - 生成AIによる自己合格: 独立評価の原則に反するため不採用。
@@ -222,7 +222,7 @@ npm run manga-video:preflight -- \
 | `akapen` | **設計方式の参照のみ**。3±1問、推奨既定値、回答後に着手する原則は採用。ユーザーglobal skillは正式Harnessの`operator-production`には入れない |
 | `.fable/last-plan.md` | 制作AI／審査AI／審査基準書／人間の4部品構成と Human in/on/out の切り分けは品質契約とループ状態に反映済み |
 | `.hiroya_obsidian_work` 字幕64本 | **第三者調査素材として参照のみ**。VTT 64組はすべて残り、rootへのMarkdown変換は`19.md`・`20.md`の2本だけが現存する。残り62本はroot Markdownになっていない。`vtt_to_markdown.py`は既存の数字ファイルを上書きするため実行しない。利用は別ディレクトリ・出所明記・引用の範囲で、かつ明示の指示があるときに限る |
-| `yt-quality-loop` / `yt-loop` 関連 | **不採用**。関連21ファイルは全て169-byteの同一`CLAUDE.md`プレースホルダだけで、実装不在 |
+| `yt-quality-loop` / `yt-loop` 関連 | **不採用**。このフォルダーの関連21ファイルは全て169-byteの同一`CLAUDE.md`プレースホルダだが、実装は別リポジトリ（1.8.x、Claude Code / Codex のプラグイン）に存在する（2026-09-25 訂正。以前は「実装不在」と書いていた）。本番へは入れず、フックの介入は doctor の`yt-quality-loop-hooks`で知らせる |
 | YouTube Analytics | **対象外**。本資産に認証済みAnalytics実装はなく、`operator-production`でも関連selectorをhard deny |
 | `plugins/`・`e2e-*`・`docs/`・`scripts/` の配置痕跡 | **参照のみ**。ディレクトリ自体は存在するが、中身は上記の`CLAUDE.md`プレースホルダだけで、導入できる機能実体はない |
 

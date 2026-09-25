@@ -59,6 +59,7 @@ import { REVIEWER_TRUST_ENV_GUIDANCE, REVIEWER_TRUST_PATH_ENV, preflightReviewer
 import { resolveCodexCommand } from "./codex-image-bridge.mjs";
 import { appendManagedToolsToPath } from "../lib/prerequisiteTools.mjs";
 import { probeSvgRasterizerCached } from "../lib/svgRasterizer.mjs";
+import { probeYtQualityLoopHooks } from "../lib/ytQualityLoopHooks.mjs";
 
 const defaultRunCommand = promisify(execFile);
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -878,6 +879,19 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "",
   add(await probeChannelPack({ projectDir, harnessId, job, runtime }));
 
   add({ id: "image-default-route", required: false, ...(await probeDefaultImageRoute({ env: runtimeEnv, runtime })) });
+
+  // yt-quality-loop（別配布のプラグイン）の Stop フックは、同じ会話・同じ作業フォルダーで
+  // そのループが動いているときだけ終了を止めてループの続きを指示する。制作 Job の会話で
+  // それが起きないかを知らせる（任意。yt-quality-loop 側は変更しない）。
+  add({
+    id: "yt-quality-loop-hooks",
+    required: false,
+    ...probeYtQualityLoopHooks({
+      projectDirs: [path.resolve(projectDir), process.cwd()],
+      homeDir: runtime.homeDir || runtimeEnv.BUZZASSIST_SETUP_HOME || homedir(),
+      env: runtimeEnv,
+    }),
+  });
 
   const drift = probeShippedSkillDrift();
   add({ id: "shipped-skill-drift", required: false, ...drift });
