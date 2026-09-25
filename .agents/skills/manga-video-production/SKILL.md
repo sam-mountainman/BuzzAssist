@@ -67,6 +67,9 @@ node scripts/run-video-harness.mjs resume \
 `run-video-harness.mjs status`でJobを読み、承認待ち・利用上限・失敗箇所から、合格済み
 artifactを再生成せず同じJob IDで再開する。
 
+Windows では、子（python・ffmpeg・正規入口）を起動するプロジェクトのフォルダか BuzzAssist のフォルダが 238 字を
+越えると子を起動できないので、doctor の `windows-work-path` で有料の処理の前に止まる。短い場所へ移して Job を作り直す。
+
 以下に出てくる`koya-manga-video.mjs`の個別actionは、上位Jobに拘束済みのworkspaceを
 検査・修復するための内部手順であり、新規制作の入口ではない。
 
