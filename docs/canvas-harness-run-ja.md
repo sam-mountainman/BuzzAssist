@@ -74,6 +74,41 @@ assetを再利用しつつ別elementとして表示する。各media elementは�
 asset bytes/file recordは削除しない。source SHA不一致、path traversal、symlink、mime/拡張子不一致は
 main Canvas stateを進める前に拒否する。
 
+## 途中の成果物（progress）の投影
+
+Run と media の投影が出すのは、Job が決着した成果物（最終 MP4・監査・contact sheet・signoff・Receipt）
+だけ。制作の途中を運営者が Canvas 上で見て判断できるよう、`projectVideoHarnessJob` は Run の投影の後に
+**途中の成果物**も投影する。
+
+- 描く側（ジャンル共通）: `lib/canvasRunProgressProjection.mjs`。入力は
+  `buzzassist-canvas-progress-snapshot-v1`（工程の DAG、見出し、格子の section と item）で、
+  要素は customData `buzzassist.harnessRunProgress.v1` で所有を示す。Run・media の要素とは所有が別なので、
+  互いに墓標化しない
+- 読む側（ジャンルごと）: 漫画は `lib/koyaMangaProgressSnapshot.mjs`。Job の隔離 workspace
+  （`job.executionProjectDir`）の中だけを読み、外を指すパスと外へ出る symlink は読まない。
+  読み取り側が無いハーネス（今はナレーション物語）は途中の投影をしない
+- 出すもの（漫画）: 工程の DAG（doctor・声の人選・衣装・人物・本編の画・構成と顔の配置・台詞の音声・
+  レンダー・最終監査・独立レビュー・RunReceipt・Canvas 投影を pending / running / pass / fail /
+  awaiting-human-review で）、本編の画のカット順の格子（生成と QA の台帳の合否と、途中の成果物の品質ループ
+  `lib/assetQualityLoop.mjs` の合否をラベルで）、人物の候補と承認済みの設定画、カットごとの採用テイク
+- 承認前の人物は匿名: 「人物 N（承認前）」と候補の匿名ラベル A〜E だけを出し、名前・人物 id・説明・
+  作り分けの軸・プロンプトを Canvas に書かない。候補の採用が記録されてから名前を出す
+- 品質ループの記録の置き場は Job の workspace（`--work-dir` に workspace を渡す）。成果物の SHA で
+  突き合わせるので、subject id の付け方に依らない。同じ subject で別の版を採点した記録は
+  「別の版を採点済み」と出す
+- 画は content-addressed に複製し（`canvas/assets/harness-runs/<runId>/<sha256>.<ext>`）、表示は
+  `?w=640`（Canvas サーバーが ffmpeg で WebP に縮めて返す。256KB 以下は原本のまま）、原寸は要素の
+  link から開く。採用テイクは `codexMediaKind: audio` の再生カードで、ポスターは WAV から描いた波形
+- 配置: Run の投影（x=40 から右・下）と重ならないよう、左側（x < 0）の固定幅パネル。配置と要素 ID は
+  snapshot（Job ID・工程・成果物のキー・SHA-256）だけで決まり、置き場の絶対パスに依らない
+- 再投影: 投影 hash が同じ要素は触らず、変わった要素だけ version を上げ、消えた要素は墓標にする。
+  画のラベルが変わっても画の要素は動かさない。新しい要素の index は scene の最大の後ろに付ける
+- revision: 保存済み（`canvas/harness-runs/<runId>/canvas-progress.json`）より古い Job revision の投影は
+  書かずに skip する。途中の成果物は workspace から毎回読み直す表示なので、同じ revision で中身が
+  変わるのは正常（Run の投影のような衝突にしない）
+- 失敗: 途中の投影の失敗は Job の状態遷移（completed の確定を含む）を止めず、戻り値の
+  `progressProjection.ok=false` と `error` に残す
+
 ## 呼び出し
 
 ライブラリから:

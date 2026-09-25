@@ -258,7 +258,21 @@ BuzzAssistを次の3層に固定する。
   - preview MP4、final MP4
   - 自動監査、独立レビュー、knownRemainingIssues
   - Harness / Skill / Channel Pack / providerの版と指紋
-- [ ] Job状態変更を同じ要素へ反映し、再実行で重複要素を増やさない
+  - 2026-09-25 漫画（koya-manga-video）の Job は、制作の途中も Run のカードの左側（x < 0 の固定幅パネル）へ
+    出すようにした。描く側はジャンル共通の `lib/canvasRunProgressProjection.mjs`、読む側は
+    `lib/koyaMangaProgressSnapshot.mjs`（Job の隔離 workspace の中だけを読む）。出すもの:
+    工程の DAG（doctor〜Canvas 投影の12工程を pending / running / pass / fail / awaiting-human-review で）、
+    本編の画のカット順の格子（生成と QA の台帳の合否・途中の成果物の品質ループの合否のラベル）、
+    人物の候補（承認前は「人物 N」と匿名ラベル A〜E だけ。名前は採用の記録の後）と承認済みの設定画、
+    カットごとの採用テイク（▶ で再生できる音声要素。ポスターは WAV から描いた波形）。画は
+    content-addressed に複製し、表示は `?w=640` の WebP プレビュー、原寸は要素の link から開く
+  - 残り: ナレーション物語の途中の成果物（読み取り側がまだ無い）、字幕・BGM の途中の版、
+    参照画像（環境アトラス）の表示、途中の成果物への採択・却下のフィードバック（下の項目）
+- [x] Job状態変更を同じ要素へ反映し、再実行で重複要素を増やさない
+  - 2026-09-25 途中の成果物の投影も同じ規則にした。要素 ID は Job ID・工程・成果物のキー・SHA-256 から決まり、
+    別の端末・別のホストの作業場から投影しても同じ ID・同じ配置になる。2回目の投影は追加・更新 0、
+    状態の変化では変わった要素だけを更新し、作り直した画は古い要素を墓標にする
+    （`test/koyaMangaProgressProjection.test.mjs`、`test/canvasRunProgressProjection.test.mjs`）
 - [ ] Canvas上の採択・却下・コメントをJob/feedbackへ戻す
 - [ ] `prepare_canvas_attachments`経路を正式なチャット添付経路として維持する
 - [ ] OS GUI自動操作やクリップボードを主要経路にしない
@@ -269,8 +283,13 @@ BuzzAssistを次の3層に固定する。
 完了条件:
 
 - [ ] Claude/Codexの同じfixture runが、Canvas上で同じ構造・状態遷移として見える
+  - 2026-09-25 漫画の途中の成果物は、置き場の違う2つの作業場から同じ要素 ID・配置・files になることを合成の
+    Job で確かめた。実際の2ホストからの投影とナレーション物語は未確認
 - [ ] 画像・音声・字幕・MP4を手動ドラッグせず確認できる
+  - 2026-09-25 漫画の途中の画・採用テイクは投影で出る。字幕は未対応
 - [ ] ブラウザー実測で画面描画、主要操作、console error 0を確認する
+  - 2026-09-25 途中の成果物のパネルはまだブラウザーで実測していない（Browser の preview_start が作業木ではなく
+    本体の checkout の launch.json と canvas を使うため、合成の Job を表示できなかった）
 
 ### Phase 5 — SkillとPluginを役割別に整理する
 
