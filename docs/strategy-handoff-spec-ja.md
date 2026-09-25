@@ -286,6 +286,33 @@ Canvas feedback は、そのチャンネルの保存先へ積みます。保存�
 保存先が別のチャンネルの場所・保存先に重なる台帳は読み込みで拒みます。チャンネルの無い Job は従来どおりハーネス単位の
 Channel Pack の台帳へ積みます。
 
+品質ループ（台本・途中の成果物・企画ブリーフ）の不合格の回から自動で拾う学習も、チャンネルが分かればそのチャンネルの
+保存先へ積みます。チャンネルは、制作の Job の `metadata.channel`、ループの作業フォルダが台帳のチャンネルの Job の
+`options.scriptQualityWorkDir`・`projectDir`・`strategy.workDir` と同じかその中であること、企画ブリーフの `channel.id` の
+順に決めます（Job を優先。ブリーフと作業フォルダが別のチャンネルを指したら決めずに積みません）。チャンネルが決まったのに
+保存先を決められないときは `channel-learning-store-unresolved` で積まず、どれにも当たらなければ従来どおりです。
+台帳を `BUZZASSIST_CHANNEL_REGISTRY` で別のファイルにした端末では、チャンネルの無い Job の保存先（`channelLearning` の
+宛先単位の行）もそのファイルから読みます。
+
+**既存の台帳を1つ目のチャンネルへ引き継ぐ**: 開発用チェックアウトで `channel-packs/<id>/`（`docs/learning/` の提案・反映記録と
+`docs/` の要求台帳）に学習を持っていたチャンネルを台帳に登録するときは、チャンネルごとの宣言の root をその Pack の
+フォルダにします。書かずに登録すると、登録後の学習は新しい保存先（`channels/<チャンネルの id>`）へ積まれ、従来の台帳は
+`--channel` なしの一覧に残ります。例（id はどちらも合成）:
+
+```json
+"channelLearning": [
+  { "target": "channel-pack:sample-pack", "channel": "sample-channel", "root": "channel-packs/sample-pack" }
+]
+```
+
+- 引き継げるのは、その宛先を使うチャンネルが台帳に1つだけのとき（2つ目の同じハーネスのチャンネルは別の root にする。
+  重なると `channel-learning-store-unscoped-overlap` で拒みます）。宛先単位の宣言 `{ "target", "root" }` で従来の保存先を
+  別の場所にしていたなら、その root を書きます
+- 印（`channel`）の無い従来の行は、そのチャンネルの行として読みます。反映記録の照合も同じ要求台帳のファイルを見るので、
+  反映済みの数えは変わりません。引き継ぐ前に置いた承認待ちの変更は `--channel` を付けずに当てるか、`pending` を作り直します
+- 配布された写し（運営者の端末）の従来の台帳は `~/.buzzassist/learning/channel-packs/<id>/` に `docs/learning/` を挟まずに
+  あるので、root では指せません。引き継ぐなら、その中の `*.jsonl` を新しい root の `docs/learning/` へ写します
+
 plan-request は依頼の種類（`requestKind`）とブリーフの状態から次の工程を返します。種類が決めきれないときは `question` を1問
 返すので、答えを `requestKind` に入れて呼び直します。
 
