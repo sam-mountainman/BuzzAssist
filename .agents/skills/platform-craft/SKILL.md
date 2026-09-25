@@ -347,10 +347,8 @@ Job binding・契約digest・review notes SHA、narrated は signoff 本文 SHA�
 - **reviewer 秘密鍵はリポジトリ外に置く**（`/secure/...` のような repo 外 path）。
   `canvas/`、`channel-packs/`、Job workspace、Canvas asset に置かない。
   `reviewer-key-create` はリポジトリ内・`--project-dir` 内・git 作業木内の path を拒否する
-- 公開鍵（trustEntry）だけを owner へ別経路で渡し、owner が信頼リストへ追記して
-  監査・Receipt 実行側へ `BUZZASSIST_REVIEWER_TRUST` として配る
-- 失効は owner が `status: "revoked"` へ変えて配り直す。entry を削除して「知らない鍵」に
-  するより、失効理由が残る方が後から追える
+- 公開鍵（trustEntry）だけを owner へ別経路で渡し、owner が信頼リストへ追記して `BUZZASSIST_REVIEWER_TRUST` として
+  配る。失効も owner が `status: "revoked"` へ変えて配り直す（entry を消すより、失効理由が残る方が後から追える）
 - generator と reviewer の context（Codex task ID / Claude session ID）は別でなければ
   ならず、鍵が信頼済みでも同一 context の signoff は不合格
 
@@ -366,9 +364,8 @@ reviewer 鍵を扱うコードや手順を触るとき、Receipt の確定が re
 再試行し、何も再生成・再課金しない。確定待ちの間に成果物 SHA が変わっていれば
 `run-receipt-artifact-drift` で再び止まり、production を勝手に再実行しない。
 
-Koya の subject は `koya-review-attestation-v1`、narrated は
-`narrated-story-review-attestation-v1`。別ハーネスの署名を持ち込んでも schema が
-違うので通らない。
+Koya の subject は `koya-review-attestation-v1`、narrated は `narrated-story-review-attestation-v1`。
+別ハーネスの署名を持ち込んでも schema が違うので通らない。
 
 ## 並列制御
 
@@ -390,13 +387,14 @@ Koya の subject は `koya-review-attestation-v1`、narrated は
 - 字幕の組版に要るフォントの寸法（字の有無・送り幅）は `lib/fontMetrics.mjs`
 - 長い filter graph は `lib/ffmpegFilterArgs.mjs` でファイルに書いて渡す（Linux は1引数 128KiB、Windows は
   コマンド行全体で 32,767 字の上限がある。FFmpeg 7 以降は `-/filter_complex`、それより前は
-  `-filter_complex_script`）
+  `-filter_complex_script`）。コマンド行の長さは同じファイルの `windowsCommandLineLength` で測る
+- 入力の多い FFmpeg の工程（場面の画・声のファイルを並べる）は `lib/ffmpegSequenceRender.mjs` で描く。
+  `FFMPEG_COMMAND_LINE_BUDGET` を越えない塊に分けて描き、concat demuxer の stream copy でつなぐ。2つ目の分割器を作らない
 - 運営者の画・動画の取り込みは上の `lib/operatorImageImport.mjs` / `lib/operatorVideoImport.mjs`
 
 ## UI を触ったら、起動して確かめる
 
-`src/` の下を変更したら、**ブラウザで実際に起動してコンソールを見る**。
-これは任意の丁寧さではなく、この層で必須の手順。
+`src/` の下を変更したら、**ブラウザで実際に起動してコンソールを見る**。これは任意の丁寧さではなく、この層で必須の手順。
 
 理由は実測にある。UI のテスト44件は `App.jsx` をレンダーせず readFile と正規表現で判定しているので、
 挙動については何も保証しない。実際、**44件すべてが緑のまま、起動するとコンソールに40件超のエラーが
@@ -452,8 +450,7 @@ workflow synthesisが欠けている、といった状態を検査で見える�
 
 ## この層で繰り返し見つかった不具合の型
 
-直す前にこの型を思い出すこと。**機能が動いていない**のではなく、
-**検証したと書いてあるのに検証していない**のが大半だった。
+直す前にこの型を思い出すこと。**機能が動いていない**のではなく、**検証したと書いてあるのに検証していない**のが大半だった。
 
 - finalizer が観測文をハードコードして、自分の書いた文を根拠に自分を pass にする
 - `full-decode` が名前に反して一度も映像をデコードしていない
@@ -462,13 +459,12 @@ workflow synthesisが欠けている、といった状態を検査で見える�
 - 合成 fixture が実データの正本を名乗り、サンプルで作った成果物に
   「プロジェクトの正本に準拠」と署名される
 
-新しいゲートを足すときは、**そのゲートを通さずに完成させる道が残っていないか**を
-先に探すこと。ゲートを足すより、迂回路を塞ぐ方が効くことが多い。
+新しいゲートを足すときは、**そのゲートを通さずに完成させる道が残っていないか**を先に探すこと。
+ゲートを足すより、迂回路を塞ぐ方が効くことが多い。
 
 ### FFmpeg で実測して分かった、ジャンルに依らない落とし穴
 
-どれも「作ったつもりの値」と「完成 MP4 を読み戻した値」がずれた例で、生成側の記録を
-根拠にしていたら見逃していた。
+どれも「作ったつもりの値」と「完成 MP4 を読み戻した値」がずれた例で、生成側の記録を根拠にしていたら見逃していた。
 
 - **字幕の終わりの時刻は切り捨てる。** 四捨五入すると動画の長さを 1ms 越え、最後の字幕が
   丸ごと落ちる
@@ -476,6 +472,8 @@ workflow synthesisが欠けている、といった状態を検査で見える�
   1フレーム足りなくなる
 - **xfade の custom 式で st/ld（状態変数）を使うなら、その描画だけ1スレッドにする。**
   並列処理で変数が混ざり、転換が砂嵐になる
+- **xfade の前は時間の単位を `settb=1/fps` に揃える。** concat の出力の単位のままだと丸めで混ぜ具合が
+  ずれ、塊の分け方で混ぜた画素が1段違う（1回で描いた版との差が重なりのフレームで 0.57 出た）
 - **閾値は、基準版と、わざと壊した版を同じ測定にかけてから決める。** 基準版だけで決めると、
   壊れた版も通る値を置いてしまう
 - **字幕のように画素で測る監査は、MP4 の輝度（Y）の面で測る。** RGB へ戻してから輝度を計算すると、

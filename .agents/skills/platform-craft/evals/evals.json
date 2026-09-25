@@ -113,6 +113,16 @@
         "ジャンル側が足すのは、どの契約の版から効くかの判定だけにする",
         "人がそのまま使うと認めた台本（accept-human --human-verified）を AI の点で止めない"
       ]
+    },
+    {
+      "id": "ffmpeg-many-inputs-command-line",
+      "prompt": "場面の画が 200 枚ある回で、Windows だけ ffmpeg の起動がコマンド行の長さで落ちる。直して。",
+      "shouldTrigger": true,
+      "invariants": [
+        "lib/ffmpegSequenceRender.mjs で FFMPEG_COMMAND_LINE_BUDGET を越えない塊に分けて描き、concat demuxer の stream copy でつなぐ",
+        "2つ目の分割器やコマンド行の測り方を作らず、windowsCommandLineLength を使う",
+        "xfade の前は settb=1/fps に揃え、1回で描いた版と画素が同じかを読み戻して確かめる"
+      ]
     }
   ]
 }
