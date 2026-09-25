@@ -44,7 +44,8 @@ test("同じ案件が走っている間は、二本目を起動せず既存へ�
   assert.equal(result.id, "koya-existing", "新しいジョブを作っていないこと");
   assert.match(result.note, /既に走っています/u);
 
-  await rm(projectDir, { recursive: true, force: true });
+  // Windows では、終わったばかりの子プロセスが握っていたフォルダの削除が一瞬 ENOTEMPTY になる（CI で観測）。待って消し直す。
+  await rm(projectDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 test("走っていることになっているが死んでいるジョブは interrupted へ直す", async () => {
@@ -71,5 +72,6 @@ test("走っていることになっているが死んでいるジョブは inte
   assert.equal(after.status, "interrupted", "死んだジョブを running のまま残さないこと");
   assert.match(after.interruptedReason, /見つからない/u, "なぜそう判断したのかを残すこと");
 
-  await rm(projectDir, { recursive: true, force: true });
+  // Windows では、終わったばかりの子プロセスが握っていたフォルダの削除が一瞬 ENOTEMPTY になる（CI で観測）。待って消し直す。
+  await rm(projectDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
