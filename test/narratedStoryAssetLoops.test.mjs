@@ -163,9 +163,9 @@ test("運営者の画: 取り込みの記録に assetLoop が無い・置き場�
   await recordAssetLoopRound({ workDir: folder, stage: "scene-image", subjectId: "s001", assetPath: image, generatorContextId: "fixture-operator-maker", route: "chatgpt-web" });
   const statePath = path.join(folder, "quality", "assets", "scene-image--s001.json");
   const subject = operatorSceneLoopSubject("s001", row({ full: statePath }));
-  assert.equal(subject.workDir, folder);
   const gated = await gateNarratedAssetLoops({ scenes: [subject] });
   assert.equal(gated.checks[NARRATED_SCENE_IMAGE_LOOP_AUDIT_ID].pass, true, gated.issues.join(", "));
+  assert.deepEqual([gated.plan.scenes[0].workDir, gated.plan.scenes[0].subjectId], [folder, "s001"], "状態の置き場から作業フォルダと対象 id を戻して記録する");
   assert.deepEqual(gated.issues, [`character-asset-loop-not-passed:${referenceSha.slice(0, 12)}:loop-not-started`]);
   // 記録の sha256 と今の画が違えば、ループの照合より先に止める。
   const swapped = await gateNarratedAssetLoops({ scenes: [{ ...subject, assetSha256: "f".repeat(64) }] });
