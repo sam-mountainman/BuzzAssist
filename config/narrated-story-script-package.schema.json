@@ -111,6 +111,12 @@
           "type": "string",
           "pattern": "^[A-Za-z0-9_-]{1,64}$",
           "description": "TV 枠の中に出す本編の場面の id（story[].id）。無ければ本編の場面を順に出す"
+        },
+        "captionOnlySeconds": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 30,
+          "description": "声を作らずに字幕だけを出す文の秒数（その間は BGM だけが鳴る）。感想パートの最初の文には使えない"
         }
       }
     },
