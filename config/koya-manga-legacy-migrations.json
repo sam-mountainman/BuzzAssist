@@ -28,5 +28,13 @@
     "requiresExplicitEpisodeId": "manga-photo-homecoming-001",
     "newVersionedScriptsRequireInventoryUpdate": true,
     "officialModulesMayImportLegacyScripts": false
+  },
+  "legacyEntrypointPolicy": {
+    "entrypoint": "scripts/build-manga-video.mjs",
+    "productionActions": ["plan", "adopt-images", "refresh-bubbles", "speech", "render", "full"],
+    "productionActionsRequire": "--benchmark-migration",
+    "refusalExitCode": 2,
+    "operatorEntrypoint": "node scripts/run-video-harness.mjs start --harness koya-manga-video",
+    "note": "These actions write or rewrite an episode manifest, audio, or MP4 without the show rules, cast gate, external signoff, or real-MP4 audit. The CLI refuses them unless --benchmark-migration is given (the same rule as the MCP benchmarkMigration flag, lib/harnessRouting.mjs). voices, cast-voices, voice-library-audition, voice-library-approve, and status produce no episode artifact and stay open."
   }
 }

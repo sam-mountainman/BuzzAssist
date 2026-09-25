@@ -11,6 +11,7 @@ import {
   renderEpisodeVideo,
 } from "../lib/mangaVideoPipeline.mjs";
 import { readCharacterRegistry, writeCharacterRegistry } from "../lib/characterRegistry.mjs";
+import { checkCanonicalRouting, isLegacyCliProductionAction } from "../lib/harnessRouting.mjs";
 import { getElevenLabsStatus, listAllElevenLabsVoices } from "../lib/speechGeneration.mjs";
 import { castRegistryVoices } from "../lib/voiceCasting.mjs";
 import {
@@ -37,8 +38,15 @@ function parseArgs(argv) {
   return result;
 }
 
+const LEGACY_ENTRYPOINT = "scripts/build-manga-video.mjs";
+
 function usage() {
-  return `Usage:
+  return `Benchmark-migration only. New episodes start with:
+  node scripts/run-video-harness.mjs start --harness koya-manga-video --script-path <script.txt> --channel-pack <signed-pack> --episode-id <id> ...
+plan / adopt-images / refresh-bubbles / speech / render / full are refused unless --benchmark-migration is given
+(they bypass the show rules, cast gate, external signoff and the real-MP4 audit).
+
+Usage:
   node scripts/build-manga-video.mjs voices
   node scripts/build-manga-video.mjs cast-voices [--episode-id <id>] [--force-voice-cast]
   node scripts/build-manga-video.mjs voice-library-audition [--episode-id <id>] [--candidate-limit 5]
@@ -50,6 +58,7 @@ function usage() {
   node scripts/build-manga-video.mjs render --manifest-path <episode-manifest.json> [--cut-ids cut-05,cut-07] [--render-concurrency 2] [--bgm-path <music.mp3> --bgm-volume 0.1] [--master-target-lufs -14]
     Use --reuse-rendered-cuts to remux or add BGM without rerendering unchanged cut videos.
   node scripts/build-manga-video.mjs full --script-path <script.txt> --episode-id <id> --voice-id <id>
+  (add --benchmark-migration to plan/adopt-images/refresh-bubbles/speech/render/full when reproducing a historical benchmark)
 
 Defaults: model=eleven_multilingual_v2, motion=pull-out, speech-concurrency=4, render-concurrency=CPU-bounded 2-4, project-dir=current directory.`;
 }
@@ -58,6 +67,27 @@ const args = parseArgs(process.argv.slice(2));
 if (args.help) {
   process.stdout.write(`${usage()}\n`);
   process.exit(0);
+}
+
+// 本番の工程（plan→speech→render と、その途中を書き換える工程）は、関門を1つも通らずに
+// MP4 まで走る。MCP 側は assertCanonicalRouting で止めていたが、この CLI を直接叩く道が
+// 開いていた。過去成果物の再現と明言したときだけ通し、それ以外は正規入口を案内して止める。
+// 何も書かないうちに止める（引数なしの既定 action も full なので、ここで止まる）。
+const productionAction = isLegacyCliProductionAction({ entrypoint: LEGACY_ENTRYPOINT, action: args.action });
+let routing = null;
+if (productionAction) {
+  const verdict = checkCanonicalRouting({
+    genre: "manga-video",
+    toolName: LEGACY_ENTRYPOINT,
+    projectDir: args.projectDir,
+    acknowledgedBenchmarkMigration: args.benchmarkMigration === true,
+    acknowledgementHint: "--benchmark-migration",
+  });
+  if (!verdict.allowed) {
+    process.stderr.write(`${LEGACY_ENTRYPOINT} ${args.action}: ${verdict.message}\n`);
+    process.exit(2);
+  }
+  routing = { entrypoint: LEGACY_ENTRYPOINT, action: args.action, benchmarkMigration: true };
 }
 
 const options = {
@@ -173,4 +203,8 @@ const publicOutput = output?.manifest
       outputs: output.manifest.outputs || {},
     }
   : output;
-process.stdout.write(`${JSON.stringify(publicOutput, null, 2)}\n`);
+// 迂回したことを結果に残す（ベンチマーク移行として通した工程だけ）。
+const printed = routing && publicOutput && typeof publicOutput === "object" && !Array.isArray(publicOutput)
+  ? { ...publicOutput, routing }
+  : publicOutput;
+process.stdout.write(`${JSON.stringify(printed, null, 2)}\n`);
