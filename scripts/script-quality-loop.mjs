@@ -124,10 +124,12 @@ export function scriptQualityHelp() {
     --work-dir <dir> [--require-pass]   未合格なら終了コード 4
 
   verdict   制作側が使う答え。この台本（SHA）を使ってよいかと理由コード。何も書かない
-    --work-dir <dir> (--script <台本のファイル> | --script-sha256 <sha>) [--json]
+    --work-dir <dir> (--script <台本のファイル> | --script-sha256 <sha>) [--genre <id>] [--json]
                                   使ってよい（終了コード 0）: script-quality-passed（ループが合格した版と同じ SHA）/
                                   script-quality-human-accepted（人がそのまま使うと認めた SHA）。
-                                  使えない（終了コード 4）: script-changed-after-pass・script-quality-not-passed など
+                                  使えない（終了コード 4）: script-changed-after-pass・script-quality-not-passed など。
+                                  --genre を付けると、別ジャンルの採点表での合格は script-quality-genre-mismatch
+                                  （制作の Job は自分のジャンルを付けて問う: ナレーション物語 narrated-story・漫画 manga）
 
   accept-human  運営者が自分で書いた台本（依頼者が書いた台本など）を、AI の点で止めずにそのまま使うと記録する。
             品質ループの合格とは別の理由として verdict が返す
@@ -207,7 +209,7 @@ export async function runScriptQualityCli(argv = process.argv.slice(2), {
       return { exitCode: result.started && (result.issues || []).length === 0 ? 0 : 3, result };
     }
     case "verdict": {
-      const result = await scriptQualityVerdict({ workDir: args.workDir, scriptPath: args.script, scriptSha256: args.scriptSha256 });
+      const result = await scriptQualityVerdict({ workDir: args.workDir, scriptPath: args.script, scriptSha256: args.scriptSha256, genre: args.genre });
       if (args.json) stdout.write(`${JSON.stringify(result, null, 2)}\n`);
       else stdout.write(`${result.pass ? "使ってよい" : "使えない"}: ${result.reasonCode}\n${result.detail}\n`);
       return { exitCode: result.pass ? 0 : 4, result };
