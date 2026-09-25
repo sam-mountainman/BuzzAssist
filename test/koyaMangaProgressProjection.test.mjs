@@ -5,6 +5,7 @@ import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/pr
 import { tmpdir } from "node:os";
 import path, { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { startAssetQualityLoop, recordAssetQualityRound } from "../lib/assetQualityLoop.mjs";
 import {
@@ -16,6 +17,12 @@ import {
   stableCanvasProgressId,
 } from "../lib/canvasRunProgressProjection.mjs";
 import {
+  createKoyaSceneImageAssetQualityGate,
+  createKoyaVoiceTakeAssetQualityGate,
+  koyaAssetQualityWorkDir,
+} from "../lib/koyaAssetQualityGate.mjs";
+import { koyaSceneImageAssetQualitySubjectId, koyaVoiceTakeAssetQualitySubjectId } from "../lib/koyaAssetQualityGatePolicy.mjs";
+import {
   deriveKoyaProgressDag,
   isInsideKoyaWorkspace,
   readKoyaMangaProgressSnapshot,
@@ -23,9 +30,9 @@ import {
   wavSummary,
 } from "../lib/koyaMangaProgressSnapshot.mjs";
 import { _testing as adapterTesting, projectVideoHarnessJob } from "../lib/videoHarnessCanvasAdapter.mjs";
-import { MAKER, now, reviewFor, stageInputs, synthVideo, writeReview } from "./fixtures/assetQualityFixtures.mjs";
+import { MAKER, now, png, reviewFor, stageInputs, synthVideo, writeReview } from "./fixtures/assetQualityFixtures.mjs";
 import { makeGradientPng } from "./fixtures/operatorImageFixture.mjs";
-import { passKoyaAssetQualityLoop } from "./helpers/koyaAssetQualityFixture.mjs";
+import { currentKoyaContract, passKoyaAssetQualityLoop } from "./helpers/koyaAssetQualityFixture.mjs";
 import {
   approveNewCharacter,
   createKoyaProgressJob,
@@ -40,6 +47,8 @@ import {
   writeCharacterApprovalPending,
   writeMidProduction,
 } from "./fixtures/koyaProgressFixture.mjs";
+
+const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
 async function project(t, prefix = "koya-progress-") {
   const projectDir = await mkdtemp(join(tmpdir(), prefix));
@@ -175,25 +184,29 @@ test("本編の画はカット順の格子に QA と品質ループの合否の�
   const mid = await writeMidProduction(workspace);
 
   // 途中の成果物の品質ループ: 1枚目の画は評価者の採点が通って人の確認待ち、cut-01 のテイクは合格。
-  // 採点ファイル・参照・声の測定は作業場の中に置く（品質ループの状態は作業場からの相対パスで残る）。
-  for (const dir of ["reviews", "refs", "measure"]) await mkdir(join(workspace, dir), { recursive: true });
-  const imageRel = path.relative(workspace, mid.images["panel:u-0001"].path);
-  const imageLoop = await startAssetQualityLoop({ workDir: workspace, harnessId: "koya-manga-video", stage: "scene-image", subjectId: "u-0001", generatorContextId: MAKER, now });
-  const imageInputs = await stageInputs(workspace, "scene-image");
+  // 置き場と対象 id はゲートと同じ（<作業場>/canvas と koya*AssetQualitySubjectId）。採点ファイル・参照・
+  // 声の測定もその中に置く（品質ループの状態は作業フォルダからの相対パスで残る）。
+  const qualityDir = koyaAssetQualityWorkDir({ projectDir: workspace });
+  for (const dir of ["reviews", "refs", "measure"]) await mkdir(join(qualityDir, dir), { recursive: true });
+  const imageSubject = koyaSceneImageAssetQualitySubjectId(EPISODE_ID, "panel:u-0001");
+  const imageRel = path.relative(qualityDir, mid.images["panel:u-0001"].path);
+  const imageLoop = await startAssetQualityLoop({ workDir: qualityDir, harnessId: "koya-manga-video", stage: "scene-image", subjectId: imageSubject, generatorContextId: MAKER, now });
+  const imageInputs = await stageInputs(qualityDir, "scene-image");
   const imageVersion = { rel: imageRel, sha: mid.images["panel:u-0001"].sha256 };
   const imageRound = await recordAssetQualityRound({
-    workDir: workspace, stage: "scene-image", subjectId: "u-0001", assetPath: imageRel, versionLabel: "v1", now,
-    reviewPath: await writeReview(workspace, "scene-u-0001", reviewFor({ stage: "scene-image", context: "ctx-eval-1", assetSha: imageVersion.sha, refs: imageInputs.refs, contract: imageLoop.state.asset.contract })),
+    workDir: qualityDir, stage: "scene-image", subjectId: imageSubject, assetPath: imageRel, versionLabel: "v1", now,
+    reviewPath: await writeReview(qualityDir, "scene-u-0001", reviewFor({ stage: "scene-image", context: "ctx-eval-1", assetSha: imageVersion.sha, refs: imageInputs.refs, contract: imageLoop.state.asset.contract })),
     ...(await imageInputs.recordExtra(imageVersion)),
   });
   assert.equal(imageRound.recorded, true, JSON.stringify(imageRound.issues));
-  const takeRel = path.relative(workspace, mid.takes["cut-01"].path);
-  const takeLoop = await startAssetQualityLoop({ workDir: workspace, harnessId: "koya-manga-video", stage: "voice-take", subjectId: "cut-01", generatorContextId: MAKER, now });
-  const takeInputs = await stageInputs(workspace, "voice-take");
+  const takeSubject = koyaVoiceTakeAssetQualitySubjectId(EPISODE_ID, "cut-01");
+  const takeRel = path.relative(qualityDir, mid.takes["cut-01"].path);
+  const takeLoop = await startAssetQualityLoop({ workDir: qualityDir, harnessId: "koya-manga-video", stage: "voice-take", subjectId: takeSubject, generatorContextId: MAKER, now });
+  const takeInputs = await stageInputs(qualityDir, "voice-take");
   const takeVersion = { rel: takeRel, sha: mid.takes["cut-01"].sha256 };
   const takeRound = await recordAssetQualityRound({
-    workDir: workspace, stage: "voice-take", subjectId: "cut-01", assetPath: takeRel, versionLabel: "v1", now,
-    reviewPath: await writeReview(workspace, "take-cut-01", reviewFor({ stage: "voice-take", context: "ctx-eval-2", assetSha: takeVersion.sha, contract: takeLoop.state.asset.contract })),
+    workDir: qualityDir, stage: "voice-take", subjectId: takeSubject, assetPath: takeRel, versionLabel: "v1", now,
+    reviewPath: await writeReview(qualityDir, "take-cut-01", reviewFor({ stage: "voice-take", context: "ctx-eval-2", assetSha: takeVersion.sha, contract: takeLoop.state.asset.contract })),
     ...(await takeInputs.recordExtra(takeVersion)),
   });
   assert.equal(takeRound.recorded, true, JSON.stringify(takeRound.issues));
@@ -245,6 +258,55 @@ test("本編の画はカット順の格子に QA と品質ループの合否の�
   assert.equal(sha256(copied), mid.images["panel:u-0003"].sha256);
   // パネルは Run の投影（x >= 40）と重ならない左側。
   assert.ok(elements.every((element) => element.x + element.width <= 0 && element.x >= CANVAS_RUN_PROGRESS_ORIGIN.x));
+});
+
+test("品質ループはゲートと同じ置き場（<作業場>/canvas）から読む: ゲートが見る記録は出し、ゲートが見ない作業場直下の記録は出さない", async (t) => {
+  const projectDir = await project(t);
+  const job = await createKoyaProgressJob(projectDir, {
+    adapterResult: { status: "waiting-usage-limit" },
+    knownRemainingIssues: ["usage-limit"],
+  });
+  const workspace = job.executionProjectDir;
+  await writeCharacterApprovalPending(workspace);
+  await approveNewCharacter(workspace);
+  const mid = await writeMidProduction(workspace);
+  const contract = await currentKoyaContract(repoRoot);
+  const qualityDir = koyaAssetQualityWorkDir({ projectDir: workspace });
+  assert.equal(qualityDir, join(workspace, "canvas"));
+  const takeGate = createKoyaVoiceTakeAssetQualityGate({ contract, canvasDir: qualityDir, episodeId: EPISODE_ID });
+  const imageGate = createKoyaSceneImageAssetQualityGate({ contract, canvasDir: qualityDir, episodeId: EPISODE_ID });
+  const take = { cutId: "cut-01", takePath: mid.takes["cut-01"].path };
+  const takeSubject = koyaVoiceTakeAssetQualitySubjectId(EPISODE_ID, take.cutId);
+  const image = { job: { id: "panel:u-0001", kind: "scene-image" }, outputPath: mid.images["panel:u-0001"].path };
+  const imageSubject = koyaSceneImageAssetQualitySubjectId(EPISODE_ID, image.job.id);
+  const itemOf = (snapshot, section, key) => snapshot.sections.find((row) => row.id === section).items.find((item) => item.key === key);
+  const loopLine = (item) => item.lines.find((line) => line.startsWith("品質ループ: "));
+
+  // 作業場の直下（ゲートが読まない場所）に合格の記録があっても、ゲートは未開始と見る。進捗にも出さない。
+  await passKoyaAssetQualityLoop({ workDir: workspace, stage: "voice-take", subjectId: takeSubject, assetPath: take.takePath });
+  assert.equal((await takeGate(take)).reason, "loop-not-started");
+  assert.equal(loopLine(itemOf(await readKoyaMangaProgressSnapshot(job), "voice-take", "cut-01")), "品質ループ: 未開始");
+
+  // ゲートの置き場に記録すると、ゲートの判定と同じものが進捗に出る（テイクは合格、人物が写る画は人の確認待ち）。
+  const reference = join(qualityDir, "refs", "approved-sheet.png");
+  await mkdir(path.dirname(reference), { recursive: true });
+  await writeFile(reference, png(1024, 1024, "approved-reference"));
+  await passKoyaAssetQualityLoop({ workDir: qualityDir, stage: "voice-take", subjectId: takeSubject, assetPath: take.takePath });
+  await passKoyaAssetQualityLoop({ workDir: qualityDir, stage: "scene-image", subjectId: imageSubject, assetPath: image.outputPath, references: [reference], stopBefore: "human" });
+  const takeCheck = await takeGate(take);
+  assert.equal(takeCheck.pass, true, JSON.stringify(takeCheck));
+  const imageCheck = await imageGate(image);
+  assert.equal(imageCheck.pass, false);
+  assert.equal(imageCheck.reason, "not-passed");
+
+  const snapshot = await readKoyaMangaProgressSnapshot(job);
+  const takeItem = itemOf(snapshot, "voice-take", "cut-01");
+  assert.equal(loopLine(takeItem), "品質ループ: 合格");
+  assert.equal(takeItem.status, "complete");
+  const imageItem = itemOf(snapshot, "scene-image", "panel:u-0001");
+  assert.equal(loopLine(imageItem), "品質ループ: 人の確認待ち");
+  assert.equal(imageItem.status, "awaiting-approval");
+  assert.equal(snapshot.summaryLines.some((line) => line.includes("品質ループの記録")), false, "記録は読めている");
 });
 
 test("画の台帳が品質ループの合格まで止めた行（分割ページはコマ）は「人の確認待ち」と出し、画の工程も人待ちにする", async (t) => {
