@@ -40,8 +40,13 @@ function plan(root, count = 6) {
 /** 生成器・QA の偽物。出力は入力（何枚目か・修正の回か）だけで決まる。 */
 function fakes({ generationMs = 30, qaMs = 30, failFirstQa = new Set(), failGeneration = new Set(), env = null } = {}) {
   const counters = { generation: 0, qa: 0, peakGeneration: 0, peakQa: 0, calls: 0 };
+  // 偽の外部呼び出しが始まった・終わった順の記録。所要時間を壁時計でなくこの順序から出す（logicalMakespan）。
+  const timeline = [];
+  let nextCallId = 0;
   const generateImage = async (input) => {
     const run = async () => {
+      const id = (nextCallId += 1);
+      timeline.push({ stage: "generation", phase: "start", id });
       counters.generation += 1;
       counters.calls += 1;
       counters.peakGeneration = Math.max(counters.peakGeneration, counters.generation);
@@ -54,12 +59,15 @@ function fakes({ generationMs = 30, qaMs = 30, failFirstQa = new Set(), failGene
         return { buffer: renderEditorialPlatePng("pastel-sky", 16 * k, 9 * k), fileName: input.fileName, mimeType: "image/png" };
       } finally {
         counters.generation -= 1;
+        timeline.push({ stage: "generation", phase: "end", id });
       }
     };
     // 本物の生成器（generateImageMedia）と同じく、端末全体の paid-image の枠の中で呼ぶ。
     return env ? withMachineSlot("paid-image", run, { env, pollMs: 5 }) : run();
   };
   const visualQa = async ({ job, attempt }) => {
+    const id = (nextCallId += 1);
+    timeline.push({ stage: "qa", phase: "start", id });
     counters.qa += 1;
     counters.peakQa = Math.max(counters.peakQa, counters.qa);
     try {
@@ -69,9 +77,35 @@ function fakes({ generationMs = 30, qaMs = 30, failFirstQa = new Set(), failGene
       return { pass: true, issues: [] };
     } finally {
       counters.qa -= 1;
+      timeline.push({ stage: "qa", phase: "end", id });
     }
   };
-  return { generateImage, visualQa, counters };
+  return { generateImage, visualQa, counters, timeline };
+}
+
+/**
+ * 呼び出しの記録（始まり・終わりの順序だけ）から、どの呼び出しも名目の時間ちょうどで終わったとしたときの
+ * 全体の所要時間を出す。ある呼び出しは「それが始まる前に終わった呼び出し」のうち、名目で最も遅く終わるものの
+ * 直後に始まったとみなす（記録の順序が作る前後関係の最長経路）。
+ * 壁時計は使わないので、共有ランナーの負荷やタイマーの粒度で遅れた分は値に入らない。枠の受け渡し・生成の
+ * あとの QA・QA に落ちたあとの作り直しのような本当の待ちは必ず記録の順序に出るので、負荷で順序がずれても、
+ * 値がその待ちの最長経路より短くなることはない（負荷で出入りするのは、たまたまの前後関係だけ）。
+ * 1本ずつ順に呼べば全部が一本につながり、値は全部の呼び出しの合計になる。
+ */
+function logicalMakespan(timeline, durations) {
+  const nominalEnd = new Map();
+  let finished = 0; // ここまでに終わった呼び出しの、名目の終わりの最大
+  for (const event of timeline) {
+    if (event.phase === "start") {
+      nominalEnd.set(event.id, finished + durations[event.stage]);
+    } else {
+      assert.ok(nominalEnd.has(event.id), `始まりの無い終わり: ${event.stage} #${event.id}`);
+      finished = Math.max(finished, nominalEnd.get(event.id));
+      nominalEnd.delete(event.id);
+    }
+  }
+  assert.equal(nominalEnd.size, 0, "終わっていない呼び出しが残っている");
+  return finished;
 }
 
 async function outputDigests(root, count) {
@@ -143,6 +177,7 @@ test("a pool whose jobs never release keeps the old one-slot-per-job behaviour",
 test("two-stage slots give the same artifacts and verdicts as the serial run, and finish sooner", async (t) => {
   const count = 6;
   const failFirstQa = new Set([3]);
+  const durations = { generation: 30, qa: 30 };
   const runs = {};
   for (const [name, options] of Object.entries({
     // 従来の形: 1本が生成から QA まで枠を持つ（生成1・QA1、重ねない）
@@ -153,7 +188,11 @@ test("two-stage slots give the same artifacts and verdicts as the serial run, an
     parallel: { concurrency: 3, qaConcurrency: 2 },
   })) {
     const root = await mkdtemp(path.join(tmpdir(), `buzzassist-two-stage-${name}-`));
-    const { generateImage, visualQa, counters } = fakes({ failFirstQa });
+    const { generateImage, visualQa, counters, timeline } = fakes({
+      failFirstQa,
+      generationMs: durations.generation,
+      qaMs: durations.qa,
+    });
     const events = [];
     const startedAt = Date.now();
     const result = await executeMangaScriptImagePlan(plan(root, count), {
@@ -171,6 +210,7 @@ test("two-stage slots give the same artifacts and verdicts as the serial run, an
       summary: result.ledger.summary,
       counters,
       events,
+      timeline,
     };
     await rm(root, { recursive: true, force: true });
   }
@@ -205,21 +245,29 @@ test("two-stage slots give the same artifacts and verdicts as the serial run, an
   };
   assert.equal(overlapSeen(runs.serial.events), false);
   assert.equal(overlapSeen(runs.overlapped.events), true);
-  // 所要時間: 生成30ms・QA30ms × 7回（1回は作り直し）。直列は約420ms、重ねると約240ms。
-  // 重なったことは上の overlapSeen で確かめている。壁時計の比較は、タイマーの粒度が粗い Windows の CI
-  // （setTimeout が 15ms 刻み）では差が出ない回があった（2026-09-25、serial=636ms overlapped=628ms）。
-  // Windows では記録だけにし、ほかの OS では短くなることまで見る。
-  // CI の共有ランナーでも壁時計はぶれる（macOS の Node 20・22 で落ちた、2026-09-25）。CI と Windows では記録だけにする。
-  const relaxTiming = process.platform === "win32" || Boolean(process.env.CI);
-  for (const [label, elapsedMs] of [["重ねた回", runs.overlapped.elapsedMs], ["並列の回", runs.parallel.elapsedMs]]) {
-    const shorter = elapsedMs < runs.serial.elapsedMs * 0.85;
-    const timingNote = `${label}が直列より短い（serial=${runs.serial.elapsedMs}ms ${label}=${elapsedMs}ms）`;
-    if (relaxTiming) {
-      if (!shorter) t.diagnostic(`${timingNote}: タイマーの粒度か共有ランナーの負荷で差が出なかった`);
-    } else {
-      assert.ok(shorter, timingNote);
-    }
+  // 所要時間: 生成30ms・QA30ms × 7回（1回は作り直し）。直列は420ms、重ねると約240ms、生成3・QA2 なら約150ms。
+  // 壁時計では比べない。偽物の待ちは30msずつだが、PNG の描画・保存・技術 QA は同じスレッドの CPU 仕事で重ならず、
+  // 負荷の高い共有ランナーではそちらが待ちより長くなる。Windows ではタイマーの粒度（15ms刻み）で差が出ず
+  // （2026-09-25、serial=636ms overlapped=628ms）、macOS の CI では逆転した（Node 22 で serial=703ms
+  // overlapped=855ms、Node 20 では parallel の比較で落ちた）。2段化が縮めるのは外部呼び出し（生成・QA）を
+  // 待つ時間なので、偽物が記録した呼び出しの順序から名目の所要時間を出し、それを比べる。
+  const makespan = Object.fromEntries(Object.entries(runs).map(([name, run]) => [name, logicalMakespan(run.timeline, durations)]));
+  const calls = (timeline, stage) => timeline.filter((event) => event.stage === stage && event.phase === "start").length;
+  const totalWork = (timeline) => calls(timeline, "generation") * durations.generation + calls(timeline, "qa") * durations.qa;
+  // 偽物が数えた生成の回数は、台帳の有料の生成回数（summary.attempts、生成7回）と一致する。
+  assert.equal(calls(runs.serial.timeline, "generation"), runs.serial.summary.attempts);
+  // 直列は1本ずつ順に呼ぶので、名目の所要時間は全部の呼び出しの合計にちょうど一致する。
+  assert.equal(makespan.serial, totalWork(runs.serial.timeline), "直列はどの呼び出しも重ならない");
+  for (const name of ["overlapped", "parallel"]) {
+    assert.equal(totalWork(runs[name].timeline), totalWork(runs.serial.timeline), `${name}: 呼び出しの量は直列と同じ`);
+    assert.ok(
+      makespan[name] < makespan.serial * 0.85,
+      `${name}: 名目の所要時間が直列より短い（serial=${makespan.serial}ms ${name}=${makespan[name]}ms）`,
+    );
   }
+  // 壁時計は記録だけにする（負荷とタイマーの粒度で上の比較と食い違うことがある）。
+  t.diagnostic(`壁時計: serial=${runs.serial.elapsedMs}ms overlapped=${runs.overlapped.elapsedMs}ms parallel=${runs.parallel.elapsedMs}ms`);
+  t.diagnostic(`名目の所要時間: serial=${makespan.serial}ms overlapped=${makespan.overlapped}ms parallel=${makespan.parallel}ms`);
 });
 
 test("generation stays within the smaller of the machine-wide paid-image slots and the channel limit", async () => {
