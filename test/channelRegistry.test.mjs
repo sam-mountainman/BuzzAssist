@@ -70,7 +70,7 @@ test("台帳: 形の揃ったチャンネルを絶対 path に直し、学習の
   assert.equal(alpha.strategy.workDir, path.join(root, "alpha", "strategy"));
   assert.equal(alpha.strategy.requireBrief, true);
   assert.deepEqual(alpha.learning.map((entry) => entry.target), ["channel-pack:narrated-story", "channel-pack:narrated-story-script"]);
-  assert.deepEqual(alpha.learning.map((entry) => entry.sharedWith), [[], []]);
+  assert.deepEqual(alpha.learning.map((entry) => entry.sameTargetChannels), [[], []]);
   assert.deepEqual(beta.learning.map((entry) => entry.target), ["channel-pack:koya"]);
   // 外部の制作のチャンネルは制作の学習の宛先を持たない（別のハーネスの宛先へ寄せない）。
   assert.deepEqual(gamma.learning, []);
@@ -156,21 +156,108 @@ test("台帳: 形の誤り（requireBrief の省略・知らない欄・未完�
   assert.deepEqual(validateChannelRegistry({ deployments: [] }), []);
 });
 
-test("台帳: 同じ学習の宛先を使うチャンネルは sharedWith に出し、学習の保存先が別のチャンネルの場所に重なれば拒む", (t) => {
+test("台帳: 同じハーネスのチャンネルでも学習の保存先はチャンネルごとに別（既定は学習の置き場の channels/<id>）", (t) => {
   const root = tempRoot(t);
-  const shared = validate([channel(root, "alpha"), channel(root, "beta")]);
-  assert.deepEqual(shared[0].learning[0], { area: "production", target: "channel-pack:narrated-story", store: { source: "channel-pack-default" }, sharedWith: ["beta"] });
-  const koya = channel(root, "beta", { production: { kind: "harness", harnessId: "koya-manga-video" }, scriptQuality: undefined });
+  const learningDir = path.join(root, "learning-state");
+  const env = { BUZZASSIST_LEARNING_DIR: learningDir };
+  const [alpha, beta] = validate([channel(root, "alpha"), channel(root, "beta")], { env });
+  assert.deepEqual(alpha.learning[0], {
+    area: "production",
+    target: "channel-pack:narrated-story",
+    store: { source: "channel-default", root: path.join(learningDir, "channels", "alpha") },
+    sameTargetChannels: ["beta"],
+  });
+  assert.deepEqual(beta.learning[0].store, { source: "channel-default", root: path.join(learningDir, "channels", "beta") });
+  // 同じチャンネルの動画と台本の宛先は同じ置き場（台帳の行の target で分ける。従来の Channel Pack の台帳と同じ）。
+  assert.deepEqual(alpha.learning[1].store, alpha.learning[0].store);
+  assert.notEqual(alpha.learning[0].store.root, beta.learning[0].store.root);
+
+  // チャンネルごとの宣言 { target, channel, root } はそのチャンネルだけに効く（別のチャンネルは既定のまま）。
+  const declared = validateChannelRegistry({
+    channels: [channel(root, "alpha"), channel(root, "beta")],
+    channelLearning: [{ target: "channel-pack:narrated-story", channel: "alpha", root: path.join(root, "alpha", "project", "learning") }],
+  }, { repoRoot: REPO_ROOT, harnessIds: HARNESS_IDS, genres: GENRES, env });
+  assert.deepEqual(declared[0].learning[0].store, { source: "channel-learning", root: path.join(root, "alpha", "project", "learning") });
+  assert.deepEqual(declared[0].learning[1].store, { source: "channel-default", root: path.join(learningDir, "channels", "alpha") });
+  assert.deepEqual(declared[1].learning[0].store, { source: "channel-default", root: path.join(learningDir, "channels", "beta") });
+  // channelView も同じ形（台帳の値だけ）。
+  assert.deepEqual(channelView(declared[1]).learning.map((entry) => entry.sameTargetChannels), [["alpha"], ["alpha"]]);
+});
+
+test("台帳: 学習の保存先が別のチャンネルの場所・別のチャンネルの保存先・チャンネルの無い Job の保存先に重なれば拒む", (t) => {
+  const root = tempRoot(t);
+  const env = { BUZZASSIST_LEARNING_DIR: path.join(root, "learning-state") };
+  const narrated = (id) => channel(root, id);
+  const manga = channel(root, "beta", { production: { kind: "harness", harnessId: "koya-manga-video" }, scriptQuality: undefined });
+  const codesFor = (channels, channelLearning) => issueCodes(() => validateChannelRegistry(
+    { channels, channelLearning },
+    { repoRoot: REPO_ROOT, harnessIds: HARNESS_IDS, genres: GENRES, env },
+  ));
+  const target = "channel-pack:narrated-story";
+
+  // チャンネルの保存先が、別のチャンネルの projectDir の中。
+  const intoOther = codesFor([narrated("alpha"), narrated("gamma")], [{ target, channel: "alpha", root: path.join(root, "gamma", "project", "learning") }]);
+  assert.ok(intoOther.includes("channel-learning-store-overlap:alpha:gamma.projectDir"), intoOther.join("\n"));
+  // 2つのチャンネルの保存先が同じ（同じハーネス）。
+  const sameStore = codesFor([narrated("alpha"), narrated("gamma")], [
+    { target, channel: "alpha", root: path.join(root, "shared-learning") },
+    { target, channel: "gamma", root: path.join(root, "shared-learning") },
+  ]);
+  assert.ok(sameStore.includes("channel-learning-store-shared:alpha:gamma"), sameStore.join("\n"));
+  // チャンネルの無い Job の保存先（宛先単位の宣言）を、同じ宛先を使うチャンネルが2つあるのに片方が引き継ぐ。
+  const unscoped = path.join(root, "unscoped-learning");
+  const inherit = codesFor([narrated("alpha"), narrated("gamma")], [
+    { target, root: unscoped },
+    { target, channel: "alpha", root: unscoped },
+  ]);
+  assert.ok(inherit.includes(`channel-learning-store-unscoped-overlap:alpha:${target}`), inherit.join("\n"));
+  // 宛先を使うチャンネルが1つなら、従来の台帳をそのチャンネルが引き継いでよい。
+  const sole = validateChannelRegistry({
+    channels: [narrated("alpha"), manga],
+    channelLearning: [{ target, root: unscoped }, { target, channel: "alpha", root: unscoped }],
+  }, { repoRoot: REPO_ROOT, harnessIds: HARNESS_IDS, genres: GENRES, env });
+  assert.deepEqual(sole[0].learning[0].store, { source: "channel-learning", root: unscoped });
+  // Channel Pack の既定の置き場（開発用チェックアウトの channel-packs/<id>/docs/learning）も、チャンネルの無い Job の保存先。
+  const packDefault = path.join(REPO_ROOT, "channel-packs", "narrated-story");
+  const packInherit = codesFor([narrated("alpha"), narrated("gamma")], [{ target, channel: "alpha", root: packDefault }]);
+  assert.ok(packInherit.includes(`channel-learning-store-unscoped-overlap:alpha:${target}`), packInherit.join("\n"));
+  // チャンネルの無い Job の保存先（宛先単位の宣言）が、別のチャンネルの場所に重なる（以前の channel-learning-store-overlap）。
+  const legacyInto = codesFor([narrated("alpha"), manga], [{ target, root: path.join(manga.projectDir, "learning") }]);
+  assert.ok(legacyInto.includes(`channel-learning-unscoped-store-overlap:${target}:beta.projectDir`), legacyInto.join("\n"));
+  // 同じ宛先を2つのチャンネルが使うなら、どちらの場所に置いてもチャンネルの無い Job の学習が混ざる。
+  const legacyIntoSameTarget = codesFor([narrated("alpha"), narrated("gamma")], [{ target, root: path.join(root, "alpha", "project", "learning") }]);
+  assert.ok(legacyIntoSameTarget.includes(`channel-learning-unscoped-store-overlap:${target}:alpha.projectDir`), legacyIntoSameTarget.join("\n"));
+  // 1つだけなら従来どおり許す。
+  assert.equal(validateChannelRegistry({
+    channels: [narrated("alpha"), manga],
+    channelLearning: [{ target, root: path.join(root, "alpha", "project", "learning") }],
+  }, { repoRoot: REPO_ROOT, harnessIds: HARNESS_IDS, genres: GENRES, env }).length, 2);
+  // 保存先を公開リポジトリの追跡される場所に置かない。
+  const publicTree = codesFor([narrated("alpha")], [{ target, channel: "alpha", root: path.join(REPO_ROOT, "docs", "channel-learning") }]);
+  assert.ok(publicTree.includes("channel-learning-store-public-tree:alpha"), publicTree.join("\n"));
+});
+
+test("台帳: チャンネルごとの宣言の誤り（台帳に無いチャンネル・使わない宛先・共有層の宛先・重複・未完成）を名指しで拒む", (t) => {
+  const root = tempRoot(t);
+  const env = { BUZZASSIST_LEARNING_DIR: path.join(root, "learning-state") };
   const codes = issueCodes(() => validateChannelRegistry({
-    channels: [channel(root, "alpha"), koya],
-    channelLearning: [{ target: "channel-pack:narrated-story", root: path.join(koya.projectDir, "learning") }],
-  }, { repoRoot: REPO_ROOT, harnessIds: HARNESS_IDS, genres: GENRES }));
-  assert.ok(codes.includes("channel-learning-store-overlap:alpha:beta.projectDir"), codes.join("\n"));
-  const ok = validateChannelRegistry({
-    channels: [channel(root, "alpha"), koya],
-    channelLearning: [{ target: "channel-pack:narrated-story", root: path.join(root, "alpha", "project", "learning") }],
-  }, { repoRoot: REPO_ROOT, harnessIds: HARNESS_IDS, genres: GENRES });
-  assert.deepEqual(ok[0].learning[0].store, { source: "channel-learning", root: path.join(root, "alpha", "project", "learning") });
+    channels: [channel(root, "alpha")],
+    channelLearning: [
+      { target: "channel-pack:narrated-story", channel: "ghost", root: path.join(root, "ghost") },
+      { target: "channel-pack:sample-other", channel: "alpha", root: path.join(root, "alpha-other") },
+      { target: "genre:narrated-story-video", channel: "alpha", root: path.join(root, "alpha-genre") },
+      { target: "channel-pack:narrated-story", channel: "alpha", root: path.join(root, "alpha-a") },
+      { target: "channel-pack:narrated-story", channel: "alpha", root: path.join(root, "alpha-b") },
+      { target: "channel-pack:narrated-story-script", channel: "alpha", root: "<private>" },
+    ],
+  }, { repoRoot: REPO_ROOT, harnessIds: HARNESS_IDS, genres: GENRES, env }));
+  for (const expected of [
+    "channel-learning-channel-unknown:ghost:channel-pack:narrated-story",
+    "channel-learning-target-unused:alpha:channel-pack:sample-other",
+    "channel-learning-row-invalid:alpha:genre:narrated-story-video",
+    "channel-learning-row-duplicate:alpha:channel-pack:narrated-story",
+    "channel-learning-root-placeholder:alpha:channel-pack:narrated-story-script",
+  ]) assert.ok(codes.includes(expected), `${expected} が無い: ${codes.join(", ")}`);
 });
 
 test("Windows の path: ドライブ名と大文字小文字を無視して重なりを見て、作業木の直下を拒む", () => {
