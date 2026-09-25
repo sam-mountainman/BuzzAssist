@@ -3,11 +3,12 @@
 運営者の端末で起きた学習（Job の決着・既知の提案の再発・未知の改善候補）を、提供元
 （BuzzAssist の開発側）が受け取るための API の仕様。**端末側は実装済み**
 （`lib/harnessFeedbackOutbox.mjs`・`lib/harnessFeedbackAutoBundle.mjs`・
-`node scripts/harness-feedback.mjs consent|destination|outbox|send|purge`）で、
-**受け取る側は未配備**。配備するかどうか・どこに置くかは運営の判断待ちで、それまで端末は
-送り先が未設定のまま bundle を貯めるだけにしている。
+`node scripts/harness-feedback.mjs consent|destination|outbox|send|purge`）。
+**受け取り口はオトシゴのサーバーに実装した**（BuzzAssist 本体とは別の製品。URL は配備後に決まる）。
+配備して送り先を配るまで、端末は送り先が未設定のまま bundle を貯めるだけにしている。
 
-この文書は受け取る側が満たすことを書く。実装はまだ無い。
+この文書は受け取る側が満たすことと、owner が受け取り口の書き出しを管理側へ取り込む口
+（`harness-feedback-ingest.mjs import-export`、下の「持ち主の取り込み」）を書く。
 
 ## 既存の部品との関係
 
@@ -19,11 +20,15 @@
 | 送り手の認証 | Bearer token と登録済み operator の Ed25519 署名 | 登録済み operator の Ed25519 署名（token は使わない） |
 | 受領証 | `buzzassist-feedback-ingest-receipt-v1`（署名なし） | `buzzassist-feedback-ingest-receipt-v2`（提供元の鍵で署名） |
 | 未知の提案 | bundle に入れられない（422）。草案を人手で渡す | 一般化した文として `newCandidates` に入る |
+| 管理側の隔離へ入れる口 | `ingest` / `serve`（受けた場で照合して隔離） | `import-export`（受け取り口の書き出しを照合して隔離） |
 
 v1 はそのまま残す。v2 は v1 と同じ原則を守る:
 
 - operator の登録簿（`buzzassist-feedback-operator-registry-v2`、`enroll` / `revoke`）を**共有する**。
-  登録と失効は v1 と同じくローカルの CLI だけで行い、HTTP には出さない
+  登録と失効は v1 と同じくローカルの CLI だけで行い、HTTP には出さない。端末は自動の bundle を
+  手動の bundle とは別の鍵で署名するので、登録簿の行に鍵の用途（`keyUse`）を持たせた。field の無い
+  既存の行は手動の bundle の鍵として読み（後方互換）、自動の bundle の鍵は `--key-use auto-feedback` で
+  登録する。1つの operator は用途ごとに1本ずつ active な鍵を持てる。用途の違う鍵は互いに使えない
 - 検証済みの bundle も**すぐには反映しない**。`verified-quarantine` に置き、owner の承認のあとで
   集計へ入れる
 - **正本（SKILL.md・台帳・公開 catalog）を書き換えない**。未知の提案から規則の本文を作らない
@@ -152,6 +157,10 @@ Ed25519 秘密鍵で署名したもの（v1 と同じ方式）。`signer.keyId` 
 検査は、受け取り口で必ず行う。置き場はファイルの木でなくデータベースの表でもよい（下の置き場の役割、すなわち
 受け付けたもの・受領証・出どころの索引・拒否の metadata を保てばよい）。
 
+オトシゴの受け取り口はこの差分で実装した。省いた照合は `harness-feedback-ingest.mjs import-export` が必ず行う
+（下の「持ち主の取り込み」）。受け取り口は運営者の検査語彙も持たないので、本文の privacy の照合も取り込みの段で
+管理側の語彙に対してやり直す。
+
 ## 冪等・replay・二重計上
 
 - `bundleDigest = sha256(canonicalJson(bundle))`（署名を含む全体）
@@ -228,6 +237,137 @@ Ed25519 秘密鍵で署名したもの（v1 と同じ方式）。`signer.keyId` 
 - 鍵を替えるときは、新しい指紋を先に配ってから切り替える。端末は1つの指紋しか信じないので、
   切り替えの前に届いた受領証は古い指紋で検証される
 
+## 持ち主の取り込み（受け取り口の書き出しから）
+
+受け取り口は受け付けた bundle を隔離して置くだけで、製品のどこにも反映しない。owner は受け取り口の
+書き出しを BuzzAssist の管理側（`harness-feedback-ingest.mjs` の置き場。既定の例は `var/feedback-ingest`）へ
+取り込み、受け取り口が省いた照合をここで行ってから、既存の隔離（curation の候補）へ置く。集計に入るのは、
+その先の owner の approve のあとだけ（v1 と同じ流れ。台帳を2つにせず、自動では採用しない）。
+
+### 書き出しの形
+
+```bash
+python -m otoshigo.feedback_intake export > feedback-export.jsonl
+```
+
+JSON Lines で、1行ずつ次の3種類（各行は鍵の順を固定した JSON）。
+
+| record | field | 意味 |
+|---|---|---|
+| `bundle` | `bundleDigest` `operatorKeyId` `signerKeyId` `receivedAt` `bundle` `receipt` | 受け付けた署名つき bundle そのものと、最初に返した受領証。`operatorKeyId` は受け取り口の中の鍵の行 ID（`fok_…`）で、鍵の指紋は `signerKeyId` |
+| `rejection` | `code` `httpStatus` `requestSha256` `bodyBytes` `signerKeyId` `receivedAt` | 拒否した送信の metadata だけ（本文は無い） |
+| `summary` | `exportedAt` `bundles` `excludedInactiveSigner` `rejections` | 最後の1行。`bundles` はその回に書き出した bundle 行の数 |
+
+- 書き出しは差分ではなく、毎回「保持期限内の全件」を出す。同じ bundle 行が回をまたいで何度も来るのが普通
+- 失効した鍵・止めた利用者の bundle は書き出さず、件数だけを `excludedInactiveSigner` に出す
+  （`bundles` には含まない）
+- 前に取り込んだ bundle が次の書き出しに出てこなくなる（保持期限切れ・鍵の失効）のは正常。
+  管理側の取り込み済みの記録は消さない
+
+### コマンド
+
+```bash
+# 自動の bundle の鍵（運営者の端末の keys/operator-feedback-ed25519.pub.pem）を、owner がローカルで登録する
+node scripts/harness-feedback-ingest.mjs enroll --root var/feedback-ingest \
+  --operator <operator-id> --public-key <operator-feedback-ed25519.pub.pem> \
+  --key-use auto-feedback --allowed-harness-ids <harness-id>[,<harness-id>...] --approved-by <owner-id>
+
+# まず何も書かずに照合だけ見る
+node scripts/harness-feedback-ingest.mjs import-export --root var/feedback-ingest \
+  --export feedback-export.jsonl --provider-key-fingerprint ed25519:<24桁hex> --dry-run
+
+# 照合を通った bundle を verified-quarantine へ置く
+node scripts/harness-feedback-ingest.mjs import-export --root var/feedback-ingest \
+  --export feedback-export.jsonl --provider-key-fingerprint ed25519:<24桁hex>
+```
+
+- `--provider-key-fingerprint` は受け取り口の受領証の鍵の指紋（受け取り口で
+  `python -m otoshigo.feedback_intake receipt-key-fingerprint`）。**渡さないときは全部を照合して「未検証」として
+  数えるが、隔離へは置かない**（取り込みの記録だけを残して exit 2）
+- `--dry-run` は何も書かない（隔離も取り込みの記録も）
+- `--proposal-catalog FILE` で照合に使う catalog を替えられる（既定は `<code-root>/docs/learning/proposals.public.jsonl`）。
+  `--code-root DIR` はハーネス宣言・公開 catalog・検査語彙を読む checkout（既定はこのスクリプトの checkout）
+- 検査語彙を照合できない（鍵が無い・一覧が無い）ときは何もせずに止める（exit 1）。受け取り口は運営者の語彙を
+  持たないので、この照合を省けない
+- 結果は JSON で出る: `counts`（`quarantined` / `wouldQuarantine` / `alreadyImported` / `rejected`）、
+  `rejectedByCode`、`providerReceipts`（`verified` / `unverified`）、`receiverRejections`（受け取り口の拒否の
+  code ごとの件数）、`summary`（`bundlesMatch`）、`stopped`、行ごとの `bundles`。`ok` が false なら exit 2
+
+### 照合の中身（bundle 行ごと、この順）
+
+1. 行の `signerKeyId` が `bundle.signer.keyId` と同じ
+2. `bundle` から計算し直した digest（`autoFeedbackBundleDigest`）が行の `bundleDigest` と同じ
+3. 既に取り込んだ digest なら、置いた記録の署名 chain を検証してから「取り込み済み」（`alreadyImported`）として
+   数え、何も書かない（冪等。重複は失敗ではない）
+4. v3 の形（`validateAutoFeedbackBundleForTransport`）
+5. 登録簿の鍵: `signerKeyId` の行があり、用途が `auto-feedback`、`active`、`build.harnessId` が `allowedHarnessIds`
+   にある（harness を持たない bundle は許可の一覧に依らない）
+6. 登録簿の公開鍵で署名（`verifyAutoFeedbackBundle`）
+7. 受領証: `bundleDigest` と `receivedAt` が行と同じ。指紋を渡したときは `verifyProviderIngestReceipt` で、
+   提供元の鍵の指紋・署名・digest の結び付きを確かめる
+8. **受け取り口が省いた照合**: `build.harnessId` の宣言があり、`settlement.gates[].gateId` が全部宣言にある
+   （`loadHarnessGateRegistry`）
+9. **受け取り口が省いた照合**: `proposals[].id` が全部 catalog にあり kind / target が一致する（手順 7）。
+   `newCandidates[].candidateId` が catalog にあれば kind / target が一致することを確かめ、既知の提案の観測として
+   数え、文は捨てる（手順 8）
+10. **受け取り口が省いた照合**: 本文の privacy（`assertFeedbackPayloadPrivacy`。管理側の検査語彙・Channel Pack の語・
+    端末のパスなど。端末より管理側の語彙のほうが広い）
+11. replay: 同じ operator（鍵を替えても同じ）の同じ `settlement.sourceDigest` が別の bundle として置かれていない
+
+1〜11 のどれかに落ちた bundle は、理由のコードを取り込みの記録に残し、隔離へ入れない（残りの行は続ける）。
+
+| 理由のコード | 意味 |
+|---|---|
+| `FEEDBACK_EXPORT_SIGNER_MISMATCH` | 行の `signerKeyId` と `bundle.signer.keyId` が違う |
+| `FEEDBACK_EXPORT_DIGEST_MISMATCH` | 行の `bundleDigest` と計算し直した digest が違う |
+| `FEEDBACK_INGEST_INVALID` | v3 の形ではない |
+| `FEEDBACK_SIGNER_NOT_ENROLLED` | 署名鍵が管理側の登録簿に無い |
+| `FEEDBACK_SIGNER_KEY_USE_MISMATCH` | 署名鍵が手動の bundle 用として登録されている |
+| `FEEDBACK_SIGNER_REVOKED` | 署名鍵が管理側で失効している |
+| `FEEDBACK_HARNESS_NOT_ALLOWED` | その鍵に `build.harnessId` の許可が無い |
+| `FEEDBACK_SIGNATURE_INVALID` | 署名を検証できない |
+| `FEEDBACK_PROVIDER_RECEIPT_INVALID` | 受領証が指紋・署名・digest・受領時刻のどれかと合わない |
+| `FEEDBACK_HARNESS_NOT_DECLARED` | `build.harnessId` のハーネス宣言が無い |
+| `FEEDBACK_GATE_NOT_DECLARED` | 宣言に無い gateId がある（件数だけ残し、gateId そのものは記録へ写さない） |
+| `FEEDBACK_PROPOSAL_NOT_REGISTERED` | catalog に無い提案 id がある |
+| `FEEDBACK_PROPOSAL_SEMANTIC_MISMATCH` | catalog の kind / target と食い違う |
+| `FEEDBACK_PRIVACY_BLOCKED` | 本文が検査に当たる（当たった語は出さず `private-term` などの理由だけを残す） |
+| `FEEDBACK_SOURCE_REPLAY_CONFLICT` | 同じ決着が別の bundle として既にある |
+
+次のときは、その行で取り込みを止める（それより前の行の取り込みは残る。bundleDigest で冪等なので、直した
+書き出しで最初から流し直してよい）: JSON として読めない行・field の組が仕様と違う行
+（`FEEDBACK_EXPORT_LINE_INVALID`）、未知の record（`FEEDBACK_EXPORT_RECORD_UNKNOWN`）、summary の後ろの行
+（`FEEDBACK_EXPORT_RECORD_AFTER_SUMMARY`）、置いた記録の改変（`FEEDBACK_INGEST_STORAGE_TAMPER`）。
+`rejection` 行は code ごとの件数を記録するだけ。`summary` 行は「読んだ bundle 行の数 == `summary.bundles`」で
+突き合わせ、合わなければ `FEEDBACK_EXPORT_SUMMARY_MISMATCH`、summary が無ければ `FEEDBACK_EXPORT_SUMMARY_MISSING`
+を結果に出す（`excludedInactiveSigner` と `rejections` は件数として記録するだけ）。
+
+### 管理側の置き場
+
+v1 と同じ root を使う。照合を通った bundle は `accepted/`（署名つき bundle そのもの）・`curation/`（隔離の候補）・
+`receipts/`（取り込みの記録。受け取り口の受領証・受領時刻・受け取り口の鍵の行 ID を含む）・`sources/`（replay の索引）
+へ置く。回ごとの結果は `export-imports/<時刻>-<書き出しの sha256 の先頭16桁>.json` に残す（dry-run では書かない）。
+取り込みの記録には digest・理由のコード・件数だけを書き、`generalizedText` などの本文は写さない。
+
+### 隔離から先は既存の承認
+
+`curation/<bundleDigest>.json` を読んでから、既存の `approve` / `reject`（`harness-feedback-ingest.mjs`）で決める。
+承認した bundle だけが `list-approved` と curator（`harness-curator.mjs --feedback-ingest-root`）の観測になる。
+観測に入るのは、既知の提案（`proposals` と、catalog に既にあった `newCandidates`）の出来事の指紋と、決着の
+ゲートの判定だけ。catalog に無い候補の文は `curation/` で owner が読むためだけに残し、承認しても自動では
+何にも使わない（一般化できると判断したものだけを owner 自身の session で `harness-learn.mjs capture` する）。
+鍵を後で失効すれば、承認済みでも `revokedAfterApproval` へ分けて数えない（v1 と同じ）。
+
+### 運営者の公開鍵を受け取り口へ登録する
+
+配備の段で、owner の承認のもとで行う。運営者の端末の自動の bundle の公開鍵（SPKI PEM、学習の置き場の
+`keys/operator-feedback-ed25519.pub.pem`。秘密鍵は渡さない）を別経路で受け取り、指紋（`ed25519:<24桁hex>`）を
+運営者本人と突き合わせてから、受け取り口の `python -m otoshigo.feedback_intake enroll --user-id <利用者 ID>
+--public-key-file <SPKI PEM> --allow-harness <harness-id> --reason "<理由>"` と、管理側の
+`harness-feedback-ingest.mjs enroll --key-use auto-feedback`（上のコマンド）の**両方**に同じ公開鍵を登録する。
+許す harness は両方で同じにする。失効も両方で行う（受け取り口だけで失効すると書き出しに出なくなり、管理側だけで
+失効すると取り込みで `FEEDBACK_SIGNER_REVOKED` になる）。
+
 ## owner の承認のあと
 
 - `settlement` はハーネス × ホスト × 版の集計（`harness-receipts.mjs rollup` と同じ軸）に入れる
@@ -238,8 +378,8 @@ Ed25519 秘密鍵で署名したもの（v1 と同じ方式）。`signer.keyId` 
 
 ## まだ決まっていないこと
 
-- 受け取り口を置くか、置くならどこ（ドメイン・ホスティング・保持期間・バックアップ）
+- 受け取り口の配備（URL・ホスティング・バックアップ）。置き場はオトシゴのサーバーに決め、保持は受領から1年
 - 提供元の受領証用の鍵の保管場所
-- operator の登録の手順（公開鍵を誰がどの経路で受け取るか）
+- operator の登録で、公開鍵を運営者から受け取る経路（登録の手順そのものは上の「運営者の公開鍵を受け取り口へ登録する」）
 - 送り先を配布物に同梱するか（同梱するなら `config/feedback-destination.json` を作り、`package.json` の
   `files` に足す。同梱しなければ運営者がそれぞれ `destination` で設定する）
