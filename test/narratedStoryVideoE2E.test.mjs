@@ -53,6 +53,7 @@ import { passPendingNarratedAssetLoops, runPastAssetLoops } from "./fixtures/nar
 import { _testing as adapterTesting } from "../lib/videoHarnessAdapters.mjs";
 import { projectVideoHarnessJob } from "../lib/videoHarnessCanvasAdapter.mjs";
 import { createVideoHarnessJob, runVideoHarnessJob } from "../lib/videoHarnessJob.mjs";
+import { acceptScriptForTests } from "./helpers/scriptQualityAcceptance.mjs";
 
 const execFile = promisify(execFileCallback);
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
@@ -304,6 +305,8 @@ test("Core narrated-story fixture renders, audits, resumes, and emits a receipt 
   const imageStylePrompt = "flat fixture illustration with no embedded text";
   const musicPrompt = "quiet fixture ambient bed";
   await writeFile(scriptPath, `${rawScript}\n`, "utf8");
+  // 台本の関門（監査契約 v8 から）はこの試験の対象外。台本を人がそのまま使うと認めた記録を置く。
+  await acceptScriptForTests(scriptPath);
   await writeFile(join(payloadDir, "narrated-story.json"), `${JSON.stringify({
     version: "fixture-channel-pack-v1",
     runtime: { imageModel: "fixture-image-v1", ttsProvider: "fixture-voice" },
@@ -818,6 +821,8 @@ async function runBookendFixture({ root, env, fixture, script = BOOKEND_FIXTURE_
   await writeBookendPack(payloadDir, toolchain, packOptions);
   const scriptPath = join(root, "raw-script.txt");
   await writeFile(scriptPath, `${script}\n`, "utf8");
+  // 台本の関門（監査契約 v8 から）はこの試験の対象外。台本を人がそのまま使うと認めた記録を置く。
+  await acceptScriptForTests(scriptPath);
   const adapters = bookendFixtureAdapters(fixture, adapterOptions);
   const options = {
     command: "full",

@@ -34,6 +34,7 @@ import {
   writeBookendPackAssets,
 } from "./fixtures/narratedBookendFixture.mjs";
 import { ff } from "./fixtures/narratedVisualFixture.mjs";
+import { acceptScriptForTests } from "./helpers/scriptQualityAcceptance.mjs";
 
 const toolchain = await resolveFfmpegToolchain();
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
@@ -140,6 +141,8 @@ async function runLayoutFixture(root, { presenter }) {
   await writeLayoutPack(payloadDir);
   const scriptPath = join(root, "script-package.json");
   await writeFile(scriptPath, SCRIPT, "utf8");
+  // 台本の関門（監査契約 v8 から）はこの試験の対象外。台本を人がそのまま使うと認めた記録を置く。
+  await acceptScriptForTests(scriptPath);
   const video = presenter ? await writePresenterManifest(join(root, "operator")) : null;
   // 監査契約 v7: 回ごとの人物の映像は、記録のフォルダで工程 video-clip の品質ループに合格させてから渡す。
   if (video) await passOperatorVideoLoops({ folder: join(root, "operator"), manifestPath: video.manifestPath });

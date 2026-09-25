@@ -21,6 +21,7 @@ import {
   splitSpeakerTurns,
   validateNarratedScriptPackage,
 } from "../lib/narratedStoryScriptPackage.mjs";
+import { acceptScriptForTests } from "./helpers/scriptQualityAcceptance.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
@@ -262,11 +263,14 @@ test("plan-only の preflight は台本パッケージを読み、止まる理�
     story: [{ id: "s01", text: "「いらっしゃい」", speaker: "c-shop" }],
     readings: [],
   })), "utf8");
+  // 台本の関門（監査契約 v8 から）はこの試験の対象外。台本を人がそのまま使うと認めた記録を置く（SHA ごと）。
+  await acceptScriptForTests(packagePath);
   const blocked = await inspectNarratedStoryPlan({ scriptPath: packagePath, channelPackDir: pack });
   assert.equal(blocked.ok, false);
   assert.deepEqual(blocked.blockers, ["cast-role-undeclared:shopkeeper"]);
   assert.equal(blocked.paidCallsAttempted, false);
   await writeFile(packagePath, JSON.stringify(samplePackage()), "utf8");
+  await acceptScriptForTests(packagePath);
   const ready = await inspectNarratedStoryPlan({ scriptPath: packagePath, channelPackDir: pack });
   assert.equal(ready.ok, true, ready.blockers.join(", "));
   assert.deepEqual(ready.segments, { story: 3, review: 0 });
@@ -304,6 +308,8 @@ test("公式経路: 台本パッケージから、字幕は表記・声は読み
   const scriptPath = join(root, "input", "script.json");
   await mkdir(dirname(scriptPath), { recursive: true });
   await writeFile(scriptPath, JSON.stringify(samplePackage()), "utf8");
+  // 台本の関門（監査契約 v8 から）はこの試験の対象外。台本を人がそのまま使うと認めた記録を置く。
+  await acceptScriptForTests(scriptPath);
   const fixture = await createBookendFixtureMedia(join(root, "media"), toolchain);
   const adapters = bookendFixtureAdapters(fixture);
   const specs = [];

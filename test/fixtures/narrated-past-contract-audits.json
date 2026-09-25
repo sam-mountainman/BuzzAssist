@@ -150,6 +150,40 @@
         "reviewLayoutMeasured",
         "episodeOpeningProvenance"
       ]
+    },
+    {
+      "version": "buzzassist-narrated-story-audit-v7",
+      "requiredAudits": [
+        "audioIntegratedLoudness",
+        "narrationBedSeparation",
+        "perceptualReviewChecks",
+        "duration",
+        "frozenV1AndParentHashes",
+        "parentAudioPcmPreserved",
+        "perceptualReviewBoundToOutput",
+        "perceptualEvidenceHashes",
+        "contactSheetOriginalDetailReviewed",
+        "pixelAudit",
+        "sceneTransitionOwnedByParent",
+        "audioBoundaryBreathV16",
+        "noWholeProgramAcrossfade",
+        "avEndSync",
+        "bookendTransitionMeasured",
+        "operatorReplacementCleared",
+        "qualityLoopPassed",
+        "voiceTakeQuality",
+        "voiceCastRouting",
+        "characterIdentityReviewed",
+        "sceneImageProvenance",
+        "sceneImageAssetLoopPassed",
+        "voiceTakeAssetLoopPassed",
+        "characterAssetLoopPassed",
+        "burnedSubtitlesMeasured",
+        "cameraMotionMeasured",
+        "reviewLayoutMeasured",
+        "episodeOpeningProvenance",
+        "operatorVideoAssetLoopPassed"
+      ]
     }
   ]
 }

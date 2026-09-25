@@ -77,7 +77,8 @@ test("監査の id と効力: 動画の関門は監査契約 v7 から（v6 以�
   assert.ok(NARRATED_STORY_AUDIT_IDS.includes(NARRATED_VIDEO_CLIP_LOOP_AUDIT_ID));
   assert.equal(NARRATED_ASSET_LOOP_AUDIT_IDS.includes(NARRATED_VIDEO_CLIP_LOOP_AUDIT_ID), false, "v5 の関門の一覧には入れない（v6 以前の state の確定を変えない）");
   assert.equal(NARRATED_VIDEO_CLIP_LOOP_SINCE, `${SERIES}-v7`);
-  assert.equal(NARRATED_STORY_AUDIT_CONTRACT_VERSION, NARRATED_VIDEO_CLIP_LOOP_SINCE);
+  // 今の監査契約（v8 で台本の品質ループの合格を足した）でも動画の関門は効いている。
+  assert.equal(narratedVideoClipLoopsRequired(NARRATED_STORY_AUDIT_CONTRACT_VERSION), true);
   assert.equal(narratedVideoClipLoopsRequired(`${SERIES}-v6`), false);
   assert.equal(narratedVideoClipLoopsRequired(`${SERIES}-v7`), true);
   assert.equal(narratedVideoClipLoopsRequired("unreadable"), true);

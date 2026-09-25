@@ -25,6 +25,7 @@ import {
   passingVoiceQualityGate,
   writeBookendPack,
 } from "./fixtures/narratedBookendFixture.mjs";
+import { acceptScriptForTests } from "./helpers/scriptQualityAcceptance.mjs";
 
 const toolchain = await resolveFfmpegToolchain();
 const EXEMPT = new Set(["perceptualReviewChecks", "perceptualReviewBoundToOutput", "perceptualEvidenceHashes", "contactSheetOriginalDetailReviewed", "qualityLoopPassed", "characterIdentityReviewed"]);
@@ -57,6 +58,8 @@ async function run(root, review) {
   await writeBookendPack(payloadDir, toolchain);
   const scriptPath = join(root, "script-package.json");
   await writeFile(scriptPath, scriptPackage(review), "utf8");
+  // 台本の関門（監査契約 v8 から）はこの試験の対象外。台本を人がそのまま使うと認めた記録を置く。
+  await acceptScriptForTests(scriptPath);
   const adapters = bookendFixtureAdapters(fixture);
   const options = {
     command: "full",

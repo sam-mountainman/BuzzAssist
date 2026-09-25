@@ -23,6 +23,7 @@ import {
 import { NARRATED_SCRIPT_PACKAGE_FORMAT } from "../lib/narratedStoryScriptPackage.mjs";
 import { bookendFixtureAdapters, createBookendFixtureMedia, passingVoiceQualityGate } from "./fixtures/narratedBookendFixture.mjs";
 import { runPastAssetLoops } from "./fixtures/narratedAssetLoopFixture.mjs";
+import { acceptScriptForTests } from "./helpers/scriptQualityAcceptance.mjs";
 
 const execFile = promisify(execFileCallback);
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
@@ -143,6 +144,8 @@ test("durable Job へ持ち込む Pack の形: musicPlan を受け、区分の�
     { id: "s01", text: "静かな朝だった。" },
     { id: "s02", text: "物語はここで終わる。", musicSection: "closing" },
   ]), "utf8");
+  // 台本の関門（監査契約 v8 から）はこの試験の対象外。台本を人がそのまま使うと認めた記録を置く。
+  await acceptScriptForTests(scriptPath);
   const inspected = await inspectNarratedStoryPlan({ scriptPath, channelPackDir: join(root, "ok") });
   assert.deepEqual(inspected.blockers, ["music-section-pending:closing"]);
   assert.equal(inspected.paidCallsAttempted, false);
@@ -169,6 +172,8 @@ test("公式経路: 区分ごとに運営者の曲と生成した曲を当てて
     const scriptPath = join(root, jobId, "script.json");
     await mkdir(dirname(scriptPath), { recursive: true });
     await writeFile(scriptPath, packagedScript(story), "utf8");
+    // 台本の関門（監査契約 v8 から）はこの試験の対象外。台本を人がそのまま使うと認めた記録を置く。
+    await acceptScriptForTests(scriptPath);
     const adapters = bookendFixtureAdapters(fixture);
     const specs = [];
     // 途中の成果物の品質ループ（本編の画・声のテイク）で止まったら、本物のループで合格させて再開する。

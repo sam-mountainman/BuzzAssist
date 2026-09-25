@@ -30,6 +30,12 @@
         "cliFlag": "--operator-video-manifest",
         "requiredWhen": "Channel Pack が bookends.opening.kind: episode-video か bookends.review.presenter.episodeVideo を宣言したとき",
         "what": "回ごとの OP 映像・感想パートの人物の映像の取り込みの記録（buzzassist-operator-video-manifest-v1）"
+      },
+      {
+        "key": "scriptQualityWorkDir",
+        "cliFlag": "--script-quality-work-dir",
+        "requiredWhen": "台本の品質ループの作業フォルダが --script-path のあるフォルダと違うとき（省けば台本のあるフォルダ。監査契約 v8 から、使う台本がそのフォルダのループで合格した版か、人がそのまま使うと認めた版でなければ有料の処理の前に止まる）",
+        "what": "台本の品質ループ（node scripts/script-quality-loop.mjs --work-dir）の作業フォルダ"
       }
     ]
   },

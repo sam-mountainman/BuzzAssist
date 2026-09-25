@@ -32,6 +32,7 @@ import { narratedQualityPaths } from "../lib/narratedStoryQualityLoop.mjs";
 import { runNarratedStoryVideo } from "../lib/narratedStoryVideo.mjs";
 import { bookendFixtureAdapters, createBookendFixtureMedia, passingVoiceQualityGate } from "./fixtures/narratedBookendFixture.mjs";
 import { recordAssetLoopRound, runPastAssetLoops } from "./fixtures/narratedAssetLoopFixture.mjs";
+import { acceptScriptForTests } from "./helpers/scriptQualityAcceptance.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
@@ -54,6 +55,8 @@ async function setup(root) {
   }, null, 2)}\n`, "utf8");
   const scriptPath = join(root, "raw-script.txt");
   await writeFile(scriptPath, "最初の物語です。次の場面です。\n", "utf8");
+  // 台本の関門（監査契約 v8 から）はこの試験の対象外。台本を人がそのまま使うと認めた記録を置く。
+  await acceptScriptForTests(scriptPath);
   const reviewer = generateReviewerKeyPair();
   const trustPath = join(root, "reviewer-trust.json");
   await writeFile(trustPath, JSON.stringify({
@@ -195,11 +198,12 @@ test("古い契約: 関門が無かった版（v4）の ready state は、品質
 
   // v4 の production が書いた state と自動監査の報告の形にする（当時は関門も場面の画の出どころの保証も無く、
   // state に作った版の印も無い）。報告の SHA は state の成果物の記録に合わせる。
-  // v5・v6（見た目の実測）・v7（運営者の動画の品質ループ）で足した監査は、v4 の state と報告には無い。
+  // v5・v6（見た目の実測）・v7（運営者の動画の品質ループ）・v8（台本の品質ループの合格）で足した監査は、v4 の
+  // state と報告には無い。
   const v5Only = new Set([
     ...NARRATED_ASSET_LOOP_AUDIT_IDS, NARRATED_SCENE_IMAGE_PROVENANCE_AUDIT_ID,
     "burnedSubtitlesMeasured", "cameraMotionMeasured", "reviewLayoutMeasured", "episodeOpeningProvenance",
-    "operatorVideoAssetLoopPassed",
+    "operatorVideoAssetLoopPassed", "scriptQualityAccepted",
   ]);
   const state = JSON.parse(await readFile(statePath, "utf8"));
   delete state.auditContractVersion;
@@ -243,6 +247,6 @@ test("古い契約: 関門が無かった版（v4）の ready state は、品質
   assert.equal(done.outcome, "pass", `不合格 ${done.summary.failedGates.join(", ")} / 未測定 ${done.summary.skippedGates.join(", ")}`);
   assert.deepEqual([...done.summary.notInForceGates].sort(), [
     "asset-quality-loop", "burned-subtitles-legible", "camera-motion-declared", "episode-opening-provenance", "operator-video-asset-loop",
-    "review-layout", "scene-image-provenance",
+    "review-layout", "scene-image-provenance", "script-quality-accepted",
   ]);
 });

@@ -162,6 +162,7 @@ test("Koya のカードの start 引数は、Job を作る前に止める表（K
   assert.deepEqual(narratedOptions.map(({ key, cliFlag }) => ({ key, cliFlag })), [
     { key: "operatorImageManifestPath", cliFlag: "--operator-image-manifest" },
     { key: "operatorVideoManifestPath", cliFlag: "--operator-video-manifest" },
+    { key: "scriptQualityWorkDir", cliFlag: "--script-quality-work-dir" },
   ]);
   const cli = await readFile(join(root, "scripts", "run-video-harness.mjs"), "utf8");
   for (const entry of [...card.inputs.startOptions, ...narratedOptions]) {
@@ -181,6 +182,7 @@ test("条件つきの start 引数は、足りなくても blockers にせず条
   assert.deepEqual(without.startOptions.conditional.map((entry) => [entry.key, entry.provided]), [
     ["operatorImageManifestPath", false],
     ["operatorVideoManifestPath", false],
+    ["scriptQualityWorkDir", false],
   ]);
   const withManifest = checkHarnessInputs(view, { script, channelPack: pack, options: { operatorImageManifestPath: "/fixture/manifest.json" } });
   assert.equal(withManifest.startOptions.conditional[0].provided, true);

@@ -22,6 +22,7 @@ import {
 } from "../lib/narratedStoryVoiceQuality.mjs";
 import { bookendFixtureAdapters, createBookendFixtureMedia } from "./fixtures/narratedBookendFixture.mjs";
 import { runPastAssetLoops } from "./fixtures/narratedAssetLoopFixture.mjs";
+import { acceptScriptForTests } from "./helpers/scriptQualityAcceptance.mjs";
 
 /** 指定した id（segment#take）だけを落とす合成のゲート。受け取った checks を記録する。 */
 function scriptedGate({ failing = new Set(), dropMetric = new Set(), missing = new Set(), available = true } = {}) {
@@ -186,6 +187,8 @@ test("公式経路: QA 実行系が無ければ有料生成の前に止まり、
   const scriptPath = join(root, "input", "script.txt");
   await mkdir(dirname(scriptPath), { recursive: true });
   await writeFile(scriptPath, "最初の物語です。次の場面です。\n", "utf8");
+  // 台本の関門（監査契約 v8 から）はこの試験の対象外。台本を人がそのまま使うと認めた記録を置く。
+  await acceptScriptForTests(scriptPath);
   const run = async (jobId, gate) => {
     const adapters = bookendFixtureAdapters(fixture);
     const specs = [];

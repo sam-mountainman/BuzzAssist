@@ -62,6 +62,7 @@ import {
   recordAssetLoopRound,
   runPastAssetLoops,
 } from "./fixtures/narratedAssetLoopFixture.mjs";
+import { acceptScriptForTests } from "./helpers/scriptQualityAcceptance.mjs";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const toolchain = await resolveFfmpegToolchain();
@@ -126,6 +127,8 @@ async function setupRoot(root, { packOptions = {}, scenes = null, loops = false 
   await writePack(payloadDir, packConfig(packOptions));
   const scriptPath = join(root, "raw-script.txt");
   await writeFile(scriptPath, `${SCRIPT}\n`, "utf8");
+  // 台本の関門（監査契約 v8 から）はこの試験の対象外。台本を人がそのまま使うと認めた記録を置く。
+  await acceptScriptForTests(scriptPath);
   const operatorDir = join(root, "operator-images");
   const folder = await writeOperatorImageFolder(operatorDir, scenes || [
     { sceneId: "s001", width: 321, height: 180 },

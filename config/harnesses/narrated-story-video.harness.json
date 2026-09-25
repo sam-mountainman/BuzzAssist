@@ -1,6 +1,6 @@
 {
   "id": "narrated-story-video",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "displayName": "ナレーション物語動画（実写素材＋カメラワーク）",
   "note": "クライアント名・チャンネル名はここに書かない。ここは『何が作れるか』の宣言であって、誰のためのものかの記録ではない。",
   "produces": {
@@ -33,6 +33,11 @@
     {
       "id": "asset-quality-loop-reviews",
       "what": "本編の画・その参照の人物の設定画・採用する声のテイク・回ごとの運営者の動画（工程 video-clip。measure-video の測定つき）の、作った文脈とは別の評価文脈の採点と、要る人の確認（node scripts/asset-quality-loop.mjs）。無ければ描く前に人待ちで止まる（有料の再生成はしない）",
+      "blocking": true
+    },
+    {
+      "id": "script-quality-acceptance",
+      "what": "使う台本（start に渡した台本のバイト列）が、台本の品質ループ（node scripts/script-quality-loop.mjs、作業フォルダは Job の options.scriptQualityWorkDir。無ければ台本のあるフォルダ）で合格した版か、人がそのまま使うと認めた記録（accept-human --human-verified。運営者・依頼者が自分で書いた台本など）。無ければ有料の処理の前に人待ちで止まる（監査契約 v8 から）",
       "blocking": true
     },
     {
@@ -202,6 +207,15 @@
         "operatorVideoAssetLoopPassed"
       ],
       "inForceSince": "buzzassist-narrated-story-audit-v7"
+    },
+    {
+      "id": "script-quality-accepted",
+      "what": "有料の処理を始める前に、使う台本（Job に保存した写しのバイト列の SHA）を台本の品質ループの答え（lib/scriptQualityLoop.mjs の scriptQualityVerdict、ジャンル narrated-story）に問い、ループが合格した版と同じ SHA か、人がそのまま使うと認めた SHA のときだけ進む。合格しなければ理由コード（script-quality-required:<理由>）と次のコマンドを返して人待ちで止まり、画・声・BGM を1つも依頼しない。答え（台本の SHA・理由コード・受け入れ方・ループの版と点）を監査に残す。台本の文・所見・人名は残さない",
+      "human": "台本をそのまま使うかは人が決める（運営者・依頼者が自分で書いた台本は accept-human --human-verified を確認した人が自分の端末から打つ）。直しを提案するときは、作った文脈とは別の評価文脈で台本の品質ループを回す",
+      "evidenceAuditIds": [
+        "scriptQualityAccepted"
+      ],
+      "inForceSince": "buzzassist-narrated-story-audit-v8"
     }
   ],
   "entrypoint": "node scripts/run-video-harness.mjs",

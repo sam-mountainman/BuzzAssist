@@ -15,6 +15,7 @@ import {
 } from "../lib/narratedStoryCast.mjs";
 import { inspectNarratedStoryPlan, planNarratedStoryScript } from "../lib/narratedStoryPipeline.mjs";
 import { NARRATED_SCRIPT_PACKAGE_FORMAT, planNarratedStoryInput } from "../lib/narratedStoryScriptPackage.mjs";
+import { acceptScriptForTests } from "./helpers/scriptQualityAcceptance.mjs";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const NARRATOR_VOICE = { provider: "fixture-voice", model: "fixture-voice-v1", adapterVersion: "fixture-voice-adapter-v1", voiceId: "voice-narrator", speed: 1 };
@@ -168,6 +169,8 @@ test("durable Job へ持ち込む Pack の形: cast を受け、役の未知の�
   );
   const scriptPath = join(root, "script.json");
   await writeFile(scriptPath, JSON.stringify(castPackage([{ id: "s01", text: "「ぼくもいく」", speaker: "c-kid" }])), "utf8");
+  // 台本の関門（監査契約 v8 から）はこの試験の対象外。台本を人がそのまま使うと認めた記録を置く。
+  await acceptScriptForTests(scriptPath);
   const inspected = await inspectNarratedStoryPlan({ scriptPath, channelPackDir: join(root, "ok") });
   assert.deepEqual(inspected.blockers, ["cast-role-blocked:small-child"]);
   const brokenCast = await writePack(join(root, "broken"), { cast: { roles: { a: { status: "blocked", blockReason: "未確認", voiceId: "voice-narrator" } } } });
@@ -195,6 +198,8 @@ test("公式経路: 役の声で台詞を作り、blocked の役があれば1円
     const scriptPath = join(root, jobId, "script.json");
     await mkdir(dirname(scriptPath), { recursive: true });
     await writeFile(scriptPath, JSON.stringify(castPackage(story)), "utf8");
+    // 台本の関門（監査契約 v8 から）はこの試験の対象外。台本を人がそのまま使うと認めた記録を置く。
+    await acceptScriptForTests(scriptPath);
     const adapters = bookendFixtureAdapters(fixture);
     const specs = [];
     const probes = [];

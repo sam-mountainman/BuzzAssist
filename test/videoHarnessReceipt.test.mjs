@@ -110,6 +110,8 @@ const CHECKS = Object.freeze({
   episodeOpeningProvenance: true,
   // 監査契約 v7: 回ごとの運営者の動画の途中の成果物の品質ループ（工程 video-clip）。
   operatorVideoAssetLoopPassed: true,
+  // 監査契約 v8: 使う台本が台本の品質ループに合格した版か、人がそのまま使うと認めた版か。
+  scriptQualityAccepted: true,
 });
 const SIGNOFF_AUDIT_IDS = Object.freeze([
   "perceptualReviewChecks",
@@ -1402,15 +1404,17 @@ const onlyChecks = (ids) => Object.fromEntries(ids.map((id) => [id, true]));
 
 test("監査契約を上げる前の版で確定を待っている narrated Job は、共通 Receipt でもその版の必須監査で確定し、足した保証は not-in-force になる", async (t) => {
   const visual = ["burned-subtitles-legible", "camera-motion-declared", "episode-opening-provenance", "review-layout"];
-  // v6→v7 で回ごとの運営者の動画の品質ループの保証を足した。
+  // v6→v7 で回ごとの運営者の動画の品質ループの保証を、v7→v8 で台本の品質ループの合格の保証を足した。
   const video = ["operator-video-asset-loop"];
+  const script = ["script-quality-accepted"];
   const cases = [
-    { version: `${NARRATED_SERIES}-v6`, notInForce: [...video] },
+    { version: `${NARRATED_SERIES}-v7`, notInForce: [...script] },
+    { version: `${NARRATED_SERIES}-v6`, notInForce: [...video, ...script].sort() },
     // v5→v6 で見た目の実測の保証を足した。
-    { version: `${NARRATED_SERIES}-v5`, notInForce: [...visual, ...video].sort() },
-    { version: `${NARRATED_SERIES}-v4`, notInForce: ["asset-quality-loop", "scene-image-provenance", ...visual, ...video].sort() },
+    { version: `${NARRATED_SERIES}-v5`, notInForce: [...visual, ...video, ...script].sort() },
+    { version: `${NARRATED_SERIES}-v4`, notInForce: ["asset-quality-loop", "scene-image-provenance", ...visual, ...video, ...script].sort() },
     // v3→v4 のときも同じ穴だった（人物の同一性の signoff 結合と声の監査を後から求めていた）。
-    { version: `${NARRATED_SERIES}-v3`, notInForce: ["asset-quality-loop", "character-identity", "scene-image-provenance", "voice-quality", ...visual, ...video].sort() },
+    { version: `${NARRATED_SERIES}-v3`, notInForce: ["asset-quality-loop", "character-identity", "scene-image-provenance", "voice-quality", ...visual, ...video, ...script].sort() },
   ];
   for (const { version, notInForce } of cases) {
     await t.test(version, async () => {
@@ -1443,13 +1447,16 @@ test("効力のある契約の必須監査が欠ければ、過去の版の Job 
   const v4 = await pastNarratedAudits(`${NARRATED_SERIES}-v4`);
   const v5 = await pastNarratedAudits(`${NARRATED_SERIES}-v5`);
   const v6 = await pastNarratedAudits(`${NARRATED_SERIES}-v6`);
-  const v7 = Object.keys(CHECKS);
+  const v7 = await pastNarratedAudits(`${NARRATED_SERIES}-v7`);
+  const v8 = Object.keys(CHECKS);
   const cases = [
     ["v4 の Job で v4 の必須監査（声のテイク）が欠けた", plannedJob, OLDER_DECLARATION_SHA, `${NARRATED_SERIES}-v4`, v4.filter((id) => id !== "voiceTakeQuality")],
     ["v5 の Job で途中の成果物の品質ループの監査が欠けた", plannedJob, OLDER_DECLARATION_SHA, `${NARRATED_SERIES}-v5`, v5.filter((id) => id !== "sceneImageAssetLoopPassed")],
     ["v6 の Job で見た目の実測（カメラの動き）の監査が欠けた", plannedJob, OLDER_DECLARATION_SHA, `${NARRATED_SERIES}-v6`, v6.filter((id) => id !== "cameraMotionMeasured")],
-    ["v7 の Job で運営者の動画の品質ループの監査が欠けた", plannedJob, declarationSha256, `${NARRATED_SERIES}-v7`, v7.filter((id) => id !== "operatorVideoAssetLoopPassed")],
-    // 今の宣言で計画された Job が、audit-report で古い版を名乗っても、宣言が書かれた版（v7）で測る。
+    ["v7 の Job で運営者の動画の品質ループの監査が欠けた", plannedJob, OLDER_DECLARATION_SHA, `${NARRATED_SERIES}-v7`, v7.filter((id) => id !== "operatorVideoAssetLoopPassed")],
+    ["v8 の Job で台本の品質ループの合格の監査が欠けた", plannedJob, declarationSha256, `${NARRATED_SERIES}-v8`, v8.filter((id) => id !== "scriptQualityAccepted")],
+    // 今の宣言で計画された Job が、audit-report で古い版を名乗っても、宣言が書かれた版（v8）で測る。
+    ["今の宣言で計画された Job が v7 を名乗った", plannedJob, declarationSha256, `${NARRATED_SERIES}-v7`, v7],
     ["今の宣言で計画された Job が v6 を名乗った", plannedJob, declarationSha256, `${NARRATED_SERIES}-v6`, v6],
     ["今の宣言で計画された Job が v5 を名乗った", plannedJob, declarationSha256, `${NARRATED_SERIES}-v5`, v5],
     ["今の宣言で計画された Job が v4 を名乗った", plannedJob, declarationSha256, `${NARRATED_SERIES}-v4`, v4],
@@ -1474,10 +1481,10 @@ test("効力のある契約の必須監査が欠ければ、過去の版の Job 
       }
     });
   }
-  await t.test("v7 の Job で全部の監査が揃えば合格し、対象外は無い", async () => {
+  await t.test("v8 の Job で全部の監査が揃えば合格し、対象外は無い", async () => {
     const root = await mkdtemp(join(tmpdir(), "video-receipt-in-force-current-"));
     try {
-      const outcome = await completedFixture(root, { includeRequiredAuditIds: false, reportOverrides: { contractVersion: `${NARRATED_SERIES}-v7` } });
+      const outcome = await completedFixture(root, { includeRequiredAuditIds: false, reportOverrides: { contractVersion: `${NARRATED_SERIES}-v8` } });
       const result = await createVideoHarnessRunReceipt({ job: plannedJob(root, declarationSha256), outcome });
       assert.equal(result.receipt.outcome, "pass");
       assert.equal(result.receipt.summary.notInForce, 0);

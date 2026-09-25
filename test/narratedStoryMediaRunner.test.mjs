@@ -22,6 +22,7 @@ import { _testing as adapterTesting, executeVideoHarnessAdapter } from "../lib/v
 import { _testing as jobTesting } from "../lib/videoHarnessJob.mjs";
 import { bookendFixtureAdapters, createBookendFixtureMedia, passingVoiceQualityGate } from "./fixtures/narratedBookendFixture.mjs";
 import { runPastAssetLoops } from "./fixtures/narratedAssetLoopFixture.mjs";
+import { acceptScriptForTests } from "./helpers/scriptQualityAcceptance.mjs";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const noSleep = async () => {};
@@ -272,6 +273,8 @@ test("公式経路: 止まった回は決着していない Media Job と journa
   const scriptPath = join(root, "input", "script.txt");
   await mkdir(dirname(scriptPath), { recursive: true });
   await writeFile(scriptPath, "最初の物語です。次の場面です。\n", "utf8");
+  // 台本の関門（監査契約 v8 から）はこの試験の対象外。台本を人がそのまま使うと認めた記録を置く。
+  await acceptScriptForTests(scriptPath);
   const fixture = await createBookendFixtureMedia(join(root, "media"), toolchain);
   const bytesByKind = { "image.generation": fixture.image, "voice.synthesis": fixture.voice, "music.generation": fixture.music };
   const kindByKey = new Map();

@@ -40,6 +40,7 @@ import {
   writeBookendPackAssets,
 } from "./fixtures/narratedBookendFixture.mjs";
 import { ff } from "./fixtures/narratedVisualFixture.mjs";
+import { acceptScriptForTests } from "./helpers/scriptQualityAcceptance.mjs";
 
 const toolchain = await resolveFfmpegToolchain();
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
@@ -157,6 +158,8 @@ test("回ごとの OP 映像: 公式経路で冒頭に入り、来歴は私有�
     await writeEpisodeOpeningPack(payloadDir);
     const scriptPath = join(temp, "script.txt");
     await writeFile(scriptPath, `${BOOKEND_FIXTURE_SCRIPT}\n`, "utf8");
+    // 台本の関門（監査契約 v8 から）はこの試験の対象外。台本を人がそのまま使うと認めた記録を置く。
+    await acceptScriptForTests(scriptPath);
     const { manifestPath } = await writeVideoManifest(join(temp, "operator"));
     const adapters = bookendFixtureAdapters(fixture);
     const options = {

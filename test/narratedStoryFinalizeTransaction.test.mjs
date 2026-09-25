@@ -21,6 +21,7 @@ import { narratedStoryRunPaths, writeNarratedReviewSignoff } from "../lib/narrat
 import { runNarratedStoryVideo } from "../lib/narratedStoryVideo.mjs";
 import { bookendFixtureAdapters, createBookendFixtureMedia, passingVoiceQualityGate } from "./fixtures/narratedBookendFixture.mjs";
 import { runPastAssetLoops } from "./fixtures/narratedAssetLoopFixture.mjs";
+import { acceptScriptForTests } from "./helpers/scriptQualityAcceptance.mjs";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const toolchain = await resolveFfmpegToolchain();
@@ -41,6 +42,8 @@ async function setup(root) {
   }, null, 2)}\n`, "utf8");
   const scriptPath = join(root, "raw-script.txt");
   await writeFile(scriptPath, "最初の物語です。次の場面です。\n", "utf8");
+  // 台本の関門（監査契約 v8 から）はこの試験の対象外。台本を人がそのまま使うと認めた記録を置く。
+  await acceptScriptForTests(scriptPath);
   const reviewer = generateReviewerKeyPair();
   const trustPath = join(root, "reviewer-trust.json");
   await writeFile(trustPath, JSON.stringify({

@@ -2,7 +2,7 @@
 // Claude Code / Codex 共通の上位入口。
 //
 //   node scripts/run-video-harness.mjs plan-request --request "依頼文" [--script-path FILE] [--channel-pack BUNDLE] [--strategy-brief FILE]
-//   node scripts/run-video-harness.mjs start --harness ID --script-path FILE --channel-pack BUNDLE [--strategy-brief FILE]
+//   node scripts/run-video-harness.mjs start --harness ID --script-path FILE --channel-pack BUNDLE [--strategy-brief FILE] [--script-quality-work-dir DIR]
 //   node scripts/run-video-harness.mjs resume --job-id ID --confirmed
 //   node scripts/run-video-harness.mjs status --job-id ID
 //   node scripts/run-video-harness.mjs cancel --job-id ID
@@ -40,8 +40,15 @@ function usage() {
     "  依頼に合うハーネスの候補・理由（一致した語・否定された語・入力要件・前提・実績・Channel Pack の向き先）と、",
     "  決めきれないときの1問を JSON で返す。モデルも有料 API も呼ばず、Job も作らない。MCP の plan_video_request と同じ結果。",
     "  --doctor で候補ごとに harness-doctor を走らせる（既定では走らせない）。start と同じ Koya の引数（--episode-id など）も受ける。",
-    "start  --harness ID --script-path FILE --channel-pack BUNDLE [--strategy-brief FILE] [--confirmed] [--reviewer-trust-path JSON] [--host-model ID]",
+    "start  --harness ID --script-path FILE --channel-pack BUNDLE [--strategy-brief FILE] [--script-quality-work-dir DIR] [--confirmed] [--reviewer-trust-path JSON] [--host-model ID]",
     "",
+    "--script-quality-work-dir DIR（start。任意）: 台本の品質ループ（node scripts/script-quality-loop.mjs）の作業フォルダ。",
+    "  省くと --script-path のあるフォルダ（台本スキルが script.md・script-package.json を出すフォルダで、ループの状態と",
+    "  外部モデルの呼び出しの台帳はその quality/ にある）。options.scriptQualityWorkDir に残る（Job の識別子に入る。MCP /",
+    "  --options-json でも同じ鍵）。ナレーション物語（監査契約 v8 から）は、有料の処理の前に、",
+    "  使う台本のバイト列がこのフォルダのループで合格した版か、人がそのまま使うと認めた版（accept-human --human-verified）",
+    "  かを問い、どちらでもなければ script-quality-required:<理由コード> と次のコマンドを返して人待ちで止まる。",
+    "  plan-only の start も同じ理由を preflight.blockers に出す。依頼者・運営者が書いた台本は accept-human で通る。",
     "--strategy-brief FILE（plan-request / start。任意）: 企画ブリーフ（buzzassist-strategy-brief-v1）。plan-request は",
     "  node scripts/strategy-brief.mjs verdict の合否と根拠の状態を理由に出し、start はブリーフの SHA-256 を",
     "  options.strategyBriefSha256 に残す（Job の識別子に入る。MCP では options.strategyBriefSha256 を渡す）。",
@@ -109,7 +116,9 @@ async function optionsFrom(args) {
     ["wardrobeReadinessOverrideReason", typeof args.wardrobeReadinessOverrideReason === "string" ? args.wardrobeReadinessOverrideReason : ""],
     ["operatorImageManifestPath", typeof args.operatorImageManifest === "string" ? resolve(args.operatorImageManifest) : ""],
     ["operatorVideoManifestPath", typeof args.operatorVideoManifest === "string" ? resolve(args.operatorVideoManifest) : ""],
+    ["scriptQualityWorkDir", typeof args.scriptQualityWorkDir === "string" ? resolve(args.scriptQualityWorkDir) : ""],
   ];
+  if (args.scriptQualityWorkDir === true) throw new Error("--script-quality-work-dir には台本の品質ループの作業フォルダの path が要る。");
   if (args.operatorImageManifest === true) throw new Error("--operator-image-manifest には取り込みの記録（manifest JSON）の path が要る。");
   if (args.operatorVideoManifest === true) throw new Error("--operator-video-manifest には取り込みの記録（manifest JSON）の path が要る。");
   for (const [key, value] of mappings) if (value !== undefined && value !== "") options[key] = value;
@@ -202,6 +211,9 @@ async function main() {
       }
       if (args.operatorVideoManifest !== undefined) {
         throw new Error("--operator-video-manifest は start でだけ渡す（Job の識別子に入る）。動画を差し替えたら、start で渡した同じ manifest の中身（動画と sha256）を直して resume する。");
+      }
+      if (args.scriptQualityWorkDir !== undefined) {
+        throw new Error("--script-quality-work-dir は start でだけ渡す（Job の識別子に入る）。台本を受け入れた・ループが合格したら、同じ Job をそのまま resume する。");
       }
       const result = await videoHarnessService.resume({
         projectDir,

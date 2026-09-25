@@ -33,6 +33,7 @@ import {
   writeBookendPackAssets,
 } from "./fixtures/narratedBookendFixture.mjs";
 import { bandSubtitleConfig, findJapaneseFontFile, outlineSubtitleConfig, writeSubtitlePackFont } from "./fixtures/narratedVisualFixture.mjs";
+import { acceptScriptForTests } from "./helpers/scriptQualityAcceptance.mjs";
 
 const toolchain = await resolveFfmpegToolchain();
 const fontPath = await findJapaneseFontFile();
@@ -70,6 +71,8 @@ async function runVisualFixture({ root, env, fixture, extend, script = BOOKEND_F
   await writeVisualPack(payloadDir, extend);
   const scriptPath = join(root, "script.txt");
   await writeFile(scriptPath, `${script}\n`, "utf8");
+  // 台本の関門（監査契約 v8 から）はこの試験の対象外。台本を人がそのまま使うと認めた記録を置く。
+  await acceptScriptForTests(scriptPath);
   const adapters = bookendFixtureAdapters(fixture);
   jobCounter += 1;
   const options = {
