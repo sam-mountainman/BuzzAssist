@@ -25,7 +25,7 @@ import {
 } from "../lib/narratedStoryReviewLayout.mjs";
 import { runNarratedStoryVideo } from "../lib/narratedStoryVideo.mjs";
 import { OPERATOR_VIDEO_MANIFEST_VERSION } from "../lib/operatorVideoImport.mjs";
-import { runPastAssetLoops } from "./fixtures/narratedAssetLoopFixture.mjs";
+import { passOperatorVideoLoops, runPastAssetLoops } from "./fixtures/narratedAssetLoopFixture.mjs";
 import {
   bookendFixtureAdapters,
   bookendFixtureChannelConfig,
@@ -141,6 +141,8 @@ async function runLayoutFixture(root, { presenter }) {
   const scriptPath = join(root, "script-package.json");
   await writeFile(scriptPath, SCRIPT, "utf8");
   const video = presenter ? await writePresenterManifest(join(root, "operator")) : null;
+  // 監査契約 v7: 回ごとの人物の映像は、記録のフォルダで工程 video-clip の品質ループに合格させてから渡す。
+  if (video) await passOperatorVideoLoops({ folder: join(root, "operator"), manifestPath: video.manifestPath });
   const adapters = bookendFixtureAdapters(fixture);
   const options = {
     command: "full",

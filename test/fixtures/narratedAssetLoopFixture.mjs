@@ -16,6 +16,7 @@ import {
   recordAssetQualityRound,
   startAssetQualityLoop,
 } from "../../lib/assetQualityLoop.mjs";
+import { VIDEO_CLIP_DECLARATION_VERSION, writeVideoClipMeasurement } from "../../lib/videoClipMeasurement.mjs";
 
 export const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const IDENTITY_NOTES = { face: "輪郭と目の形を参照と並べて見た", hair: "分け目と前髪の形を並べて見た", body: "頭身と肩幅を並べて見た" };
@@ -91,6 +92,9 @@ export async function recordAssetLoopRound({
     ...(spec.reviewRequirements.includes("charactersVisible") ? { charactersVisible: visible } : {}),
     ...(spec.reviewRequirements.includes("viewedAtDecidedSize") ? { viewedAtDecidedSize: true } : {}),
     ...(refs.length > 0 ? { comparedReferenceSha256s: refs, identityComparison: IDENTITY_NOTES } : {}),
+    ...(spec.reviewRequirements.includes("framesReviewed")
+      ? { framesReviewed: { start: `始まりのフレームを見た（${context}）`, middle: `中ほどのフレームを見た（${context}）`, end: `終わりのフレームを見た（${context}）` } }
+      : {}),
     rubricScores: scoresFor(contract, scores),
     notes: `原寸で全体を見て（声は前後と続けて聞いて）判断した（合成の所見・${context}）`,
     findings: [],
@@ -179,6 +183,41 @@ export async function passOperatorImageLoops({ folder, manifestPath, manifest, r
   }
   await writeManifest(manifestPath, manifest);
   return { approvedReferencesPath: approved };
+}
+
+/**
+ * 運営者の動画の取り込みの記録（buzzassist-operator-video-manifest-v1）のフォルダ（＝品質ループの作業フォルダ）で、
+ * 記録の全部の動画の工程 video-clip のループを合格させ、記録に assetLoop を書く。測定は measure-video と同じ
+ * writeVideoClipMeasurement で、宣言は declarations[枠]（無ければ広い範囲）。参照は付けず、人物が写らない版として
+ * 採点する（合成の動画は色と図形だけ）。
+ */
+export async function passOperatorVideoLoops({ folder, manifestPath, declarations = {} }) {
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  for (const clip of manifest.clips) {
+    const videoPath = path.join(folder, ...clip.video.path.split("/"));
+    const measurementRel = path.posix.join("quality", "measure", `${clip.slot}.json`);
+    await writeVideoClipMeasurement({
+      assetPath: videoPath,
+      outputPath: path.join(folder, ...measurementRel.split("/")),
+      declaration: declarations[clip.slot] || {
+        version: VIDEO_CLIP_DECLARATION_VERSION,
+        durationSeconds: { min: 0.04, max: 3600 },
+        frameRate: { min: 1, max: 240 },
+        width: { min: 16 },
+        height: { min: 16 },
+        audio: "optional",
+      },
+    });
+    const status = await recordAssetLoopRound({
+      workDir: folder, stage: "video-clip", subjectId: clip.slot, assetPath: videoPath,
+      generatorContextId: "fixture-operator-video-maker", route: clip.route === "recorded" ? "recorded" : "grok",
+      charactersVisible: false, referenceExemptReason: "人物の写らない合成の動画", measurementPath: measurementRel,
+    });
+    if (status.pass !== true) throw new Error(`fixture video loop did not pass for ${clip.slot}: ${status.issues.join(", ")}`);
+    clip.assetLoop = { statePath: `quality/assets/video-clip--${clip.slot}.json`, passedSha256: sha256(await readFile(videoPath)) };
+  }
+  await writeFile(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+  return manifest;
 }
 
 /**

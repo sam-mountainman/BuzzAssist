@@ -30,7 +30,7 @@ import {
   checkOperatorVideoImport,
   readOperatorVideoManifest,
 } from "../lib/operatorVideoImport.mjs";
-import { runPastAssetLoops } from "./fixtures/narratedAssetLoopFixture.mjs";
+import { passOperatorVideoLoops, runPastAssetLoops } from "./fixtures/narratedAssetLoopFixture.mjs";
 import {
   BOOKEND_FIXTURE_SCRIPT,
   bookendFixtureAdapters,
@@ -178,6 +178,19 @@ test("回ごとの OP 映像: 公式経路で冒頭に入り、来歴は私有�
     assert.deepEqual(missing.knownRemainingIssues, ["operator-video-manifest-required"]);
     assert.equal(adapters.calls.generation, 0);
     assert.ok((await inspectNarratedStoryPlan({ scriptPath, channelPackDir: payloadDir })).blockers.includes("operator-video-manifest-required"));
+    // 監査契約 v7: 取り込む動画は、記録のフォルダで回した工程 video-clip の品質ループの合格が要る。記録に assetLoop が
+    // 無ければ、plan-only でも公式経路でも有料の処理の前に人待ちで止まる。
+    assert.deepEqual(
+      (await inspectNarratedStoryPlan({ scriptPath, channelPackDir: payloadDir, operatorVideoManifestPath: manifestPath, ffprobe: toolchain.ffprobe })).blockers,
+      ["video-clip-asset-loop-not-passed:episode-opening:record-required"],
+    );
+    const unreviewed = await runNarratedStoryVideo({ ...options, operatorVideoManifestPath: manifestPath }, { allowDirectUnboundJobForTests: true });
+    assert.equal(unreviewed.status, "awaiting-human-review");
+    assert.deepEqual(unreviewed.knownRemainingIssues, ["video-clip-asset-loop-not-passed:episode-opening:record-required"]);
+    assert.deepEqual(unreviewed.assetQualityLoop.pending.map((row) => [row.stage, row.slot, row.reason, row.declaration?.audio]), [["video-clip", "episode-opening", "record-required", "required"]]);
+    assert.equal(unreviewed.auditChecks.operatorVideoAssetLoopPassed.pass, false);
+    assert.equal(adapters.calls.generation, 0, "動画のループが合格するまで有料の処理へ進まない");
+    await passOperatorVideoLoops({ folder: join(temp, "operator"), manifestPath, declarations: { "episode-opening": unreviewed.assetQualityLoop.pending[0].declaration } });
     assert.deepEqual((await inspectNarratedStoryPlan({ scriptPath, channelPackDir: payloadDir, operatorVideoManifestPath: manifestPath, ffprobe: toolchain.ffprobe })).blockers, []);
 
     const outcome = await runPastAssetLoops(() => runNarratedStoryVideo({ ...options, operatorVideoManifestPath: manifestPath }, { allowDirectUnboundJobForTests: true }));
@@ -197,6 +210,10 @@ test("回ごとの OP 映像: 公式経路で冒頭に入り、来歴は私有�
       assert.equal(text.includes("fixture opening prompt"), false);
     }
     assert.equal(JSON.parse(manifestText).operatorVideos.clips[0].conversationUrlSha256, sha256(CONVERSATION));
+    // 動画の品質ループの合格は公開面には sha256 だけで出る（合格した版＝取り込んだ動画）。
+    const publicClip = JSON.parse(manifestText).operatorVideos.clips[0];
+    assert.equal(publicClip.assetLoop.passedSha256, publicClip.source.sha256);
+    assert.equal(outcome.auditChecks.operatorVideoAssetLoopPassed.pass, true, outcome.auditChecks.operatorVideoAssetLoopPassed.detail);
     const privateRecord = await readFile(join(options.deploymentRoot, ".media", "narrated-story-video", options.jobId, "operator-videos", "import-record.json"), "utf8");
     assert.ok(privateRecord.includes(CONVERSATION));
     // OP の境目の転換も、動画の OP のまま実測で通る。

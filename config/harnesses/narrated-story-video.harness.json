@@ -1,6 +1,6 @@
 {
   "id": "narrated-story-video",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "displayName": "ナレーション物語動画（実写素材＋カメラワーク）",
   "note": "クライアント名・チャンネル名はここに書かない。ここは『何が作れるか』の宣言であって、誰のためのものかの記録ではない。",
   "produces": {
@@ -32,12 +32,12 @@
     },
     {
       "id": "asset-quality-loop-reviews",
-      "what": "本編の画・その参照の人物の設定画・採用する声のテイクの、作った文脈とは別の評価文脈の採点と、要る人の確認（node scripts/asset-quality-loop.mjs）。無ければ描く前に人待ちで止まる（有料の再生成はしない）",
+      "what": "本編の画・その参照の人物の設定画・採用する声のテイク・回ごとの運営者の動画（工程 video-clip。measure-video の測定つき）の、作った文脈とは別の評価文脈の採点と、要る人の確認（node scripts/asset-quality-loop.mjs）。無ければ描く前に人待ちで止まる（有料の再生成はしない）",
       "blocking": true
     },
     {
       "id": "episode-opening-video",
-      "what": "回ごとの OP 映像（運営者が外で作った短い動画）。Channel Pack の bookends.opening.kind が episode-video のとき、運営者の動画の取り込みの記録（buzzassist-operator-video-manifest-v1、枠 episode-opening、経路・プロンプトの sha256・生成した時刻つき）を Job の options.operatorVideoManifestPath で渡す。無ければ有料生成の前に止める",
+      "what": "回ごとの OP 映像（運営者が外で作った短い動画）。Channel Pack の bookends.opening.kind が episode-video のとき、運営者の動画の取り込みの記録（buzzassist-operator-video-manifest-v1、枠 episode-opening、経路・プロンプトの sha256・生成した時刻つき）を Job の options.operatorVideoManifestPath で渡す。無ければ有料生成の前に止める。記録の各行には、記録のフォルダで回した工程 video-clip の品質ループの assetLoop（状態の置き場と合格した版の sha256）を書く（監査契約 v7 から）",
       "blocking": false
     }
   ],
@@ -193,6 +193,15 @@
         "episodeOpeningProvenance"
       ],
       "inForceSince": "buzzassist-narrated-story-audit-v6"
+    },
+    {
+      "id": "operator-video-asset-loop",
+      "what": "回ごとの運営者の動画（OP 映像・感想パートの人物の映像）は、途中の成果物の品質ループの工程 video-clip に合格した版でなければ描かない。ループは取り込みの記録の assetLoop.statePath が指す作業フォルダ（記録のフォルダ）で回し、機械ゲートとして ffprobe / ffmpeg の測定（形式・全フレームのデコード・尺・fps・解像度・音声トラックの有無が宣言どおり）と参照の承認を見て、作った文脈とは別の評価文脈が採点する（元の画・場面の意図、人物の同一性、動きの自然さ、手指の安全、画風、文字・ロゴの混入）。描く写しの sha256 が合格した版と同じであること。記録に assetLoop が無い・合格していない動画があれば、有料の処理の前に工程・枠・理由コードを返して人待ちで止まり、確定の前にも今も合格した版のままかを照合する。取り込んだ動画が無い回は対象が無いので合格",
+      "human": "採点は作った文脈とは別の評価者が、動画を通しで再生し、始まり・中ほど・終わりのフレームを見て行う。人物が写る動画（参照を持つ版）は、同一性と手指の安全を対話端末から人が確認する（機械は人の確認を記録できない）",
+      "evidenceAuditIds": [
+        "operatorVideoAssetLoopPassed"
+      ],
+      "inForceSince": "buzzassist-narrated-story-audit-v7"
     }
   ],
   "entrypoint": "node scripts/run-video-harness.mjs",
