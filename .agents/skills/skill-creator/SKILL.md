@@ -14,7 +14,10 @@ Operator Production の動画生成経路からは呼ばない。端末にある
 ## 所有境界
 
 - BuzzAssist共通正本は `.agents/skills/<name>/` に置く。
-- Claude Code / Codexのproject adapterは、正本を読むことだけを指示する薄い文書にする。
+- Claude Code のproject adapter（`.claude/skills`）は、正本を読むことだけを指示する薄い文書にする。
+  Codex はリポジトリの `.agents/skills` を直接読むので adapter は要らない。今ある `.codex/skills` は
+  同じ Skill を一覧に重複して出すだけで、`docs/skill-inventory-profiles-ja.md` の手順でまとめて外す予定。
+  外すまでは正本参照だけに保つ。
 - plugin cache、`~/.codex/skills/.system/`、ユーザーのglobal Skill、global plugin設定は変更しない。
 - 配布は正本 → build/stage → 署名Release → host update の一方向。cacheから正本へ逆輸入しない。
 - Channel Packの秘密、未公開台本、運営者固有の承認記録を共通Skillへ入れない。
@@ -26,8 +29,10 @@ Operator Production の動画生成経路からは呼ばない。端末にある
 3. Skillの目的、発火条件、対象外、必要な証拠を決める。一般的な能力説明は省き、BuzzAssist固有の判断だけを書く。
 4. `.agents/skills` の正本を日本語で変更する。条件別の詳細だけを `references/` へ分ける。
 5. `evals/evals.json` に現実的な正例と近接した負例を置き、観測可能な不変条件をテストする。
-6. Claude/Codex adapterは正本への相対参照だけに保ち、手順を複製しない。
+6. Claude Code の adapter（と、外すまでの `.codex/skills`）は正本への相対参照だけに保ち、手順を複製しない。
 7. inventory manifestのsemver、言語、owner、由来、対応host、内容SHAを更新する。
+   `plugins[].version` はリリースの版上げで `package.json` と各 plugin manifest と同じ値にそろえる
+   （inventory の検査が照合する）。
 8. focused testとSkill validatorを実行し、`skill inventory` のcollisionとdivergent hashを確認する。
 9. 変更案と評価結果を人へ渡す。人間承認前にproduction-allowedへ昇格せず、正本反映済みとも数えない。
 
