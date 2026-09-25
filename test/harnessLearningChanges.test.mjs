@@ -27,6 +27,7 @@ import {
   enqueueLearningChange,
   listLearningChanges,
   rejectLearningChange,
+  rollbackLearningChange,
   showLearningChange,
 } from "../lib/harnessLearningChanges.mjs";
 import { childAgentEnvironment } from "../lib/harnessLearningGuard.mjs";
@@ -221,7 +222,7 @@ test("却下は記録を消さずにキューから外し、却下した変更�
   assert.equal(foldLearningChanges(readJsonl(fx.ledger("changes")), []).get(again.change.changeId).status, "pending");
 });
 
-test("Channel Pack 宛の変更は、キューも記録も Channel Pack 側の台帳に置き、共有台帳へ混ぜない", (t) => {
+test("Channel Pack 宛の変更は、キューも記録も Channel Pack 側の台帳に置き、共有台帳へ混ぜない。当てて戻すのは人だけ", (t) => {
   const fx = fixture(t);
   const packLedgerDir = path.join(fx.repo, "channel-packs", "sample-pack", "docs", "learning");
   const entry = fx.addProposal(proposal({ target: PACK_TARGET, text: "合成の台帳に規則を1行足す" }), packLedgerDir);
@@ -230,9 +231,14 @@ test("Channel Pack 宛の変更は、キューも記録も Channel Pack 側の�
   const proposed = `${base}\n<!-- buzzassist-learning:${entry.id} -->\n- R2 ${RULE}\n`;
   const { change, queuePath } = enqueueLearningChange({ ...fx.options, proposalIds: [entry.id], proposedText: proposed, note: RULE });
   assert.equal(queuePath, path.join(packLedgerDir, "changes.jsonl"));
+  // Channel Pack の台帳（review-only）はリリースを通らず、人の決定の記録そのもの。エージェントは当てない。
+  assert.throws(() => approveLearningChange({ ...fx.options, changeId: change.changeId }), (error) => error.code === "human-verification-required");
+  assert.equal(fs.readFileSync(ledgerFile, "utf8"), base, "エージェントが台帳へ当てた");
   approveLearningChange({ ...fx.options, ...HUMAN, changeId: change.changeId });
   assert.equal(fs.readFileSync(ledgerFile, "utf8"), proposed);
   assert.equal(readJsonl(path.join(packLedgerDir, "applied.jsonl"))[0].changeId, change.changeId);
+  assert.throws(() => rollbackLearningChange({ ...fx.options, changeId: change.changeId, reason: "合成の理由で戻す" }), (error) => error.code === "human-verification-required", "エージェントが台帳を戻した");
+  assert.equal(fs.readFileSync(ledgerFile, "utf8"), proposed);
   assert.equal(fs.existsSync(fx.ledger("changes")), false, "チャンネルの差分を共有台帳の置き場へ書いた");
   assert.equal(fs.existsSync(fx.ledger("applied")), false);
 });

@@ -1904,7 +1904,8 @@ function printHelp() {
             sha256 が base と一致するときだけ書き、違えば base-changed で拒否する（読んでから書く）。
             当てたら applied 台帳へ「適用した変更」（対象・変更前後の sha256・当てた者・時刻・元の提案 ID・
             差分）を1行残す。正本スキルを人が確かめるのは、運営者へ配る版を出すリリースのときの1回
-            （npm run skills:check:release と承認者の端末の skill-inventory --approve）
+            （npm run skills:check:release と承認者の端末の skill-inventory --approve）。
+            Channel Pack の台帳（review-only）はリリースを通らないので、今までどおり人だけが当てて戻す
     --change <変更ID>  [--reviewer <名前> --human-verified]
     [--require-evals]  [--evals-dir <dir>]
             正本スキル（.agents/skills/<id>/SKILL.md）なら、skill-evals の記録で「変更後の版の
