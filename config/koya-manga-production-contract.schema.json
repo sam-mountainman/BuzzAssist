@@ -307,6 +307,24 @@
         "operatorOverrideRequiresReason": { "const": true }
       }
     },
+    "assetQualityGate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version", "inForceSince", "harnessId", "workDir", "approvedReferencesPath", "requirePassBeforeUse",
+        "requireReviewedVersionSha256", "stopWithoutPaidRegeneration"
+      ],
+      "properties": {
+        "version": { "const": "koya-asset-quality-gate-v1" },
+        "inForceSince": { "const": "koya-manga-production-v54" },
+        "harnessId": { "const": "koya-manga-video" },
+        "workDir": { "const": "canvas" },
+        "approvedReferencesPath": { "const": "canvas/quality/approved-references.json" },
+        "requirePassBeforeUse": { "const": ["character", "location", "scene-image", "thumbnail", "voice-take"] },
+        "requireReviewedVersionSha256": { "const": true },
+        "stopWithoutPaidRegeneration": { "const": true }
+      }
+    },
     "editorial": {
       "type": "object",
       "additionalProperties": false,

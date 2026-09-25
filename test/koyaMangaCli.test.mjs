@@ -30,7 +30,7 @@ test("official Koya CLI exposes a validated read-only contract command", () => {
   });
   assert.equal(result.status, 0, result.stderr);
   const parsed = JSON.parse(result.stdout);
-  assert.equal(parsed.version, "koya-manga-production-v53");
+  assert.equal(parsed.version, "koya-manga-production-v54");
   assert.equal(parsed.validation.pass, true);
 });
 
