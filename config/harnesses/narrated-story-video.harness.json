@@ -1,6 +1,6 @@
 {
   "id": "narrated-story-video",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "displayName": "ナレーション物語動画（実写素材＋カメラワーク）",
   "note": "クライアント名・チャンネル名はここに書かない。ここは『何が作れるか』の宣言であって、誰のためのものかの記録ではない。",
   "produces": {
@@ -27,13 +27,18 @@
     },
     {
       "id": "presenter-video",
-      "what": "感想パートの人物素材。Channel Packのbookends.review.presenterで必須と宣言した場合、Packに無ければ有料生成の前に止める（代用の絵で埋めない）",
+      "what": "感想パートの人物素材。Channel Pack の bookends.review.presenter で、チャンネル共通の素材（video）か、回ごとに運営者が後から渡す映像（episodeVideo: true。Job の運営者の動画の取り込みの枠 review-presenter）を宣言する。必須と宣言して無ければ有料生成の前に止める（代用の絵で埋めない）。TV の配置で任意の映像が無ければ人物の枠は空のまま",
       "blocking": false
     },
     {
       "id": "asset-quality-loop-reviews",
       "what": "本編の画・その参照の人物の設定画・採用する声のテイクの、作った文脈とは別の評価文脈の採点と、要る人の確認（node scripts/asset-quality-loop.mjs）。無ければ描く前に人待ちで止まる（有料の再生成はしない）",
       "blocking": true
+    },
+    {
+      "id": "episode-opening-video",
+      "what": "回ごとの OP 映像（運営者が外で作った短い動画）。Channel Pack の bookends.opening.kind が episode-video のとき、運営者の動画の取り込みの記録（buzzassist-operator-video-manifest-v1、枠 episode-opening、経路・プロンプトの sha256・生成した時刻つき）を Job の options.operatorVideoManifestPath で渡す。無ければ有料生成の前に止める",
+      "blocking": false
     }
   ],
   "guarantees": [
@@ -156,6 +161,38 @@
         "sceneImageProvenance"
       ],
       "inForceSince": "buzzassist-narrated-story-audit-v5"
+    },
+    {
+      "id": "burned-subtitles-legible",
+      "what": "Channel Pack が焼き込み字幕（subtitles.burnIn）を宣言したら、全部の字幕の頁を完成 MP4 のフレームで測る: 頁の始まりのフレームで、Pack の書体で描いた頁の字の芯の位置に字の色が出ている、字と縁（または帯）の輝度の差が読める幅である、字の範囲が左右の余白と上下の端の内側にある、1つ前のフレーム・終わりの次のフレームには出ていない（字面の近い頁が続くときは違う画素で切り替わりを見る）。字幕の字は台本の表記で、声の読みではない。書体に無い字・1行に入らない語は有料生成の前に止める。宣言が無ければ焼き込みを描いていないことを確かめる",
+      "evidenceAuditIds": [
+        "burnedSubtitlesMeasured"
+      ],
+      "inForceSince": "buzzassist-narrated-story-audit-v6"
+    },
+    {
+      "id": "camera-motion-declared",
+      "what": "場面の画のゆっくりした寄り引き（Channel Pack の camera の型: slow-push-in / slow-pull-out / pan-left / pan-right / static）を、完成 MP4 のフレームから推定した拡大と中身の移動で計画と比べる: ショットを6つに分けた区間ごと・区間をつないだ始まり→終わり・同じ画の中の文の境目の前後のフレーム（話者ごとに分けた場面で動きを始め直さない・向きを交互にしない）。実測の速さは Pack の型の速さを越えない",
+      "evidenceAuditIds": [
+        "cameraMotionMeasured"
+      ],
+      "inForceSince": "buzzassist-narrated-story-audit-v6"
+    },
+    {
+      "id": "review-layout",
+      "what": "Channel Pack が感想パートの配置（bookends.review.layout）を宣言したら、区間ごとに始まり・中ほど・終わりのフレームで、背景と TV 枠・人物の枠の線が宣言の色、TV の中が本編の場面の画、人物の枠の中がその時刻の人物の映像（無ければ空の枠のまま。代わりの人物を描かない）、plain の区間の全面の人物の映像を測る。宣言が無ければ配置の区間を作っていないことを確かめる",
+      "evidenceAuditIds": [
+        "reviewLayoutMeasured"
+      ],
+      "inForceSince": "buzzassist-narrated-story-audit-v6"
+    },
+    {
+      "id": "episode-opening-provenance",
+      "what": "Channel Pack が回ごとの OP 映像（bookends.opening.kind: episode-video）を宣言したら、運営者の動画の取り込みの記録があり写しの sha256 が元の動画と同じ、生成した経路ならプロンプトの sha256 がある、尺が Pack の範囲の中、完成 MP4 の OP の全フレームが取り込んだ動画を同じ合わせ方で読んだ絵と同じであることを測る。会話の URL などの本文は私有の Job フォルダにだけ残す。宣言が無ければ回ごとの OP 映像を取り込んでいないこと（OP が2つにならない）を確かめる",
+      "evidenceAuditIds": [
+        "episodeOpeningProvenance"
+      ],
+      "inForceSince": "buzzassist-narrated-story-audit-v6"
     }
   ],
   "entrypoint": "node scripts/run-video-harness.mjs",
