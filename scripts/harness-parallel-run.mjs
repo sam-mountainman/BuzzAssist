@@ -330,10 +330,29 @@ function abandonedLockOwner(dir) {
  * 2 人が同時に片付けると、片方が先に作り直したロックの中身まで消し、自分は ENOTEMPTY で落ちていた。
  * rename は1人しか成功しないので、よけられた人だけが片付ける。
  */
+// Windows では、別のプロセスがロックの中のファイル（token・pid）を読んでいる瞬間にディレクトリの
+// rename が EPERM / EACCES / EBUSY になる（CI の Windows で、取り合いの試験の解放が落ちた）。
+// 読み手はすぐ閉じるので、短く待ってやり直す。ほかの OS では1回だけ。
+const WINDOWS_TRANSIENT_RENAME_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
+const WINDOWS_RENAME_RETRIES = 50;
+const WINDOWS_RENAME_RETRY_MS = 10;
+
+function renameLockDir(from, to) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      fs.renameSync(from, to);
+      return;
+    } catch (error) {
+      if (process.platform !== "win32" || !WINDOWS_TRANSIENT_RENAME_CODES.has(error.code) || attempt >= WINDOWS_RENAME_RETRIES) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, WINDOWS_RENAME_RETRY_MS);
+    }
+  }
+}
+
 function moveAsideLockDir(dir, reason) {
   const aside = `${dir}.${reason}-${process.pid}-${randomUUID()}`;
   try {
-    fs.renameSync(dir, aside);
+    renameLockDir(dir, aside);
   } catch (error) {
     if (error.code === "ENOENT") return null;
     throw error;
@@ -350,7 +369,7 @@ function takeOverAbandonedLock(dir) {
   // それをよけてしまっている。持ち主の記録が判定のときと違えば元へ戻して、奪わない。
   const moved = readLockOwner(aside) || { pid: 0, token: "" };
   if (moved.pid !== judged.pid || moved.token !== judged.token) {
-    try { fs.renameSync(aside, dir); } catch { /* 戻せなければ、相手は解放時に token を見失うだけ */ }
+    try { renameLockDir(aside, dir); } catch { /* 戻せなければ、相手は解放時に token を見失うだけ */ }
     return false;
   }
   fs.rmSync(aside, { recursive: true, force: true });
