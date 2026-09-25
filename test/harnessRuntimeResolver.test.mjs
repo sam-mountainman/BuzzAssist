@@ -72,6 +72,52 @@ test("Python resolver rejects a runnable interpreter when required modules are a
   assert.deepEqual(calls[1].args.slice(0, 4), ["-3", "-X", "utf8", "-c"]);
 });
 
+test("Python resolver retries a probe that only ran out of time, and names the timeout when it runs out again", async () => {
+  // 時間切れは壊れた interpreter の証拠ではない（壊れた import はプローブの中で拾われ、不足として返る）。
+  // 端末が飽和していると import が遅くなるだけなので、長い上限で1回だけ測り直す。
+  const ok = `BUZZASSIST_PYTHON_RUNTIME=${JSON.stringify({ version: [3, 12, 2], modules: { cv2: true } })}\n`;
+  const killed = () => Object.assign(new Error("Command failed: python3 -X utf8 -c ..."), { killed: true, signal: "SIGTERM", code: null });
+  const timeouts = [];
+  const slowOnce = await resolvePythonRuntime({
+    candidates: [{ command: "python3", args: [] }],
+    requiredModules: ["cv2"],
+    timeoutMs: 50,
+    saturatedTimeoutMs: 500,
+    runCommand: async (_command, _args, options) => {
+      timeouts.push(options.timeout);
+      if (timeouts.length === 1) throw killed();
+      return { stdout: ok, stderr: "" };
+    },
+  });
+  assert.equal(slowOnce.ok, true, slowOnce.detail);
+  assert.deepEqual(timeouts, [50, 500]);
+
+  const alwaysSlow = await resolvePythonRuntime({
+    candidates: [{ command: "python3", args: [] }],
+    requiredModules: ["cv2"],
+    timeoutMs: 50,
+    saturatedTimeoutMs: 500,
+    runCommand: async () => { throw killed(); },
+  });
+  assert.equal(alwaysSlow.ok, false);
+  assert.match(alwaysSlow.detail, /timed out after 50ms and again after 500ms/u);
+
+  // 時間切れでない失敗（終了コードで落ちた）は測り直さない。
+  const exitCalls = [];
+  const crashed = await resolvePythonRuntime({
+    candidates: [{ command: "python3", args: [] }],
+    requiredModules: ["cv2"],
+    timeoutMs: 50,
+    saturatedTimeoutMs: 500,
+    runCommand: async (_command, _args, options) => {
+      exitCalls.push(options.timeout);
+      throw Object.assign(new Error("Command failed: exit 1"), { killed: false, signal: null, code: 1 });
+    },
+  });
+  assert.equal(crashed.ok, false);
+  assert.deepEqual(exitCalls, [50]);
+});
+
 test("required Python resolution fails closed and preserves preverified launcher args", async () => {
   await assert.rejects(
     () => requirePythonRuntime({
