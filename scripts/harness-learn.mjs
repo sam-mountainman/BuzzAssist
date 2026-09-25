@@ -1746,6 +1746,10 @@ function printHelp() {
             base-changed で拒否する（読んでから書く）。当てたら applied 台帳へ「適用した変更」
             （対象・変更前後の sha256・承認者・時刻・元の提案 ID・差分）を1行残す
     --change <変更ID>  --reviewer <名前>  --human-verified
+    [--require-evals]  [--evals-dir <dir>]
+            正本スキル（.agents/skills/<id>/SKILL.md）なら、skill-evals の記録で「変更後の版の
+            contentSha256 に両ホストの結果があり、変更前の版より悪化していない」かを見る。既定は警告、
+            --require-evals のときだけ止める。eval は流さない（モデルを呼ばない）
 
   reject    キューの変更を却下する（記録は消さない。正本は書き換えない）
     --change <変更ID>  --reviewer <名前>  --reason "何を見て外したか"  [--human-verified | --agent-attested]
@@ -2209,7 +2213,10 @@ async function runLearningChangeCli(args, now) {
         ...common,
         ...attestationArgs(args),
         changeId: args.change,
+        requireEvals: args.requireEvals === true,
+        evalsDir: typeof args.evalsDir === "string" ? args.evalsDir : "",
       });
+      process.stdout.write(changes.formatEvalGate(result.gate, { required: args.requireEvals === true }));
       process.stdout.write(
         `${result.record.changeId} を ${result.targetRel} へ当てました（${shortSha(result.record.beforeSha256)} → ${shortSha(result.record.afterSha256)}、`
         + `reviewer: ${result.record.reviewer}）。提案 ${result.record.proposalIds.join(", ")} は反映済みとして数えます。\n`
