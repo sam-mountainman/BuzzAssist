@@ -436,13 +436,25 @@ async function probeNarratedPaidMediaRuntime({ job, runtime = {}, env = process.
     };
   }
 
+  // 運営者の画を取り込む Pack（image.source: operator-file。検証済みの runtime metadata の imageSource）は、
+  // 本編の画を有料の Media Job で作らない。画の adapter は「使わない」扱いにして probe しない
+  // （probe すると、使わない adapter が落ちているだけで doctor が止まる）。声と BGM は従来どおり probe する。
+  const imageNotUsed = persisted?.imageSource === "operator-file"
+    ? {
+      ok: true,
+      status: "not-used",
+      host: "operator-file",
+      ...specs.image,
+      detail: "Channel Pack の image.source が operator-file（運営者の画を取り込む）なので、画の有料 Media Job を使わず adapter を probe しない",
+    }
+    : null;
   const injectedProbe = typeof runtime.mediaAdapterProbe === "function" ? runtime.mediaAdapterProbe : null;
   const apiBase = String(runtime.mediaJobApiBase ?? env.BUZZASSIST_MEDIA_JOB_API_BASE ?? "").trim();
   if (!injectedProbe && !apiBase) {
     const detail = "BUZZASSIST_MEDIA_JOB_API_BASEが無く、署名Channel Packのadapterを非課金probeできない";
     return {
       tts: { ok: false, status: "route-missing", ...specs.tts, detail },
-      image: { ok: false, status: "route-missing", host: "buzzassist-media-job", ...specs.image, detail },
+      image: imageNotUsed || { ok: false, status: "route-missing", host: "buzzassist-media-job", ...specs.image, detail },
       music: { ok: false, status: "route-missing", ...specs.music, detail },
     };
   }
@@ -476,13 +488,13 @@ async function probeNarratedPaidMediaRuntime({ job, runtime = {}, env = process.
     }
   };
   const [image, tts, music] = await Promise.all([
-    safeProbe(specs.image),
+    imageNotUsed ? Promise.resolve(null) : safeProbe(specs.image),
     safeProbe(specs.tts),
     safeProbe(specs.music),
   ]);
   return {
     tts,
-    image: { ...image, host: "buzzassist-media-job" },
+    image: imageNotUsed || { ...image, host: "buzzassist-media-job" },
     music,
   };
 }
