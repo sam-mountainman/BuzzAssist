@@ -54,8 +54,14 @@ node scripts/harness-learn.mjs capture --kind <correction|constraint|preference|
 発言を逐語で写さず、何を直すかの形に書き直す。訂正に当たらなければ何もしなくてよい。
 
 入口は `node scripts/harness-learn.mjs`。捕捉は何も書き換えず、統合は既定で
-dry-run、正本への反映には reviewer 名が要る。自動で正本を書き換える作りに
-していないのは、それが「自分で自分に合格を出す」構造になるため。
+dry-run。エージェントは overlay（learned-auto.md）だけでなく正本スキル（SKILL.md・
+references）も直してよい。提案を正本へ反映するときは `pending` → `approve` を通し、
+変更前後の sha256・元の提案・時刻・誰が当てたかを残して、1件ずつ `rollback` できる形にする。
+人が確かめるのは、運営者へ配る版（GitHub Release）を出すときの1回だけ
+（`npm run skills:check:release` と、承認者本人の端末の `skill-inventory --approve`。
+機械はこの承認を記録できない）。関門をそこに残すのは、人が見ないまま他人のパソコンへ
+届き、有料 API を動かす指示になるのを防ぐため。開発用チェックアウトでの制作は承認前の
+正本でも止めず、その事実を Job と RunReceipt に残す。
 
 # 完成と言う前に Job の状態を自分で確かめる
 

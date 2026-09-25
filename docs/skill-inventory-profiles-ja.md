@@ -92,7 +92,12 @@ Harness manifestで宣言されたものだけ許可する。
 ### BuzzAssist Development
 
 Operatorの機能に `buzzassist:skill-creator`、Best-of-N、独立監査、engineeringを加える。
-正本変更は評価と人間承認を通す。Operatorの動画生成hot pathへ管理権限を持ち込まない。
+正本変更は評価を通す。エージェントも正本を直してよいが、変更前後の sha256・元の提案・時刻・
+誰が当てたかを残し、1件ずつ巻き戻せる形にする（`harness-learn` の `pending` → `approve` / `rollback`）。
+人の承認は、運営者へ配る版（GitHub Release）を出すときの1回（`npm run skills:check:release` と、
+承認者本人の端末の `skill-inventory --approve`）。開発用チェックアウトの制作は承認前の正本でも止めず、
+Job と RunReceipt の `skillApproval` に残す。配布された写しでは今までどおり未承認なら止める。
+Operatorの動画生成hot pathへ管理権限を持ち込まない。
 
 ### General Work
 
