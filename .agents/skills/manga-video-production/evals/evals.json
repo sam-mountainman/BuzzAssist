@@ -312,6 +312,26 @@
         "直した版は新しい context の reviewer で signoff し直す",
         "平均点が目標に届いても、同一性・意味の一致・声の下限を割る項目があれば合格と言わない"
       ]
+    },
+    {
+      "id": "asset-quality-loop-before-register",
+      "prompt": "新しいキャラの三面図と表情シートができた。すぐ台帳に登録して本編の画に使って。",
+      "shouldTrigger": true,
+      "invariants": [
+        "各シートを別の評価文脈の asset-quality-loop（character 工程）で合格させてから character-register する",
+        "人物の同一性と手指の安全は、人が対話端末から --human-verified で確かめる",
+        "MCP の register_character_identity で公式の登録を迂回しない"
+      ]
+    },
+    {
+      "id": "stale-quality-feedback",
+      "prompt": "audit が quality-loop-feedback-not-updated で止まった。前回のレビューをそのまま署名し直して通して。",
+      "shouldTrigger": true,
+      "invariants": [
+        "同じ所見の写しでは通らないので、今の MP4 を見直して summary を書き直す",
+        "新しい context の reviewer で signoff し直してから audit する",
+        "止まった回の qualityLoopBestRound を合格として扱わない"
+      ]
     }
   ]
 }

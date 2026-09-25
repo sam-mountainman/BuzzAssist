@@ -51,6 +51,8 @@ node scripts/run-video-harness.mjs resume \
 上位入口は、署名済みChannel Pack、制作契約の実ファイルSHA、durable Job、doctor、
 再開/取消、共通RunReceipt、実MP4全decode、BuzzAssist Canvas投影を一つのidentityへ
 拘束する。ホストがMCPを使える場合の`run_video_harness`も同じServiceを呼ぶ同等入口である。
+`run_video_harness` / `resume_video_harness_job` を呼ぶときは、自分のモデル ID が分かれば `hostModel`
+（CLI は `--host-model`）を渡す。分からなければ付けない（推測で埋めない。Job の識別子には入らない）。
 
 `node scripts/koya-manga-video.mjs`は、上位Jobが検証済みworkspace内で呼ぶ**唯一の内部Koya runner**である。
 `plan`、`full`、`speech`、`render`、個別repair/audit actionを直接実行するのは、上位Jobに
@@ -126,6 +128,43 @@ node scripts/koya-blind-review.mjs record --set <spec.json> --winner A --reviewe
 
 採用の記録は公式CLI（`character-approve`、`character-style-select`）に残す。
 アリーナの選択は記録ではない。
+
+### 途中の成果物の品質ループ（契約 v54 から。最終監査 asset-quality-loops）
+
+人物の identity pack の各シート・場所の4ボード・本編の画（1枚の画と分割ページの各コマ）・サムネの
+専用画・採用する声のテイクは、`node scripts/asset-quality-loop.mjs` のループで合格（作った文脈と別の
+評価者の採点・要る人の確認・合格した版と同じバイト列）してからでないと、登録・採用・complete にならない。
+止まった画や声は有料で作り直さない。直した版を置いてループを回し直し、同じ Job を resume する。
+
+- 作業フォルダは Job の workspace の `canvas/`（状態は `canvas/quality/assets/`）
+- 対象 id: 人物は `<castId>.<role>[.<storyStage>]`、場所は `<locationId>.<boardId>`、本編の画は
+  `<episodeId>.image.<発話id>`（分割ページのコマは `<episodeId>.panel.<発話id>.<コマ番号>`）、声は
+  `<episodeId>.<cutId>`、サムネの専用画は計画の `artworkQualitySubjectIds` か
+  `thumbnail.<拡張子を除いたファイル名>`、画像計画に無い画は
+  `<episodeId>.unplanned.<ファイル名>`。英数字と `._-` 以外を含む部品は置き換えて短い指紋が付く
+  （`lib/koyaAssetQualityGatePolicy.mjs` の `koyaAssetQualitySubjectId`）
+- 参照の照合には `koya-manga-video.mjs asset-quality-references` が書く承認一覧
+  （`canvas/quality/approved-references.json`）を `record --approved-references` に渡す。声の
+  `--measurement` は `canvas/manga-videos/<回>/.koya-dialogue-source/<cut>-voice-quality.json`
+- 最終監査 `asset-quality-loops` が、manifest で実際に使った画と採用テイクを、使ったファイルそのものの
+  SHA で照らし直す（完了済みの行の再利用・standard-cut の差し替え・登録後の参照画の差し替えはここで落ちる）
+- 回の画に出る人物・場所は、登録時の合格の記録と今の参照画の SHA が一致すること。記録の無い旧登録は
+  `final-audit.json` の `assetQualityOutOfForce` に出る（落ちない）
+- サムネを回に含めるときは、final の plan を `canvas/manga-videos/<回>/thumbnail-plan.json` に置くか、
+  manifest の `outputs.thumbnail.planPath` で指す
+- 画の台帳・音声の報告に `awaiting-human-review` が残っていれば不合格
+- 背景の評価は、配置表（入口・帳場・看板などの位置）を文章で固定したものと比べる
+- Koya の Channel Pack があるプロジェクトでは、MCP の `approve_character_candidate` /
+  `register_character_identity` と `scripts/generate-manga-script-images.mjs` は止まり、
+  `character-approve` / `character-register` / `images` を案内する（画像スクリプトだけは過去成果物の
+  再現と明言した `--benchmark-migration` で通る）
+
+### 吹き出しの描画
+
+吹き出しの SVG→PNG は `lib/svgRasterizer.mjs` の `rasterizeSvg` だけを使う。ブラウザーは
+`BUZZASSIST_CHROME_PATH`（明示。指す先が無ければ他へ逃げずに止まる）→ OS の既定の置き場所 → PATH の
+順で探す。doctor の `svg-rasterizer`（本番と同じ関数で縦書きを描いて読み返す）が通らない端末では
+有料生成を始めない。
 
 ### 声の人選（2026-09-18 追加。台帳 readiness-9）
 
@@ -233,7 +272,7 @@ node scripts/koya-manga-video.mjs wardrobe-readiness --episode-id <id> --script-
    `character-approve`のidentity pack生成は人物単位checkpointへ候補SHA、生成context、prompt/model/size、参照SHA、各出力SHAを保存する。停止後は同じ入力と同じcontextで再実行し、digestが一致する生成済み画像だけを再利用する。出所不明の既存画像、入力変更、SHA変異を再開扱いにしない。生成完了後も別contextの原寸セル別reviewが通るまで登録しない。
    固定キャラ準備中は`character-bootstrap-status`でshow bible、既存workflow、選択ラベル、候補review、styling順序、identity pack、台帳を横断し、各人物の次の合法な工程を確認する。新作episodeの前には`cast-readiness`も通す。show bible固定人物が台帳未登録、identity-face/turnaround/expression/指定されたeye-open/outfitのどれか欠落、show bibleの`eyeOpenVariants`で宣言した開眼variantのどれかが台帳に`storyStage`付きで1件ずつ無い（キー無しの旧eye-openシートはvariantの代わりにならない）、identity review SHA欠落、またはon-holdなら、その回だけの代替候補を作らず停止する。show bibleで`requiredEveryEpisode: true`の人物は無言出演でもcharacter bibleへ毎話宣言し、`episodeRoleRequired`が付く人物の登場回は`episodeRole=ally|antagonist`を明記する。
    採用候補の髪型・髪色・衣装・体格・細部を選び直す場合は、三面図へ直行せず`character-style-generate`→別contextによる各案の原寸QA→`character-style-compose`→人間選択→`character-style-select`を挟む。画像モデルへ横並び比較表を直接生成させない。各optionは採用顔1枚だけを身元参照にした独立の完全シートとして生成し、合格optionだけを決定論的に比較シートへ合成する。styling review v2では、合格optionの全ペアについて指定軸の可視差、重複takeでないこと、同一人物性、変更対象外の一致、原寸確認を必須にし、同じ設計のtake違いを候補数へ数えない。既存作品人物への非類似が要件なら、比較参照を`canvas/`へ保存し`--styling-comparison-reference-paths`でSHA拘束する。比較参照は生成モデルへ渡さず、各候補の独立QAだけで輪郭・髪・目元・全体印象を原寸比較する。比較シート自体は台帳へ登録せず、選ばれた個別assetだけを三面図・表情シートの唯一の人物参照にする。`--styling-round-id`を安定IDとして指定し、セッション制限や停止後はround/spec/generator contextを変えず同じコマンドを再実行する。各optionは生成入力SHA・出力path・画像SHAを即時checkpointし、完了済みbytesを再生成しない。公式工程外ですでに生成済みのsheetは捨てたり自動承認したりせず、source manifestと人間作成option mapが出力・入力元・prompt・model・時刻をSHA拘束でき、現specの最低比較数を満たす場合だけ`character-style-import --generator-host legacy-migration`で未承認roundへ取り込む。取り込み後も別contextの原寸QAは省略しない。複数属性を決める場合は1roundへ混ぜず、show bibleのspec path順に前roundの人間選択assetを次roundの唯一の基準にする（`stylingSpecPaths`が複数ある人物は、その配列順が正本）。各roundはspec path/SHA/characterIdを保存し、全宣言roundが選択済みになるまで三面図へ進まない。`kind: "outfit"`のstyling specを持つ人物は、選択後もそのspecが列挙する全衣装のシートを作る。
-   location bibleが列挙する背景は`location-plan`→`location-generate --location-stage anchor`→`location-anchor-review-draft`→別contextの原寸review→`location-anchor-audit`→そのreview pathを渡した`location-generate --location-stage continuity`で4個別jobを作る。`--location-stage all`は禁止する。continuityはgeneration manifestへSHA拘束された承認済みanchor候補1枚だけを参照し、各boardの生成context、prompt SHA、anchor SHA、画像SHAを保存する。再利用だけの呼出しでmanifestを書き換えず、新規生成は各boardごとにcheckpointする。全生成contextと異なるreviewerによる原寸・人物0・文字/実在ロゴ0・建築連続性review後にだけ`location-register`する。サムネは`thumbnail-audit`のpreflightが通ってから専用画像を生成し、本編frameとのSHA比較を含むfinal auditを通す。pendingの帯色・書体を推測しない。
+   location bibleが列挙する背景は`location-plan`→`location-generate --location-stage anchor`→`location-anchor-review-draft`→別contextの原寸review→`location-anchor-audit`→そのreview pathを渡した`location-generate --location-stage continuity`で4個別jobを作る。`--location-stage all`は禁止する。continuityはgeneration manifestへSHA拘束された承認済みanchor候補1枚だけを参照し、各boardの生成context、prompt SHA、anchor SHA、画像SHAを保存する。再利用だけの呼出しでmanifestを書き換えず、新規生成は各boardごとにcheckpointする。全生成contextと異なるreviewerによる原寸・人物0・文字/実在ロゴ0・建築連続性review後にだけ`location-register`する。サムネは`thumbnail-audit`のpreflightが通ってから専用画像を生成し、本編frameとのSHA比較を含むfinal auditを通す。pendingの帯色・書体を推測しない。サムネの計画と検査の本体はジャンル共通の`lib/thumbnailPlan.mjs`で、`node scripts/thumbnail-plan.mjs draft|audit --harness koya-manga-video`は`thumbnail-plan-draft` / `thumbnail-audit`と同じ出力になる。計画に`jobBinding`（jobId・episodeId・完成動画のvideoSha256）を書けば、finalでどのJobの回かを照合する（Jobがcompletedで動画のSHAが一致するときだけ通る）。`lettering`（枠ごとの書体・抑揚・字間・色・担体）・`characterReferences`（承認済み設定画のSHA-256）・`idea`・`compositePath`・`previousThumbnailPaths`を書けば共通の検査が効き、thumbnail contractに`commonChecks`節を足せば必須にできる。
 5. 発話ごとの意味から構図を設計する。カット見出しだけを全発話へ誤適用しない。人物、背景、証拠、吹き出し余白を同時に設計する。
 6. 独立画像jobを適応並列で生成し、技術・意味QAを行う。合格済みhashを再利用し、不合格だけを修正する。利用上限ではcheckpointを書いて停止する。
 7. 承認済み日本語ネイティブ音声を人物ごとに固定する。声も最低2候補をA〜Eだけで全件実聴し、provider・voice ID・声名・sourceを伏せたまま`winnerLabel`と理由を先に保存してからprivate mappingを開く。新規作品の四角いナレーション枠は視覚様式を保ち、音声は主人公の承認済みVoice ID/Profile/設定/モデルと完全一致させる。専用ナレーターを作らない。
@@ -275,6 +314,12 @@ node scripts/koya-manga-video.mjs video-substitute --episode-id <episode-id> --c
 - 表示中は発話者だけでなく画面内の全人物の顔・頭と吹き出しの重なりを、カメラ移動中を含め0pxにする。配置座標と最終監査の顔検出を共有しない。最終監査の吹き出し領域は配置計画の矩形ではなく、実際に合成したrasterized overlay PNGのalpha非透明bboxから測る。alpha bboxの正規化には元SVGやoverlay specの寸法ではなく、そのPNGを原寸でdecodeした実pixel幅・高さを使う。実ラスターがあるのに計画座標へ戻して判定しない。独立cascadeの候補は検出confidenceを保存し、校正済み閾値未満の低信頼候補だけを除外する。合格閾値を超えて吹き出しに覆われたcascade候補は、直前直後のbubble-clear frameへ分割ページ全体のカメラ変換を反映して同一物を再探索する。そこにも顔がなければ腕時計・文字・輪郭等のoverlay起因候補として除外し、再投影後にも存在する実顔はconfidenceの高低にかかわらず消さない。
 - 思考場面の暗部と顔中心の明部は、カメラ前の元ページへ焼き込む。実MP4監査で顔を画面へ投影するときは、manifestの生focus座標を直接使わず、レンダーと同じcamera mode正規化・終端zoom基準のsafe focus clamp・keyframe再構築を適用する。生座標と実cropが違う状態で明部不合格を出さない。
 - 人体、手、指、小道具、遠近、服装段階、人物同一性、背景密度、疑似文字を目視する。機械合格で代用しない。
+- 公開面に出る画（サムネ・人物の設定画）は全数を人が拡大して見る。猥褻・侮辱と読める手のジェスチャーと、
+  文字の無い実在の意匠（ロゴ・キャラクターに似た形）は、どの機械ゲートも捕まえない。
+- 背景に小さく描き足した人物も、設定画を毎回参照に渡し、顔が読める大きさで描く。同一性は属性の一致では
+  なく、顔・髪・体型を参照と並べて判定する。
+- サムネの文字は、在り処だけでなく書体・抑揚・字間・色・担体まで指定する。指定の薄い文字は既定の
+  ゴシックの仮看板で埋まり、それは不合格。
 - 一つの画像に複数発話を自然に保持できる場合、発話ごとに画像を乱造しない。場面転換と因果が読める編集連続性を優先する。
 - 承認済み発話WAVを、画像・吹き出し・カメラ修正のついでに再生成しない。
 - cut単位ダイアログの分割点は、プロバイダ申告の`start_time_seconds`中点ではなく、文字単位アライメントで囲んだ区間の実測持続無音に置く。申告終端は語尾リリースを含まず実際より約200ms早いので、そこで切ると前話者の残響が次発話の先頭に残る。話者交代の境界で別人の声が混入していないことを`audio-speaker-continuity`で検証する。承認済みテイクからの再分割は再生成ではないので、この修復に有料呼び出しは不要。
@@ -318,8 +363,8 @@ MCP を使える host では、同じ工程を `run_koya_manga_pipeline`（`acti
 鍵の作成は両ハーネス共通の `create_video_harness_reviewer_key` でもよいが、narrated 専用の
 `signoff_video_harness_job` へ Koya Job を渡すと拒否される。上位
 `run-video-harness.mjs start|resume --reviewer-trust-path JSON`（MCP `reviewerTrustPath`）は照合用で、
-一致した path は上位 Job から `koya-manga-video.mjs full` へも同じ値で渡される。信頼アンカー・失敗コード・
-復旧の正本は `../platform-craft/SKILL.md`。
+一致した path は上位 Job から `koya-manga-video.mjs full` へも同じ値で渡される。信頼アンカーの正本は
+`../platform-craft/SKILL.md`、失敗コードと復旧は `../platform-craft/references/reviewer-attestation-ja.md`。
 
 `--reviewer-key-path`が無い signoff は新仕様では必ず失敗する。`audit`は signoff 内の
 `reviewerAttestation`を信頼リストで再検証し、鍵が未登録・失効済み・別 subject・信頼リスト
@@ -327,3 +372,18 @@ MCP を使える host では、同じ工程を `run_koya_manga_pipeline`（`acti
 
 完了は、契約の完了status、全必須監査PASS、`knownRemainingIssues=[]`、実MP4の全デコード、MP4 hashに結び付き信頼済み reviewer 鍵で署名されたClaude/Codex署名がすべて揃ったときだけ宣言する。報告には絶対MP4パス、尺、解像度、fps、容量、主要監査、残課題0件を含める。
 `quality-harness-final`は空の品質ループ状態や事前ゲートだけでは合格しない。独立contextの全rubric採点を含む完了roundが最低1回必要である。自分自身を除く全必須監査の結果・実在証拠SHA-256・契約digest・実MP4 SHA-256・証拠Merkle rootを集約した`final-decision.json`が`passed`であることを確認する。失敗監査は永続incident ledgerへ記録し、再発時の指示/hard-gate昇格を次の新規台本へ引き継ぐ。
+
+- 前の回と同じ所見の署名では、監査は例外にせず `quality-loop-feedback-not-updated` の工程で人待ちに
+  止まる。今の MP4 を見直して summary を書き直し、signoff し直す
+- 品質事故の再発は、別の版（MP4 SHA か revisionDelta が違う）でだけ数える。同じ版の再監査は昇格させない
+- 品質ループの費用は、speech report の `mediaJobs`（RunReceipt に載る有料生成の記録と同じもの）から、
+  前の回までに数えていない take だけを回ごとに数える
+- 合格せずに止まったら、`final-decision.json` の `qualityLoopBestRound`（最高点の回と成果物 SHA）を
+  納品判断の材料にする。これは合格ではない
+
+## Canvas で途中を見る
+
+上位 Job を投影するたびに、制作の途中（工程の DAG、本編の画のカット順の格子、人物の候補と承認済みの
+設定画、カットごとの採用テイク、画の台帳が品質ループの合格まで止めた行の「人の確認待ち」）が Run の
+左側のパネルに出る（読み取り側は `lib/koyaMangaProgressSnapshot.mjs`）。承認前の人物は「人物 N」と
+候補 A〜E だけが出る。候補を Canvas の表示名で呼ばず、採用は `character-approve --candidate-label` で記録する。
