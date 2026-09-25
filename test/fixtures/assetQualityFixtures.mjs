@@ -62,7 +62,8 @@ export function reviewFor({ stage, context, assetSha, refs = [], contract, overr
     ...(spec.reviewRequirements.includes("viewedAtDecidedSize") ? { viewedAtDecidedSize: true } : {}),
     ...(refs.length > 0 ? { comparedReferenceSha256s: refs, identityComparison: IDENTITY_NOTES } : {}),
     rubricScores: scores(contract, overrides),
-    notes: "原寸で全体を見て、手元と顔を拡大して見た（合成の所見）",
+    // 所見は評価ごとに違う（前の回の所見の写しは品質ループが採点に使わない）。
+    notes: `原寸で全体を見て、手元と顔を拡大して見た（合成の所見・${context}）`,
     findings: [],
     ...extra,
   };

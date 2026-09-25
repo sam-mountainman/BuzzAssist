@@ -207,7 +207,8 @@ test("品質ループの record は不合格の回でだけ、verify は人の�
       evaluatorId: "evaluator", evaluatorContextId: context, assetSha256: assetSha,
       comparedReferenceSha256s: [refSha], identityComparison: { face: "輪郭を並べて見た", hair: "分け目を並べて見た", body: "頭身を並べて見た" },
       rubricScores: Object.fromEntries(CHARACTER.rubric.map((row) => [row.id, overrides[row.id] ?? (row.minimumScore >= 100 ? 100 : 95)])),
-      notes: NOTES,
+      // 所見は評価ごとに違う（前の回の所見の写しは品質ループが採点に使わない）。
+      notes: `${NOTES}（${context}）`,
     }));
     return `reviews/${name}.json`;
   };
