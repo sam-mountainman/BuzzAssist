@@ -772,7 +772,7 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "",
     detail: voiceQa
       ? `利用可能（${pythonLabel} / Python ${pythonRuntime.version || "version確認済み"}）`
       : `利用不可（${pythonLabel}${pythonRuntime.detail ? ` / ${pythonRuntime.detail}` : ""}）`,
-    fix: voiceQa ? "" : `音声品質ゲートが動かない。正規入口はこのゲートを既定で有効にしているので、有償生成の手前で止まる。利用するPythonに ${VOICE_QA_REQUIRED_MODULES.join(" / ")} を入れ、UTMOSキャッシュを用意する。別のinterpreterは VOICE_QA_PYTHON で指定できる（Windowsは py -3 / python.exe も自動探索）`,
+    fix: voiceQa ? "" : `音声品質ゲートが動かない。正規入口はこのゲートを既定で有効にしているので、有償生成の手前で止まる。利用するPythonに ${VOICE_QA_REQUIRED_MODULES.join(" / ")} を入れ、UTMOSキャッシュ（~/.cache/torch/hub）と、faster-whisper の kotoba-tech/kotoba-whisper-v2.0-faster と small（Hugging Face キャッシュ。監査中はダウンロードしない）を用意する。別のinterpreterは VOICE_QA_PYTHON で指定できる（Windowsは py -3 / python.exe も自動探索）`,
   });
 
   // --- 有償API（必須。無いと生成が1つも通らない） ---
