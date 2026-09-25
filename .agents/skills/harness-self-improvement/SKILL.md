@@ -310,15 +310,19 @@ node scripts/harness-learn.mjs rollback --change <変更ID> --reason "..."      
 正本への自動昇格ではない。Job の決着時と品質ループの捕捉は、子エージェントと
 `BUZZASSIST_LEARNING_AUTO_CAPTURE=0` では積まず、捕捉に失敗しても元の工程（Job・ループ）の結果は変えない。
 
-### 品質ループの不合格（途中の成果物・台本）
+### 品質ループの不合格（途中の成果物・台本・企画ブリーフ）
 
 - 途中の成果物の品質ループ（`scripts/asset-quality-loop.mjs`、本体 `lib/assetQualityLearning.mjs`）:
   合格しなかった回と人の確認の否を、工程・失敗指紋・評価項目 id・機械ゲート id だけで、そのハーネスの
   Channel Pack 宛の非公開台帳へ積む。件数は evidence 側に置き、対象の id（人物名になりうる）・
   所見・パスは入れない。同じ版・同じ指紋は二重に積まない
-- 台本の品質ループ（`scripts/script-quality-loop.mjs record`、本体 `lib/scriptQualityLearning.mjs`）:
-  合格しなかった回の、下限割れの評価項目 id・落ちた機械ゲート id・止まった理由のコードを、台本の
-  非公開台帳へ積む
+- 台本の品質ループ（`scripts/script-quality-loop.mjs record`、本体 `lib/scriptQualityLearning.mjs`）と企画ブリーフの
+  品質ループ（本体 `lib/strategyBriefLearning.mjs`）: 合格しなかった回の、下限割れの評価項目 id・落ちた機械ゲート id・
+  止まった理由のコードを非公開台帳へ積む
+- どのループも、台帳のチャンネルが分かればそのチャンネルの保存先へ積む（本体 `lib/learningChannelResolver.mjs`。
+  Job の `metadata.channel` を優先し、次にループの作業フォルダ、企画ブリーフの `channel.id` で決める）。手がかりが
+  別々のチャンネルを指す・台帳を読めない・保存先を決められないときは、推測で寄せずに積まない。どれにも当たらなければ
+  従来の Channel Pack の台帳へ積む。決め方と理由コードは `references/learning-store-ja.md`
 
 ### Job の決着時（RunReceipt から）
 
