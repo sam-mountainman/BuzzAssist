@@ -19,7 +19,7 @@ const sha = (value) => `sha256:${createHash("sha256").update(value).digest("hex"
 function stageRepository(t) {
   const copy = realpathSync(mkdtempSync(join(tmpdir(), "skill-release-gate-")));
   t.after(() => rmSync(copy, { recursive: true, force: true }));
-  for (const entry of [".agents", join(".claude", "skills"), join(".codex", "skills"), ".claude-plugin", ".codex-plugin", "skills", "package.json"]) {
+  for (const entry of [".agents", join(".claude", "skills"), ".claude-plugin", ".codex-plugin", "skills", "package.json"]) {
     if (existsSync(join(root, entry))) cpSync(join(root, entry), join(copy, entry), { recursive: true });
   }
   return copy;

@@ -27,11 +27,6 @@
           "host": "claude-code",
           "path": ".claude/skills/platform-craft/SKILL.md",
           "name": "platform-craft"
-        },
-        {
-          "host": "codex",
-          "path": ".codex/skills/platform-craft/SKILL.md",
-          "name": "platform-craft"
         }
       ],
       "classification": {
@@ -65,11 +60,6 @@
         {
           "host": "claude-code",
           "path": ".claude/skills/harness-parallel-execution/SKILL.md",
-          "name": "harness-parallel-execution"
-        },
-        {
-          "host": "codex",
-          "path": ".codex/skills/harness-parallel-execution/SKILL.md",
           "name": "harness-parallel-execution"
         }
       ],
@@ -105,11 +95,6 @@
           "host": "claude-code",
           "path": ".claude/skills/harness-self-improvement/SKILL.md",
           "name": "harness-self-improvement"
-        },
-        {
-          "host": "codex",
-          "path": ".codex/skills/harness-self-improvement/SKILL.md",
-          "name": "harness-self-improvement"
         }
       ],
       "classification": {
@@ -143,11 +128,6 @@
         {
           "host": "claude-code",
           "path": ".claude/skills/manga-video-production/SKILL.md",
-          "name": "manga-video-production"
-        },
-        {
-          "host": "codex",
-          "path": ".codex/skills/manga-video-production/SKILL.md",
           "name": "manga-video-production"
         }
       ],
@@ -183,11 +163,6 @@
           "host": "claude-code",
           "path": ".claude/skills/manga-page-camera/SKILL.md",
           "name": "manga-page-camera"
-        },
-        {
-          "host": "codex",
-          "path": ".codex/skills/manga-page-camera/SKILL.md",
-          "name": "manga-page-camera"
         }
       ],
       "classification": {
@@ -222,11 +197,6 @@
           "host": "claude-code",
           "path": ".claude/skills/narrated-story-video/SKILL.md",
           "name": "narrated-story-video"
-        },
-        {
-          "host": "codex",
-          "path": ".codex/skills/narrated-story-video/SKILL.md",
-          "name": "narrated-story-video"
         }
       ],
       "classification": {
@@ -260,11 +230,6 @@
         {
           "host": "claude-code",
           "path": ".claude/skills/buzzassist-skill-creator/SKILL.md",
-          "name": "buzzassist-skill-creator"
-        },
-        {
-          "host": "codex",
-          "path": ".codex/skills/buzzassist-skill-creator/SKILL.md",
           "name": "buzzassist-skill-creator"
         },
         {

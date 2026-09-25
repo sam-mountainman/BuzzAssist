@@ -24,7 +24,6 @@
     ".claude-plugin/plugin.json",
     ".claude-plugin/marketplace.json",
     ".claude/skills/",
-    ".codex/skills/",
     ".cursor/mcp.json",
     ".cursor/rules/buzzassist.mdc",
     ".mcp.json",

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,12 +8,18 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (path) => readFile(resolve(root, path), "utf8");
 
-test("Claude and Codex skill adapters both route to one canonical skill", async () => {
-  for (const host of [".claude", ".codex"]) {
-    const production = await read(`${host}/skills/manga-video-production/SKILL.md`);
-    const camera = await read(`${host}/skills/manga-page-camera/SKILL.md`);
-    assert.match(production, /\.agents\/skills\/manga-video-production\/SKILL\.md/u);
-    assert.match(camera, /\.agents\/skills\/manga-page-camera\/SKILL\.md/u);
+test("Claude Code reaches the canonical skill through its adapter and Codex reads the canonical skill directly", async () => {
+  // Claude Code は .agents/skills を読まないので .claude/skills のアダプターから正本へ届く。
+  const production = await read(".claude/skills/manga-video-production/SKILL.md");
+  const camera = await read(".claude/skills/manga-page-camera/SKILL.md");
+  assert.match(production, /\.agents\/skills\/manga-video-production\/SKILL\.md/u);
+  assert.match(camera, /\.agents\/skills\/manga-page-camera\/SKILL\.md/u);
+  // Codex はリポジトリの .agents/skills を直接読む。.codex/skills のアダプターは同じ Skill を一覧に
+  // 2回出すだけなので外した（2026-09-26）。正本の frontmatter の名前が Codex の一覧に出る名前になる。
+  for (const name of ["manga-video-production", "manga-page-camera"]) {
+    const canonical = await read(`.agents/skills/${name}/SKILL.md`);
+    assert.match(canonical, new RegExp(`^---\\nname: ${name}\\n`, "u"));
+    assert.equal(existsSync(resolve(root, ".codex", "skills", name, "SKILL.md")), false, `.codex/skills/${name} を戻さない`);
   }
 });
 
@@ -45,14 +52,12 @@ test("canonical skill evals cover production, repair, and resumability", async (
   assert.doesNotMatch(canonical, /generate-manga-v22-dialogue-audio\.mjs/u);
 });
 
-test("canonical skills and both host adapters are written in Japanese", async () => {
+test("canonical skills and the Claude Code adapters are written in Japanese", async () => {
   for (const path of [
     ".agents/skills/manga-video-production/SKILL.md",
     ".agents/skills/manga-page-camera/SKILL.md",
     ".claude/skills/manga-video-production/SKILL.md",
     ".claude/skills/manga-page-camera/SKILL.md",
-    ".codex/skills/manga-video-production/SKILL.md",
-    ".codex/skills/manga-page-camera/SKILL.md",
   ]) {
     const source = await read(path);
     assert.match(source, /[ぁ-んァ-ヶ一-龠]/u, `${path} must contain Japanese guidance`);

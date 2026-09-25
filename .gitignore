@@ -8,11 +8,8 @@ canvas/
 !.claude/
 .claude/*
 !.claude/skills/
+# Codex はリポジトリの .agents/skills を直接読む。.codex/skills のアダプターは外した（2026-09-26）。
 .codex/
-!.codex/
-.codex/*
-!.codex/skills/
-!.codex/skills/**
 Downloads/
 Youtube-AGI/
 # claude-mem drops auto-generated CLAUDE.md context files into subdirectories;

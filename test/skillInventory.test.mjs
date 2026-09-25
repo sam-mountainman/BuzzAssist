@@ -40,8 +40,13 @@ test("project inventory has four explicit classifications and no ambiguous proje
   assert.equal(canonical.language, "ja");
   assert.equal(canonical.classification.productionAllowed, false);
   assert.equal(canonical.classification.developmentOnly, true);
-  assert.deepEqual(adapters.map((record) => record.adapterHost).sort(), ["claude-code", "codex", "shared"]);
+  assert.deepEqual(adapters.map((record) => record.adapterHost).sort(), ["claude-code", "shared"]);
   assert.ok(adapters.every((record) => record.name === "buzzassist-skill-creator"));
+  // Codex はリポジトリの .agents/skills を直接読むので、.codex/skills のアダプターは同じ Skill を
+  // 一覧に2回出すだけになる（2026-09-26 に外した）。在庫にも戻さない。
+  const codexAdapters = report.skills.filter((record) => record.sourceRole === "project-adapter"
+    && (record.adapterHost === "codex" || String(record.relativePath || "").startsWith(".codex/")));
+  assert.deepEqual(codexAdapters.map((record) => record.relativePath), []);
   assert.ok(report.skills.filter((record) => record.scope === "buzzassist").every((record) => /^sha256:/u.test(record.shippedContentSha256)));
 });
 
