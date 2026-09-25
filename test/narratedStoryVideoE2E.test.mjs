@@ -566,6 +566,9 @@ test("Core narrated-story fixture renders, audits, resumes, and emits a receipt 
   // 独立 signoff と品質ループは自動監査の後で判定する。
   assert.equal(first.auditChecks.qualityLoopPassed.pass, false);
   assert.equal(first.review.quality.contractDigest.length, 64);
+  // 評価者に渡すシートに合格点・下限・重みを載せない（採点が合格点に寄らないように。合否はループ側だけ）。
+  assert.equal(first.review.quality.targetScore, undefined);
+  assert.ok(first.review.quality.rubric.every((criterion) => criterion.minimumScore === undefined && criterion.weight === undefined));
   assert.ok(first.knownRemainingIssues.includes("audit-qualityLoopPassed-pending-or-failed"));
   for (const auditId of NARRATED_STORY_AUDIT_IDS) {
     // 品質ループと人物の同一性（署名済み独立レビューの採点）も独立 signoff の後で判定する。
@@ -892,6 +895,9 @@ test("bookends: OP → story → review is rendered as a real MP4, its boundarie
       const rejectedReport = JSON.parse(await readFile(rejected.artifacts.auditReport.path, "utf8"));
       assert.notEqual(rejectedReport.status, "pass");
       assert.equal(rejectedReport.qualityLoop.rounds, 1, "audit report にもループの状態を残す");
+      // 次の回の評価者に渡すシートには、前の回の点数も合格点も載せない。
+      assert.equal(JSON.stringify(rejected.review.quality).includes(`"score"`), false);
+      assert.equal(rejected.review.quality.targetScore, undefined);
 
       // 再開しても同じ signoff は二重に記録しない（状態はディスクから引き継ぐ）。
       const resumed = await resume();

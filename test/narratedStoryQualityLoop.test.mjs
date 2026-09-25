@@ -326,3 +326,47 @@ test("機械ゲートが落ちた回は記録するが合格にせず、落ち�
   assert.deepEqual(result.state.rounds[0].failedGateIds, ["narrationBedSeparation"], "品質ループ自身の判定は機械ゲートに数えない");
   assert.ok(result.issues.includes("quality-loop-hard-gate-failed:narrationBedSeparation"));
 });
+
+test("評価者に渡す評価シートには、合格点・下限・重み・前の回の点数を載せない（合否はループ側だけが持つ）", async (t) => {
+  const {
+    NARRATED_REVIEW_SHEET_FORBIDDEN_KEYS,
+    narratedQualityReviewSheet,
+    normalizeNarratedReviewInput,
+  } = await import("../lib/narratedStoryQualityLoop.mjs");
+  const ws = await workspace(t);
+  // 前の回（不合格）を記録してから、次の回の評価者に渡すシートを作る。
+  const failed = await advance(ws, JOB_A, signoffFor("review-ctx-001", scores({ "character-identity": 71 })));
+  assert.equal(failed.recorded, true);
+  const previousScore = failed.state.rounds[0].score;
+  const custom = createNarratedQualityContract({ limits: normalizeNarratedQualityLoopConfig({ targetScore: 97 }).limits });
+  for (const sheetContract of [contract, custom]) {
+    const sheet = narratedQualityReviewSheet(sheetContract, ws.runDir(JOB_A));
+    const keys = [];
+    const numbers = [];
+    const walk = (value) => {
+      if (Array.isArray(value)) value.forEach(walk);
+      else if (value && typeof value === "object") for (const [key, child] of Object.entries(value)) { keys.push(key); walk(child); }
+      else if (typeof value === "number") numbers.push(value);
+    };
+    walk(sheet);
+    for (const forbidden of NARRATED_REVIEW_SHEET_FORBIDDEN_KEYS) {
+      assert.equal(keys.includes(forbidden), false, `評価シートに ${forbidden} が載っている`);
+    }
+    assert.deepEqual(numbers.sort((a, b) => a - b), [0, 100], "数値は尺度だけ（合格点・下限・重み・前の点を載せない）");
+    assert.equal(numbers.includes(previousScore), false);
+    assert.equal(JSON.stringify(sheet).includes(narratedQualityPaths(ws.runDir(JOB_A)).dir), false, "前の回の状態の置き場も載せない");
+    assert.deepEqual(sheet.rubric.map((criterion) => criterion.id), sheetContract.rubric.map((criterion) => criterion.id), "何を採点するかは全部載せる");
+    assert.ok(sheet.rubric.every((criterion) => criterion.label && criterion.description));
+    assert.equal(sheet.contractDigest, sheetContract.digest, "採点は契約に結び付ける");
+    // このシートだけで採点を書ける（合否の判定はループ側が契約で行う）。
+    const scored = normalizeNarratedReviewInput(
+      { rubricScores: Object.fromEntries(sheet.rubric.map((criterion) => [criterion.id, 90])), notes: "全尺を通して見た", findings: [] },
+      sheet,
+      { approved: true },
+    );
+    assert.equal(scored.qualityReview.contractDigest, sheetContract.digest);
+  }
+  // 合否の材料はループ側（契約）にだけある。
+  assert.equal(custom.limits.targetScore, 97);
+  assert.ok(custom.rubric.every((criterion) => Number.isFinite(criterion.minimumScore) && Number.isFinite(criterion.weight)));
+});
