@@ -256,13 +256,18 @@ JSON Lines で、1行ずつ次の3種類（各行は鍵の順を固定した JSO
 |---|---|---|
 | `bundle` | `bundleDigest` `operatorKeyId` `signerKeyId` `receivedAt` `bundle` `receipt` | 受け付けた署名つき bundle そのものと、最初に返した受領証。`operatorKeyId` は受け取り口の中の鍵の行 ID（`fok_…`）で、鍵の指紋は `signerKeyId` |
 | `rejection` | `code` `httpStatus` `requestSha256` `bodyBytes` `signerKeyId` `receivedAt` | 拒否した送信の metadata だけ（本文は無い） |
-| `summary` | `exportedAt` `bundles` `excludedInactiveSigner` `rejections` | 最後の1行。`bundles` はその回に書き出した bundle 行の数 |
+| `summary` | `exportedAt` `bundles` `excludedInactiveSigner` `rejections`（＋`inactiveSigners`） | 最後の1行。`bundles` はその回に書き出した bundle 行の数 |
 
 - 書き出しは差分ではなく、毎回「保持期限内の全件」を出す。同じ bundle 行が回をまたいで何度も来るのが普通
 - 失効した鍵・止めた利用者の bundle は書き出さず、件数だけを `excludedInactiveSigner` に出す
   （`bundles` には含まない）
 - 前に取り込んだ bundle が次の書き出しに出てこなくなる（保持期限切れ・鍵の失効）のは正常。
   管理側の取り込み済みの記録は消さない
+- `summary.inactiveSigners` は受け取り口が後から足す予定の欄（受け取り口で止まっている送り手の鍵の一覧。保持期限に
+  関わらず全部、いなければ空配列）。各項目は `{"signerKeyId","reason","revokedAt"}` で、`reason` は `key-revoked`
+  （`revokedAt` はミリ秒つきの UTC）か `user-inactive`（利用者の凍結・退会、`revokedAt` は null）、`signerKeyId` の
+  昇順で重複なし。**取り込みは欄が入る前の書き出しも入った後の書き出しも読む。** 欄がある場合は形を厳密に確かめ、
+  違えば `FEEDBACK_EXPORT_LINE_INVALID` で止める
 
 ### コマンド
 
@@ -291,7 +296,13 @@ node scripts/harness-feedback-ingest.mjs import-export --root var/feedback-inges
   持たないので、この照合を省けない
 - 結果は JSON で出る: `counts`（`quarantined` / `wouldQuarantine` / `alreadyImported` / `rejected`）、
   `rejectedByCode`、`providerReceipts`（`verified` / `unverified`）、`receiverRejections`（受け取り口の拒否の
-  code ごとの件数）、`summary`（`bundlesMatch`）、`stopped`、行ごとの `bundles`。`ok` が false なら exit 2
+  code ごとの件数）、`summary`（`bundlesMatch`・`inactiveSigners` の件数）、`warnings`、`stopped`、行ごとの `bundles`。
+  `ok` が false なら exit 2
+- `inactiveSigners` に載った鍵が管理側の登録簿でまだ active なら、`warnings` に
+  `FEEDBACK_EXPORT_SIGNER_INACTIVE_UPSTREAM` を出す（その鍵から取り込み済みの bundle と承認済みの観測の件数つき）。
+  警告は `ok` を変えず、**自動では失効も削除もしない**。受け取り口で止めた理由を確かめ、必要なら owner が
+  `revoke --operator <id> --key-id <signerKeyId>` で失効する（失効すれば承認済みの観測も数えなくなる）。
+  管理側で失効済みの鍵と、管理側の登録簿に無い鍵は警告しない
 
 ### 照合の中身（bundle 行ごと、この順）
 
@@ -366,7 +377,8 @@ v1 と同じ root を使う。照合を通った bundle は `accepted/`（署名
 --public-key-file <SPKI PEM> --allow-harness <harness-id> --reason "<理由>"` と、管理側の
 `harness-feedback-ingest.mjs enroll --key-use auto-feedback`（上のコマンド）の**両方**に同じ公開鍵を登録する。
 許す harness は両方で同じにする。失効も両方で行う（受け取り口だけで失効すると書き出しに出なくなり、管理側だけで
-失効すると取り込みで `FEEDBACK_SIGNER_REVOKED` になる）。
+失効すると取り込みで `FEEDBACK_SIGNER_REVOKED` になる）。受け取り口の書き出しに `inactiveSigners` が入れば、管理側で
+失効し忘れた鍵は取り込みの `warnings`（`FEEDBACK_EXPORT_SIGNER_INACTIVE_UPSTREAM`）で分かる。
 
 ## owner の承認のあと
 
