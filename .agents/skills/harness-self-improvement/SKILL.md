@@ -17,9 +17,9 @@ description: ユーザーの指摘・訂正・好みを、その場の修正で�
 ここでの狙いは**その場の修正を、次が読む正本へ載せること**に尽きる。
 仕組みは Nous Research の hermes-agent が採る3層
 （ターン内の捕捉 → 定期的な統合 → 人間起動の取り込み）を参考にしている。
-ただし、自己生成した提案をそのまま正本へ書く仕組みは採らない。BuzzAssistでは
-提案の捕捉、機械所有overlayへの同期、人が確認した正本への昇格を別の操作と証跡に
-分ける。
+ただし、自己生成した提案を記録も巻き戻しも無しに正本へ書く仕組みは採らない。
+BuzzAssistでは、提案の捕捉、機械所有overlayへの同期、差分の承認キューを通した
+正本への反映、配る版の人の承認（リリース）を別の操作と証跡に分ける。
 
 
 ## 大原則
@@ -28,17 +28,34 @@ description: ユーザーの指摘・訂正・好みを、その場の修正で�
 このリポジトリは今日、スクリプトが自作のサインオフを根拠に納品物を
 合格にしていた箇所を3件塞いだ。学習の仕組みが同じ形になれば同じことが起きる。
 
+**機械は正本も直してよい。人が確かめるのは、運営者へ配る版を出すときの1回だけ**
+（運営者の決定 2026-09-26）。以前は正本スキルへの反映のたびに人の確認を要求していたが、
+人の手番が溜まって学習が正本へ届かなかった。そこで関門を、人が見ないまま他人のパソコンへ
+届き、有料 API を動かす指示になる地点——配る版（GitHub Release）——の1か所へ寄せた。
+
 - **捕捉は何も書き換えない**。提案を追記するだけ
-- **自動で書き換えてよいのは overlay ファイルだけ**。各スキルの
-  `references/learned-auto.md` を `sync` が丸ごと書き直す。人が書く
-  `SKILL.md` には触らない。hermes の curator が「agent作成スキルだけ触り、
-  bundled や hub-installed には手を出さない」としているのと同じ境界を、
-  ここでは**ファイル単位の所有**が担っている
+- **sync が自動で書き換えるのは overlay ファイルだけ**。各スキルの
+  `references/learned-auto.md` を `sync` が丸ごと書き直す。hermes の curator が
+  「agent作成スキルだけ触り、bundled や hub-installed には手を出さない」としているのと
+  同じ境界を、ここでは**ファイル単位の所有**が担っている
+- **正本スキル（SKILL.md・references）はエージェントも直してよい**。提案を反映するときは
+  差分の承認キュー（`pending` → `approve`、後述）を通し、変更前後の sha256・元の提案・時刻・
+  誰が当てたか（エージェントか人か）を残して、1件ずつ `rollback` できる形にする。
+  提案に結び付かない改訂は skill-creator の手順で直接直してよい（記録は変更履歴と在庫の SHA）
+- **配る版は人がリリースで1回確かめる**。`npm run skills:check:release`（release.yml の関門）は、
+  在庫の承認が今の版と内容 SHA に付いていなければ止まる。承認は承認者本人の端末の
+  `node scripts/skill-inventory.mjs --approve <id> --reviewer <名前> --human-verified` だけが記録でき、
+  **エージェントは代わりに打たない**
+- **開発用チェックアウトの制作は、承認前の正本でも止めない**。代わりに Job と RunReceipt の
+  `skillApproval` に「承認前の正本スキルで作った」ことと、そのスキルの id・版・sha256 が残る
+  （本体 `lib/videoHarnessProductionProfile.mjs`）。配布された写し（運営者の端末のプラグイン）は
+  今までどおり、承認済みの版でなければ止まる
 - **overlay は証跡ではない**。運用上の補助指示であって、監査・承認・合否の
   根拠には使えない。だから台帳（`ledger:koya`）とゲート基準
   （`doc:mike-audio-gates`）は `review-only` にして自動反映しない——
   そこは承認の記録そのものなので、機械が書き足すと何を人が決めたのかが
-  分からなくなる
+  分からなくなる。同じ理由で、Channel Pack の台帳（review-only）への `approve`・`rollback` は
+  今までどおり人の確認でだけ通る（台帳はリリースも通らない）
 - **機械区画から人の規則へ上げる（promote）には reviewer 名と正本内の実在証拠が要る**。
   「機械が書いた」と「人が確認した」の差がこの一手で、この差が無くなると
   自己改善が自己認証に変わる（台帳R196と同じ理由）。
@@ -56,28 +73,29 @@ description: ユーザーの指摘・訂正・好みを、その場の修正で�
 
   1. 既定を拒否にする（黙って人を名乗れる状態を無くす）
   2. 詐称に明示的な一手を要求し、何を名乗ったかを記録に残す
-  3. **人の確認が無いものを「反映済み」として数えない**
+  3. **記録の残らない機械の自己申告を「反映済み」として数えない**
 
   3が実効の中心。`isActuallyApplied` がここを見ていなかったので、機械の
   自己申告が人の確認と同じ効力で applied になり、しかも未反映一覧から
   消えるので**後から人が昇格しようとすると「既に反映済み」で拒まれた**。
   機械の自己申告が、人の確認を締め出す向きに働いていた。
 
-  印は4段階で、`human-verified` だけが反映済みとして数えられる:
+  印と、反映済みに数えるか:
 
   | 印 | 何を意味するか | 反映済みに数えるか |
   |---|---|---|
   | `human-verified` | 対話端末＋ `--human-verified` の二手 | ○ |
+  | `agent-self-attested`（差分の承認キューの `approve`、`actor: agent`） | エージェントが差分を当てた。変更前後の sha256・元の提案・時刻が残り、1件ずつ戻せる | ○（配る版は人がリリースで確かめる） |
+  | `agent-self-attested`（`apply`・`promote`・`curate --archive`） | 機械が機械として記録しただけ。変更前の版も巻き戻しも残らない | × |
   | `cli-interactive-claimed` | 対話端末だった、という事実だけ | × |
-  | `agent-self-attested` | 機械が機械として記録した | × |
   | `unverified-agent-typed` | ガード導入前の記録 | × |
 
-  ここで作っているのは関門ではなく、**読める証跡**。本当の関門は、この台帳が
-  git で追跡されていて、commit を人が読むところにある。新しいゲートを足す
-  前に、そのゲートを通さずに同じ効果を得る道が残っていないかを先に探すこと
-  ——機械が作る正本の変更は、後述の差分の承認キュー（`pending` → 人の `approve`）を通る。
-  ただし正本の直接編集と `applied.jsonl` への直接追記は、物理的には今も残っている
-  （開発側のレビュー台帳に cx-a3 として記録）
+  ここで作っているのは関門ではなく、**読める証跡**。本当の関門は、配る版を出すときに
+  人が差分を読んで承認するところ（上の skills:check:release と承認者の端末の
+  skill-inventory --approve）と、この台帳が変更履歴で追跡されていて commit を人が読むところに
+  ある。新しいゲートを足す前に、そのゲートを通さずに同じ効果を得る道が残っていないかを
+  先に探すこと。正本の直接編集と `applied.jsonl` への直接追記は物理的には今も残っている
+  （開発側のレビュー台帳に cx-a3 として記録）が、どちらもリリースの承認を越えては届かない
 - **消さない**。置き換えたものは記録に残す
 - **1件1スキルにしない**。個別事象を並べた文書は読まれなくなる
 
@@ -253,9 +271,13 @@ node scripts/harness-learn.mjs review   # 統合案（dry-run）
 2. 吸収できなければ、複数の提案をまとめてクラスレベルの1節を書く
 3. スキルを書き換えるときは **skill-creator を使う**（この規則自体が
    ユーザーの指示から来ている）
-4. 正本へ `<!-- buzzassist-learning:<提案ID> -->` と、12文字以上の規則本文を
+4. 書き換え後の本文（エージェントは正本の写し、人は正本そのもの）へ
+   `<!-- buzzassist-learning:<提案ID> -->` と、12文字以上の規則本文を
    書く。提案IDだけ、短い要約だけ、overlay内の文言だけでは反映証跡にならない
-5. 人が実際に確認した端末から記録する:
+5. エージェントが反映するなら、書き換え後の全文を写しに作って、下の差分の承認キュー
+   （`pending` → `approve`）で当てる。変更前後の sha256・元の提案・時刻・当てた者が残り、
+   1件ずつ `rollback` できる。これが反映済みに数えられる機械の経路
+6. 人が skill-creator で正本を直接直したなら、その人の端末から記録する:
 
 ```bash
 node scripts/harness-learn.mjs apply --id <提案ID> \
@@ -263,38 +285,45 @@ node scripts/harness-learn.mjs apply --id <提案ID> \
   --human-verified
 ```
 
-非対話のエージェントが変更内容を記録するときは `--agent-attested` を使う。その
-記録は残るが、`human-verified`ではなく未反映として扱われる。TTYは人間性の証明に
-ならないため、`--reviewer`だけ、または対話端末だったという事実だけでは人の承認に
-数えない。誰も確認していない自動反映は証跡にならないので、この仕組みは意図的に
-そこで止まる。
+エージェントが `apply --agent-attested` で記録すると、記録は残るが未反映として扱われる——
+直接の編集には変更前の版も巻き戻しも残らないため。エージェントは apply ではなくキューを使う。
+TTYは人間性の証明にならないため、`--reviewer`だけ、または対話端末だったという事実だけでは
+人の確認に数えない。
 
 ## 正本を書き換えるとき（差分の承認キュー）
 
-機械が正本（SKILL.md・台帳）の書き換え案を作るときは、正本を直接書き換えず、差分と
-「案を作るときに読んだ正本の sha256（base）」をつけてキューに置き、人の `approve` を待つ
-（本体 `lib/harnessLearningChanges.mjs`）。approve の記録が apply を兼ねるので、別に apply は打たない。
-人が skill-creator で正本を直接直したときの記録は、従来どおり上の `apply` を使う。
+正本（SKILL.md・台帳）の書き換え案は、差分と「案を作るときに読んだ正本の sha256（base）」を
+つけてキューに置き、`approve` で当てる（本体 `lib/harnessLearningChanges.mjs`）。approve の記録が
+apply を兼ねるので、別に apply は打たない。
 
 ```bash
 node scripts/harness-learn.mjs pending --id <提案ID> --proposed <書き換え後の全文> --note "規則本文" --base <読んだ版の sha256>
 node scripts/harness-learn.mjs pending                       # 一覧（base が変わったものは base-changed と出る）
 node scripts/harness-learn.mjs pending --show <変更ID> [--out <写しの SKILL.md>]
-node scripts/harness-learn.mjs approve --change <変更ID> --reviewer <名前> --human-verified [--require-evals] [--evals-dir <dir>]
-node scripts/harness-learn.mjs reject --change <変更ID> --reviewer <名前> --reason "..."
-node scripts/harness-learn.mjs rollback --change <変更ID> --reviewer <名前> --reason "..." --human-verified
+node scripts/harness-learn.mjs approve --change <変更ID> [--require-evals] [--evals-dir <dir>]       # エージェントが当てる
+node scripts/harness-learn.mjs approve --change <変更ID> --reviewer <名前> --human-verified      # 人が自分の端末で当てる
+node scripts/harness-learn.mjs reject --change <変更ID> --reason "..."
+node scripts/harness-learn.mjs rollback --change <変更ID> --reason "..."                          # 人なら --reviewer <名前> --human-verified を足す
 ```
 
 - 案には提案ごとの印（`<!-- buzzassist-learning:<提案ID> -->`）と、`--note` と完全一致の規則本文が要る
-- approve と rollback は人の確認（対話端末＋`--human-verified`＋reviewer 名）でだけ通り、
-  `--agent-attested` では通らない
+- `approve`・`rollback`・`reject` は、エージェントも打てる。`--reviewer` を省けば記録は
+  「エージェントが当てた」（`actor: agent`、reviewer は `agent`）。人が承認者の端末から
+  `--reviewer <名前> --human-verified` で打てば「人が当てた」（`actor: human`）として分けて残る。
+  **名前だけ（`--human-verified` なし）と、非対話の端末からの `--human-verified` は拒否する**——
+  エージェントがユーザーの名前を打って人を名乗らない
+- Channel Pack の台帳（review-only）への `approve`・`rollback` は、今までどおり人の確認でだけ通る。
+  エージェントは `pending` に置くまで
 - `base-changed` が出たら、正本を読み直して案を作り直す。正本を base の版へ手で戻して通さない
 - `rollback-conflict`（正本が、その変更を当てた後にさらに変わっている）が出たら、後の変更を先に戻す
 - 正本スキルへの approve は、評価の関門（skill-evals の記録で、変更後の版の contentSha256 に両ホストの
   結果があり、変更前の版より悪化していないか）を警告として出す。`--require-evals` のときだけ止まる。
-  警告を読んでから承認する（`--out` で書いた写しで evals を流せる）
-- 正本スキルを approve したら、`.agents/skills/inventory.manifest.json` の contentSha256 と版を上げ、
-  `skill-inventory --approve` を人の端末で打ち直す（未承認のままだと本番が止まる）
+  警告を読んでから当てる（`--out` で書いた写しで evals を流せる）
+- 正本スキルを approve したら（skill-creator で直接直したときも）、`.agents/skills/inventory.manifest.json`
+  の contentSha256 を今の内容へ更新する。版は skill-creator の決まりに従う（まだ配っていない版が
+  すでに上がっていれば、同じ版のまま SHA だけ）。開発用チェックアウトの制作は止まらず、RunReceipt に
+  承認前の正本で作ったと残る。運営者へ配る版を出す前に、人が承認者の端末で
+  `skill-inventory --approve` を打つ（`npm run skills:check:release` が確かめる）
 
 ## 自動の捕捉経路
 
@@ -362,8 +391,9 @@ bundle の中身・同意の範囲・送り先の設定・手動の bundle（v2�
 手順は `references/feedback-return-ja.md` にある。feedback bundle・送信・受け取りを触るときに読む。
 
 このため「自動学習」は、捕捉・署名upload・重複排除・集計までを自動化する意味で
-あり、AIが自分の変更を自分で承認する意味ではない。正本への昇格は従来どおり
-`skill-creator`でfixture比較を行い、人の承認証跡を要する。
+あり、AIが自分の変更を自分で承認する意味ではない。正本への反映は開発用チェックアウトで
+`skill-creator` と差分の承認キューを通し（エージェントも当てられる）、運営者へ届く版は
+人がリリースで承認する。
 
 ## 使われない教訓の扱い（curate）
 
@@ -398,6 +428,8 @@ node scripts/harness-learn.mjs curate --archive --id <id> \
   「スキル本体は変えていないのに指紋が動いた」を読めるようにするため
 - 宣言された保証ごとの判定と、その裏づけになった実測監査の指紋
 - 結果と `knownRemainingIssues`
+- 正本スキルの承認の状態（`skillApproval`。承認前の正本で作ったか、そのスキルの id・版・sha256）。
+  合否は変えないが、正本を直した効果を測るときに「承認前の版で出た結果」を分けて読める
 
 記録が守っている規則は1つだけ——**走っていないゲートを「通った」と書けない**。
 
@@ -466,9 +498,13 @@ genre/platformへ引き上げる。
 - blocked の提案本文を、検査を通さずに正本へ貼る
 - `curate` の候補を、人の確認なしに機械の判断で退避する
 - フックの案内を「毎回何か capture せよ」と読む
-- 正本をエージェントが直接書き換える（書き換え案は `pending` に置いて人の `approve` を待つ）
+- 提案を正本へ反映するのに、キューを通さず直接書き換えて `apply --agent-attested` で済ませる
+  （変更前の版も巻き戻しも残らない。`pending` → `approve` を使う）
 - `base-changed` を、正本を base の版へ手で戻して通す
-- approve・rollback を `--agent-attested` や PTY 経由で通そうとする
-- 評価の関門の警告を読まずに承認する
+- エージェントが approve・rollback を「人が当てた」ように見せる（名前を打つ・PTY 経由で `--human-verified`）
+- Channel Pack の台帳（review-only）を、エージェントの approve で書き換えようとする
+- 評価の関門の警告を読まずに当てる
+- エージェントが `skill-inventory --approve` を打つ（配る版の承認は承認者本人の端末だけ）
+- 開発用チェックアウトで承認前の正本のまま作った成果物を、Receipt の `skillApproval` を伏せて報告する
 - 運営者の代わりに `harness-feedback.mjs consent --enable` を打つ
 - 学習の台帳をホストの写し（plugin cache・`~/plugins/buzzassist/plugin`）の中へ書く

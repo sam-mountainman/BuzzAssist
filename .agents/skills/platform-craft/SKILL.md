@@ -172,10 +172,26 @@ RunReceipt の `invocation` 欄へ digest つきで写る。判定は `lib/harne
 - モデル ID は推測で埋めない。自分のモデル ID が分かるときだけ MCP の `hostModel` / CLI の `--host-model`
   に渡す（記録は caller-declared。分からなければ unknown のまま）
 - 記録の系列名 `harness-run-receipt-v1` は変えない（Canvas 投影・学習の索引・Stop フックが完全一致で読む）。
-  欄の増減は `schemaRevision` で表す（2 = invocation と timing、3 = `timing.stages`）。上げたら、上げる前の
-  版の実例を `test/fixtures/run-receipt-past-schema-revisions.json` に足す
+  欄の増減は `schemaRevision` で表す（2 = invocation と timing、3 = `timing.stages`、4 = `skillApproval`）。
+  上げたら、上げる前の版の実例を `test/fixtures/run-receipt-past-schema-revisions.json` に足す
 - 同じ品質かは `node scripts/harness-receipts.mjs rollup --by host` で見る。ホストの記録が無い・判定できない・
   作ったホストと再開したホストが混ざった組は比べない
+
+### 正本スキルの承認の状態を残す
+
+正本スキルの人の承認（在庫の approval 欄。版と内容 SHA に束縛）は、運営者へ配る版を出すときに1回だけ
+確かめる（2026-09-26 運営者決定。`npm run skills:check:release` と release.yml の関門、承認は承認者本人の
+端末の `skill-inventory --approve` だけが記録できる）。制作で止めるかは写しの種類で分ける
+（本体 `lib/videoHarnessProductionProfile.mjs`。開発用チェックアウトの判定は `lib/hostSkillSync.mjs` の
+`readsCanonicalDirectly` と同じ1つ）:
+
+- 開発用チェックアウト: 承認前の正本でも止めない。Job の `canonicalIdentity.productionProfile.skillApproval` と
+  RunReceipt の `skillApproval`（digest つき）に、写しの種類と承認の付いていないスキルの id・版・sha256 を残す。
+  doctor は `skill-approval` を advisory で出す
+- 配布された写し: 今までどおり承認済みの版でなければ止める（doctor もハーネス指定なら blocking）
+- `BUZZASSIST_REQUIRE_SKILL_APPROVAL=0` で外す、それ以外の値ならどちらの写しでも止める。止めたかどうかは
+  Job の同一性に入れない（env で Job が分かれないように、記録は写しの種類と未承認のスキルだけ）
+- 承認前の正本で作ったことは Receipt の合否を変えない。成果物を報告するときは `skillApproval` を伏せない
 
 ### 完成と言う前に（Stop フック）
 
@@ -401,7 +417,9 @@ BuzzAssist正本は`.agents/skills`に置く。Claude Code は `.claude/skills` 
 `.codex/skills` の adapter は同じ Skill を一覧に2回出すだけになる（2026-09-25 実測）。今ある
 `.codex/skills` は リポジトリの docs/skill-inventory-profiles-ja.md の手順でまとめて外す予定で、外すまでは正本参照
 だけに保ち、手順を足さない。host名やCLI名を一括置換して別内容を作らない。正本更新時は
-`skill-creator`、eval、inventoryのversion/content SHA、adapter検査をまとめて行う。
+`skill-creator`、eval、inventoryのversion/content SHA、adapter検査をまとめて行う。正本はエージェントも
+直してよいが、人の承認は配る版を出すときの1回（上の「正本スキルの承認の状態を残す」）で、
+エージェントは `skill-inventory --approve` を打たない。
 
 ## 複数セッションを監査する
 
@@ -456,3 +474,5 @@ workflow synthesisが欠けている、といった状態を検査で見える�
   `node scripts/generate-host-instructions.mjs` で作る（CI が `npm run instructions:check` で照合する）
 - 4つ目の Canvas 投影器、2つ目の取り込み口・品質ループの照合・ホストの判定を作る
 - Stop フックに差し戻されなかったことを、合格の根拠として報告する
+- 承認前の正本スキルで作ったこと（Receipt の `skillApproval`）を伏せて完成を報告する。
+  エージェントが `skill-inventory --approve` を打つ・`skills:check:release` の関門を外す

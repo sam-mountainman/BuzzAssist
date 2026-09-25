@@ -4,7 +4,7 @@
     {
       "id": 1,
       "prompt": "BuzzAssistの漫画動画Skillへ新しい監査ルールを追加し、Claude CodeとCodexへ同じ版を配れるようにしてください。",
-      "expected_output": "`.agents/skills`の日本語正本を起点に、評価・manifest SHA・薄いadapter・人間承認まで扱い、global/system/cacheを編集しない。",
+      "expected_output": "`.agents/skills`の日本語正本を起点に、評価・manifest SHA・薄いadapterまで扱い、global/system/cacheを編集しない。人の承認は配る版を出すときに承認者本人の端末で打つものとして、エージェントは skill-inventory --approve を打たない。",
       "files": []
     },
     {
@@ -16,7 +16,7 @@
     {
       "id": 4,
       "prompt": "BuzzAssistに新しい正本スキルを1本足して、Claude CodeとCodexの両方から使えるようにしてください。",
-      "expected_output": "`.agents/skills`に日本語の正本を置き、Claude Code用に正本を読むだけの`.claude/skills`アダプターを足す。Codexはリポジトリの`.agents/skills`を直接読み、`.codex/skills`のアダプターは一覧の重複で外す予定であることを踏まえ、アダプターに手順を複製しない。manifestのSHAと版、evals、人の承認待ちまで扱う。",
+      "expected_output": "`.agents/skills`に日本語の正本を置き、Claude Code用に正本を読むだけの`.claude/skills`アダプターを足す。Codexはリポジトリの`.agents/skills`を直接読み、`.codex/skills`のアダプターは一覧の重複で外す予定であることを踏まえ、アダプターに手順を複製しない。manifestのSHAと版、evalsまで扱い、配る版を出す前の人の承認（承認者の端末の skill-inventory --approve）を待つ。",
       "files": []
     },
     {
