@@ -353,7 +353,11 @@ test("完成の主張の判定: 否定・伝聞・仮定・path の「パス」�
 // null で落ちた（同じ試験を 4 本並列で回して3回）。止めない長さはフックの見張りを試験の時計で確かめる。
 const PROCESS_HANG_GUARD_MS = 120_000;
 
-test("実プロセス: 起動行をシェルで動かし、stdin の JSON に stdout の JSON で答える（両ホストの起動行）", () => {
+// フック自身の見張り（scripts/harness-stop-hook.mjs の HARD_TIMEOUT_MS）。読み込みの後、この長さで判定を
+// 終えられなければ、止めない側に倒して何も出さずに exit 0 で終わる（ユーザーを待たせない作り）。
+const STOP_HOOK_GUARD_MS = 5_000;
+
+test("実プロセス: 起動行をシェルで動かし、stdin の JSON に stdout の JSON で答える（両ホストの起動行）", (t) => {
   const fx = fixture();
   try {
     writeJob(fx.projectDir, { status: "failed", knownRemainingIssues: ["synthetic issue"] });
@@ -366,9 +370,20 @@ test("実プロセス: 起動行をシェルで動かし、stdin の JSON に st
     const codex = readJson("hooks/codex-hooks.json").hooks.Stop[0].hooks[0].command;
     let session = 0;
     for (const [label, command, extraEnv] of [["claude", claude, {}], ["codex", codex, { PLUGIN_ROOT: ROOT }]]) {
-      session += 1;
-      const input = JSON.stringify(stopInput(fx, { session_id: `process-${session}`, last_assistant_message: "動画が完成しました。" }));
-      const result = spawnSync(command, { shell: true, cwd: tmpdir(), input, env: { ...env, ...extraEnv }, encoding: "utf8", timeout: PROCESS_HANG_GUARD_MS });
+      // 負荷の高い端末では、読み込みの後の判定そのものがフックの見張り（5 秒）を超え、止めない側に倒れて
+      // 何も出さないことがある（同じ試験を 4 本並列で回して 20 回中 2 回、"Unexpected end of JSON input"）。
+      // それは作りどおりの動きなので、見張りより長くかかって空だった回だけ、別の会話として起動し直す。
+      // 見張りより早く空で返るのは本当の取りこぼしなので、測り直さずに落とす。
+      let result;
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        session += 1;
+        const input = JSON.stringify(stopInput(fx, { session_id: `process-${session}`, last_assistant_message: "動画が完成しました。" }));
+        const started = Date.now();
+        result = spawnSync(command, { shell: true, cwd: tmpdir(), input, env: { ...env, ...extraEnv }, encoding: "utf8", timeout: PROCESS_HANG_GUARD_MS });
+        const elapsedMs = Date.now() - started;
+        if (!(result.status === 0 && result.stdout === "" && elapsedMs >= STOP_HOOK_GUARD_MS)) break;
+        t.diagnostic(`${label}: ${elapsedMs}ms かかって空の応答（フックの見張りで打ち切り）。起動し直す（${attempt} 回目）`);
+      }
       assert.equal(result.status, 0, `${label}: ${result.stderr}`);
       const output = JSON.parse(result.stdout);
       assert.equal(output.decision, "block", label);

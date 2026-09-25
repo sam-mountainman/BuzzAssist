@@ -161,19 +161,21 @@ test("child output tail is byte-bounded and marks truncation", () => {
 });
 
 // timeoutMs は「子が SIGTERM を握り潰す状態になるまでの猶予」も兼ねている。
-// 500ms だと、テストを並列で回している間の node 起動がそれを超えることが
-// あり、ハンドラ登録前に SIGTERM が届いて既定動作で即死する——SIGKILL へ
-// 昇格しないので signalsSent が ["SIGTERM"] になり、実装ではなく起動競合で
-// 落ちる。上限を主張する assert は残したまま、起動ぶんの余裕を取る。
+// node の子は、起動してハンドラを登録する前に SIGTERM が届くと既定動作で即死し、SIGKILL へ昇格しない
+// （signalsSent が ["SIGTERM"] になり、実装ではなく起動競合で落ちる）。500ms では並列の試験の間に超え、
+// 3 秒に延ばしたが、負荷の平均 140 前後では `node -e 0` の起動だけで最大 3.4 秒かかった。
+// POSIX では sh の最初の命令（trap '' TERM）で握り潰すので、起動の重さに左右されない。無視された
+// シグナルは子の sleep にも引き継がれ、プロセスグループへの SIGKILL だけが全員を止める。
+// Windows は sh が無いので従来の node の子のまま。
 const STUBBORN_CHILD_TIMEOUT_MS = 3_000;
 const STUBBORN_CHILD_GRACE_MS = 100;
+const STUBBORN_CHILD = process.platform === "win32"
+  ? [process.execPath, ["-e", "process.on('SIGTERM',()=>{});process.stdout.write('ready\\n');setInterval(()=>{},1000)"]]
+  : ["/bin/sh", ["-c", "trap '' TERM; echo ready; while :; do sleep 1; done"]];
 
-test("a stubborn child is terminated within a bounded grace period and records escalation", { timeout: 20_000 }, async () => {
+test("a stubborn child is terminated within a bounded grace period and records escalation", { timeout: 60_000 }, async (t) => {
   const startedAt = Date.now();
-  const child = await _testing.runChild(process.execPath, [
-    "-e",
-    "process.on('SIGTERM',()=>{});process.stdout.write('ready\\n');setInterval(()=>{},1000)",
-  ], {
+  const child = await _testing.runChild(STUBBORN_CHILD[0], STUBBORN_CHILD[1], {
     cwd: process.cwd(),
     timeoutMs: STUBBORN_CHILD_TIMEOUT_MS,
     terminationGraceMs: STUBBORN_CHILD_GRACE_MS,
@@ -182,16 +184,15 @@ test("a stubborn child is terminated within a bounded grace period and records e
   assert.equal(child.termination.reason, "timeout");
   assert.equal(child.termination.signalsSent[0], "SIGTERM");
   if (process.platform !== "win32") {
+    assert.match(child.stdout, /ready/u, "SIGTERM を握り潰す前に止められた（起動競合）");
     assert.deepEqual(child.termination.signalsSent, ["SIGTERM", "SIGKILL"]);
     assert.equal(child.termination.escalated, true);
     assert.equal(child.signal, "SIGKILL");
   }
-  // 上限は「打ち切り時刻 + 猶予 + 後始末」に張り付いていること。実装が
-  // 猶予を無視して待ち続ければ、ここで落ちる。
-  assert.ok(
-    Date.now() - startedAt < STUBBORN_CHILD_TIMEOUT_MS + STUBBORN_CHILD_GRACE_MS + 2_500,
-    "stubborn child termination must be bounded",
-  );
+  // 設定の猶予で昇格すること（既定の猶予で待ち続けないこと）は、下の「bounded settle watchdog」の試験が
+  // 試験の時計で確かめている（猶予を待つ処理は OS に依らず同じ requestTermination を通る）。
+  // ここの壁時計は起動と端末の負荷を含むので記録だけにする（負荷の平均 280 で 4.3 秒）。
+  t.diagnostic(`起動から打ち切りの決着まで ${Date.now() - startedAt}ms`);
 });
 
 test("Windows taskkill nonzero falls back to the exact child and records the failed tree attempt", async () => {
