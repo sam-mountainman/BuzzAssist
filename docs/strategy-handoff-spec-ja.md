@@ -276,6 +276,16 @@ Channel Pack・制作の仕組み（`{ "kind": "harness", "harnessId": ... }` �
 戦略の作業フォルダ（`strategy.workDir`）・合格したブリーフを制作の条件にするか（`strategy.requireBrief`）・台本の品質ループの
 ジャンルを持ちます。チャンネルどうしで場所が重なる台帳と、公開リポジトリの追跡される場所を指す台帳は読み込みで拒みます。
 
+学習（要求台帳・提案・反映記録）の保存先もチャンネルごとに分けます。台帳のチャンネルで作った Job（`start --channel`、
+または Pack・作業フォルダが台帳のチャンネルに一致した Job。Job の `metadata.channel` に残ります）の確定時の自動の捕捉と
+Canvas feedback は、そのチャンネルの保存先へ積みます。保存先は `channelLearning` の
+`{ "target": "channel-pack:<id>", "channel": "<チャンネルの id>", "root": "<dir>" }`、宣言が無ければ学習の置き場の
+`channels/<チャンネルの id>` です。同じハーネスのチャンネルが2つあっても、片方の提案・承認待ちの変更はもう片方に出ません。
+見る・直すときは `node scripts/harness-learn.mjs status --channel <id>`（`pending` / `approve` も同じ `--channel`）。
+共有層（`genre:` / `platform:`）の宛先には `--channel` を付けられません（チャンネル固有の事実を共有層へ上げないため）。
+保存先が別のチャンネルの場所・保存先に重なる台帳は読み込みで拒みます。チャンネルの無い Job は従来どおりハーネス単位の
+Channel Pack の台帳へ積みます。
+
 plan-request は依頼の種類（`requestKind`）とブリーフの状態から次の工程を返します。種類が決めきれないときは `question` を1問
 返すので、答えを `requestKind` に入れて呼び直します。
 

@@ -1,5 +1,5 @@
 {
-  "note": "学習の宛先と反映方式。宛先は3層に分ける——`platform:` は運営者に依らない craft、`genre:` はジャンル共通のハーネス、`channel-pack:` は個々のチャンネル固有。Codexレビュー(g1)が koyaChannelGovernance の18規則を判定した結果、『番組固有』『ジャンル共通に一般化できる』『そもそも共通基盤』の3種が混在していたため。overlay は機械が丸ごと所有するファイルで、canonical は人が書く正本。",
+  "note": "学習の宛先と反映方式。宛先は3層に分ける——`platform:` は運営者に依らない craft、`genre:` はジャンル共通のハーネス、`channel-pack:` は個々のチャンネル固有。Codexレビュー(g1)が koyaChannelGovernance の18規則を判定した結果、『番組固有』『ジャンル共通に一般化できる』『そもそも共通基盤』の3種が混在していたため。overlay は機械が丸ごと所有するファイルで、canonical は人が書く正本。channel-pack: の保存先（台帳・提案・反映記録）は、運営者の配置表の channels のチャンネルで作った Job ならチャンネルごと（lib/channelRegistry.mjs が決める。harness-learn の --channel で見る）、チャンネルの無い Job なら下の reason のとおりハーネス単位。canonical のパスはどちらも保存先の root からの相対。",
   "modes": {
     "auto-guidance": "overlay へ自動反映する。運用上の補助指示であって、監査・承認・合否の証跡には使えない",
     "review-only": "自動反映しない。ここは監査と承認の記録そのものなので、人が書く"
