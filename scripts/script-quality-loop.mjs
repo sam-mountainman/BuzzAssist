@@ -70,7 +70,9 @@ export function scriptQualityHelp() {
   start     ループを始める（状態は <work-dir>/quality/script-quality-loop.json）
     --work-dir <dir>              台本の作業フォルダ（私有側）
     --generator-context <id>      初稿を書いた会話・タスクの ID（この文脈は採点できない）
-    [--generator-host <claude-code|codex>] [--genre narrated-story]
+    [--generator-host <claude-code|codex>] [--genre ${Object.keys(SCRIPT_QUALITY_GENRES).join("|")}]
+                                  既定は narrated-story。manga は漫画の台本、explainer は解説動画の台本
+                                  （どちらも BuzzAssist 独自の評価基準。contract --genre <id> で採点表を見る）
     [--channel-pack <dir>]        署名済み Channel Pack。payload/script-quality.json でチャンネル固有の
                                   評価項目を足し、下限を上げられる（下げられない）。検証の公開鍵は
                                   BUZZASSIST_CHANNEL_PACK_PUBLIC_KEY
@@ -82,7 +84,8 @@ export function scriptQualityHelp() {
 
   record    1つの版を1回として記録する。合格しなかった回は、評価項目 id・機械ゲート id・止まった
             理由のコードだけを台本の非公開台帳（channel-pack:narrated-story-script）へ自動で積む
-            （本文は入れない。BUZZASSIST_LEARNING_AUTO_CAPTURE=0 で止まる）
+            （本文は入れない。BUZZASSIST_LEARNING_AUTO_CAPTURE=0 で止まる。学習の宛先がまだ無いジャンル
+            manga / explainer では積まない）
     --work-dir <dir> --script <版のファイル> --version <版の名前> --stage <${SCRIPT_STAGES.join("|")}>
     --review <採点ファイル>        { evaluatorId, evaluatorContextId, evaluatorHost, scriptSha256,
                                     baseScriptSha256（初稿以外）, rubricScores, notes, findings }

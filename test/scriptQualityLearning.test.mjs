@@ -195,6 +195,17 @@ test("品質ループの record は、合格しなかった回でだけ学習の
   assert.equal(called, false);
 });
 
+test("学習の宛先が決まっていない台本のジャンル（漫画・解説動画）は、推測で別の台帳へ積まない", async () => {
+  const harness = captureHarness();
+  for (const genre of ["manga", "explainer"]) {
+    const { contract } = createScriptQualityContract({ genre });
+    const input = failingRound({ state: { script: { genre } } });
+    const result = await captureScriptRoundLearning({ ...input, contract, env: {}, now, captureOptions: harness.options });
+    assert.equal(result.skippedReason, "unknown-genre-route", genre);
+  }
+  assert.equal(harness.rows.length, 0);
+});
+
 test("台本の直し・訂正は、人が harness-learn capture で台本の非公開台帳へ積める", () => {
   const harness = captureHarness();
   const { entry, ledgerPath, appended } = captureLearningProposal({
