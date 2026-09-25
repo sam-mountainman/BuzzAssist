@@ -27,7 +27,7 @@ const STAGES = {
 };
 
 test("timing.stages keeps only well-formed stage rows and is shared as durations without timestamps", () => {
-  assert.equal(RUN_RECEIPT_SCHEMA_REVISION, 3);
+  assert.ok(RUN_RECEIPT_SCHEMA_REVISION >= 3, "timing.stages は版 3 から");
   assert.equal(RUN_RECEIPT_STAGE_TIMINGS_IN_FORCE_SINCE, 3);
   const receipt = openRunReceipt({
     projectDir: SOURCE_ROOT,
@@ -38,7 +38,7 @@ test("timing.stages keeps only well-formed stage rows and is shared as durations
     invocation: invocationRecord(hostCall()),
     timing: { jobCreatedAt: "2026-09-24T23:59:00.000Z", runStartedAt: "2026-09-25T00:00:00.000Z", stages: STAGES.stages },
   });
-  assert.equal(receipt.schemaRevision, 3);
+  assert.equal(receipt.schemaRevision, RUN_RECEIPT_SCHEMA_REVISION);
   assert.deepEqual(receipt.timing.stages.map((row) => row.id), ["images", "speech-overlap", "prepare"], "形の崩れた行は落とす");
   assert.equal(receipt.timing.stages[1].overlapsWith, "images");
   assert.equal("status" in receipt.timing.stages[1], false, "id・時刻・長さ・重ねた相手の他は持たない");

@@ -6,10 +6,13 @@ import test from "node:test";
 import {
   RUN_RECEIPT_INVOCATION_IN_FORCE_SINCE,
   RUN_RECEIPT_SCHEMA_REVISION,
+  RUN_RECEIPT_SKILL_APPROVAL_IN_FORCE_SINCE,
+  RUN_RECEIPT_STAGE_TIMINGS_IN_FORCE_SINCE,
   RUN_RECEIPT_VERSION,
   redactForPlatform,
   runReceiptHostSummary,
   verifyRunReceiptInvocation,
+  verifyRunReceiptSkillApproval,
 } from "../lib/harnessRunReceipt.mjs";
 import { PAST_REVISIONS, finalizedReceipt, hostCall, invocationRecord } from "./fixtures/hostInvocationFixtures.mjs";
 
@@ -80,7 +83,13 @@ test("過去の版の Receipt は従来どおり検証が通り、ホストは u
       assert.notEqual(runReceiptHostSummary(receipt).hostKey, "unrecorded");
     }
     assert.equal(redactForPlatform(receipt).durationSeconds, null);
-    // 工程ごとの内訳（timing.stages）は版 3 から。それより前の記録は空の内訳として読む。
-    assert.deepEqual(redactForPlatform(receipt).stageDurations, []);
+    // 工程ごとの内訳（timing.stages）は版 3 から。それより前の記録は空の内訳として読み、版 3 以降は当時の記録どおり読む。
+    if (revision < RUN_RECEIPT_STAGE_TIMINGS_IN_FORCE_SINCE) assert.deepEqual(redactForPlatform(receipt).stageDurations, []);
+    else assert.ok(redactForPlatform(receipt).stageDurations.length > 0, `revision ${revision}: 工程ごとの内訳を読めていない`);
+    // 正本スキルの承認の状態（skillApproval）は版 4 から。それより前の記録は「当時は記録しなかった」。
+    if (revision < RUN_RECEIPT_SKILL_APPROVAL_IN_FORCE_SINCE) {
+      assert.deepEqual(verifyRunReceiptSkillApproval(receipt), { ok: true, status: "not-in-force", revision, failures: [] });
+      assert.equal(redactForPlatform(receipt).skillApproval.recorded, false);
+    }
   }
 });
