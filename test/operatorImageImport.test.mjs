@@ -317,6 +317,65 @@ test("途中の成果物の品質ループ: 宣言があれば、本体が無い
   assert.ok(rejected.checked.issues.includes("operator-image-asset-loop-not-passed:s001"));
 });
 
+test("途中の成果物の品質ループ（本体）: 本編の画の工程で合格し人の確認が揃った版だけを取り込み、別の版・置き場の違う状態は止める", async (t) => {
+  if (!existsSync(fileURLToPath(new URL("../lib/assetQualityLoop.mjs", import.meta.url)))) {
+    t.skip("lib/assetQualityLoop.mjs is not on this branch");
+    return;
+  }
+  const { recordAssetQualityRound, startAssetQualityLoop } = await import("../lib/assetQualityLoop.mjs");
+  const loopFixtures = await import("./fixtures/assetQualityFixtures.mjs");
+  const folder = await tempFolder(t, "operator-image-real-loop-");
+  // 取り込みの記録のフォルダ＝品質ループの作業フォルダ。参照と承認一覧は本体の fixture で作る。
+  const fx = await (async () => {
+    for (const dir of ["reviews", "refs"]) await mkdir(join(folder, dir), { recursive: true });
+    return loopFixtures.stageInputs(folder, "scene-image");
+  })();
+  const { manifestPath, manifest } = await writeOperatorImageFolder(folder, [{ sceneId: "s001", width: 320, height: 180, referenceSha256s: fx.refs }]);
+  const imageRel = manifest.scenes[0].image.path;
+  const imageSha = manifest.scenes[0].image.sha256;
+  const started = await startAssetQualityLoop({
+    workDir: folder, harnessId: "narrated-story-video", stage: "scene-image", subjectId: "s001",
+    generatorContextId: loopFixtures.MAKER, generatorHost: "claude-code", now: loopFixtures.now,
+  });
+  const contract = started.state.asset.contract;
+  const reviewPath = await loopFixtures.writeReview(folder, "scene-s001", loopFixtures.reviewFor({
+    stage: "scene-image", context: "ctx-operator-import-eval-1", assetSha: imageSha, refs: fx.refs, contract,
+  }));
+  const round = await recordAssetQualityRound({
+    workDir: folder, stage: "scene-image", subjectId: "s001", assetPath: imageRel, versionLabel: "v1", reviewPath,
+    now: loopFixtures.now, ...(await fx.recordExtra({ rel: imageRel, sha: imageSha }, "chatgpt-web")),
+  });
+  assert.equal(round.recorded, true, JSON.stringify(round.issues));
+  manifest.scenes[0].assetLoop = { statePath: "quality/assets/scene-image--s001.json", passedSha256: imageSha };
+  await writeManifest(manifestPath, manifest);
+  const policy = policyOf({ requireAssetLoopPass: true, approvedReferences: { sha256: fx.refs } });
+  const real = await loadDefaultAssetLoopVerifier();
+  assert.equal(real.available, true, JSON.stringify(real));
+  // 採点は通ったが、人物の同一性の人の確認がまだ無い → 取り込まない。
+  const awaitingHuman = await check(folder, { sceneIds: ["s001"], policy, assetLoopVerifier: real });
+  assert.deepEqual(awaitingHuman.checked.issues, ["operator-image-asset-loop-not-passed:s001"]);
+  await loopFixtures.verify(folder, "scene-image", "s001", imageRel, ["identity"]);
+  const passed = await check(folder, { sceneIds: ["s001"], policy, assetLoopVerifier: real });
+  assert.equal(passed.checked.ok, true, passed.checked.issues.join(", "));
+  assert.equal(passed.checked.publicScenes[0].assetLoop.passedSha256, imageSha);
+
+  // 状態ファイルを本体の置き場の外へ写して指しても、推測で読まずに止める。
+  await mkdir(join(folder, "elsewhere"), { recursive: true });
+  await writeFile(join(folder, "elsewhere", "scene-image--s001.json"), await readFile(join(folder, "quality", "assets", "scene-image--s001.json")));
+  manifest.scenes[0].assetLoop.statePath = "elsewhere/scene-image--s001.json";
+  await writeManifest(manifestPath, manifest);
+  const moved = await check(folder, { sceneIds: ["s001"], policy, assetLoopVerifier: real });
+  assert.deepEqual(moved.checked.issues, ["operator-image-asset-loop-not-passed:s001"]);
+
+  // 合格した版の後で画を差し替え、manifest の sha256 だけ揃えても、合格した版そのものではないので止める。
+  const replaced = await replaceImage(folder, "s001", 320, 180, 23);
+  manifest.scenes[0].image.sha256 = sha256(replaced);
+  manifest.scenes[0].assetLoop = { statePath: "quality/assets/scene-image--s001.json", passedSha256: sha256(replaced) };
+  await writeManifest(manifestPath, manifest);
+  const swapped = await check(folder, { sceneIds: ["s001"], policy, assetLoopVerifier: real });
+  assert.deepEqual(swapped.checked.issues, ["operator-image-asset-loop-not-passed:s001"]);
+});
+
 test("取り込み: 決まった寸法の PNG にし、同じ鍵なら作り直さず、検査の後で差し替わった画は使わない", async (t) => {
   const toolchain = await resolveFfmpegToolchain();
   if (!toolchain.ok) { t.skip("ffmpeg/ffprobe is unavailable"); return; }
