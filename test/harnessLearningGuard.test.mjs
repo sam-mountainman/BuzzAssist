@@ -49,7 +49,7 @@ test("印があれば capture は台帳へ書く前に止まる（Canvas / Recei
 });
 
 test("CLI の書き込み系は印があれば拒否し、読むだけの status は通す", () => {
-  assert.deepEqual([...LEARNING_WRITE_ACTIONS].sort(), ["apply", "approve", "capture", "curate", "pending", "promote", "reject", "sync"]);
+  assert.deepEqual([...LEARNING_WRITE_ACTIONS].sort(), ["apply", "approve", "capture", "curate", "pending", "promote", "reject", "rollback", "sync"]);
   const env = childAgentEnvironment(process.env);
   for (const args of [
     ["capture", "--kind", "fact", "--target", "platform:platform-craft", "--text", "子からの捕捉は拒否される", "--session", "child"],
@@ -57,10 +57,11 @@ test("CLI の書き込み系は印があれば拒否し、読むだけの status
     ["promote", "--id", "000000000000", "--reviewer", "x"],
     ["apply", "--id", "000000000000", "--reviewer", "x"],
     ["curate", "--archive", "--id", "000000000000", "--reviewer", "x"],
-    // 差分の承認キュー: 置く・承認・却下は書き込み（一覧と表示は読むだけ）。
+    // 差分の承認キュー: 置く・承認・却下・巻き戻しは書き込み（一覧と表示は読むだけ）。
     ["pending", "--id", "000000000000", "--proposed", "proposed.md", "--note", "子からの案は置かない規則本文"],
     ["approve", "--change", "chg-000000000000", "--reviewer", "x", "--human-verified"],
     ["reject", "--change", "chg-000000000000", "--reviewer", "x", "--reason", "子からは却下しない"],
+    ["rollback", "--change", "chg-000000000000", "--reviewer", "x", "--reason", "子からは戻さない"],
   ]) {
     const result = spawnSync(process.execPath, [HARNESS_LEARN, ...args], { cwd: REPO_ROOT, env, encoding: "utf8" });
     assert.equal(result.status, 2, `${args[0]} が拒否されなかった: ${result.stdout}`);

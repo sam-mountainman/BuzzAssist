@@ -1657,7 +1657,7 @@ function printCurateReport(report) {
 }
 
 /** 台帳・overlay・正本側の記録を書く操作。子エージェントの印があれば拒否する。 */
-export const LEARNING_WRITE_ACTIONS = new Set(["capture", "sync", "promote", "apply", "curate", "pending", "approve", "reject"]);
+export const LEARNING_WRITE_ACTIONS = new Set(["capture", "sync", "promote", "apply", "curate", "pending", "approve", "reject", "rollback"]);
 
 /** 読むだけの呼び方（curate の一覧、pending の一覧と表示）は子エージェントからも通す。 */
 export function isLearningWriteInvocation(args) {
@@ -1750,6 +1750,9 @@ function printHelp() {
   reject    キューの変更を却下する（記録は消さない。正本は書き換えない）
     --change <変更ID>  --reviewer <名前>  --reason "何を見て外したか"  [--human-verified | --agent-attested]
 
+  rollback  approve した変更を巻き戻す。正本の今の sha256 が「変更後」と一致するときだけ変更前へ戻し、
+            違えば rollback-conflict で拒否する。戻したことも applied 台帳へ残す。人の確認でだけ通る
+    --change <変更ID>  --reviewer <名前>  --reason "何を見て戻すか"  --human-verified
 
   自動で入ってくる提案（どちらも提案台帳への追記だけで、正本と overlay には触らない）:
     - Receipt からの自動捕捉: Video Harness の Job が completed / failed / awaiting-human-review で
@@ -1812,7 +1815,7 @@ async function main() {
   process.stdout.write(describeMigration(ensureLearningStateReady({ state })));
 
   // 差分の承認キュー（lib/harnessLearningChanges.mjs）。正本の書き換えはここだけが行う。
-  if (["pending", "approve", "reject"].includes(args.action)) {
+  if (["pending", "approve", "reject", "rollback"].includes(args.action)) {
     await runLearningChangeCli(args, now);
     return;
   }
@@ -2152,7 +2155,7 @@ function shortSha(value) {
   return String(value || "").slice(0, 12);
 }
 
-/** pending / approve / reject。本体は lib/harnessLearningChanges.mjs。 */
+/** pending / approve / reject / rollback。本体は lib/harnessLearningChanges.mjs。 */
 async function runLearningChangeCli(args, now) {
   const changes = await import("../lib/harnessLearningChanges.mjs");
   const common = { repoRoot: REPO_ROOT, now: () => now };
@@ -2209,7 +2212,8 @@ async function runLearningChangeCli(args, now) {
       });
       process.stdout.write(
         `${result.record.changeId} を ${result.targetRel} へ当てました（${shortSha(result.record.beforeSha256)} → ${shortSha(result.record.afterSha256)}、`
-        + `reviewer: ${result.record.reviewer}）。提案 ${result.record.proposalIds.join(", ")} は反映済みとして数えます。\n`,
+        + `reviewer: ${result.record.reviewer}）。提案 ${result.record.proposalIds.join(", ")} は反映済みとして数えます。\n`
+        + `  巻き戻すとき: node scripts/harness-learn.mjs rollback --change ${result.record.changeId} --reviewer <名前> --reason "..." --human-verified\n`,
       );
       if (result.canonicalSkill) {
         process.stdout.write(
@@ -2222,6 +2226,14 @@ async function runLearningChangeCli(args, now) {
     case "reject": {
       const { record } = changes.rejectLearningChange({ ...common, ...attestationArgs(args), changeId: args.change, reason: args.reason });
       process.stdout.write(`${record.changeId} を却下しました（attestedBy: ${record.attestedBy}。記録は消していません）\n`);
+      return;
+    }
+    case "rollback": {
+      const result = changes.rollbackLearningChange({ ...common, ...attestationArgs(args), changeId: args.change, reason: args.reason });
+      process.stdout.write(
+        `${result.record.changeId} を巻き戻しました（${result.targetRel}: ${shortSha(result.record.fromSha256)} → ${shortSha(result.record.toSha256)}、`
+        + `reviewer: ${result.record.reviewer}）。提案 ${result.record.proposalIds.join(", ")} は反映待ちへ戻ります。\n`,
+      );
       return;
     }
     default:
