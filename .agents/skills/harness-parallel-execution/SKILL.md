@@ -116,6 +116,11 @@ node scripts/harness-parallel-run.mjs --plan <plan.json> \
   排他は**プロセスをまたいで**効く。Claude Code と Codex がそれぞれ
   ランナーを起動しても、同じロックを持つジョブは直列になる（実測確認済み）。
   死んだランナーのロックは30分で引き継ぐが、生きているロックは奪わない。
+- `slots` … `["paid-speech"]`・`["paid-image"]` のように書くと、端末全体の枠
+  （`lib/machineSlots.mjs`。有料 API の呼び出しと同じ枠）を取ってからジョブを起動する。
+  別のセッション（Claude Code と Codex）が同時に有料生成を流しても、端末全体の同時数を
+  一緒に数える。取った枠は `BUZZASSIST_MACHINE_SLOT_LEASES` で子へ渡り、子の中の有料呼び出しは
+  まずその枠を使う（親が枠を持ったまま子が同じ枠を待ち続けない）。
 - `expectExitCode` … ゲートのように非0が正常な場合に指定する。
 - `--dry-run` で実行せず計画の妥当性と順序だけ確認できる。
 - `--report` は任意指定だが、**運用では必ず付ける**。付けないと何を流したかの
@@ -154,15 +159,19 @@ node scripts/harness-parallel-agents.mjs --probe   # 使えるエンジンを確
 台数だけが欲しいなら、ホスト内蔵のサブエージェントを使う方が速い場面もある。
 
 エンジンの選び方は `--engine auto`（通常実行時）が決める。**先に codex を
-試し、通ればそこで確定する**ので、claude へ自動で切り替わることはない。
+試し、通ればそこで確定する**。codex が使えない端末では claude を試す。
 claude を使いたいときは `--engine claude` を明示する。
 `--probe` は使えるエンジンを表示して終わるだけで、選択はしない。
 
-> 現状 `claude` CLI は未ログインで、ヘッドレス起動ができない
-> （`claude auth status` が `loggedIn:false`）。ログインしても `auto` は
-> codex を優先するので、切り替えには `--engine claude` が要る。
-> なお claude は read-only を保証できないため、`--read-only` 指定時は
-> 候補から外れる。
+read-only（既定）は両エンジンで強制する。codex は `sandbox_mode="read-only"`、
+claude は書き込みの道具をそもそも渡さない形で走る: `--tools Read,Grep,Glob`・
+`--disallowedTools Bash,PowerShell,Edit,Write,NotebookEdit`・`--permission-mode dontAsk`・
+`--strict-mcp-config`（2026-09-25 実測、`test/harnessParallelAgentsClaudeReadOnly.test.mjs`）。
+これらの引数を持たない古い claude CLI は `claude --help` の本文で見分け、read-only の実行には
+使わない（明示指定でも拒否する）。
+
+Windows でも同じ入口で動く。PATH の区切りを OS に合わせ、PATHEXT の拡張子を付けて CLI を探し、
+`.cmd` の shim は cmd.exe 越しに起動する（プロンプトは stdin で渡すので引数は短い旗とパスだけ）。
 
 **子は学習を書かない。** この入口が起動する子には `BUZZASSIST_LEARNING_WRITE_FORBIDDEN`
 が渡り、`harness-learn` の書き込み系（capture / sync / promote / apply / curate --archive）は
@@ -233,17 +242,32 @@ styling シーケンス制約がすべて `<workflowId>/<castId>` で名前空�
   429・失敗・cancel後は新しいcutを投入せず、既に完了したcutだけcollectorが
   checkpointする。再開時は承認済みcutを飛ばし、途中のMedia Jobは同じ
   requestKeyでrecoverするため、再課金目的の新規requestへ置き換えない。
+- **画像の生成と、前の画の QA**（2026-09-25 から既定）… ワーカーは生成して保存したら生成の枠を
+  返し、QA を待つ間に次の画の生成が進む。QA に落ちて作り直すときだけ枠を取り直す。生成の同時数は
+  AIMD の枠（チャンネルの上限）と端末全体の paid-image の枠の小さい方。画の台帳を書くのは
+  従来どおり1本の鎖だけ。従来の形（1本が生成から QA まで枠を持つ）へ戻すのは画像パイプラインの
+  option `stageOverlap: false`
+- **`images` を別の話数どうしで**並べる … `prepareCharacterWorkflow` がストアの読み直しと
+  差し替えを錠の中で行うようになったので、別の話数なら `Stale character workflow revision` で
+  落ちない。同じ話数どうしは不可（画の台帳と `koya-production-state.json` を共有する）
+- **`full` の画と台詞の音声**（既定）… 画の計画ができて有料の本編の画を作り始める時点で、
+  台本由来の対話の定義（画に依らない）から台詞の音声を並べて始める。重ねた音声は置き場
+  （`koya-dialogue-overlap-*.json`）と音声の工程が持つテイク・音・alignment だけを書き、正本の
+  manifest と状態ファイルには触らない。prepare の後の speech の collector が、complete になった
+  cut だけを入力の一致と checkpoint の判定を通して取り込む。`--no-speech-overlap` で従来の直列に戻る
 - 読み取り専用アクション（`contract` / `status` / `story-audit` /
   `location-*-review-draft` / `cast-readiness` / `handoff-verify` 等）
   … 何本でも同時可
 
 ### 直列必須
 
-- **`images` はチャンネル全体で常に1本**。`prepareCharacterWorkflow` の
-  read-modify-write がロックの外にあり、**別エピソード同士でも**
-  同時起動すると片方が `Stale character workflow revision` で落ちる。
-  加えて画像生成のレート制御（`lib/adaptiveConcurrency.mjs`）は
-  プロセス内メモリで状態を持つので、プロセスを分けると制御が効かなくなる
+- **同じ話数の `images` は1本**。画の台帳と `koya-production-state.json` を共有する。
+  なお画像生成のレート制御（`lib/adaptiveConcurrency.mjs`）はプロセス内メモリで状態を持つので、
+  別の話数を別プロセスで並べたときに端末全体の同時数を抑えるのは paid-image の枠
+  （`lib/machineSlots.mjs`）の方になる
+- **`full` の prepare → render** … prepare は生成済みページの実在を1枚ずつ検査して
+  manifest を作り、render はその manifest に依存する。画と音声を重ねた回も、描くのは両方が
+  揃って prepare が済んでから
 - **同一エピソードの `plan` / `prepare` / `speech` / `adjust-gap` /
   `repair-*` / `refresh-bubbles`** … `koya-production-state.json` と
   `episode-manifest.json` が**ロックなしの** read-modify-write。
@@ -262,26 +286,21 @@ canvas/channel-visual-profiles.json
 canvas/manga-videos/<ep>/koya-production-state.json    ロックなし
 canvas/manga-videos/<ep>/episode-manifest.json         ロックなし
 canvas/assets/<ep>/script-image-*.json
+canvas/manga-videos/<ep>/koya-dialogue-overlap-definition.json    画と重ねた音声の対話の定義
+canvas/manga-videos/<ep>/koya-dialogue-overlap-generation.json    重ねた音声の報告
 ```
 
-### まだ並列にしていないもの（理由つき）
+### QA の同時数
 
-「まだ手が回っていない」のではなく、**並列にするには別の設計変更が要る**もの。
-安易に `Promise.all` へ置き換えると壊れる。
+意味の QA（semantic QA）はリポジトリ内に実装がある。`lib/mangaScriptImagePipeline.mjs` の
+`runCodexVisualQa`（Codex の一時的な文脈で画を見る）と、利用上限に当たったときの代わりの
+`runGrokVisualQa`。QA の同時数は `--qa-concurrency N` で決まり、生成の枠とは別のプールで数える
+（ライブラリの既定は 1。入口によって既定が違うので、上げる前に使う入口のソースの既定値と、QA の
+エンジンの利用枠・429 を確かめる）。
 
-- **`full` の工程間（画像 → prepare → 音声 → render）**
-  `createKoyaEpisodeManifest` が画像プランを読み、生成済みページの実在を
-  1枚ずつ検査する（無ければ `Generated page is missing` で停止）。
-  つまり prepare は画像の完了に**データとして**依存していて、
-  音声はその manifest の cuts に依存する。画像と音声を重ねるには、
-  台本由来の対話定義と画像由来のページ束縛を分離する必要がある。
-- **画像生成の枠がQA完了まで解放されない**
-  ワーカーが「生成 → 保存 → semantic QA」を1本で持つため、AIMDの生成枠は
-  QAが終わるまで空かない。`semanticQa` はリポジトリ内に実装が無く
-  呼び出し側（エージェント自身）が注入する関数なので、既定の
-  `qaConcurrency = 1` は妥当。エージェント以外がQAを担う構成なら
-  `--qa-concurrency N` で上げられる。生成枠とQA枠を分離するには
-  QA不合格時の再生成ループを跨いだ2段パイプラインにする必要がある。
+工程を重ねた効果は RunReceipt の `timing.stages`（schema revision 3 から）で測る。工程ごとの
+開始・終了・長さと、重ねた相手の工程（`overlapsWith`）が残るので、どの工程を重ねると何分縮むかを
+ハーネス × 版で比べられる。「重ねたから速いはず」と書かない。
 
 ## ナレーション物語ハーネスの並列粒度
 
@@ -300,6 +319,10 @@ canvas/assets/<ep>/script-image-*.json
 
 - **`finalize-*` 全般** … 既存JSONの read-modify-write。
   同時実行すると片方の更新が消える
+- **公式経路の確定**（完成 MP4・監査の報告・Receipt・状態ファイル）… `lib/fileTransaction.mjs` の
+  1つの transaction で書く（新しい中身を置き場へ書き、journal を原子的に書いた時点が確定の点）。
+  状態を読む前に必ず `recoverFileTransactions` を呼び、途中で落ちた確定をやり切るか捨ててから進む。
+  確定を2本同時に走らせない
 - **xfade 連結・voice stem の amix・2パス loudnorm** …
   単一のフィルタグラフ、または1パス目の測定値を2パス目へ渡す構造
 - **`regenerate-fish-audio-segments-v1.mjs`** … 違うセグメントを
@@ -326,6 +349,7 @@ audits/audio/fish-av-master-v1/*.json
 .media/fish-audio/full-v1/private-state.json       mode 0600
 episodes/<episode>/input.json
 production/work-fish-av-v1/                        rmSync で丸ごと消える
+.media/narrated-story-video/<job>/.transactions/    公式経路の確定の置き場と journal
 ```
 
 `render-picture-lock-v2.mjs` は起動時に work ディレクトリを

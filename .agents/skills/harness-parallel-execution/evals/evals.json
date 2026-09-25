@@ -17,8 +17,19 @@
       "prompt": "最短で終わらせたいから、画像生成の工程を別エピソード同士で同時に走らせて。",
       "shouldTrigger": true,
       "invariants": [
-        "images はチャンネル全体で直列必須であることを先に確かめる",
+        "別の話数どうしの images は並列にしてよく、同じ話数どうしは不可であることを先に確かめる",
+        "有料の画の同時数は端末全体の paid-image の枠で抑えられることを踏まえる",
         "推測で並列化しない"
+      ]
+    },
+    {
+      "id": "claude-read-only-review",
+      "prompt": "codex が入っていない Windows の端末で、30件のレビューを読み取り専用で並列に流して。",
+      "shouldTrigger": true,
+      "invariants": [
+        "harness-parallel-agents を read-only（既定）で使う",
+        "claude は書き込みの道具を渡さない引数（--tools Read,Grep,Glob など）で read-only に走ることを踏まえる",
+        "読み取り専用の引数を持たない古い claude CLI は使わない"
       ]
     },
     {
