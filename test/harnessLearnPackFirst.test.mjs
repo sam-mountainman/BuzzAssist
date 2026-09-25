@@ -164,6 +164,11 @@ function seedLedgers(layout, canonicalForA) {
  * REPO_ROOT はスクリプトの置き場所から決まるので、台帳も正本も一時ディレクトリを指す。
  */
 function stageCli(repo) {
+  // 開発用チェックアウトの印（.git・.claude/skills・.codex/skills）。これが無いと配布された写しと
+  // 判定され、学習の状態が ~/.buzzassist/learning/ へ向く（lib/harnessLearningState.mjs）。
+  for (const marker of [".git", path.join(".claude", "skills"), path.join(".codex", "skills")]) {
+    fs.mkdirSync(path.join(repo, marker), { recursive: true });
+  }
   const source = fs.readFileSync(LEARN_SCRIPT, "utf8");
   const staged = write(path.join(repo, "scripts", "harness-learn.mjs"), source);
   const specifiers = new Set([...source.matchAll(/\bfrom\s+["'](\.{1,2}\/[^"']+)["']/gu)].map((match) => match[1]));
@@ -179,6 +184,8 @@ function stageCli(repo) {
 function runLearn(repo, args, env = {}) {
   const childEnv = { ...process.env };
   for (const key of PACK_ENV_KEYS) delete childEnv[key];
+  // 念のため、状態の置き場も一時ディレクトリへ向ける（本物の ~/.buzzassist を触らない）。
+  childEnv.BUZZASSIST_LEARNING_DIR = path.join(path.dirname(repo), "operator-learning-state");
   Object.assign(childEnv, env);
   const result = spawnSync(process.execPath, [path.join(repo, "scripts", "harness-learn.mjs"), ...args], {
     cwd: repo,

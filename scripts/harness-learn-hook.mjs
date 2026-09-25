@@ -26,8 +26,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
+import { operatorLearningStateDir } from "../lib/harnessLearningState.mjs";
 
-/** 数えるだけの記録先。"off" で記録しない。既定はリポジトリ外（~/.buzzassist/learning/）。 */
+/**
+ * 数えるだけの記録先。"off" で記録しない。既定は学習の状態の置き場（~/.buzzassist/learning/、
+ * BUZZASSIST_LEARNING_DIR で上書き可）。どのホスト・どの版の写しから動いても同じファイルへ書く。
+ */
 export const HOOK_EVENT_LOG_ENV = "BUZZASSIST_LEARNING_HOOK_LOG";
 const LEARNING_WRITE_FORBIDDEN_ENV = "BUZZASSIST_LEARNING_WRITE_FORBIDDEN";
 const HARD_TIMEOUT_MS = 1500;
@@ -107,16 +111,44 @@ export function hookEventLogPath(env = process.env, home = homedir()) {
   const configured = String(env?.[HOOK_EVENT_LOG_ENV] ?? "").trim();
   if (configured === "off") return null;
   if (configured) return path.resolve(configured);
-  return path.join(home, ".buzzassist", "learning", "hook-events.jsonl");
+  return path.join(operatorLearningStateDir({ env, homeDir: home }), "hook-events.jsonl");
 }
 
-/** sha256 と時刻だけを1行追記する。失敗しても黙って終わる（入力を止めない）。 */
-export function recordHookEvent(prompt, { env = process.env, now = () => new Date().toISOString(), home = homedir() } = {}) {
+export const HOOK_HOSTS = Object.freeze(["claude", "codex"]);
+
+/**
+ * どのホストから呼ばれたか。記録に残して、Codex で信頼されていない（動いていない）フックを
+ * 記録の偏りから見つけられるようにする。
+ *
+ *   1. 起動行の明示（Claude Code の起動行は `--host claude` を渡す）
+ *   2. Codex だけが持つ手がかり: 入力の turn_id、環境変数 PLUGIN_ROOT
+ *      （Codex は互換のため CLAUDE_PLUGIN_ROOT も渡すので、こちらを先に見る）
+ *   3. 写しの置き場（~/.codex/plugins/cache か ~/.claude/plugins/cache か）
+ *   4. CLAUDE_PLUGIN_ROOT だけがある → Claude Code
+ *
+ * Codex の起動行は変えない。変えるとフックの定義の hash が変わり、運営者が信頼し直すまで動かなくなる。
+ */
+export function detectHookHost({ explicit = "", input = null, env = process.env, hookRoot = HOOK_ROOT } = {}) {
+  const named = String(explicit || "").trim().toLowerCase();
+  if (HOOK_HOSTS.includes(named)) return named;
+  if (input && typeof input === "object" && typeof input.turn_id === "string" && input.turn_id) return "codex";
+  if (String(env?.PLUGIN_ROOT ?? "").trim()) return "codex";
+  const parts = path.resolve(String(hookRoot || "")).split(/[\\/]+/u);
+  const cacheAt = parts.findIndex((part, index) => part === "plugins" && parts[index + 1] === "cache");
+  if (cacheAt > 0 && parts[cacheAt - 1] === ".codex") return "codex";
+  if (cacheAt > 0 && parts[cacheAt - 1] === ".claude") return "claude";
+  if (String(env?.CLAUDE_PLUGIN_ROOT ?? "").trim()) return "claude";
+  return "unknown";
+}
+
+/** 時刻・ホスト・sha256 だけを1行追記する。失敗しても黙って終わる（入力を止めない）。 */
+export function recordHookEvent(prompt, { env = process.env, now = () => new Date().toISOString(), home = homedir(), host = "unknown" } = {}) {
   try {
     const file = hookEventLogPath(env, home);
     if (!file) return false;
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    const line = `${JSON.stringify({ at: String(now()), sha256: createHash("sha256").update(String(prompt), "utf8").digest("hex") })}\n`;
+    const recordedHost = HOOK_HOSTS.includes(host) ? host : "unknown";
+    const line = `${JSON.stringify({ at: String(now()), host: recordedHost, sha256: createHash("sha256").update(String(prompt), "utf8").digest("hex") })}\n`;
     fs.appendFileSync(file, line, { encoding: "utf8", mode: 0o600 });
     return true;
   } catch {
@@ -142,12 +174,19 @@ function readStdin(stream, limit = MAX_INPUT_BYTES) {
  * CLI 本体。どの経路でも exit 0 で終わり、応答が無ければ何も出さない。
  * Codex のフックは `node -e` の起動子からこの関数を呼ぶ（シェルに依らず plugin root を解決するため）。
  */
+function hostFromArgv(argv = []) {
+  const index = argv.indexOf("--host");
+  return index >= 0 ? String(argv[index + 1] || "") : "";
+}
+
 export async function runHookCli({
   stdin = process.stdin,
   stdout = process.stdout,
   env = process.env,
   exit = (code) => process.exit(code),
   timeoutMs = HARD_TIMEOUT_MS,
+  host = "",
+  argv = process.argv.slice(2),
 } = {}) {
   // 入力が閉じない・遅いときでも、ユーザーの入力を待たせない（出力なしで打ち切る）。
   const guard = setTimeout(() => exit(0), timeoutMs);
@@ -157,7 +196,10 @@ export async function runHookCli({
     try { input = raw.trim() ? JSON.parse(raw) : null; } catch { input = null; }
     const response = input ? buildHookResponse(input, { env }) : null;
     if (response) {
-      recordHookEvent(promptFromHookInput(input), { env });
+      recordHookEvent(promptFromHookInput(input), {
+        env,
+        host: detectHookHost({ explicit: host || hostFromArgv(argv), input, env }),
+      });
       stdout.write(`${JSON.stringify(response.output)}\n`);
     }
   } catch {

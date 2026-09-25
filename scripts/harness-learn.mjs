@@ -66,11 +66,68 @@ import { buildPublicProposalCatalog, renderPublicProposalCatalog } from "../lib/
 import { loadSensitiveVocabulary, SENSITIVE_VOCABULARY_DIGEST_PATH } from "./audit-package-tarball.mjs";
 import { collectSensitiveSignals } from "./audit-public-surface.mjs";
 import { loadReceipts } from "./harness-receipts.mjs";
+import {
+  ARCHIVE_STATE_FILE,
+  LEARNING_DIR_ENV,
+  LOCAL_OVERLAY_BEGIN,
+  LOCAL_OVERLAY_END,
+  OVERLAY_STATE_FILE,
+  channelLedgerDir,
+  deliverLearningOverlays,
+  learningOverlayCopies,
+  migrateLegacyLearningState,
+  resolveLearningState,
+  sharedLedgerPath,
+  stripLocalOverlayBlock,
+  withLearningFileLock,
+  writeLearningSyncState,
+  writeStateOverlayFile,
+} from "../lib/harnessLearningState.mjs";
+import { learningWritesForbidden } from "../lib/harnessLearningGuard.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const LEARN_DIR = path.join(REPO_ROOT, "docs", "learning");
-const SHARED_PROPOSALS_PATH = path.join(LEARN_DIR, "proposals.jsonl");
-const PUBLIC_CATALOG_PATH = path.join(LEARN_DIR, "proposals.public.jsonl");
+// リリースと一緒に配る設定（targets.json）の置き場。写しの側から読む。
+const CODE_LEARNING_DIR = path.join(REPO_ROOT, "docs", "learning");
+
+/**
+ * 学習の可変状態の置き場（lib/harnessLearningState.mjs）。開発用チェックアウトでは
+ * リポジトリの docs/learning、配布された写しでは ~/.buzzassist/learning/
+ * （BUZZASSIST_LEARNING_DIR で上書き可）。ホストごと・版ごとに台帳が分かれないよう、
+ * 写しがどこにあっても同じ場所を指す。
+ */
+export function learningState() {
+  return resolveLearningState({ codeRoot: REPO_ROOT });
+}
+
+function sharedLedgerFile(kind = "proposals") {
+  return sharedLedgerPath(learningState(), kind);
+}
+
+function publicCatalogFile() {
+  return sharedLedgerFile("proposals.public");
+}
+
+/**
+ * 配布された写しで初めて台帳に触るとき、古い写し（各ホストの版別キャッシュ・
+ * ~/plugins/buzzassist/plugin・自動更新の控え）に残った台帳を1回だけ取り込む。
+ * 開発用チェックアウトと子エージェントでは何もしない。取り込んだら公開 catalog も作り直す。
+ */
+export function ensureLearningStateReady({ env = process.env, state = learningState() } = {}) {
+  if (state.mode !== "installed" || learningWritesForbidden(env)) return null;
+  const result = migrateLegacyLearningState({ state });
+  const ledger = sharedLedgerPath(state, "proposals");
+  const catalog = sharedLedgerPath(state, "proposals.public");
+  if ((result.imported > 0 || !fs.existsSync(catalog)) && fs.existsSync(ledger)) {
+    refreshPublicProposalCatalog({ ledgerPath: ledger, catalogPath: catalog });
+  }
+  return result;
+}
+
+function describeMigration(result) {
+  if (!result || !(result.imported > 0)) return "";
+  const { proposals = 0, applied = 0, archived = 0, receipts = 0 } = result.byKind || {};
+  return `古い写しの台帳から ${result.imported} 件を取り込みました（提案 ${proposals} / 反映 ${applied} / 退避 ${archived} / Receipt ${receipts}。元のファイルは消していません）\n`;
+}
 
 /**
  * 共有台帳から、配布物に入れる公開 catalog（id / kind / target だけ）を作り直す。
@@ -81,11 +138,12 @@ const PUBLIC_CATALOG_PATH = path.join(LEARN_DIR, "proposals.public.jsonl");
  * 直す人がいない回にずれたまま配布される。捕捉と同じロックの中で作り直す。
  */
 export function refreshPublicProposalCatalog({
-  ledgerPath = SHARED_PROPOSALS_PATH, catalogPath = PUBLIC_CATALOG_PATH, read = readJsonl,
+  ledgerPath = sharedLedgerFile("proposals"), catalogPath = publicCatalogFile(), read = readJsonl,
 } = {}) {
   const rendered = renderPublicProposalCatalog(buildPublicProposalCatalog(read(ledgerPath)).entries);
   const current = fs.existsSync(catalogPath) ? fs.readFileSync(catalogPath, "utf8") : null;
   if (current === rendered) return { written: false, catalogPath };
+  fs.mkdirSync(path.dirname(catalogPath), { recursive: true });
   const temporary = `${catalogPath}.${process.pid}.tmp`;
   fs.writeFileSync(temporary, rendered, "utf8");
   fs.renameSync(temporary, catalogPath);
@@ -94,7 +152,7 @@ export function refreshPublicProposalCatalog({
 
 function refreshCatalogForSharedLedger(ledgerPath) {
   // pack 側の台帳は公開 catalog の材料ではない。
-  if (path.resolve(ledgerPath) !== path.resolve(SHARED_PROPOSALS_PATH)) return { written: false, skipped: true };
+  if (path.resolve(ledgerPath) !== path.resolve(sharedLedgerFile("proposals"))) return { written: false, skipped: true };
   return refreshPublicProposalCatalog({ ledgerPath });
 }
 
@@ -123,15 +181,17 @@ export function ledgerPathFor(target, kind = "proposals") {
     if (store) return path.join(store.root, "docs", "learning", name);
     // ambient BUZZASSIST_CHANNEL_PACK_ID を使うと、narrated-story宛の提案が
     // たまたまactiveなKoya packへ入る。target自身をpack IDとして固定する。
+    // 保存先の宣言が無いときの置き場は、開発用チェックアウトなら <repo>/channel-packs/<id>/docs/learning、
+    // 配布された写しなら状態の置き場の channel-packs/<id>/（写しの中に置くと更新で消える）。
     const packId = packIdForTarget(resolvedTarget, definition);
-    return path.join(REPO_ROOT, "channel-packs", packId, "docs", "learning", name);
+    return path.join(channelLedgerDir(learningState(), packId), name);
   }
-  return path.join(LEARN_DIR, name);
+  return sharedLedgerFile(kind);
 }
 
 /** 共有台帳と、設定済みの各Channel Pack台帳を重複なく列挙する。 */
 export function learningLedgerPaths(kind = "proposals") {
-  const paths = new Set([path.join(LEARN_DIR, `${kind}.jsonl`)]);
+  const paths = new Set([sharedLedgerFile(kind)]);
   for (const [target, definition] of Object.entries(loadTargets())) {
     if (definition.scope !== "channel-pack") continue;
     try {
@@ -256,7 +316,7 @@ export const LEARNING_TARGETS = new Proxy({}, {
 // もう一点、overlay は「運用上の補助指示」であって
 // **監査・承認・合否の証跡には使えない**。だから台帳やゲート基準のように
 // 承認の記録そのものである文書は review-only にして自動反映しない。
-const TARGETS_PATH = path.join(LEARN_DIR, "targets.json");
+const TARGETS_PATH = path.join(CODE_LEARNING_DIR, "targets.json");
 
 export function loadTargets(targetsPath = TARGETS_PATH) {
   const raw = JSON.parse(fs.readFileSync(targetsPath, "utf8"));
@@ -406,6 +466,21 @@ export function redactForOverlay(value, context = {}) {
   return sanitizeForOverlay(vocabulary.text);
 }
 
+/** overlay の1項目ずつの行。同梱の overlay と、運営者の端末の区画が同じ書式を使う。 */
+function overlayEntryLines(entries, redaction) {
+  const lines = [];
+  for (const entry of entries) {
+    const repeat = entry.occurrences > 1 ? `（${entry.occurrences}回指摘）` : "";
+    lines.push(`- **${redactForOverlay(entry.text, redaction)}**${repeat}`);
+    const digests = [...new Set((entry.evidence || []).map((ev) => evidenceDigest(ev)))];
+    if (digests.length > 0) {
+      lines.push(`  - 根拠digest: ${digests.map((digest) => `\`${digest}\``).join(", ")}`);
+    }
+    lines.push(`  - 種別: ${entry.kind} / 初回: ${String(entry.firstSeenAt).slice(0, 10)} / id: \`${entry.id}\``);
+  }
+  return lines;
+}
+
 export function renderOverlay(entries, now, context = null) {
   const lines = [OVERLAY_HEADER];
   // 語彙照合なしで生成した overlay は、空でもヘッダで見分けられるようにする。
@@ -415,20 +490,44 @@ export function renderOverlay(entries, now, context = null) {
   if (entries.length === 0) {
     lines.push("_まだ自動反映された項目はありません。_", "");
   } else {
-    const redaction = context ?? overlayRedactionContext();
-    for (const entry of entries) {
-      const repeat = entry.occurrences > 1 ? `（${entry.occurrences}回指摘）` : "";
-      lines.push(`- **${redactForOverlay(entry.text, redaction)}**${repeat}`);
-      const digests = [...new Set((entry.evidence || []).map((ev) => evidenceDigest(ev)))];
-      if (digests.length > 0) {
-        lines.push(`  - 根拠digest: ${digests.map((digest) => `\`${digest}\``).join(", ")}`);
-      }
-      lines.push(`  - 種別: ${entry.kind} / 初回: ${String(entry.firstSeenAt).slice(0, 10)} / id: \`${entry.id}\``);
-    }
-    lines.push("");
+    lines.push(...overlayEntryLines(entries, context ?? overlayRedactionContext()), "");
   }
   lines.push(`_最終更新: ${now}_`, "");
   return lines.join("\n");
+}
+
+/**
+ * 運営者の端末で積み上がった項目の区画。状態の置き場（overlays/<skill>/learned-auto.md）に
+ * 置き、sync と setup のたびにホストが読む各写しの learned-auto.md の末尾へ届ける
+ * （lib/harnessLearningState.mjs の deliverLearningOverlays）。同梱の項目には触らない。
+ */
+export function renderLocalOverlayBlock(entries, now, context = null) {
+  const lines = [
+    `${LOCAL_OVERLAY_BEGIN} この区画はこの端末の harness-learn sync が書きます。手で編集しないでください。 -->`,
+    "",
+    "## この端末で積み上がった指摘",
+    "",
+    "上の同梱項目と同じく運用上の補助指示で、**監査・承認・合否の証跡には使えません**。",
+    "逐語はこの端末の `node scripts/harness-learn.mjs status` で id から引けます。",
+    "",
+  ];
+  if (context?.vocabularyMissing === true) lines.push(OVERLAY_VOCABULARY_MISSING_NOTE, "");
+  lines.push(...overlayEntryLines(entries, context ?? overlayRedactionContext()));
+  lines.push("", `_この端末での最終更新: ${now}_`, LOCAL_OVERLAY_END, "");
+  return lines.join("\n");
+}
+
+/** 同梱の overlay に既に載っている提案 id（運営者の区画へ二重に載せないため）。 */
+function shippedOverlayIds(file) {
+  let text = "";
+  try { text = fs.readFileSync(file, "utf8"); } catch { return new Set(); }
+  return new Set([...stripLocalOverlayBlock(text).matchAll(/id: `([a-f0-9]{12})`/gu)].map((match) => match[1]));
+}
+
+/** `.agents/skills/<id>/references/learned-auto.md` から skill id を取り出す。 */
+function skillIdFromOverlay(overlay) {
+  const match = String(overlay || "").replaceAll("\\", "/").match(/^\.agents\/skills\/([^/]+)\/references\/learned-auto\.md$/u);
+  return match ? match[1] : null;
 }
 
 export const PROPOSAL_KINDS = new Set([
@@ -467,45 +566,8 @@ function appendJsonl(filePath, entry) {
   }
 }
 
-function processIsAlive(pid) {
-  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return error?.code !== "ESRCH";
-  }
-}
-
-function withProposalCaptureLock(filePath, action, { timeoutMs = 10_000, staleMs = 120_000 } = {}) {
-  const lockPath = `${filePath}.capture.lock`;
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const startedAt = Date.now();
-  let handle = null;
-  while (handle === null) {
-    try {
-      handle = fs.openSync(lockPath, "wx");
-      fs.writeSync(handle, `${JSON.stringify({ pid: process.pid, acquiredAt: new Date().toISOString() })}\n`);
-    } catch (error) {
-      if (error?.code !== "EEXIST") throw error;
-      let owner = null;
-      try { owner = JSON.parse(fs.readFileSync(lockPath, "utf8")); } catch { /* stale判定へ */ }
-      const age = Date.now() - (fs.statSync(lockPath, { throwIfNoEntry: false })?.mtimeMs ?? Date.now());
-      if ((owner && !processIsAlive(Number(owner.pid))) || (!owner && age > staleMs)) {
-        try { fs.rmSync(lockPath, { force: true }); } catch { /* 次のloopで再確認 */ }
-        continue;
-      }
-      if (Date.now() - startedAt >= timeoutMs) throw new Error("proposal台帳のcapture lockを取得できない。");
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
-    }
-  }
-  try {
-    return action();
-  } finally {
-    try { fs.closeSync(handle); } catch { /* cleanupを続ける */ }
-    try { fs.rmSync(lockPath, { force: true }); } catch { /* stale recoveryが扱う */ }
-  }
-}
+// 台帳ファイル単位の排他は lib/harnessLearningState.mjs に1つだけ置く（移行と Receipt の索引も同じ規則で取る）。
+const withProposalCaptureLock = withLearningFileLock;
 
 function canonicalPotentialPathSync(filePath) {
   let current = path.resolve(filePath);
@@ -779,6 +841,67 @@ export function writeOverlayFiles(plan, { now, redaction, repoRoot = REPO_ROOT }
   return written;
 }
 
+/**
+ * 運営者の端末（配布された写し）の sync。台帳に積んだのはこの端末の指摘だけなので、
+ * 同梱の overlay を丸ごと書き直すと配布物の項目が消える。だから:
+ *
+ *   1. この端末の項目だけの区画を、状態の置き場 overlays/<skill>/learned-auto.md に書く
+ *      （同梱の overlay に既にある id は載せない）
+ *   2. ホストが実際に読む全部の写し（Claude の installPath、Codex の使用中の版、
+ *      ~/plugins/buzzassist/plugin、いま動いている写し）の learned-auto.md の末尾へ届ける
+ *
+ * 写しの中で書き換えるのは、印で囲んだ区画だけ。setup と自動更新が写しを置き換えても、
+ * 状態の置き場から同じ区画をまた届ける。
+ */
+export function writeLocalOverlayFiles(plan, { now, redaction, state, repoRoot = REPO_ROOT } = {}) {
+  const written = [];
+  for (const { overlay, entries, archive, archivedEntries = [] } of plan.overlays) {
+    const skill = skillIdFromOverlay(overlay);
+    if (!skill) continue;
+    const shipped = shippedOverlayIds(path.join(repoRoot, overlay));
+    const local = entries.filter((entry) => !shipped.has(entry.id));
+    const block = local.length > 0 ? renderLocalOverlayBlock(local, now, redaction) : "";
+    if (writeStateOverlayFile(state.overlaysDir, skill, OVERLAY_STATE_FILE, block)) {
+      written.push({ file: path.join("overlays", skill, OVERLAY_STATE_FILE), count: local.length });
+    }
+    if (!archive) continue;
+    const archiveFull = path.join(state.overlaysDir, skill, ARCHIVE_STATE_FILE);
+    if (archivedEntries.length === 0 && !fs.existsSync(archiveFull)) continue;
+    if (writeMachineOwnedFile(archiveFull, renderArchive(archivedEntries, now, redaction))) {
+      written.push({ file: path.join("overlays", skill, ARCHIVE_STATE_FILE), count: archivedEntries.length });
+    }
+  }
+  return written;
+}
+
+/**
+ * 置き場の種類に応じて overlay を書く。開発用チェックアウトは従来どおりリポジトリの
+ * `.agents/skills/<id>/references/` を書き直す。配布された写しでは状態の置き場へ書いて、
+ * ホストが読む写しへ届け、sync の状態を残す。
+ */
+export function syncOverlaysForState(plan, {
+  now,
+  redaction,
+  state = learningState(),
+  repoRoot = REPO_ROOT,
+  homeDir = homedir(),
+} = {}) {
+  if (state.mode !== "installed") {
+    return { mode: state.mode, written: writeOverlayFiles(plan, { now, redaction, repoRoot }), delivery: null };
+  }
+  const written = writeLocalOverlayFiles(plan, { now, redaction, state, repoRoot });
+  const delivery = deliverLearningOverlays({
+    overlaysDir: state.overlaysDir,
+    copies: learningOverlayCopies({ homeDir, extraRoots: [repoRoot] }),
+  });
+  writeLearningSyncState(state, {
+    at: now,
+    overlays: written,
+    delivered: { copies: delivery.copies, filesWritten: delivery.written.length, skills: delivery.skillsWithLocalBlock },
+  });
+  return { mode: state.mode, written, delivery };
+}
+
 function overlayRedactionContextForCli(args) {
   const allowMissingVocabulary = args.allowMissingVocabulary === true;
   const redaction = overlayRedactionContext({ allowMissingVocabulary });
@@ -791,7 +914,7 @@ function overlayRedactionContextForCli(args) {
   return redaction;
 }
 
-function reportOverlaySync(plan, written) {
+function reportOverlaySync(plan, written, { mode = "development", delivery = null, stateDir = "" } = {}) {
   for (const { file, count } of written) process.stdout.write(`✅ ${file}（${count}件）\n`);
   if (written.length === 0 && plan.held.length === 0) process.stdout.write("更新するものはありませんでした\n");
   if (plan.blocked.length > 0) {
@@ -805,6 +928,16 @@ function reportOverlaySync(plan, written) {
       `⏸  ${h.target} は review-only なので自動反映しません（${h.count}件保留）\n`
       + `    ${h.reason ?? "人が書く記録です"}\n`,
     );
+  }
+  if (mode === "installed") {
+    // 運営者の端末: 状態の置き場の区画を、ホストが読む写しへもう届けてある。
+    process.stdout.write(
+      `\nこの端末の学習の置き場: ${stateDir}\n`
+      + `ホストが読む写し ${delivery?.copies.length ?? 0} 個へ届けました（書き換え ${delivery?.written.length ?? 0} ファイル）`
+      + `${delivery?.copies.length ? `: ${delivery.copies.join(", ")}` : ""}\n`
+      + "新しいセッションから読まれます。setup と自動更新のあとも、同じ区画を届け直します。\n",
+    );
+    return;
   }
   // 正本を書き換えても、ホストが読むのは配布コピー。setup を再実行
   // しないと、エージェントは古い指示を読み続ける。
@@ -1415,6 +1548,9 @@ export function captureLearningProposal(input, {
   // 語彙の照合とは別の層として、文字列の形（注入・隠しコメント・不可視文字・
   // 資格情報・端末パス）を見る。検出しても捨てずに blocked として残す。
   const entry = blockProposalIfUnsafe(built, { homeRoot });
+  // 配布された写しでの最初の書き込みの前に、古い写しの台帳を取り込む（1回だけ）。
+  // 先に書くと「状態の置き場が空ではない」になり、古い台帳を取り込む機会が無くなる。
+  if (ledgerPathResolver === ledgerPathFor) ensureLearningStateReady({ env });
   const ledgerPath = ledgerPathResolver(entry.target, "proposals");
   assertCaptureLedgerIsolation(entry.target, ledgerPath, ledgerPathResolver);
   return lock(ledgerPath, () => {
@@ -1553,7 +1689,7 @@ function printHelp() {
             不合格・skip で出たか」。overlay は毎回まるごと読まれるので「使われた回数」は使わない
     --stale-days <N>         最後の再発からの日数の下限（既定 ${CURATE_DEFAULT_STALE_DAYS}）
     --gate-window-days <N>   直近とみなす Receipt の期間（既定 ${CURATE_DEFAULT_GATE_WINDOW_DAYS}）
-    --receipts-dir <dir>     RunReceipt の置き場（既定 docs/learning/receipts）
+    --receipts-dir <dir>     RunReceipt の置き場（既定は状態の置き場の receipts/。索引 index.jsonl も読む）
     --archive --id <id>[,<id>] --reviewer <名前> --reason "何を見て判断したか" --human-verified
             候補に出た項目だけを learned-archive.md へ退避する（削除しない。再発すれば戻る）。
             人の確認（human-verified）が無い退避記録は効力を持たない——再発しないのは
@@ -1588,6 +1724,14 @@ function printHelp() {
   渡り、capture / sync / promote / apply / curate --archive は拒否される。捕捉したい内容は
   結果本文で親へ返し、親が確かめてから capture する。
 
+  学習の置き場（台帳・applied・退避・Receipt の索引・sync の状態・この端末の overlay）:
+    開発用チェックアウト（.git と .claude/skills と .codex/skills がある）ではリポジトリの docs/learning。
+    配布された写し（Claude Code と Codex の版別キャッシュ、~/plugins/buzzassist/plugin）では、
+    どの写しから動かしても ~/.buzzassist/learning/（${LEARNING_DIR_ENV} で上書き可）。初回だけ古い写しに
+    残った台帳を ID で重複を除いて取り込む（元のファイルは消さない）。配布された写しの sync は、
+    この端末の項目だけの区画を overlays/<skill>/learned-auto.md に書き、ホストが読む全部の写しの
+    references/learned-auto.md の末尾へ届ける（同梱の項目には触らない。setup のたびにも届け直す）。
+
   channel-pack 宛の正本は Channel Pack（BUZZASSIST_CHANNEL_PACK →
   channel-packs/<id>/）を先に読み、pack 側に無いときだけリポジトリ直下を読む。
   どれを読んだかは status / review / promote / apply の出力に出る。
@@ -1611,6 +1755,10 @@ function main() {
   if (LEARNING_WRITE_ACTIONS.has(args.action) && !(args.action === "curate" && args.archive !== true)) {
     assertLearningWriteAllowed(process.env, args.action);
   }
+
+  // 配布された写しでは、ホストや版に依らず同じ状態の置き場を読む。初回だけ古い写しの台帳を取り込む。
+  const state = learningState();
+  process.stdout.write(describeMigration(ensureLearningStateReady({ state })));
 
   const proposals = learningLedgerPaths("proposals").flatMap(readJsonl);
   const applied = learningLedgerPaths("applied").flatMap(readJsonl);
@@ -1741,8 +1889,8 @@ function main() {
       // digest 語彙が無ければここで止まる（fail-closed）。--allow-missing-vocabulary
       // でだけ通し、その overlay にはヘッダで印が付く。
       const redaction = overlayRedactionContextForCli(args);
-      const wrote = writeOverlayFiles(plan, { now, redaction });
-      reportOverlaySync(plan, wrote);
+      const synced = syncOverlaysForState(plan, { now, redaction, state });
+      reportOverlaySync(plan, synced.written, { mode: synced.mode, delivery: synced.delivery, stateDir: state.stateDir });
       break;
     }
 
@@ -1790,9 +1938,9 @@ function main() {
         break;
       }
       const plan = planOverlaySync(summary, targets, { archivedRecords: [...archived, ...records] });
-      const written = writeOverlayFiles(plan, { now, redaction: overlayRedactionContextForCli(args) });
+      const synced = syncOverlaysForState(plan, { now, redaction: overlayRedactionContextForCli(args), state });
       process.stdout.write(`${records.length} 件を learned-archive.md へ退避しました（削除はしていません。再発すれば overlay へ戻ります）。\n`);
-      reportOverlaySync(plan, written);
+      reportOverlaySync(plan, synced.written, { mode: synced.mode, delivery: synced.delivery, stateDir: state.stateDir });
       break;
     }
 

@@ -58,6 +58,11 @@ function tempRoot(t) {
 /** 本物の CLI を一時リポジトリで動かす（harnessLearnPackFirst.test.mjs と同じ写し方）。 */
 function stageRepo(root, { channelLearning } = {}) {
   const repo = path.join(root, "repo");
+  // 開発用チェックアウトの印（.git・.claude/skills・.codex/skills）。これが無いと配布された写しと
+  // 判定され、学習の状態が ~/.buzzassist/learning/ へ向く（lib/harnessLearningState.mjs）。
+  for (const marker of [".git", path.join(".claude", "skills"), path.join(".codex", "skills")]) {
+    fs.mkdirSync(path.join(repo, marker), { recursive: true });
+  }
   write(path.join(repo, "docs", "learning", "targets.json"), `${JSON.stringify({ targets: TARGETS }, null, 2)}\n`);
   write(path.join(repo, "config", "harness-deployments.json"), `${JSON.stringify({
     deployments: [{ harnessId: "sample-harness", root: ".", entrypoint: "node scripts/sample-entry.mjs" }],
@@ -78,6 +83,8 @@ function stageRepo(root, { channelLearning } = {}) {
 function runLearn(repo, args) {
   const env = { ...process.env };
   for (const key of PACK_ENV_KEYS) delete env[key];
+  // 念のため、状態の置き場も一時ディレクトリへ向ける（本物の ~/.buzzassist を触らない）。
+  env.BUZZASSIST_LEARNING_DIR = path.join(path.dirname(repo), "operator-learning-state");
   const result = spawnSync(process.execPath, [path.join(repo, "scripts", "harness-learn.mjs"), ...args], {
     cwd: repo, env, encoding: "utf8", input: "", timeout: 60_000,
   });

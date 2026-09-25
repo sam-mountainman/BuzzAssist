@@ -10,6 +10,7 @@ import {
   HOOK_EVENT_LOG_ENV,
   analyzeUserPrompt,
   buildHookResponse,
+  detectHookHost,
   hookEventLogPath,
 } from "../scripts/harness-learn-hook.mjs";
 import { PLUGIN_HOOK_MANIFESTS, stagePluginHooks } from "../scripts/setup-agents.mjs";
@@ -101,7 +102,8 @@ test("CLI は常に exit 0 で、当たったときだけ JSON を出し、数�
     assert.match(output.hookSpecificOutput.additionalContext, /harness-self-improvement/u);
     const lines = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line));
     assert.equal(lines.length, 1);
-    assert.deepEqual(Object.keys(lines[0]).sort(), ["at", "sha256"]);
+    assert.deepEqual(Object.keys(lines[0]).sort(), ["at", "host", "sha256"]);
+    assert.ok(["claude", "codex", "unknown"].includes(lines[0].host));
     assert.match(lines[0].sha256, /^[a-f0-9]{64}$/u);
     assert.equal(readFileSync(log, "utf8").includes("合成の依頼"), false, "発言本文を保存した");
 
@@ -123,9 +125,29 @@ test("CLI は常に exit 0 で、当たったときだけ JSON を出し、数�
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-  // 記録先の既定はリポジトリの外。
+  // 記録先の既定はリポジトリの外（学習の状態の置き場）。BUZZASSIST_LEARNING_DIR で一緒に動く。
   assert.equal(hookEventLogPath({}, join(tmpdir(), "home")), join(tmpdir(), "home", ".buzzassist", "learning", "hook-events.jsonl"));
+  assert.equal(
+    hookEventLogPath({ BUZZASSIST_LEARNING_DIR: join(tmpdir(), "state") }, join(tmpdir(), "home")),
+    join(tmpdir(), "state", "hook-events.jsonl"),
+  );
   assert.equal(hookEventLogPath({ [HOOK_EVENT_LOG_ENV]: "off" }), null);
+});
+
+test("記録にどちらのホストから来たかを残す（Codex の起動行は変えずに見分ける）", () => {
+  const home = join(tmpdir(), "synthetic-home");
+  const noEnv = {};
+  assert.equal(detectHookHost({ explicit: "claude", env: { PLUGIN_ROOT: "x" } }), "claude", "起動行の明示が優先");
+  assert.equal(detectHookHost({ input: { turn_id: "turn-1", prompt: "x" }, env: noEnv, hookRoot: tmpdir() }), "codex");
+  // Codex は互換のため CLAUDE_PLUGIN_ROOT も渡すので、PLUGIN_ROOT を先に見る。
+  assert.equal(detectHookHost({ env: { PLUGIN_ROOT: "p", CLAUDE_PLUGIN_ROOT: "p" }, hookRoot: tmpdir() }), "codex");
+  assert.equal(detectHookHost({ env: noEnv, hookRoot: join(home, ".codex", "plugins", "cache", "buzzassist", "buzzassist", "9.9.9") }), "codex");
+  assert.equal(detectHookHost({ env: noEnv, hookRoot: join(home, ".claude", "plugins", "cache", "buzzassist", "buzzassist", "9.9.9") }), "claude");
+  assert.equal(detectHookHost({ env: { CLAUDE_PLUGIN_ROOT: "p" }, hookRoot: tmpdir() }), "claude");
+  assert.equal(detectHookHost({ env: noEnv, hookRoot: tmpdir() }), "unknown");
+  // Claude Code の起動行はホストを明示する。Codex の起動行は変えない（変えると信頼し直しになる）。
+  assert.match(readJson("hooks/claude-hooks.json").hooks.UserPromptSubmit[0].hooks[0].command, /--host claude$/u);
+  assert.doesNotMatch(readJson("hooks/codex-hooks.json").hooks.UserPromptSubmit[0].hooks[0].command, /--host/u);
 });
 
 test("入力が閉じなくても短時間で exit 0 で終わり、ユーザーの入力を待たせない", async () => {
