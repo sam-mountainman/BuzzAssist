@@ -94,6 +94,9 @@ const CHECKS = Object.freeze({
   bookendTransitionMeasured: true,
   operatorReplacementCleared: true,
   qualityLoopPassed: true,
+  voiceTakeQuality: true,
+  voiceCastRouting: true,
+  characterIdentityReviewed: true,
 });
 const SIGNOFF_AUDIT_IDS = Object.freeze([
   "perceptualReviewChecks",
@@ -101,7 +104,10 @@ const SIGNOFF_AUDIT_IDS = Object.freeze([
   "perceptualEvidenceHashes",
   "contactSheetOriginalDetailReviewed",
   "qualityLoopPassed",
+  "characterIdentityReviewed",
 ]);
+// 人物の同一性の採点（合成値）。署名された採点が下限以上であることを Receipt が見る。
+const IDENTITY_SCORE = 90;
 // 品質ループの契約 digest（合成値）。合格した回の採点がこの契約に対するものであることを Receipt が見る。
 const QUALITY_CONTRACT_DIGEST = "9".repeat(64);
 // 1秒・16x16の黒映像と無音AACを持つ、ffprobe/ffmpegで実際に全編decode
@@ -192,7 +198,7 @@ async function completedFixture(root, {
     qualityReview: {
       contractDigest: QUALITY_CONTRACT_DIGEST,
       evaluatorContextId: "review-context-001",
-      rubricScores: { "script-image-fit": 95 },
+      rubricScores: { "script-image-fit": 95, "character-identity": IDENTITY_SCORE },
       notes: "合成の採点",
     },
     reviewedAt: "2026-09-01T00:00:00.000Z",
@@ -228,6 +234,12 @@ async function completedFixture(root, {
         videoSha256: finalVideo.sha256,
         contactSheetSha256: contactSheet.sha256,
         ...(id === "qualityLoopPassed" ? { contractDigest: QUALITY_CONTRACT_DIGEST } : {}),
+        ...(id === "characterIdentityReviewed" ? {
+          contractDigest: QUALITY_CONTRACT_DIGEST,
+          criterionId: "character-identity",
+          minimumScore: 80,
+          score: IDENTITY_SCORE,
+        } : {}),
       };
     }
   }
@@ -955,6 +967,8 @@ test("narrated signoffは現行contract・現在の成果物SHA・別review cont
     ["品質ループの合格が別のsignoffに結合", { auditCheckOverrides: { qualityLoopPassed: { pass: true, signoffSha256: "e".repeat(64), videoSha256: "e".repeat(64), contactSheetSha256: "e".repeat(64), contractDigest: QUALITY_CONTRACT_DIGEST } } }, /auditChecks\.qualityLoopPassed/u],
     ["採点が別の品質契約", { signoffOverrides: { qualityReview: { contractDigest: "8".repeat(64), evaluatorContextId: "review-context-001", rubricScores: {}, notes: "別の契約の採点" } } }, /品質ループの契約/u],
     ["品質ループ未合格", { checks: { ...CHECKS, qualityLoopPassed: false } }, /auditChecks\.qualityLoopPassed/u],
+    ["人物の同一性の採点が下限割れ", { signoffOverrides: { qualityReview: { contractDigest: QUALITY_CONTRACT_DIGEST, evaluatorContextId: "review-context-001", rubricScores: { "character-identity": 70 }, notes: "下限割れの採点" } } }, /人物の同一性/u],
+    ["人物の同一性の採点が署名と違う", { signoffOverrides: { qualityReview: { contractDigest: QUALITY_CONTRACT_DIGEST, evaluatorContextId: "review-context-001", rubricScores: { "character-identity": 85 }, notes: "報告と違う採点" } } }, /人物の同一性/u],
     ["別video SHA", { signoffOverrides: { videoSha256: "e".repeat(64) } }, /final-video SHA/u],
     ["別contact sheet SHA", { signoffOverrides: { contactSheetSha256: "e".repeat(64) } }, /contact-sheet SHA/u],
     ["productionと同じcontext", {

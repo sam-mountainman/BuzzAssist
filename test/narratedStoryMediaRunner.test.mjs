@@ -20,7 +20,7 @@ import { narratedStoryRunPaths, runNarratedStoryPipeline } from "../lib/narrated
 import { createPaidMediaJobBroker, paidMediaRequestIdentity } from "../lib/paidMediaJobBroker.mjs";
 import { _testing as adapterTesting, executeVideoHarnessAdapter } from "../lib/videoHarnessAdapters.mjs";
 import { _testing as jobTesting } from "../lib/videoHarnessJob.mjs";
-import { bookendFixtureAdapters, createBookendFixtureMedia } from "./fixtures/narratedBookendFixture.mjs";
+import { bookendFixtureAdapters, createBookendFixtureMedia, passingVoiceQualityGate } from "./fixtures/narratedBookendFixture.mjs";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const noSleep = async () => {};
@@ -299,6 +299,7 @@ test("公式経路: 止まった回は決着していない Media Job と journa
     mediaJobRunner: make(),
     mediaJobProbe: bookendFixtureAdapters(fixture).mediaJobProbe,
     ffmpegToolchain: toolchain,
+    voiceQualityGate: passingVoiceQualityGate,
     jobIdentityDigest: "a1".repeat(32),
     env: {},
   });

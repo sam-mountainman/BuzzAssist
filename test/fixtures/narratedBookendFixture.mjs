@@ -171,3 +171,22 @@ export function bookendFixtureAdapters(fixture, { truncatedLastStoryVoice = fals
 }
 
 export const fixtureSha256 = sha256;
+
+/**
+ * 声の品質ゲートの合成（python の QA 実行系を使わない）。全テイクを合格にする。本物のゲートの判定は
+ * test/narratedStoryVoiceQuality.test.mjs と test/voiceQualityGate.test.mjs が見る。
+ */
+export const passingVoiceQualityGate = Object.freeze({
+  available: async () => true,
+  audit: async ({ checks }) => ({
+    checks: checks.map((check) => ({
+      id: check.id,
+      type: check.type,
+      status: "pass",
+      metrics: { utmos: 4.2, cer: 0.01, durationSec: 0.75 },
+      problems: [],
+      warnings: [],
+      unavailable: [],
+    })),
+  }),
+});

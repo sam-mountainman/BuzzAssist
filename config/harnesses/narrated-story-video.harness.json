@@ -1,6 +1,6 @@
 {
   "id": "narrated-story-video",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "displayName": "ナレーション物語動画（実写素材＋カメラワーク）",
   "note": "クライアント名・チャンネル名はここに書かない。ここは『何が作れるか』の宣言であって、誰のためのものかの記録ではない。",
   "produces": {
@@ -42,6 +42,7 @@
     {
       "id": "narration-intelligibility",
       "what": "各発話区間で voice RMS − bed RMS ≥ 6dB。全体が合格でもナレーションが埋もれていれば落とす",
+      "human": "語りが聞き取れるかの最終判断は、独立 reviewer が完成 MP4 を通して聴いた署名済み signoff（perceptualReviewChecks）で行う",
       "evidenceAuditIds": [
         "narrationBedSeparation",
         "perceptualReviewChecks"
@@ -65,6 +66,7 @@
     {
       "id": "external-visual-signoff",
       "what": "目視サインオフは外部が書いたものだけを受け取る。finalizerは転記のみ。差し戻し（approved: false）は品質ループの回として記録するが、この保証は承認された signoff でしか pass にしない",
+      "human": "完成 MP4 と contact sheet を原寸で見て承認するのは、生成とは別の文脈の reviewer（運営者の信頼リストにある鍵で署名する）。生成側・finalizer は判断しない",
       "evidenceAuditIds": [
         "perceptualReviewBoundToOutput",
         "perceptualEvidenceHashes",
@@ -107,10 +109,29 @@
     {
       "id": "quality-loop",
       "what": "完成と呼ぶのは、信頼リストの鍵で署名された独立レビューの回が品質ループに記録され、その回で機械ゲートが全部通り、評価項目の加重平均が目標点以上で、どの項目も下限を下回らないときだけ（台本と画の意味・人物の同一性・語りの声は、視聴者が「話が違う」「別人」「声が違う」と気づくので下限を高くしてある）。届かない回は失敗指紋を残して人待ちで止まり、次の回には前回の失敗指紋と修正内容、前の回で使っていない評価文脈のレビューが要る。止まる条件は目標到達・人の判断・費用・時間・回数・停滞",
+      "human": "評価項目の採点は、生成とは別の文脈の reviewer が回ごとに新しい文脈で行う。止まった回を続けるか、前の Job のループを引き継ぐか、上限を変えるかは人（運営者）が決める",
       "evidenceAuditIds": [
         "qualityLoopPassed"
       ],
       "inForceSince": "buzzassist-narrated-story-audit-v3"
+    },
+    {
+      "id": "voice-quality",
+      "what": "語りと台詞の全テイクを共通の音声品質ゲート（lib/voiceQualityGate.mjs: 声に渡した読みを基準にした CER、UTMOS、間・端無音・音量・抑揚）で測り、ゲートに落ちたテイクは採用しない（Channel Pack の voiceQuality.maxTakesPerTurn の範囲で撮り直し、合格のテイクが無い文が残れば人待ちで止まる。必須の指標が測れないテイクも合格にしない）。各テイクが宣言した役の声で作られ、使えない（blocked）役の声が1つも使われていないことを Media Job の受領記録で照合する。QA 環境が無ければ有料生成の前に止まる",
+      "evidenceAuditIds": [
+        "voiceTakeQuality",
+        "voiceCastRouting"
+      ],
+      "inForceSince": "buzzassist-narrated-story-audit-v4"
+    },
+    {
+      "id": "character-identity",
+      "what": "同じ人物が場面をまたいで同じ顔・年齢・体型・服で出る（別人に見えない）。品質ループで合格した回の、信頼リストの鍵で署名された承認済みの独立レビューが、評価項目 character-identity を下限（80）以上で採点し、その signoff が今の MP4 と contact sheet に結び付いていること。下限は Channel Pack から変えられない",
+      "human": "人物の同一性は、生成とは別の文脈の reviewer が完成 MP4 と contact sheet を原寸で見て判断する。機械の顔照合（pHash など）では合否を決めない",
+      "evidenceAuditIds": [
+        "characterIdentityReviewed"
+      ],
+      "inForceSince": "buzzassist-narrated-story-audit-v4"
     }
   ],
   "entrypoint": "node scripts/run-video-harness.mjs",

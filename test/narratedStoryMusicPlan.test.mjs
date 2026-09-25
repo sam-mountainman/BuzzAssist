@@ -21,7 +21,7 @@ import {
   runNarratedStoryPipeline,
 } from "../lib/narratedStoryPipeline.mjs";
 import { NARRATED_SCRIPT_PACKAGE_FORMAT } from "../lib/narratedStoryScriptPackage.mjs";
-import { bookendFixtureAdapters, createBookendFixtureMedia } from "./fixtures/narratedBookendFixture.mjs";
+import { bookendFixtureAdapters, createBookendFixtureMedia, passingVoiceQualityGate } from "./fixtures/narratedBookendFixture.mjs";
 
 const execFile = promisify(execFileCallback);
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
@@ -178,6 +178,7 @@ test("公式経路: 区分ごとに運営者の曲と生成した曲を当てて
       mediaJobRunner: async (spec) => { specs.push(spec); return adapters.mediaJobRunner(spec); },
       mediaJobProbe: adapters.mediaJobProbe,
       ffmpegToolchain: toolchain,
+      voiceQualityGate: passingVoiceQualityGate,
       jobIdentityDigest: "f".repeat(64),
       env: {},
     });

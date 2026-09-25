@@ -46,6 +46,7 @@ import {
   BOOKEND_FIXTURE_SCRIPT,
   bookendFixtureAdapters,
   createBookendFixtureMedia,
+  passingVoiceQualityGate,
   writeBookendPack,
 } from "./fixtures/narratedBookendFixture.mjs";
 import { _testing as adapterTesting } from "../lib/videoHarnessAdapters.mjs";
@@ -428,6 +429,7 @@ test("Core narrated-story fixture renders, audits, resumes, and emits a receipt 
     mediaJobRunner,
     mediaJobProbe,
     ffmpegToolchain: toolchain,
+    voiceQualityGate: passingVoiceQualityGate,
   };
   let coreOutcome = null;
   let outerAdapterCalls = 0;
@@ -566,7 +568,8 @@ test("Core narrated-story fixture renders, audits, resumes, and emits a receipt 
   assert.equal(first.review.quality.contractDigest.length, 64);
   assert.ok(first.knownRemainingIssues.includes("audit-qualityLoopPassed-pending-or-failed"));
   for (const auditId of NARRATED_STORY_AUDIT_IDS) {
-    if (!perceptual.has(auditId) && auditId !== "qualityLoopPassed") {
+    // 品質ループと人物の同一性（署名済み独立レビューの採点）も独立 signoff の後で判定する。
+    if (!perceptual.has(auditId) && auditId !== "qualityLoopPassed" && auditId !== "characterIdentityReviewed") {
       assert.equal(
         first.auditChecks[auditId].pass,
         true,
@@ -793,6 +796,7 @@ async function runBookendFixture({ root, env, fixture, script = BOOKEND_FIXTURE_
     mediaJobRunner: adapters.mediaJobRunner,
     mediaJobProbe: adapters.mediaJobProbe,
     ffmpegToolchain: toolchain,
+    voiceQualityGate: passingVoiceQualityGate,
     env,
   };
   const outcome = await runNarratedStoryVideo(options, { allowDirectUnboundJobForTests: true });
@@ -818,7 +822,7 @@ test("bookends: OP → story → review is rendered as a real MP4, its boundarie
     }), "utf8");
     const env = cleanTrustEnv({ [REVIEWER_TRUST_PATH_ENV]: trustPath });
     const fixture = await createBookendFixtureMedia(join(temp, "fixture-media"), toolchain);
-    const perceptual = new Set(["perceptualReviewChecks", "perceptualReviewBoundToOutput", "perceptualEvidenceHashes", "contactSheetOriginalDetailReviewed", "qualityLoopPassed"]);
+    const perceptual = new Set(["perceptualReviewChecks", "perceptualReviewBoundToOutput", "perceptualEvidenceHashes", "contactSheetOriginalDetailReviewed", "qualityLoopPassed", "characterIdentityReviewed"]);
     let passing = null;
 
     await t.test("the reference render passes every automatic audit, then finalizes only with a signed independent review", async () => {

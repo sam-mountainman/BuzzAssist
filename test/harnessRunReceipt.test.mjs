@@ -572,8 +572,9 @@ test("過去の契約の必須監査を全て満たした回は、今の宣言�
   }
 });
 
-test("ナレーション物語: 過去の監査契約を満たした回は品質ループを足した宣言でも合格のまま、今の契約では品質ループの合格が要る", async () => {
-  // 品質ループ（qualityLoopPassed）は監査契約 v3 から。v1・v2 の必須監査を全て満たした過去の回を、
+test("ナレーション物語: 過去の監査契約を満たした回は保証を足した宣言でも合格のまま、今の契約では足した保証の合格が要る", async () => {
+  // 品質ループ（qualityLoopPassed）は監査契約 v3、声の監査（voiceTakeQuality・voiceCastRouting）と
+  // 人物の同一性（characterIdentityReviewed）は v4 から。当時の必須監査を全て満たした過去の回を、
   // 保証を足した今の宣言で記録しても、当時無かった保証のぶんだけ後から不合格にしない。
   const { isGateNotInForce } = await import("../lib/harnessRunReceipt.mjs");
   const { NARRATED_STORY_AUDIT_CONTRACT_VERSION } = await import("../lib/narratedStoryPipeline.mjs");
@@ -602,7 +603,19 @@ test("ナレーション物語: 過去の監査契約を満たした回は品質
   }
   const quality = declaration.guarantees.find((g) => g.id === "quality-loop");
   assert.deepEqual(quality.evidenceAuditIds, ["qualityLoopPassed"]);
-  assert.equal(quality.inForceSince, NARRATED_STORY_AUDIT_CONTRACT_VERSION, "品質ループの保証は、それが入った監査契約の版から");
+  assert.equal(quality.inForceSince, `${current.series}-v3`, "品質ループの保証は、それが入った監査契約の版から");
+  const voice = declaration.guarantees.find((g) => g.id === "voice-quality");
+  assert.deepEqual(voice.evidenceAuditIds, ["voiceTakeQuality", "voiceCastRouting"]);
+  const identity = declaration.guarantees.find((g) => g.id === "character-identity");
+  assert.deepEqual(identity.evidenceAuditIds, ["characterIdentityReviewed"]);
+  for (const added of [voice, identity]) {
+    assert.equal(added.inForceSince, NARRATED_STORY_AUDIT_CONTRACT_VERSION, `${added.id}: それが入った監査契約の版から`);
+  }
+  // 人の判断に依存する保証は、何を人が判断するのかを宣言に書く。
+  for (const id of ["external-visual-signoff", "quality-loop", "character-identity"]) {
+    assert.ok(String(declaration.guarantees.find((g) => g.id === id)?.human || "").length > 10, `${id}: human が無い`);
+  }
+  const sinceNumber = (guarantee) => parse(guarantee.inForceSince || `${current.series}-v1`).number;
 
   const record = (requiredAudits, contractVersion, failing = "") => {
     const receipt = openRunReceipt({ projectDir: root, harnessId: "narrated-story-video", entrypoint: "scripts/run-video-harness.mjs", action: "audit" });
@@ -619,18 +632,22 @@ test("ナレーション物語: 過去の監査契約を満たした回は品質
     assert.ok(past && past.series === current.series && past.number < current.number, `${entry.version}: 今の監査契約より前の同じ系列であること`);
     const done = record(entry.requiredAudits, entry.version);
     assert.equal(done.outcome, "pass", `${entry.version}: 当時の必須監査を全て満たした回が不合格になる（未測定 ${done.summary.skippedGates.join(", ") || "なし"}）`);
-    assert.ok(done.summary.notInForceGates.includes("quality-loop"), "品質ループは当時無かった保証として対象外に数える");
-    assert.equal(done.gates["quality-loop"].verdict, "skip", "測っていないものを pass と書かない");
+    const laterGuarantees = declaration.guarantees.filter((g) => sinceNumber(g) > past.number).map((g) => g.id).sort();
+    assert.ok(laterGuarantees.length > 0);
+    assert.deepEqual([...done.summary.notInForceGates].sort(), laterGuarantees, "当時無かった保証だけを対象外に数える");
+    for (const id of laterGuarantees) assert.equal(done.gates[id].verdict, "skip", "測っていないものを pass と書かない");
     for (const id of entry.requiredAudits) {
       assert.equal(record(entry.requiredAudits, entry.version, id).outcome, "fail", `${entry.version}: ${id} が落ちても合格になる`);
     }
   }
-  // 今の契約では、品質ループの監査が無い（縮んだ）・落ちた回は不合格、合格した回だけが合格。
+  // 今の契約では、足した保証の監査が無い（縮んだ）・落ちた回は不合格、合格した回だけが合格。
   const previousRoster = fixture.contracts.find((entry) => entry.version === previous).requiredAudits;
   const shrunk = record(previousRoster, NARRATED_STORY_AUDIT_CONTRACT_VERSION);
   assert.equal(shrunk.outcome, "fail");
-  assert.deepEqual(shrunk.summary.skippedGates, ["quality-loop"]);
-  assert.equal(record([...NARRATED_STORY_AUDIT_IDS], NARRATED_STORY_AUDIT_CONTRACT_VERSION, "qualityLoopPassed").outcome, "fail");
+  assert.deepEqual([...shrunk.summary.skippedGates].sort(), ["character-identity", "voice-quality"]);
+  for (const id of ["qualityLoopPassed", "voiceTakeQuality", "voiceCastRouting", "characterIdentityReviewed"]) {
+    assert.equal(record([...NARRATED_STORY_AUDIT_IDS], NARRATED_STORY_AUDIT_CONTRACT_VERSION, id).outcome, "fail", `${id} が落ちても合格になる`);
+  }
   assert.equal(record([...NARRATED_STORY_AUDIT_IDS], NARRATED_STORY_AUDIT_CONTRACT_VERSION).outcome, "pass");
 });
 

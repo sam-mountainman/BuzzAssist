@@ -295,7 +295,7 @@ test("公式経路: 台本パッケージから、字幕は表記・声は読み
     return;
   }
   const { runNarratedStoryPipeline, narratedStoryRunPaths } = await import("../lib/narratedStoryPipeline.mjs");
-  const { bookendFixtureAdapters, createBookendFixtureMedia } = await import("./fixtures/narratedBookendFixture.mjs");
+  const { bookendFixtureAdapters, createBookendFixtureMedia, passingVoiceQualityGate } = await import("./fixtures/narratedBookendFixture.mjs");
   const root = await mkdtemp(join(tmpdir(), "narrated-script-package-run-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const pack = join(root, "pack");
@@ -315,6 +315,7 @@ test("公式経路: 台本パッケージから、字幕は表記・声は読み
     mediaJobRunner: async (spec) => { specs.push(spec); return adapters.mediaJobRunner(spec); },
     mediaJobProbe: adapters.mediaJobProbe,
     ffmpegToolchain: toolchain,
+    voiceQualityGate: passingVoiceQualityGate,
     jobIdentityDigest: "d".repeat(64),
     env: {},
   });
