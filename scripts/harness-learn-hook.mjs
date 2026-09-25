@@ -18,6 +18,13 @@
 //
 // 誤検知しにくい言い回しに絞っている。「違う」単独は「違うファイル」のような普通の
 // 文にも出るので、文頭か「それは違う」の形だけを見る。
+//
+// もう1つ、**回数で起動する振り返り**を持つ（lib/harnessLearningReflection.mjs）。
+// 訂正の言い回しを伴わない好み・禁止事項・実測の事実は、この検知では拾えない。
+// 会話ごとにユーザーの発言の回数だけを数え、既定で 10 回ごとに「この会話で残すものが
+// あれば capture する」の短い促しを足す。capture で0に戻る。数えるのは回数と時刻だけで、
+// 間隔は BUZZASSIST_LEARNING_REFLECT_EVERY（0 で止まる）。フックの定義（起動行）は変えない
+// ——Codex はフックの定義の hash で信頼を記録するので、変えると信頼し直しになる。
 
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -26,6 +33,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
+import { buildReflectionContext, countPromptForReflection } from "../lib/harnessLearningReflection.mjs";
 import { operatorLearningStateDir } from "../lib/harnessLearningState.mjs";
 
 /**
@@ -75,32 +83,45 @@ export function promptFromHookInput(input) {
   return typeof value === "string" ? value : "";
 }
 
-export function buildAdditionalContext(analysis, { learnScript = path.join(HOOK_ROOT, "scripts", "harness-learn.mjs") } = {}) {
+const DEFAULT_LEARN_SCRIPT = path.join(HOOK_ROOT, "scripts", "harness-learn.mjs");
+
+export function buildAdditionalContext(analysis, { learnScript = DEFAULT_LEARN_SCRIPT, sessionToken = "" } = {}) {
+  // 会話 ID が分かれば --session に入れて渡す（capture がその会話の振り返りの数を0に戻せるように）。
+  const session = sessionToken || "<この会話のID>";
   return [
     `[BuzzAssist 自己改善] 直前の発言に「${analysis.labels.join("・")}」らしい言い回しがあります。`,
     "こちらの誤りの訂正・禁止事項・繰り返しの指摘に当たるなら、harness-self-improvement スキルに従い、",
-    `その場で \`node "${learnScript}" capture --kind <correction|constraint|preference> --target <宛先> --text "何をどう直すか" --evidence "何を観測したか" --session "<この会話のID>"\` で提案として残してください。`,
+    `その場で \`node "${learnScript}" capture --kind <correction|constraint|preference> --target <宛先> --text "何をどう直すか" --evidence "何を観測したか" --session "${session}"\` で提案として残してください。`,
     "発言を逐語で写さず、何を直すかの形に書き直すこと。当たらなければ何もしなくてよい（提案ゼロは正常）。",
   ].join("\n");
 }
 
 /**
- * フックの応答を作る。何も足さないときは null。
+ * フックの応答を作る。何も足さないときは null。副作用は無い（数えるのは呼び出し側）。
  * UserPromptSubmit 以外のイベントと、子エージェント（学習を書かない印あり）には何も返さない。
+ *
+ * @param reflection countPromptForReflection の結果。due のときだけ振り返りの一段落を足す。
  */
-export function buildHookResponse(input, { env = process.env, learnScript } = {}) {
+export function buildHookResponse(input, { env = process.env, learnScript, reflection = null } = {}) {
   const event = String(input?.hook_event_name ?? "UserPromptSubmit");
   if (event !== "UserPromptSubmit") return null;
   const forbidden = String(env?.[LEARNING_WRITE_FORBIDDEN_ENV] ?? "").trim();
   if (forbidden !== "" && forbidden !== "0") return null;
+  if (input && typeof input === "object" && input.agent_id) return null;
   const analysis = analyzeUserPrompt(promptFromHookInput(input));
-  if (!analysis.matched) return null;
+  const reflect = reflection?.counted === true && reflection?.due === true;
+  if (!analysis.matched && !reflect) return null;
+  const script = learnScript ? { learnScript } : {};
+  const parts = [];
+  if (analysis.matched) parts.push(buildAdditionalContext(analysis, { ...script, sessionToken: reflection?.sessionToken || "" }));
+  if (reflect) parts.push(buildReflectionContext(reflection, { learnScript: learnScript || DEFAULT_LEARN_SCRIPT }));
   return {
     analysis,
+    reflection: reflect ? { count: reflection.count, interval: reflection.interval } : null,
     output: {
       hookSpecificOutput: {
         hookEventName: "UserPromptSubmit",
-        additionalContext: buildAdditionalContext(analysis, learnScript ? { learnScript } : {}),
+        additionalContext: parts.join("\n\n"),
       },
     },
   };
@@ -194,12 +215,17 @@ export async function runHookCli({
     const raw = await readStdin(stdin);
     let input = null;
     try { input = raw.trim() ? JSON.parse(raw) : null; } catch { input = null; }
-    const response = input ? buildHookResponse(input, { env }) : null;
+    // 会話ごとの発言回数を数える（回数と時刻だけ。子エージェントと 0 設定では数えない）。
+    const reflection = input && typeof input === "object" ? countPromptForReflection(input, { env }) : null;
+    const response = input ? buildHookResponse(input, { env, reflection }) : null;
     if (response) {
-      recordHookEvent(promptFromHookInput(input), {
-        env,
-        host: detectHookHost({ explicit: host || hostFromArgv(argv), input, env }),
-      });
+      // 数えるだけの記録は、従来どおり訂正らしい言い回しに当たったときだけ残す。
+      if (response.analysis.matched) {
+        recordHookEvent(promptFromHookInput(input), {
+          env,
+          host: detectHookHost({ explicit: host || hostFromArgv(argv), input, env }),
+        });
+      }
       stdout.write(`${JSON.stringify(response.output)}\n`);
     }
   } catch {

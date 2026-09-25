@@ -84,6 +84,7 @@ import {
   writeStateOverlayFile,
 } from "../lib/harnessLearningState.mjs";
 import { learningWritesForbidden } from "../lib/harnessLearningGuard.mjs";
+import { REFLECTION_INTERVAL_ENV, resetReflectionCounter } from "../lib/harnessLearningReflection.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // リリースと一緒に配る設定（targets.json）の置き場。写しの側から読む。
@@ -1719,6 +1720,9 @@ function printHelp() {
   台本の直し・訂正を人から受けたら、--target channel-pack:narrated-story-script で capture する。
   ユーザーの訂正らしい発言は、プラグインの UserPromptSubmit フック（scripts/harness-learn-hook.mjs）が
   見つけてエージェントに capture を促す。フックは何も書き換えず、発言本文も保存しない。
+  同じフックが会話ごとにユーザーの発言の回数だけを数え（学習の置き場の reflection/）、既定で 10 回ごとに
+  「この会話で残すものがあれば capture する」と短く促す。同じ --session で capture すると0に戻る。
+  間隔は ${REFLECTION_INTERVAL_ENV}（0 で数えるのも促すのも止まる）。子エージェントでは数えない。
 
   子エージェント（harness-parallel-agents が起動）には BUZZASSIST_LEARNING_WRITE_FORBIDDEN が
   渡り、capture / sync / promote / apply / curate --archive は拒否される。捕捉したい内容は
@@ -1794,6 +1798,10 @@ function main() {
       });
       const repeats = proposals.filter((p) => (p.id ?? proposalId(p)) === entry.id).length;
       process.stdout.write(`記録しました: ${entry.id}\n`);
+      // 回数で起動する振り返り（UserPromptSubmit フック）の数を、この会話（--session）で0に戻す。
+      if (resetReflectionCounter(args.session, { now: () => now })) {
+        process.stdout.write("  この会話の振り返りの数を0に戻しました\n");
+      }
       if (repeats > 0) {
         process.stdout.write(
           `  ⚠️ 同じ指摘は これで ${repeats + 1} 回目です。まだ正本へ反映できていません\n`,
