@@ -268,7 +268,9 @@ function main() {
       }
       process.stdout.write(
         "\n候補を出しただけで、選んだわけではありません。"
-        + "入口を叩く前に、そのハーネスの正本スキルを読むこと。\n",
+        + "入口を叩く前に、そのハーネスの正本スキルを読むこと。\n"
+        + "入力要件・前提・実績を添えた候補と、決めきれないときの1問は "
+        + "node scripts/run-video-harness.mjs plan-request --request \"...\"（MCP は plan_video_request）で出る。\n",
       );
       break;
     }

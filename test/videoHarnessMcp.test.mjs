@@ -16,6 +16,7 @@ import {
   TOOL_CREATE_VIDEO_HARNESS_REVIEWER_KEY,
   TOOL_GET_VIDEO_HARNESS_JOB,
   TOOL_LIST_VIDEO_HARNESS_JOBS,
+  TOOL_PLAN_VIDEO_REQUEST,
   TOOL_RESUME_VIDEO_HARNESS_JOB,
   TOOL_RUN_VIDEO_HARNESS,
   TOOL_SIGNOFF_VIDEO_HARNESS_JOB,
@@ -49,6 +50,7 @@ test("generic MCP definitions expose plan/run, get/list/cancel/resume without se
   const definitions = videoHarnessToolDefinitions();
   assert.deepEqual(definitions.map((definition) => definition.name), VIDEO_HARNESS_TOOL_NAMES);
   assert.deepEqual(VIDEO_HARNESS_TOOL_NAMES, [
+    TOOL_PLAN_VIDEO_REQUEST,
     TOOL_RUN_VIDEO_HARNESS,
     TOOL_GET_VIDEO_HARNESS_JOB,
     TOOL_LIST_VIDEO_HARNESS_JOBS,
@@ -390,6 +392,59 @@ test("R5-REV-02: run/resume/get/list/cancel/collect-feedback never fall back to 
   assert.equal(calls.at(-1)[1].projectDir, resolve("/work/from-env"));
   for (const [, args] of calls) assert.notEqual(args.projectDir, cwdBefore, "MCP server の cwd が projectDir になることはない");
   assert.equal(process.cwd(), cwdBefore);
+});
+
+test("plan_video_request は読むだけの道具で、Job 系と同じ path の規則を使い、project が決まらなくても止めない", async () => {
+  const definitions = videoHarnessToolDefinitions();
+  const planTool = definitions.find((definition) => definition.name === TOOL_PLAN_VIDEO_REQUEST);
+  assert.deepEqual(planTool.inputSchema.required, ["request"]);
+  assert.deepEqual(Object.keys(planTool.inputSchema.properties).sort(), [
+    "channelPackPath", "checkPrerequisites", "harnessId", "options", "projectDir", "request", "scriptPath",
+  ]);
+  assert.equal(planTool.inputSchema.properties.checkPrerequisites.default, false);
+  assert.equal(planTool.annotations.readOnlyHint, true);
+  assert.equal(planTool.annotations.destructiveHint, false);
+  assert.match(planTool.description, /no model and no paid API, creates no Job/u);
+  assert.match(planTool.description, /run-video-harness\.mjs plan-request/u, "CLI と同じ結果だと説明する");
+
+  const calls = [];
+  const planner = async (args) => {
+    calls.push(args);
+    return { operation: "plan-request", summaryLines: ["判定: fixture"], decision: { status: "selected" } };
+  };
+  const env = { EXCALIDRAW_PROJECT_DIR: "/work/from-env" };
+  const result = await handleVideoHarnessToolCall({
+    name: TOOL_PLAN_VIDEO_REQUEST,
+    arguments: { request: "朗読の動画", projectDir: "/work/project", scriptPath: "rel/script.md", channelPackPath: "/packs/pack", options: { episodeId: "ep" }, checkPrerequisites: true },
+  }, { planner, env });
+  assert.equal(result.content[0].text, "判定: fixture");
+  assert.equal(result.structuredContent.operation, "plan-request");
+  assert.equal(calls[0].request, "朗読の動画");
+  assert.equal(calls[0].projectDir, resolve("/work/project"));
+  assert.equal(calls[0].scriptPath, resolve("/work/project", "rel/script.md"), "相対 path は projectDir 基準");
+  assert.equal(calls[0].channelPackPath, resolve("/packs/pack"));
+  assert.deepEqual(calls[0].options, { episodeId: "ep" });
+  assert.equal(calls[0].checkPrerequisites, true);
+  assert.equal(calls[0].env, env);
+
+  // project が決まらなくても、読むだけなので止めない（その project の記録を読まないだけ）。
+  await handleVideoHarnessToolCall({ name: TOOL_PLAN_VIDEO_REQUEST, arguments: { request: "朗読" } }, { planner, env: {} });
+  assert.equal(calls.at(-1).projectDir, null);
+  assert.equal(calls.at(-1).checkPrerequisites, false);
+  // ただし相対 path は server の cwd で解決しない。
+  await assert.rejects(
+    handleVideoHarnessToolCall({ name: TOOL_PLAN_VIDEO_REQUEST, arguments: { request: "朗読", scriptPath: "rel/script.md" } }, { planner, env: {} }),
+    new RegExp(`^Error: ${REVIEWER_PATH_NOT_ABSOLUTE_CODE}: scriptPath`, "u"),
+  );
+  await assert.rejects(
+    handleVideoHarnessToolCall({ name: TOOL_PLAN_VIDEO_REQUEST, arguments: { request: "朗読", projectDir: "." } }, { planner, env: {} }),
+    new RegExp(`^Error: ${REVIEWER_PATH_NOT_ABSOLUTE_CODE}: projectDir`, "u"),
+  );
+  await assert.rejects(
+    handleVideoHarnessToolCall({ name: TOOL_PLAN_VIDEO_REQUEST, arguments: { request: "朗読", options: ["x"] } }, { planner, env: {} }),
+    /options must be a JSON object/u,
+  );
+  assert.equal(calls.length, 2, "拒否した呼び出しは planner に届かない");
 });
 
 test("the real MCP server registers all generic harness tools and list uses the common envelope", async () => {

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Claude Code / Codex 共通の上位入口。
 //
+//   node scripts/run-video-harness.mjs plan-request --request "依頼文" [--script-path FILE] [--channel-pack BUNDLE]
 //   node scripts/run-video-harness.mjs start --harness ID --script-path FILE --channel-pack BUNDLE
 //   node scripts/run-video-harness.mjs resume --job-id ID --confirmed
 //   node scripts/run-video-harness.mjs status --job-id ID
@@ -34,6 +35,10 @@ function usage() {
   return [
     "BuzzAssist video harness (Claude Code / Codex common entry)",
     "",
+    "plan-request --request TEXT [--project-dir DIR] [--harness ID] [--script-path FILE] [--channel-pack BUNDLE] [--options-json FILE] [--doctor]",
+    "  依頼に合うハーネスの候補・理由（一致した語・否定された語・入力要件・前提・実績・Channel Pack の向き先）と、",
+    "  決めきれないときの1問を JSON で返す。モデルも有料 API も呼ばず、Job も作らない。MCP の plan_video_request と同じ結果。",
+    "  --doctor で候補ごとに harness-doctor を走らせる（既定では走らせない）。start と同じ Koya の引数（--episode-id など）も受ける。",
     "start  --harness ID --script-path FILE --channel-pack BUNDLE [--confirmed] [--reviewer-trust-path JSON]",
     "resume --job-id ID --project-dir DIR --confirmed [--reviewer-trust-path JSON] [--retry-failed-images]",
     "status --job-id ID --project-dir DIR",
@@ -116,6 +121,19 @@ async function main() {
     case "-h":
       process.stdout.write(`${usage()}\n`);
       return;
+    case "plan-request": {
+      const { planVideoRequest } = await import("../lib/videoRequestPlan.mjs");
+      print(await planVideoRequest({
+        request: typeof args.request === "string" ? args.request : "",
+        harnessId: typeof args.harness === "string" ? args.harness : "",
+        projectDir,
+        scriptPath: typeof args.scriptPath === "string" ? resolve(args.scriptPath) : "",
+        channelPackPath: typeof args.channelPack === "string" ? resolve(args.channelPack) : "",
+        options: await optionsFrom(args),
+        checkPrerequisites: args.doctor === true,
+      }));
+      return;
+    }
     case "start": {
       if (!args.scriptPath) throw new Error("start には --script-path が要る。");
       if (!args.channelPack) throw new Error("本番上位Jobには署名済み --channel-pack が要る。");
