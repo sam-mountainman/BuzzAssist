@@ -76,13 +76,27 @@
   そのチャンネルの保存先へ積む。保存先を決められなければ `channel-learning-store-unresolved` で積まずに返す
   （チャンネルの無い保存先へ落とさない）
 - 品質ループ（台本・途中の成果物・企画ブリーフ）の不合格の回の捕捉は、`lib/learningChannelResolver.mjs` が
-  チャンネルを次の順に決める（上ほど強い。Job を優先）:
-  1. 呼び出しが明示したチャンネル
-  2. 制作の Job の `metadata.channel`
-  3. ループの作業フォルダが、台帳のチャンネルの Job の台本の作業フォルダ（`options.scriptQualityWorkDir`）と同じかその中
-  4. 企画ブリーフの `channel.id`、またはループの作業フォルダが台帳のチャンネルの `strategy.workDir`・`projectDir` と
+  チャンネルを次の順に決める（Job を優先）:
+  1. 制作の Job の `metadata.channel`
+  2. ループの作業フォルダが、台帳のチャンネルの Job の台本の作業フォルダ（`options.scriptQualityWorkDir`）と同じかその中
+  3. 企画ブリーフの `channel.id`、またはループの作業フォルダが台帳のチャンネルの `strategy.workDir`・`projectDir` と
      同じかその中
-- 手がかりが別々のチャンネルを指せば `channel-learning-channel-ambiguous`、台帳を読めなければ
-  `channel-registry-unreadable`、チャンネルが決まったのに保存先を決められなければ `channel-learning-store-unresolved`。
-  どれも推測で寄せずに積まない。ループの CLI の出力には、積んだチャンネルの保存先が出る
+- 明示の手がかり（ループの CLI の `--channel <id>` と、`--job <id>` の Job の `metadata.channel`）も無条件には勝たない。
+  上の順で決めた答えと照らし、別のチャンネルを指せば決めない。`--channel` と `--job` の Job のチャンネルが違うときも
+  同じ。作業フォルダが台帳のチャンネルの場所の外でも、明示すればそのチャンネルの保存先へ積める
+- 手がかりが別々のチャンネルを指せば `channel-learning-channel-ambiguous`（回は記録し、学習だけ積まない）、台帳を
+  読めなければ `channel-registry-unreadable`、チャンネルが決まったのに保存先を決められなければ
+  `channel-learning-store-unresolved`。どれも推測で寄せずに積まない。ループの CLI の出力には、積んだチャンネルの
+  保存先が出る
 - どれにも当たらなければ（`metadata.channel` の無い Job を含む）、今までどおりハーネス単位の Channel Pack の台帳へ積む
+
+## 品質ループの CLI の `--channel` / `--job`
+
+台本（`script-quality-loop.mjs`）・途中の成果物（`asset-quality-loop.mjs`）・企画ブリーフ（`strategy-brief.mjs`）の
+`record`（途中の成果物は `verify` も）で使える。ほかの動詞に付けると止まる（`strategy-brief.mjs` の `--channel` は
+`draft` でも使うが、意味はブリーフの下書きのチャンネル）。
+
+- `--channel <id>` は運営者の配置表の `channels` の id。台帳に無いチャンネルは、回を記録する前に止まる
+- `--job <Job の ID>` は、台帳のチャンネルの作業フォルダ（`projectDir` の `canvas/harness-runs`）から Job を探して、その
+  `metadata.channel` を使う。見つからない Job（`learning-channel-job-not-found`）・チャンネルで作っていない Job
+  （`learning-channel-job-without-channel`）・読めない台帳（`channel-registry-unreadable`）も、回を記録する前に止まる

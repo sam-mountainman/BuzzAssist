@@ -145,6 +145,16 @@
         "--channel なしの一覧はチャンネルの中身を出さず件数だけなので、それを「無い」の根拠にしない",
         "チャンネル固有の事実を共有層（genre: / platform:）へ --channel 付きで捕捉しない。一般化するならチャンネルを外して別の提案にする"
       ]
+    },
+    {
+      "id": "loop-learning-explicit-channel-mismatch",
+      "prompt": "台本の品質ループの record に --channel を付けたら、学習が channel-learning-channel-ambiguous で積まれなかった。--channel を付けたんだから、そのチャンネルに積んで。",
+      "shouldTrigger": true,
+      "invariants": [
+        "明示の --channel / --job も、Job の metadata.channel・作業フォルダ・ブリーフの channel.id と照らされ、食い違えば積まない決まりだと説明する",
+        "回そのものは記録されていて、学習だけが積まれていないことを伝える",
+        "どの手がかりが別のチャンネルを指しているかを確かめて直し、推測でどちらかへ寄せて積まない"
+      ]
     }
   ]
 }

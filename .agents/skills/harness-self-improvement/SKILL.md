@@ -319,10 +319,10 @@ node scripts/harness-learn.mjs rollback --change <変更ID> --reason "..."      
 - 台本の品質ループ（`scripts/script-quality-loop.mjs record`、本体 `lib/scriptQualityLearning.mjs`）と企画ブリーフの
   品質ループ（本体 `lib/strategyBriefLearning.mjs`）: 合格しなかった回の、下限割れの評価項目 id・落ちた機械ゲート id・
   止まった理由のコードを非公開台帳へ積む
-- どのループも、台帳のチャンネルが分かればそのチャンネルの保存先へ積む（本体 `lib/learningChannelResolver.mjs`。
-  Job の `metadata.channel` を優先し、次にループの作業フォルダ、企画ブリーフの `channel.id` で決める）。手がかりが
-  別々のチャンネルを指す・台帳を読めない・保存先を決められないときは、推測で寄せずに積まない。どれにも当たらなければ
-  従来の Channel Pack の台帳へ積む。決め方と理由コードは `references/learning-store-ja.md`
+- どのループも、台帳のチャンネルが分かればそのチャンネルの保存先へ積む（本体 `lib/learningChannelResolver.mjs`。Job の
+  `metadata.channel`・ループの作業フォルダ・企画ブリーフの `channel.id` の順。CLI の `--channel`・`--job` の明示もこれと
+  照らす）。手がかりが食い違う・台帳を読めない・保存先を決められないときは、推測で寄せずに積まない。どれにも当たらなければ
+  従来の Channel Pack の台帳へ積む。決め方・CLI の引数・理由コードは `references/learning-store-ja.md`
 
 ### Job の決着時（RunReceipt から）
 
@@ -431,12 +431,14 @@ node scripts/harness-learn.mjs curate --archive --id <id> \
 node scripts/harness-receipts.mjs rollup            # 版ごとのゲート失敗率
 node scripts/harness-receipts.mjs rollup --harness koya-manga-video
 node scripts/harness-receipts.mjs rollup --by host   # ハーネス × ホスト × 版の pass 率・所要時間と、片方のホストだけ低い組の警告
-node scripts/harness-receipts.mjs export --out <path>   # 返せる形だけ
+node scripts/harness-receipts.mjs rollup --channel <id>   # そのチャンネルで作った Job だけ（rollup --by host・list も）
+node scripts/harness-receipts.mjs export --out <path>   # 返せる形だけ（チャンネルを出さないので --channel は付けられない）
 ```
 
 `rollup` は学習の置き場の索引（`receipts/index.jsonl`）が指す RunReceipt を読み、`--project-dir <dir>` を
 付けると `<dir>/canvas/harness-runs/*/run-receipt.json` も読み取り専用で読む。`--by host` では、ホストの
 記録が無い（unrecorded）・判定できない（unknown）・作ったホストと再開したホストが混ざった組は比べない。
+`rollup` の `channels` はチャンネルごとの件数・合否・失敗の理由コードの上位で、チャンネルの無い記録は1行にまとまる。
 
 `worstGates` の先頭が、次に直すべき場所。**ここを見ずに書いた提案は、
 思いつきと区別がつかない**。`capture` の evidence には、可能なら
