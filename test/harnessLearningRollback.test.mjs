@@ -48,6 +48,7 @@ test("rollback は変更後と一致するときだけ変更前へ戻し、戻�
     { from: record.fromSha256, to: record.toSha256, reviewer: record.reviewer, attestedBy: record.attestedBy, ids: record.proposalIds },
     { from: rows[0].afterSha256, to: rows[0].beforeSha256, reviewer: REVIEWER, attestedBy: "human-verified", ids: [entries[0].id] },
   );
+  assert.equal(record.actor, "human");
   // 巻き戻した変更は反映記録に数えない。提案は反映待ちへ戻る。
   assert.deepEqual(expandAppliedRecords(rows), []);
   assert.equal(summaryOf(fx)[0].applied, false);
@@ -71,22 +72,52 @@ test("変更後に正本が変わっていたら rollback-conflict で拒否し�
   assert.deepEqual(readJsonl(fx.ledger("applied")).map((row) => row.recordType), [CHANGE_APPLIED]);
 });
 
-test("rollback も人の確認でだけ通り、承認していない変更は巻き戻せない", (t) => {
+test("rollback はエージェントも人も打て、誰が戻したかを分けて残す。名前だけの人の印と、承認していない変更は拒否する", (t) => {
   const fx = fixture(t);
-  const { change, text } = approved(fx);
+  const { change, text, entries } = approved(fx);
   for (const attempt of [
-    { reviewer: REVIEWER, agentAttested: true, isInteractive: true },
     { reviewer: REVIEWER, humanVerified: true, isInteractive: false },
     { reviewer: REVIEWER, isInteractive: true },
+    { reviewer: REVIEWER },
   ]) {
-    assert.throws(() => rollbackLearningChange({ ...fx.options, ...attempt, changeId: change.changeId, reason: "合成の理由で戻す" }), (error) => error.code === "human-verification-required");
+    assert.throws(() => rollbackLearningChange({ ...fx.options, ...attempt, changeId: change.changeId, reason: "合成の理由で戻す" }), (error) => error.code === "human-verification-required", JSON.stringify(attempt));
   }
   assert.throws(() => rollbackLearningChange({ ...fx.options, ...HUMAN, changeId: change.changeId, reason: "短" }), /理由/u);
   assert.equal(fs.readFileSync(fx.skillPath, "utf8"), text);
   const second = fx.addProposal(proposal({ text: "合成の手順では錠を取ってから追記する" }));
   const pending = enqueueLearningChange({ ...fx.options, proposalIds: [second.id], proposedText: proposedWith(text, [second], `${RULE}（二つ目）`), note: `${RULE}（二つ目）` });
-  assert.throws(() => rollbackLearningChange({ ...fx.options, ...HUMAN, changeId: pending.change.changeId, reason: "合成の理由で戻す" }), (error) => error.code === "change-not-applied");
-  assert.throws(() => rollbackLearningChange({ ...fx.options, ...HUMAN, changeId: "chg-000000000000", reason: "合成の理由で戻す" }), (error) => error.code === "change-not-found");
+  assert.throws(() => rollbackLearningChange({ ...fx.options, changeId: pending.change.changeId, reason: "合成の理由で戻す" }), (error) => error.code === "change-not-applied");
+  assert.throws(() => rollbackLearningChange({ ...fx.options, changeId: "chg-000000000000", reason: "合成の理由で戻す" }), (error) => error.code === "change-not-found");
+
+  // 人が当てた変更を、エージェントが戻す（当てた側と戻す側は別でもよい）。
+  const { record } = rollbackLearningChange({ ...fx.options, changeId: change.changeId, reason: "合成の規則が別の節と重複した" });
+  assert.equal(fs.readFileSync(fx.skillPath, "utf8"), BASE_SKILL);
+  assert.deepEqual(
+    { actor: record.actor, reviewer: record.reviewer, attestedBy: record.attestedBy },
+    { actor: "agent", reviewer: "agent", attestedBy: "agent-self-attested" },
+  );
+  assert.deepEqual(readJsonl(fx.ledger("applied")).map((row) => [row.recordType, row.actor]), [[CHANGE_APPLIED, "human"], [CHANGE_ROLLED_BACK, "agent"]]);
+  assert.equal(summaryOf(fx).find((item) => item.id === entries[0].id).applied, false, "巻き戻した提案が反映済みのまま");
+});
+
+test("エージェントが当てた変更を人が戻せ、どちらも base と変更後の sha256 の照合は今までどおり", (t) => {
+  const fx = fixture(t);
+  const entry = fx.addProposal(proposal());
+  const text = proposedWith(BASE_SKILL, [entry]);
+  const { change } = enqueueLearningChange({ ...fx.options, proposalIds: [entry.id], proposedText: text, note: RULE });
+  approveLearningChange({ ...fx.options, changeId: change.changeId });
+  assert.equal(summaryOf(fx)[0].applied, true, "エージェントが当てた変更が反映済みに数えられていない");
+  // 変更後に正本が動いていれば、エージェントでも人でも rollback-conflict で止まる。
+  fs.writeFileSync(fx.skillPath, `${text}\n追記\n`);
+  for (const who of [{}, HUMAN]) {
+    assert.throws(() => rollbackLearningChange({ ...fx.options, ...who, changeId: change.changeId, reason: "合成の理由で戻す" }), (error) => error.code === "rollback-conflict");
+  }
+  fs.writeFileSync(fx.skillPath, text);
+  const { record } = rollbackLearningChange({ ...fx.options, ...HUMAN, changeId: change.changeId, reason: "合成の理由で人が戻す" });
+  assert.deepEqual({ actor: record.actor, reviewer: record.reviewer, attestedBy: record.attestedBy }, { actor: "human", reviewer: REVIEWER, attestedBy: "human-verified" });
+  assert.equal(fs.readFileSync(fx.skillPath, "utf8"), BASE_SKILL);
+  assert.deepEqual(readJsonl(fx.ledger("applied")).map((row) => [row.recordType, row.actor]), [[CHANGE_APPLIED, "agent"], [CHANGE_ROLLED_BACK, "human"]]);
+  assert.equal(summaryOf(fx)[0].applied, false);
 });
 
 test("後の変更を先に戻せば、前の変更も戻せる（変更後の sha256 で順序が守られる）", (t) => {

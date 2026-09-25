@@ -87,7 +87,12 @@ import {
 } from "../lib/harnessLearningState.mjs";
 import { learningWritesForbidden } from "../lib/harnessLearningGuard.mjs";
 import { REFLECTION_INTERVAL_ENV, resetReflectionCounter } from "../lib/harnessLearningReflection.mjs";
-import { expandAppliedRecords } from "../lib/harnessLearningChangeRecords.mjs";
+import {
+  AGENT_SELF_ATTESTED,
+  CHANGE_ACTOR_AGENT,
+  CHANGE_ID_PATTERN,
+  expandAppliedRecords,
+} from "../lib/harnessLearningChangeRecords.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // リリースと一緒に配る設定（targets.json）の置き場。写しの側から読む。
@@ -657,6 +662,14 @@ export function canonicalHasPromotionEvidence(record, canonicalText) {
 // 反映済みの判定。id が1行あるだけでは足りない——正本にその規則が
 // 実在することまで見る。以前は id だけで判定していたので、正本を
 // 1文字も変えずに apply を通せてしまい、status からも消えていた。
+/** 差分の承認キューでエージェントが当てた変更（expandAppliedRecords が展開した行）か。 */
+export function isAgentAppliedChange(record) {
+  return record?.via === "approve"
+    && record.actor === CHANGE_ACTOR_AGENT
+    && record.attestedBy === AGENT_SELF_ATTESTED
+    && CHANGE_ID_PATTERN.test(String(record.changeId || ""));
+}
+
 export function isActuallyApplied(record, readCanonical, hashCanonical = null) {
   if (!record?.id) return false;
   // 昇格記録には、何をどこへ書いたかが要る。
@@ -669,7 +682,13 @@ export function isActuallyApplied(record, readCanonical, hashCanonical = null) {
   // summarizeProposals が applied を未反映一覧から消すので、**後から人が
   // 昇格しようとすると「既に反映済み」で拒まれる**——機械の自己申告が、
   // 人の確認を締め出していた。
-  if (record.attestedBy !== HUMAN_VERIFIED) return false;
+  //
+  // 例外は1つだけ: 差分の承認キュー（pending → approve）でエージェントが当てた変更
+  // （actor: agent）。運営者の決定（2026-09-26）で、正本スキルの人の確認はリリースのときの
+  // 1回にまとめた。キューを通った変更は、変更前後の sha256・元の提案・時刻・当てた者が
+  // 残り、1件ずつ巻き戻せる。apply --agent-attested（直接の編集の自己申告）は、変更前の版も
+  // 巻き戻しも残らないので、今までどおり反映済みに数えない。
+  if (record.attestedBy !== HUMAN_VERIFIED && !isAgentAppliedChange(record)) return false;
   if (!record.targetPath) return false;
   // 記録そのものも渡す。channel-pack 宛は同じ相対パスでも pack 側が正本で、
   // 相対パスだけでは「どちらの写しを読むか」を決められない（ops-7）。
@@ -1434,7 +1453,10 @@ function recordedCanonicalSource(resolved) {
  * ところにある。ここで作るのは関門ではなく、**読める証跡**。
  */
 
-/** 人の確認として数える印。これ以外は記録に残るが「反映済み」にはならない。 */
+/**
+ * 人の確認として数える印。これ以外は記録に残るが「反映済み」にはならない（例外は、差分の承認キューで
+ * エージェントが当てた変更だけ。isAgentAppliedChange を参照）。
+ */
 export const HUMAN_VERIFIED = "human-verified";
 
 export function attestationFor({ reviewer, isInteractive, agentAttested, humanVerified }) {
@@ -1861,8 +1883,9 @@ function printHelp() {
 
   apply     提案を反映済みとして記録する（promote と同じ検査を通す）
     --id <提案ID>  --reviewer <名前>  --note "何をどう書いたか"
-            人が skill-creator で正本を直接直したときの記録。正本を書き換える案を機械が作るなら、
-            下の pending → approve を使う（approve が apply と同じ記録を残すので、apply は要らない）
+            人が skill-creator で正本を直接直したときの記録。機械が提案を正本へ反映するなら、
+            下の pending → approve を使う（approve が apply と同じ記録を残すので、apply は要らない）。
+            apply --agent-attested は記録に残るが反映済みには数えない（変更前の版と巻き戻しが残らない）
 
   pending   正本（SKILL.md・台帳）の書き換え案を、差分と「読んだ時点の正本の sha256（base）」つきで
             キューに置く。正本には触らない。案には提案ごとの印（buzzassist-learning:<提案ID>）と
@@ -1875,22 +1898,26 @@ function printHelp() {
     --show <変更ID>           差分を出す。--out <file> で書き換え後の全文を別のファイルへ書く
                               （その写しで skill-evals を流すため。正本そのものへは書かない）
 
-  approve   キューの変更を正本へ当てる。人の確認（対話端末＋ --human-verified ＋ reviewer 名）でだけ通り、
-            --agent-attested では通らない。正本の今の sha256 が base と一致するときだけ書き、違えば
-            base-changed で拒否する（読んでから書く）。当てたら applied 台帳へ「適用した変更」
-            （対象・変更前後の sha256・承認者・時刻・元の提案 ID・差分）を1行残す
-    --change <変更ID>  --reviewer <名前>  --human-verified
+  approve   キューの変更を正本へ当てる。エージェントも当てられる（--reviewer を省けば「エージェントが
+            当てた」actor: agent）。人が自分の端末から --reviewer <名前> --human-verified で打てば「人が当てた」
+            actor: human として分けて残す。名前だけ（--human-verified なし）は受け付けない。正本の今の
+            sha256 が base と一致するときだけ書き、違えば base-changed で拒否する（読んでから書く）。
+            当てたら applied 台帳へ「適用した変更」（対象・変更前後の sha256・当てた者・時刻・元の提案 ID・
+            差分）を1行残す。正本スキルを人が確かめるのは、運営者へ配る版を出すリリースのときの1回
+            （npm run skills:check:release と承認者の端末の skill-inventory --approve）
+    --change <変更ID>  [--reviewer <名前> --human-verified]
     [--require-evals]  [--evals-dir <dir>]
             正本スキル（.agents/skills/<id>/SKILL.md）なら、skill-evals の記録で「変更後の版の
             contentSha256 に両ホストの結果があり、変更前の版より悪化していない」かを見る。既定は警告、
             --require-evals のときだけ止める。eval は流さない（モデルを呼ばない）
 
-  reject    キューの変更を却下する（記録は消さない。正本は書き換えない）
-    --change <変更ID>  --reviewer <名前>  --reason "何を見て外したか"  [--human-verified | --agent-attested]
+  reject    キューの変更を却下する（記録は消さない。正本は書き換えない）。誰が外したかを approve と同じく残す
+    --change <変更ID>  --reason "何を見て外したか"  [--reviewer <名前> --human-verified]
 
   rollback  approve した変更を巻き戻す。正本の今の sha256 が「変更後」と一致するときだけ変更前へ戻し、
-            違えば rollback-conflict で拒否する。戻したことも applied 台帳へ残す。人の確認でだけ通る
-    --change <変更ID>  --reviewer <名前>  --reason "何を見て戻すか"  --human-verified
+            違えば rollback-conflict で拒否する。戻したことも applied 台帳へ残す。エージェントも人も戻せ、
+            どちらが戻したかを approve と同じく分けて残す
+    --change <変更ID>  --reason "何を見て戻すか"  [--reviewer <名前> --human-verified]
 
   自動で入ってくる提案（どちらも提案台帳への追記だけで、正本と overlay には触らない）:
     - Receipt からの自動捕捉: Video Harness の Job が completed / failed / awaiting-human-review で
@@ -1926,9 +1953,11 @@ function printHelp() {
   channel-packs/<id>/）を先に読み、pack 側に無いときだけリポジトリ直下を読む。
   どれを読んだかは status / review / promote / apply の出力に出る。
 
-  なぜこの形か: 捕捉は書き換えない、review と curate は既定 dry-run、apply・promote・
-  退避には reviewer 名が要る。自動で正本を書き換える作りにすると、「スクリプトが
-  自分で自分に合格を出す」のと同じ構造になるため。提案ゼロは正常で、毎回何かを書かせる圧はかけない。
+  なぜこの形か: 捕捉は書き換えない、review と curate は既定 dry-run、promote と退避には人の確認が要る。
+  正本はエージェントも pending → approve で直せるが、変更前後の sha256・元の提案・時刻・当てた者を残し、
+  1件ずつ rollback できる。正本スキルを人が確かめるのは、運営者へ配る版（Release）を出すときの1回
+  （skills:check:release の関門と、承認者の端末の skill-inventory --approve）。人が見ないまま他人の端末へ
+  届き、有料 API を動かす指示になるのを防ぐのはそこ。提案ゼロは正常で、毎回何かを書かせる圧はかけない。
 `);
 }
 
@@ -2270,7 +2299,8 @@ async function main() {
       } else {
         process.stdout.write(
           `${entry.id} を機械の自己申告として記録しました。人の確認済みにはなりません`
-          + `（attestedBy: ${attested.attestation.attestedBy}）\n`,
+          + `（attestedBy: ${attested.attestation.attestedBy}）。`
+          + "機械が提案を正本へ反映するなら pending → approve を使うと、変更前後の sha256 と巻き戻しが残り、反映済みに数えます\n",
         );
       }
       break;
@@ -2294,6 +2324,13 @@ function shortSha(value) {
   return String(value || "").slice(0, 12);
 }
 
+/** 誰がした操作か（approve / reject / rollback の出力）。 */
+function actorLabel(record) {
+  return record.actor === CHANGE_ACTOR_AGENT
+    ? `エージェントが実行${record.claimedReviewer ? `（名乗った名前: ${record.claimedReviewer}。人の確認ではない）` : ""}`
+    : `人が実行: ${record.reviewer}（${record.attestedBy}）`;
+}
+
 /** pending / approve / reject / rollback。本体は lib/harnessLearningChanges.mjs。 */
 async function runLearningChangeCli(args, now) {
   const changes = await import("../lib/harnessLearningChanges.mjs");
@@ -2314,9 +2351,10 @@ async function runLearningChangeCli(args, now) {
           `キューに置きました: ${change.changeId}（${change.target} / ${change.targetPath}）\n`
           + `  base ${shortSha(change.baseSha256)} → 変更後 ${shortSha(change.afterSha256)}`
           + `（${change.stats.hunks} hunk、+${change.stats.added} -${change.stats.removed}）/ 提案 ${change.proposalIds.join(", ")}\n`
-          + "  正本はまだ書き換えていません。人が差分を読んで承認します:\n"
+          + "  正本はまだ書き換えていません。差分を読んでから当てます:\n"
           + `    node scripts/harness-learn.mjs pending --show ${change.changeId}\n`
-          + `    node scripts/harness-learn.mjs approve --change ${change.changeId} --reviewer <名前> --human-verified\n`,
+          + `    node scripts/harness-learn.mjs approve --change ${change.changeId}`
+          + "（エージェントが当てる。人が当てるなら自分の端末から --reviewer <名前> --human-verified を足す）\n",
         );
         return;
       }
@@ -2354,27 +2392,28 @@ async function runLearningChangeCli(args, now) {
       process.stdout.write(changes.formatEvalGate(result.gate, { required: args.requireEvals === true }));
       process.stdout.write(
         `${result.record.changeId} を ${result.targetRel} へ当てました（${shortSha(result.record.beforeSha256)} → ${shortSha(result.record.afterSha256)}、`
-        + `reviewer: ${result.record.reviewer}）。提案 ${result.record.proposalIds.join(", ")} は反映済みとして数えます。\n`
-        + `  巻き戻すとき: node scripts/harness-learn.mjs rollback --change ${result.record.changeId} --reviewer <名前> --reason "..." --human-verified\n`,
+        + `${actorLabel(result.record)}）。提案 ${result.record.proposalIds.join(", ")} は反映済みとして数えます。\n`
+        + `  巻き戻すとき: node scripts/harness-learn.mjs rollback --change ${result.record.changeId} --reason "..."\n`,
       );
       if (result.canonicalSkill) {
         process.stdout.write(
-          "  正本スキルを書き換えました。inventory.manifest.json の contentSha256 と版を上げ、"
-          + "skill-inventory --approve を人の端末で打ち直してください（未承認のままだと本番が止まります）。\n",
+          "  正本スキルを書き換えました。.agents/skills/inventory.manifest.json の contentSha256 を今の内容へ更新してください"
+          + "（版の扱いは skill-creator の決まり）。開発用チェックアウトの制作は止まらず、RunReceipt に承認前の正本で作ったと残ります。"
+          + "運営者へ配る版（Release）を出す前に、人が承認者の端末で skill-inventory --approve を打ちます（skills:check:release が確かめます）。\n",
         );
       }
       return;
     }
     case "reject": {
       const { record } = changes.rejectLearningChange({ ...common, ...attestationArgs(args), changeId: args.change, reason: args.reason });
-      process.stdout.write(`${record.changeId} を却下しました（attestedBy: ${record.attestedBy}。記録は消していません）\n`);
+      process.stdout.write(`${record.changeId} を却下しました（${actorLabel(record)}。記録は消していません）\n`);
       return;
     }
     case "rollback": {
       const result = changes.rollbackLearningChange({ ...common, ...attestationArgs(args), changeId: args.change, reason: args.reason });
       process.stdout.write(
         `${result.record.changeId} を巻き戻しました（${result.targetRel}: ${shortSha(result.record.fromSha256)} → ${shortSha(result.record.toSha256)}、`
-        + `reviewer: ${result.record.reviewer}）。提案 ${result.record.proposalIds.join(", ")} は反映待ちへ戻ります。\n`,
+        + `${actorLabel(result.record)}）。提案 ${result.record.proposalIds.join(", ")} は反映待ちへ戻ります。\n`,
       );
       return;
     }

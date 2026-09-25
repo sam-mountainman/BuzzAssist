@@ -68,7 +68,7 @@ test("行の差分は前後どちらへも当てられ、文脈が1行でも違�
   assert.match(renderUnifiedDiff(hunks, { label: "sample" }), /^@@ -1,3 \+1,3 @@$/mu);
 });
 
-test("pending → approve で正本へ当たり、applied 台帳に変更前後の sha256・承認者・時刻・提案 ID が残る", (t) => {
+test("pending → approve（人が当てる）で正本へ当たり、applied 台帳に変更前後の sha256・当てた者・時刻・提案 ID が残る", (t) => {
   const fx = fixture(t);
   const first = fx.addProposal(proposal());
   const second = fx.addProposal(proposal({ text: "合成の手順では錠を取ってから追記する" }));
@@ -93,6 +93,7 @@ test("pending → approve で正本へ当たり、applied 台帳に変更前後�
     { target: applied[0].target, targetPath: applied[0].targetPath, before: applied[0].beforeSha256, after: applied[0].afterSha256, reviewer: applied[0].reviewer, attestedBy: applied[0].attestedBy, at: applied[0].appliedAt, ids: applied[0].proposalIds },
     { target: TARGET, targetPath: SKILL_REL, before: baseSha, after: change.afterSha256, reviewer: REVIEWER, attestedBy: "human-verified", at: NOW, ids: change.proposalIds },
   );
+  assert.equal(applied[0].actor, "human", "人が当てたことを actor で分けて残す");
   assert.equal(record.changeId, change.changeId);
 
   // 適用した変更の行は、提案ごとの反映記録として数えられる（approve のあとに apply は要らない）。
@@ -125,31 +126,64 @@ test("読んでから書く: base が変わっていたら、置くときも承�
   assert.throws(() => showLearningChange({ ...fx.options, changeId: change.changeId, out: path.join(fx.root, "out.md") }), (error) => error.code === "base-changed");
 });
 
-test("承認には人の確認（対話端末＋ --human-verified ＋ reviewer）が要り、機械は自分で承認できない", (t) => {
+test("エージェントも承認でき、記録は「エージェントが当てた」になる。名前だけ・非対話の人の印は拒否する", (t) => {
+  // 運営者の決定（2026-09-26）: 正本スキルの人の確認はリリースのときの1回。キューの approve は
+  // エージェントも打てるが、誰が当てたか（actor）を人の場合と分けて残す。
   const fx = fixture(t);
   const entry = fx.addProposal(proposal());
-  const { change } = enqueueLearningChange({ ...fx.options, proposalIds: [entry.id], proposedText: proposedWith(BASE_SKILL, [entry]), note: RULE });
-  const attempts = [
+  const proposed = proposedWith(BASE_SKILL, [entry]);
+  const { change } = enqueueLearningChange({ ...fx.options, proposalIds: [entry.id], proposedText: proposed, note: RULE });
+  const refused = [
     { reviewer: REVIEWER, humanVerified: true, isInteractive: false },
-    { reviewer: REVIEWER, agentAttested: true, isInteractive: true },
     { reviewer: REVIEWER, isInteractive: true },
     { reviewer: "", humanVerified: true, isInteractive: true },
     { reviewer: REVIEWER },
   ];
-  for (const attempt of attempts) {
+  for (const attempt of refused) {
     assert.throws(() => approveLearningChange({ ...fx.options, ...attempt, changeId: change.changeId }), (error) => error.code === "human-verification-required", JSON.stringify(attempt));
   }
   assert.throws(
-    () => approveLearningChange({ ...fx.options, ...HUMAN, env: childAgentEnvironment(fx.env), changeId: change.changeId }),
+    () => approveLearningChange({ ...fx.options, env: childAgentEnvironment(fx.env), changeId: change.changeId }),
     (error) => error.code === "LEARNING_WRITE_FORBIDDEN_IN_CHILD_AGENT",
+    "子エージェントは承認もしない",
   );
   assert.throws(
     () => enqueueLearningChange({ ...fx.options, env: childAgentEnvironment(fx.env), proposalIds: [entry.id], proposedText: proposedWith(BASE_SKILL, [entry], `${RULE}（別）`), note: `${RULE}（別）` }),
     (error) => error.code === "LEARNING_WRITE_FORBIDDEN_IN_CHILD_AGENT",
   );
-  assert.equal(fs.readFileSync(fx.skillPath, "utf8"), BASE_SKILL);
+  assert.equal(fs.readFileSync(fx.skillPath, "utf8"), BASE_SKILL, "拒否した承認で正本を書いた");
   assert.deepEqual(readJsonl(fx.ledger("applied")), []);
-  assert.equal(listLearningChanges(fx.options)[0].status, "pending");
+
+  const { record } = approveLearningChange({ ...fx.options, changeId: change.changeId });
+  assert.equal(fs.readFileSync(fx.skillPath, "utf8"), proposed);
+  const [row] = readJsonl(fx.ledger("applied"));
+  assert.deepEqual(
+    { actor: row.actor, reviewer: row.reviewer, attestedBy: row.attestedBy, claimed: row.claimedReviewer, before: row.beforeSha256, after: row.afterSha256, at: row.appliedAt, ids: row.proposalIds },
+    { actor: "agent", reviewer: "agent", attestedBy: "agent-self-attested", claimed: undefined, before: sha256Hex(Buffer.from(BASE_SKILL)), after: change.afterSha256, at: NOW, ids: [entry.id] },
+  );
+  assert.equal(record.actor, "agent");
+  // エージェントが当てた変更も、提案ごとの反映記録として数える（変更前後の sha256 と巻き戻しが残るため）。
+  const readers = createCanonicalReaders({ repoRoot: fx.repo, targets: JSON.parse(fs.readFileSync(path.join(fx.repo, "docs", "learning", "targets.json"), "utf8")).targets });
+  assert.deepEqual(summarizeProposals(readJsonl(fx.ledger("proposals")), readJsonl(fx.ledger("applied")), readers.readCanonical, readers.hashCanonical).map((item) => item.applied), [true]);
+  // 同じ印でも、キューを通らない行（apply --agent-attested と同じ形）は反映済みに数えない。
+  const direct = { id: entry.id, target: TARGET, targetPath: SKILL_REL, targetSha256: change.afterSha256, reviewer: "agent", attestedBy: "agent-self-attested", actor: "agent", note: RULE, evidenceVersion: 2 };
+  assert.deepEqual(summarizeProposals(readJsonl(fx.ledger("proposals")), [direct], readers.readCanonical, readers.hashCanonical).map((item) => item.applied), [false]);
+  // actor 欄の無い古い適用の行（人の確認でしか当てられなかった時期）は人が当てたと読む。
+  const legacy = { ...row };
+  delete legacy.actor;
+  assert.equal(expandAppliedRecords([legacy])[0].actor, "human");
+});
+
+test("--agent-attested で名前を添えたエージェントは、名乗った名前を残しても人の確認にはならない", (t) => {
+  const fx = fixture(t);
+  const entry = fx.addProposal(proposal());
+  const { change } = enqueueLearningChange({ ...fx.options, proposalIds: [entry.id], proposedText: proposedWith(BASE_SKILL, [entry]), note: RULE });
+  const { record } = approveLearningChange({ ...fx.options, reviewer: REVIEWER, agentAttested: true, humanVerified: true, isInteractive: true, changeId: change.changeId });
+  assert.deepEqual(
+    { actor: record.actor, reviewer: record.reviewer, attestedBy: record.attestedBy, claimed: record.claimedReviewer },
+    { actor: "agent", reviewer: "agent", attestedBy: "agent-self-attested", claimed: REVIEWER },
+    "明示の --agent-attested が TTY と --human-verified に勝つ",
+  );
 });
 
 test("案には提案ごとの印と規則本文が要り、追加する本文は書き込み前の検査を通す", (t) => {
@@ -174,6 +208,8 @@ test("却下は記録を消さずにキューから外し、却下した変更�
   const { record } = rejectLearningChange({ ...fx.options, reviewer: REVIEWER, agentAttested: true, changeId: change.changeId, reason: "同じ節の別案に置き換える" });
   assert.equal(record.recordType, CHANGE_REJECTED);
   assert.equal(record.attestedBy, "agent-self-attested");
+  assert.equal(record.actor, "agent");
+  assert.equal(record.claimedReviewer, REVIEWER);
   const rows = readJsonl(fx.ledger("changes"));
   assert.deepEqual(rows.map((row) => row.recordType), [CHANGE_QUEUED, CHANGE_REJECTED], "キューの行を消した");
   assert.deepEqual(listLearningChanges(fx.options), []);
@@ -224,7 +260,7 @@ test("Windows のパス区切りでも、同じ変更 ID と同じ置き場に�
   assert.equal(applyLineHunks(crlf, computeLineHunks(crlf, edited)), edited);
 });
 
-test("CLI: pending は案をキューに置き、非対話の approve は人の確認が無いので止まる", (t) => {
+test("CLI: pending は案をキューに置き、非対話で人を名乗る approve は止まり、--reviewer を省けばエージェントとして当てて戻せる", (t) => {
   const fx = fixture(t);
   // 本物の harness-learn を合成の開発用チェックアウトへ写す（相対 import は本物のモジュールへ転送する）。
   const real = path.join(SOURCE_ROOT, "scripts", "harness-learn.mjs");
@@ -247,9 +283,10 @@ test("CLI: pending は案をキューに置き、非対話の approve は人の�
   assert.ok(changeId, queued.stdout);
   const list = run("pending");
   assert.match(list.stdout, new RegExp(`\\[${changeId}\\] pending`, "u"));
-  const approve = run("approve", "--change", changeId, "--reviewer", REVIEWER, "--human-verified");
-  assert.equal(approve.status, 2);
-  assert.match(approve.stderr, /human-verification-required/u);
+  // 非対話の端末から人を名乗る（--human-verified）のは今までどおり止まる。
+  const claimed = run("approve", "--change", changeId, "--reviewer", REVIEWER, "--human-verified");
+  assert.equal(claimed.status, 2);
+  assert.match(claimed.stderr, /human-verification-required/u);
   assert.equal(fs.readFileSync(fx.skillPath, "utf8"), BASE_SKILL);
   const child = spawnSync(process.execPath, [staged, "pending", "--id", entry.id, "--proposed", proposedFile, "--note", RULE], {
     cwd: fx.repo, env: childAgentEnvironment(env), encoding: "utf8", input: "", timeout: 60_000,
@@ -260,4 +297,14 @@ test("CLI: pending は案をキューに置き、非対話の approve は人の�
   const childList = spawnSync(process.execPath, [staged, "pending", "--show", changeId], { cwd: fx.repo, env: childAgentEnvironment(env), encoding: "utf8", input: "", timeout: 60_000 });
   assert.equal(childList.status, 0, childList.stderr);
   assert.match(childList.stdout, /\+<!-- buzzassist-learning:/u);
+  // --reviewer を省いた approve はエージェントが当てた変更として通り、rollback も同じく打てる。
+  const agentApprove = run("approve", "--change", changeId);
+  assert.equal(agentApprove.status, 0, `${agentApprove.stdout}\n${agentApprove.stderr}`);
+  assert.match(agentApprove.stdout, /エージェントが実行/u);
+  assert.match(agentApprove.stdout, /skill-inventory --approve/u, "正本スキルの変更後にリリース前の承認の案内が出ない");
+  assert.equal(fs.readFileSync(fx.skillPath, "utf8"), proposedWith(BASE_SKILL, [entry]));
+  const agentRollback = run("rollback", "--change", changeId, "--reason", "合成の理由で戻す");
+  assert.equal(agentRollback.status, 0, `${agentRollback.stdout}\n${agentRollback.stderr}`);
+  assert.equal(fs.readFileSync(fx.skillPath, "utf8"), BASE_SKILL);
+  assert.deepEqual(readJsonl(fx.ledger("applied")).map((row) => [row.recordType, row.actor]), [["canonical-change", "agent"], ["canonical-rollback", "agent"]]);
 });
