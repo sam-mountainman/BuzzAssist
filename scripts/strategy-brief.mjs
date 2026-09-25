@@ -7,6 +7,7 @@
 //   node scripts/strategy-brief.mjs sheet  --brief <ブリーフ> [--work-dir <dir>]
 //   node scripts/strategy-brief.mjs record --brief <ブリーフ> --review <採点ファイル> [--work-dir <dir>]
 //   node scripts/strategy-brief.mjs status [--work-dir <dir> | --brief <ブリーフ>] [--require-pass]
+//   node scripts/strategy-brief.mjs verdict --brief <ブリーフ> [--work-dir <dir>] [--require-pass]
 //
 // 企画の判断はホストのエージェントと運営者がする。ここは形の検査・根拠の照合・版ごとの採点の記録だけで、
 // モデルを呼ばない。実装の正本は lib/strategyBrief.mjs と lib/strategyBriefQualityLoop.mjs（中核は lib/qualityLoop.mjs）。
@@ -25,6 +26,7 @@ import {
   startStrategyBriefLoop,
   strategyBriefReviewTemplate,
   strategyBriefStatus,
+  strategyBriefVerdict,
 } from "../lib/strategyBriefQualityLoop.mjs";
 
 const VALUE_OPTIONS = new Set([
@@ -91,6 +93,12 @@ export function strategyBriefHelp() {
 
   status       今の状態。deliverable は合格して、その版のブリーフが今も同じバイト列のときだけ
     [--work-dir <dir> | --brief <file>] [--require-pass]   未合格なら終了コード 4
+
+  verdict      制作へ渡す前の判定。合格した版と同じ SHA か、根拠のファイルが揃い 4分析の run が現行か、
+               前提（問い・見る人・入口の約束）を変えて古くなった根拠が無いかを理由コードつきで返す。
+               古い根拠があれば strategy-evidence-refresh-required（日数では決めない）。採点した版から
+               根拠の確かさを上げた書き換えは strategy-brief-evidence-upgraded-without-review:<id>
+    --brief <file> [--work-dir <dir>] [--require-pass]     pass でなければ終了コード 4
 
   --work-dir を省くと、--brief のあるフォルダを作業フォルダにする。根拠のパスは作業フォルダからの相対。
 
@@ -212,8 +220,17 @@ export async function runStrategyBriefCli(argv = process.argv.slice(2), {
       if (!result.started) return { exitCode: 3, result };
       return { exitCode: args.requirePass && !result.deliverable ? 4 : 0, result };
     }
+    case "verdict": {
+      const result = await strategyBriefVerdict({ workDir: strategyWorkDir(args), briefPath: requireBrief(args) });
+      if (args.json) print(stdout, result, true);
+      else {
+        stdout.write(`${result.pass ? "合格（制作へ渡せる）" : "未合格"}: ${result.detail}\n`);
+        for (const code of result.reasonCodes) stdout.write(`  - ${code}\n`);
+      }
+      return { exitCode: args.requirePass && !result.pass ? 4 : 0, result };
+    }
     default:
-      throw new Error(`不明なアクション: ${args.action}（validate / fingerprint / start / sheet / record / status）`);
+      throw new Error(`不明なアクション: ${args.action}（validate / fingerprint / start / sheet / record / status / verdict）`);
   }
 }
 
