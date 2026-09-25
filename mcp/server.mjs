@@ -3756,7 +3756,9 @@ async function markCharacterApprovalOnCanvas(args = {}, details = {}) {
 
 async function handleToolCall(params, progress = () => {}) {
   if (isVideoHarnessToolName(params?.name)) {
-    return handleVideoHarnessToolCall(params);
+    // clientInfo は initialize で host が名乗った name / version。Job と RunReceipt に
+    // どのホストから動かしたかを残すために渡す（lib/harnessHostProvenance.mjs）。
+    return handleVideoHarnessToolCall(params, { clientInfo: params?.clientInfo ?? null });
   }
   const settingsGateKind = SETTINGS_CONFIRMATION_TOOLS.get(params?.name);
   if (settingsGateKind) {
@@ -4756,7 +4758,11 @@ for (const definition of toolDefinitions()) {
     async (args = {}, extra) => {
       try {
         const contextualArgs = await contextualizeToolArgs(server, definition.name, args, extra);
-        return await handleToolCall({ name: definition.name, arguments: contextualArgs }, createProgressReporter(extra));
+        return await handleToolCall({
+          name: definition.name,
+          arguments: contextualArgs,
+          clientInfo: server.server.getClientVersion?.() ?? null,
+        }, createProgressReporter(extra));
       } catch (error) {
         return toolErrorResult(error);
       }

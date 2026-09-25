@@ -67,6 +67,7 @@ test("generic MCP definitions expose plan/run, get/list/cancel/resume without se
     "channelPackPath",
     "confirmed",
     "harnessId",
+    "hostModel",
     "options",
     "projectDir",
     "reviewerTrustPath",
@@ -75,7 +76,7 @@ test("generic MCP definitions expose plan/run, get/list/cancel/resume without se
   ]);
   const resume = definitions.find((definition) => definition.name === TOOL_RESUME_VIDEO_HARNESS_JOB);
   assert.deepEqual(resume.inputSchema.required, ["jobId", "confirmed"]);
-  assert.deepEqual(Object.keys(resume.inputSchema.properties).sort(), ["confirmed", "jobId", "projectDir", "retryFailedImages", "reviewerTrustPath"]);
+  assert.deepEqual(Object.keys(resume.inputSchema.properties).sort(), ["confirmed", "hostModel", "jobId", "projectDir", "retryFailedImages", "reviewerTrustPath"]);
   assert.equal(resume.inputSchema.properties.retryFailedImages.type, "boolean");
   assert.match(resume.inputSchema.properties.retryFailedImages.description, /re-billing/u, "再課金の事実が記録されると説明する");
   assert.match(resume.inputSchema.properties.retryFailedImages.description, /--retry-failed-images/u, "CLI と同じ引数だと説明する");
@@ -383,7 +384,10 @@ test("R5-REV-02: run/resume/get/list/cancel/collect-feedback never fall back to 
 
   // 明示 projectDir: 相対 script / pack は projectDir 基準、絶対はそのまま。cwd の値は結果に現れない。
   await handleVideoHarnessToolCall({ name: TOOL_RUN_VIDEO_HARNESS, arguments: { projectDir: "/work/project", scriptPath: "rel/script.md", channelPackPath: "/packs/pack.json", reviewerTrustPath: "/secure/trust.json" } }, deps);
-  assert.deepEqual(calls.at(-1)[1], { projectDir: resolve("/work/project"), scriptPath: resolve("/work/project", "rel/script.md"), channelPackPath: resolve("/packs/pack.json"), reviewerTrustPath: resolve("/secure/trust.json") });
+  // invocation（呼び出したホスト）は Job の引数ではなく、入口が判定して別に渡す。
+  const { invocation: startInvocation, ...startArgs } = calls.at(-1)[1];
+  assert.deepEqual(startArgs, { projectDir: resolve("/work/project"), scriptPath: resolve("/work/project", "rel/script.md"), channelPackPath: resolve("/packs/pack.json"), reviewerTrustPath: resolve("/secure/trust.json") });
+  assert.equal(startInvocation.via, "mcp");
   // server が roots から埋めた projectDir が env より優先される。
   await handleVideoHarnessToolCall({ name: TOOL_GET_VIDEO_HARNESS_JOB, arguments: { projectDir: "/work/from-roots", jobId: "video-a" } }, { ...deps, env: { EXCALIDRAW_PROJECT_DIR: "/work/from-env" } });
   assert.equal(calls.at(-1)[1].projectDir, resolve("/work/from-roots"));

@@ -15,6 +15,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
+import { detectHostInvocation } from "../lib/harnessHostProvenance.mjs";
 import { appendManagedToolsToPath } from "../lib/prerequisiteTools.mjs";
 import { videoHarnessService } from "../lib/videoHarnessService.mjs";
 
@@ -39,8 +40,8 @@ function usage() {
     "  依頼に合うハーネスの候補・理由（一致した語・否定された語・入力要件・前提・実績・Channel Pack の向き先）と、",
     "  決めきれないときの1問を JSON で返す。モデルも有料 API も呼ばず、Job も作らない。MCP の plan_video_request と同じ結果。",
     "  --doctor で候補ごとに harness-doctor を走らせる（既定では走らせない）。start と同じ Koya の引数（--episode-id など）も受ける。",
-    "start  --harness ID --script-path FILE --channel-pack BUNDLE [--confirmed] [--reviewer-trust-path JSON]",
-    "resume --job-id ID --project-dir DIR --confirmed [--reviewer-trust-path JSON] [--retry-failed-images]",
+    "start  --harness ID --script-path FILE --channel-pack BUNDLE [--confirmed] [--reviewer-trust-path JSON] [--host-model ID]",
+    "resume --job-id ID --project-dir DIR --confirmed [--reviewer-trust-path JSON] [--retry-failed-images] [--host-model ID]",
     "status --job-id ID --project-dir DIR",
     "cancel --job-id ID --project-dir DIR",
     "list   --project-dir DIR",
@@ -60,6 +61,10 @@ function usage() {
     "Common: --want TEXT --title TEXT --options-json FILE",
     "",
     "--confirmed が無い start は durable job を作るだけで、有料APIを呼びません。",
+    "",
+    "--host-model ID（start / resume）: いま動いているエージェントのモデル ID を宣言として Job と RunReceipt に残す。",
+    "  分からなければ付けない（unknown と記録される）。ホスト（Claude Code / Codex / Antigravity / 素の端末）は",
+    "  環境変数の名前から判定し、値は記録しない。Job の識別子には入らない（別のホストから resume しても同じ Job）。",
     "",
     "--reviewer-trust-path は MCP の run_video_harness / resume_video_harness_job の reviewerTrustPath と同じ照合用引数です。",
     "--retry-failed-images は、失敗した画像だけを同じ Job のまま作り直します（完成済みは再課金しない）。Job の識別子には入らず、使った事実は台帳と Receipt に残ります。",
@@ -112,6 +117,12 @@ function reviewerTrustPathFrom(args) {
   return resolve(args.reviewerTrustPath);
 }
 
+// この CLI を呼んだホスト。どのホストの印も無い素の端末なら "cli"。モデルは宣言されたときだけ。
+export function cliHostInvocation(args, env = process.env) {
+  if (args.hostModel === true) throw new Error("--host-model にはモデル ID が要る。分からなければ付けない。");
+  return detectHostInvocation({ via: "cli", env, hostModel: args.hostModel });
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const projectDir = resolve(typeof args.projectDir === "string" ? args.projectDir : process.cwd());
@@ -146,6 +157,7 @@ async function main() {
         options: await optionsFrom(args),
         confirmed: args.confirmed === true,
         reviewerTrustPath: reviewerTrustPathFrom(args),
+        invocation: cliHostInvocation(args),
       });
       print(result);
       if (result.execution.started && result.status !== "completed") {
@@ -166,6 +178,7 @@ async function main() {
         confirmed: true,
         reviewerTrustPath: reviewerTrustPathFrom(args),
         retryFailedImages: args.retryFailedImages === true,
+        invocation: cliHostInvocation(args),
       });
       print(result);
       if (result.status !== "completed") process.exitCode = result.status === "awaiting-human-review" ? 3 : 2;
