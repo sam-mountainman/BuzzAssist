@@ -45,7 +45,13 @@ function usage() {
     "  Job の識別子に入るので後から足せない。欠けていれば Job を作らずに koya-start-options-missing で止まる",
     "  --wardrobe-readiness-override-reason: 台本駆動の衣装ゲート（wardrobe-readiness）の pass レポートが無いまま有料の画像生成を始める。理由は Job と最終監査に残る",
     "  --confirm-paid-video-generation: エピソード例外で印を付けたカットの動画クリップ生成（別課金）を許可する。無ければ開始フレームと費用計画だけ作って止まる",
-    "Narrated (narrated-story-video) options: --episode-id ID",
+    "Narrated (narrated-story-video) options: --episode-id ID [--operator-image-manifest FILE]",
+    "  --operator-image-manifest: 運営者が用意した本編の画（ChatGPT の web 画面・Codex・ローカルモデル・Grok など）を、",
+    "  取り込みの記録（buzzassist-operator-image-manifest-v1）ごと公式経路へ入れる。Channel Pack の image.source が",
+    "  operator-file のときに要り、start の時点で渡す（Job の識別子に入る。MCP / --options-json では options.operatorImageManifestPath）。",
+    "  画の Media Job は作らず、全部の場面をこの記録から取る。sha256・場面の過不足・使い回しの理由・承認済みの参照・寸法の",
+    "  いずれかが合わなければ有料の処理の前に operator-image-* の理由で止まる。画を差し替えたら同じ Job を resume すれば、",
+    "  声と BGM を払い直さずに作り直す。会話の URL は私有の Job フォルダにだけ残り、Receipt と Canvas には sha256 だけが出る。",
     "Common: --want TEXT --title TEXT --options-json FILE",
     "",
     "--confirmed が無い start は durable job を作るだけで、有料APIを呼びません。",
@@ -83,7 +89,9 @@ async function optionsFrom(args) {
     ["contractPath", args.contractPath ? resolve(args.contractPath) : ""],
     ["overridePath", args.overridePath ? resolve(args.overridePath) : ""],
     ["wardrobeReadinessOverrideReason", typeof args.wardrobeReadinessOverrideReason === "string" ? args.wardrobeReadinessOverrideReason : ""],
+    ["operatorImageManifestPath", typeof args.operatorImageManifest === "string" ? resolve(args.operatorImageManifest) : ""],
   ];
+  if (args.operatorImageManifest === true) throw new Error("--operator-image-manifest には取り込みの記録（manifest JSON）の path が要る。");
   for (const [key, value] of mappings) if (value !== undefined && value !== "") options[key] = value;
   if (args.retryFailed === true) options.retryFailed = true;
   if (args.confirmPaidVideoGeneration === true) options.confirmPaidVideoGeneration = true;
@@ -130,6 +138,10 @@ async function main() {
     case "resume": {
       if (!args.jobId) throw new Error("resume には --job-id が要る。");
       if (args.confirmed !== true) throw new Error("resume は有料生成へ進み得るため --confirmed が要る。");
+      if (args.operatorImageManifest !== undefined) {
+        // 黙って捨てると「渡したのに効かない」に見える。置き場は Job の識別子なので start でしか決められない。
+        throw new Error("--operator-image-manifest は start でだけ渡す（Job の識別子に入る）。画を差し替えたら、start で渡した同じ manifest の中身（画と sha256）を直して resume する。");
+      }
       const result = await videoHarnessService.resume({
         projectDir,
         jobId: String(args.jobId),
