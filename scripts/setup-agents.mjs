@@ -793,6 +793,8 @@ async function rewriteSkillRelativeDepth(skillDir) {
     "docs/koya-harness-handoff-ja.md",
     "docs/koya-character-gate-runbook-ja.md",
     "docs/koya-voice-quality-runbook-ja.md",
+    // 戦略の道具から制作へ渡す仕様（strategy-brief.mjs draft --from-hyp のヘルプが指す）。
+    "docs/strategy-handoff-spec-ja.md",
     "docs/learning/targets.json",
     // 本文つき台帳（proposals.jsonl）は配布しない。公開版 catalog だけ。
     "docs/learning/proposals.public.jsonl",
