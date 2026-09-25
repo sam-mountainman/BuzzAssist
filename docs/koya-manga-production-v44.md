@@ -34,7 +34,7 @@ flowchart LR
 - 要求履歴: `docs/koya-channel-requirements-ledger.md`
 - 共通スキル正本: `.agents/skills/manga-video-production` と `.agents/skills/manga-page-camera`
 - Claudeアダプター: `.claude/skills/...`
-- Codexアダプター: `.codex/skills/...`
+- Codex: アダプターを置かず、リポジトリの `.agents/skills` を直接読む（`.codex/skills` のアダプターは一覧に同じ Skill を2回出すだけなので 2026-09-26 に外した）
 
 ClaudeとCodexは同じ正本を読む。ホスト別コピーへ制作規則を重複記載しない。
 

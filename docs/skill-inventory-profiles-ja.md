@@ -61,8 +61,8 @@ hash差は「存在するが古い」であり、**同梱 Skill が host cache �
 「両 host が同じ正本 Skill を使う」要件は hash が揃っていても満たされない。
 
 - 同梱一覧 = `bundled: true` かつ `.agents/skills/<name>/` または `skills/<name>/` にある
-  record（`setup-agents` が配布物 `skills/` へコピーするのはこの2系統。`.claude/skills` /
-  `.codex/skills` の host adapter は配布物に入らないので比較しない）
+  record（`setup-agents` が配布物 `skills/` へコピーするのはこの2系統。`.claude/skills` の
+  host adapter は配布物に入らないので比較しない）
 - 導入物（installation）= host cache の `<cache>/<ns>/<ns>/<semver>/` と、配布元
   `~/plugins/buzzassist/plugin/skills`。record の `installation.root / host / version` で束ねる
 - 同梱 plugin と**同じ版**の導入物（または版が読めない導入物）で欠けているものだけを
@@ -165,9 +165,10 @@ node scripts/skill-evals.mjs report          # 版ごと・ホストごとの合
 
 BuzzAssist版の正本は `.agents/skills/skill-creator/SKILL.md`。plugin配布時は
 `buzzassist:skill-creator` になり、project上では衝突回避のため
-`buzzassist-skill-creator` という薄いadapter（`.claude/skills`、`.codex/skills`、共有の
-`.agents/skills/buzzassist-skill-creator`）から正本へ到達する。3つとも
+`buzzassist-skill-creator` という薄いadapter（`.claude/skills` と、共有の
+`.agents/skills/buzzassist-skill-creator`）から正本へ到達する。2つとも
 `inventory.manifest.json` の `adapters` に登録し、正本参照が切れたら検査で落ちる。
+Codex 用の `.codex/skills` の adapter は 2026-09-26 に外した（下の「`.codex/skills` を外した」）。
 Codex system Skill、global Skill、Cowork版、plugin cacheは編集しない。
 
 **制作中の依存**と**Skill改善用の機能**は別物として扱う。
@@ -178,7 +179,8 @@ Codex system Skill、global Skill、Cowork版、plugin cacheは編集しない�
 | Skill改善用の機能 | `buzzassist:skill-creator`、`excalidraw-benchmark-manga-style`、Best-of-N、独立監査 | BuzzAssist Development のみ。Operator の hot path には出さない |
 
 skill-creator は「不要だから外す」のではなく「本番動画Jobから隔離する」。正本を更新する
-ときは skill-creator、eval、inventoryのversion/content SHA、両host adapter検査をまとめて行う。
+ときは skill-creator、eval、inventoryのversion/content SHA、adapter検査（Claude Code の `.claude/skills` と
+共有の adapter）をまとめて行う。
 
 
 ## 同名 Skill の棚卸し（2026-09-25）
@@ -209,7 +211,7 @@ Codex は同じ `name` の Skill を統合しない（公式文書: 同名は両
 | 系統 | 置き場所 | ホストでの名前 | 扱い |
 |---|---|---|---|
 | BuzzAssist 正本 | `.agents/skills/skill-creator` | `buzzassist:skill-creator`（plugin として。Codex はリポジトリ内でも同じ名前空間で出す） | BuzzAssist Skill の管理・curation 用。`developmentOnly` |
-| BuzzAssist のアダプター | `.claude/skills` / `.codex/skills` / `.agents/skills` の `buzzassist-skill-creator` | `buzzassist-skill-creator` | 正本へ案内するだけ |
+| BuzzAssist のアダプター | `.claude/skills` / `.agents/skills` の `buzzassist-skill-creator`（`.codex/skills` の分は 2026-09-26 に外した） | `buzzassist-skill-creator` | 正本へ案内するだけ |
 | Anthropic の汎用版 | `~/.claude/skills`、Claude の plugin（anthropic-skills）、Cowork の同期コピー | `skill-creator` / `anthropic-skills:skill-creator` | 汎用。BuzzAssist は編集しない |
 | Codex 内蔵版 | `~/.codex/skills/.system/skill-creator` | `skill-creator` | 汎用。変更しない |
 | 端末全体の写し | `~/.agents/skills/skill-creator` | `skill-creator` | Anthropic 版を「Claude→Codex」で機械置換した写しで、`Codex -p`・`Codex.ai` のような存在しない記述が入っている |
@@ -223,22 +225,29 @@ Codex は同じ `name` の Skill を統合しない（公式文書: 同名は両
   `~/.codex/skills` 側の同名を消す）で、BuzzAssist のコードでは直さない
 - **`.codex/skills` のアダプターは、Codex が正本へ届くためには要らない。** Codex はリポジトリの
   `.agents/skills` を直接読む。アダプターがあると、同じ Skill が一覧に2回（plugin を入れた開発機では3回）
-  出るだけになる。`.claude/skills` のアダプターは要る（Claude Code は `.agents/skills` を読まない）
+  出るだけになる（2026-09-26 に外した）。`.claude/skills` のアダプターは要る（Claude Code は `.agents/skills` を読まない）
 - inventory の「project collisions 0」は実装の同一性（正本が1つ）を数えたもので、ホストの一覧に
   同じ名前が何回出るかは数えていない。上の重複は `crossScopeSameNames` にも出ない
 
-### `.codex/skills` を外すときの手順（提案。まだ外していない）
+### `.codex/skills` を外した（2026-09-26 運営者決定）
 
-外すには次をまとめて変える必要がある。どれも正本の在庫と承認に関わるので、このリポジトリの
-正本改訂の手順（skill-creator・eval・inventory の版と SHA・人の承認）で行う。
+2026-09-25 の提案の手順で外した。Claude Code は `.agents/skills` を読まないので、`.claude/skills` のアダプターは残す。
 
-1. `.agents/skills/inventory.manifest.json` の各 Skill の `adapters` から `.codex/skills/...` を外し、
-   manifest の版を上げて承認をやり直す
-2. `lib/hostSkillSync.mjs` の開発チェックアウト判定（`.claude/skills` と `.codex/skills` の両方があるか）を、
-   `.claude/skills` と `.agents/skills` を見る形に変える
-3. `test/koyaHostSkills.test.mjs` などアダプターの存在を前提にした試験と、`package.json` の `files` の
-   `.codex/skills/` を直す
-4. 正本の `skill-creator` と `platform-craft` の「Claude Code / Codex の project adapter」の記述を、
-   「Claude Code は `.claude/skills` のアダプター、Codex は `.agents/skills` を直接読む」に直す
-5. Codex の app-server の `skills/list` で、BuzzAssist Skill が1回（開発機では plugin と合わせて2回）だけ
-   出ることを確かめる
+1. `.codex/skills` の7件（と `agents/openai.yaml` の写し）を消し、`.agents/skills/inventory.manifest.json` の各 Skill の
+   `adapters` から `.codex/skills/...` を外した。`.gitignore` は `.codex/` を丸ごと無視に戻し、`package.json` の
+   `files` から `.codex/skills/` を外した（`setup-agents` の配布物はもともと `.codex` を写していない）。
+   manifest と正本スキルの版は 0.1.28 のために上げてあってまだ配っていない・承認も付いていないので、
+   skill-creator の決まりどおり同じ版のまま内容 SHA だけ更新した。人の承認は配る版を出すときの1回
+   （承認者本人の端末の `skill-inventory --approve`）
+2. 開発用チェックアウトの判定（`lib/hostSkillSync.mjs` の `readsCanonicalDirectly`）を
+   `.git`・`.claude/skills`・`.agents/skills` の3つに変えた。学習の置き場（`lib/harnessLearningState.mjs`）、
+   制作の承認の扱い（`lib/videoHarnessProductionProfile.mjs`）、doctor の host-skill-sync、skill evals の置き場が
+   この判定を使う。配布された写しは `.git` を持たない（`setup-agents` の写しは `.agents` を含むが `.git` も
+   `.claude` も含まない。npm の tarball も `.git` を含まない）ので、配布された写しの判定は変わらない。
+   古いチェックアウトに `.codex/skills` が残っていても判定には使わない
+3. アダプターの存在を前提にした試験（`test/koyaHostSkills.test.mjs`・`test/skillInventory.test.mjs` など）と、
+   合成の開発用チェックアウトの印を直した。`.codex/skills` のアダプターが在庫やリポジトリへ戻れば試験が落ちる
+4. 正本の `skill-creator`・`platform-craft`・`harness-self-improvement` の記述を「Claude Code は `.claude/skills` の
+   アダプター、Codex は `.agents/skills` を直接読む」「開発用チェックアウトの印は3つ」に直した
+5. 未実施: Codex の app-server の `skills/list` で、BuzzAssist Skill が1回（開発機では plugin と合わせて2回）だけ
+   出ることを運営者の端末で確かめる
