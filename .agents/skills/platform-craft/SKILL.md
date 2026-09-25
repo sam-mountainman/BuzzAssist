@@ -399,7 +399,7 @@ skill-creatorは育成・正本改善のために保持し、不要物として�
 BuzzAssist正本は`.agents/skills`に置く。Claude Code は `.claude/skills` の薄い adapter から正本を読む
 （Claude Code は `.agents/skills` を読まない）。Codex はリポジトリの `.agents/skills` を直接読むので、
 `.codex/skills` の adapter は同じ Skill を一覧に2回出すだけになる（2026-09-25 実測）。今ある
-`.codex/skills` は `docs/skill-inventory-profiles-ja.md` の手順でまとめて外す予定で、外すまでは正本参照
+`.codex/skills` は リポジトリの docs/skill-inventory-profiles-ja.md の手順でまとめて外す予定で、外すまでは正本参照
 だけに保ち、手順を足さない。host名やCLI名を一括置換して別内容を作らない。正本更新時は
 `skill-creator`、eval、inventoryのversion/content SHA、adapter検査をまとめて行う。
 
@@ -452,7 +452,7 @@ workflow synthesisが欠けている、といった状態を検査で見える�
 - `src/` を触ったのに、起動して確かめずに終える（テストは緑でも動くとは限らない）
 - 「あとで紐づける」と書いて宣言に穴を残す。**書けない理由を宣言に書き、
   テストで見えるようにする**（`receiptAdapter: { status: "pending", reason, requiredWork }`）
-- CLAUDE.md / AGENTS.md / GEMINI.md を手で直す。`config/host-instructions.template.md` を直して
+- CLAUDE.md / AGENTS.md / GEMINI.md を手で直す。リポジトリの config/host-instructions.template.md を直して
   `node scripts/generate-host-instructions.mjs` で作る（CI が `npm run instructions:check` で照合する）
 - 4つ目の Canvas 投影器、2つ目の取り込み口・品質ループの照合・ホストの判定を作る
 - Stop フックに差し戻されなかったことを、合格の根拠として報告する

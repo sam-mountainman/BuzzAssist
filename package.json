@@ -37,6 +37,7 @@
     "config/koya-manga-production-contract.schema.json",
     "config/koya-manga-quality-incidents.json",
     "config/koya-reading-dictionary.json",
+    "config/narrated-story-script-package.schema.json",
     "config/parallel-plans/",
     "lib/*.mjs",
     "mcp/server.mjs",

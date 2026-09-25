@@ -16,7 +16,7 @@ Operator Production の動画生成経路からは呼ばない。端末にある
 - BuzzAssist共通正本は `.agents/skills/<name>/` に置く。
 - Claude Code のproject adapter（`.claude/skills`）は、正本を読むことだけを指示する薄い文書にする。
   Codex はリポジトリの `.agents/skills` を直接読むので adapter は要らない。今ある `.codex/skills` は
-  同じ Skill を一覧に重複して出すだけで、`docs/skill-inventory-profiles-ja.md` の手順でまとめて外す予定。
+  同じ Skill を一覧に重複して出すだけで、リポジトリの docs/skill-inventory-profiles-ja.md の手順でまとめて外す予定。
   外すまでは正本参照だけに保つ。
 - plugin cache、`~/.codex/skills/.system/`、ユーザーのglobal Skill、global plugin設定は変更しない。
 - 配布は正本 → build/stage → 署名Release → host update の一方向。cacheから正本へ逆輸入しない。

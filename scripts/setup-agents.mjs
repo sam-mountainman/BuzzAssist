@@ -506,6 +506,7 @@ export const DISTRIBUTABLE_CONFIG_ENTRIES = Object.freeze([
   "koya-manga-quality-incidents.json",
   "koya-manga-episode-overrides",       // モデル選択の上書き。固有情報を含まない
   "koya-reading-dictionary.json",
+  "narrated-story-script-package.schema.json", // 台本パッケージの形。台本スキルが出力の形を確かめるのに読む
   "parallel-plans",
 ]);
 

@@ -20,7 +20,7 @@ bundle にして提供元（BuzzAssist の開発側）へ返す経路の手順�
 
 送り先（`harness-feedback.mjs destination --endpoint <HTTPS の URL> --provider-key-fingerprint ed25519:<24hex>`）
 が無いあいだは貯めるだけ。受領証がその提供元の鍵で署名されていなければ「届いた」と記録しない。
-受け取る側が満たす仕様は `docs/harness-feedback-receiver-spec-ja.md`。
+受け取る側が満たす仕様は、BuzzAssist のリポジトリの docs/harness-feedback-receiver-spec-ja.md（提供元の受け取り口の仕様なので、運営者への配布物には入れない）。
 
 **エージェントは運営者の代わりに `consent --enable` を打たない。** 同意は運営者本人の決定であり、
 `--human-verified` と同じく機械では証明できない。setup も対話のときだけ聞き、対話でなければ
