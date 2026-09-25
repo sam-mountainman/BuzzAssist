@@ -62,6 +62,7 @@
     { "doctorCheckId": "ffmpeg-capability", "checkedAt": "before-job", "what": "libx264 と aac を含む ffmpeg で、1本作って読み返せる" },
     { "doctorCheckId": "svg-rasterizer", "checkedAt": "before-job", "what": "縦組みの吹き出しを描く描画器（Chrome / Edge / Chromium）" },
     { "doctorCheckId": "disk-space", "checkedAt": "before-job", "what": "作業フォルダーの空き容量" },
+    { "doctorCheckId": "windows-work-path", "checkedAt": "before-job", "what": "Windows では、子プロセスを起動する作業フォルダが上限（238 字）に収まる（Windows 以外は見ない）" },
     { "doctorCheckId": "voice-quality-python", "checkedAt": "before-job", "what": "音声品質ゲートの Python 環境（UTMOS など）" },
     { "doctorCheckId": "tts-key", "checkedAt": "before-job", "what": "制作契約が指す台詞の声の adapter が、非課金の確認で ready（BUZZASSIST_MEDIA_JOB_API_BASE）" },
     { "doctorCheckId": "image-key", "checkedAt": "before-job", "what": "本番契約の画像モデルの経路にログイン済み" },

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -682,4 +682,49 @@ test("吹き出しの描画器: 漫画ハーネスでは必須で有料生成の
     runtime: deterministicDoctorRuntime({ svgRasterizerProbe: missing }),
   });
   assert.equal(narrated.checks.find((check) => check.id === "svg-rasterizer").required, false, "吹き出しを使わないジャンルは止めない");
+});
+
+test("Windows の作業フォルダの長さ: ハーネス指定では必須。ナレーション物語は Job の run のフォルダの中まで、漫画はプロジェクトのフォルダで測る", async () => {
+  // Windows では子プロセスを起動する作業フォルダが MAX_PATH を越えると spawn が ENOENT で落ちる。
+  // 有料の処理を始めてから奥で落ちないよう、doctor で止める。OS は差し込む（実際の Windows は CI が見る）。
+  const base = resolve(tmpdir());
+  // 全体でちょうど 200 字のプロジェクトのフォルダ（作らない。長さだけを測る）。
+  const projectDir = join(base, "w".repeat(200 - base.length - 1));
+  const route = async () => ({ command: "fixture-node", args: ["help"], cwd: root, label: "fixture", mcpTool: "run_video_harness" });
+  const run = (harnessId, platform, job = null) => runHarnessDoctor({
+    projectDir,
+    harnessId,
+    job,
+    runtime: deterministicDoctorRuntime({
+      platform,
+      resolveProductionRoute: route,
+      mediaAdapterProbe: async (spec) => ({ ok: true, status: "ready", ...spec }),
+    }),
+  });
+  const workPath = (report) => report.checks.find((check) => check.id === "windows-work-path");
+
+  // ナレーション物語: プロジェクトのフォルダ（200 字）は収まっても、字幕の頁の作業フォルダは 289 字。
+  const narrated = await run("narrated-story-video", "win32", { id: "video-narrated-story-video-0123456789abcdef", projectDir });
+  assert.equal(workPath(narrated).required, true);
+  assert.equal(workPath(narrated).ok, false);
+  assert.equal(workPath(narrated).code, "windows-work-path-too-long");
+  assert.ok(narrated.blocking.includes("windows-work-path"), "有料の処理の前に止める側に入る");
+  assert.match(workPath(narrated).detail, /字幕の頁の作業フォルダが 289 字/u);
+  assert.match(workPath(narrated).fix, /短い場所/u, "直し方が付く");
+  assert.ok(!workPath(narrated).detail.includes(projectDir) && !workPath(narrated).fix.includes(projectDir), "path は出さない");
+  // Job がまだ無い（setup・plan-request）ときも、同じ長さの仮の Job の id で見積もる。
+  assert.equal(workPath(await run("narrated-story-video", "win32")).ok, false);
+
+  // 漫画: 子はプロジェクトのフォルダで起動するので、200 字なら収まる。
+  const manga = await run("koya-manga-video", "win32");
+  assert.equal(workPath(manga).required, true);
+  assert.equal(workPath(manga).ok, true, workPath(manga).detail);
+  assert.ok(!manga.blocking.includes("windows-work-path"));
+
+  // Windows 以外は見ない。Harness 未選択の setup では任意。
+  const posix = await run("narrated-story-video", "linux", { id: "video-narrated-story-video-0123456789abcdef", projectDir });
+  assert.equal(workPath(posix).ok, true);
+  assert.ok(!posix.blocking.includes("windows-work-path"));
+  const setup = await run("", "win32");
+  assert.equal(workPath(setup).required, false);
 });

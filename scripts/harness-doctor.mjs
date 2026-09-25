@@ -62,6 +62,12 @@ import { appendManagedToolsToPath } from "../lib/prerequisiteTools.mjs";
 import { probeSvgRasterizerCached } from "../lib/svgRasterizer.mjs";
 import { probeYtQualityLoopHooks } from "../lib/ytQualityLoopHooks.mjs";
 import { probeCodexLearningHookTrust } from "../lib/codexHookTrust.mjs";
+import {
+  WINDOWS_WORK_PATH_TOO_LONG,
+  checkWindowsWorkPaths,
+  windowsWorkPathDetail,
+  windowsWorkPathFix,
+} from "../lib/windowsWorkPath.mjs";
 
 const defaultRunCommand = promisify(execFile);
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -284,6 +290,34 @@ async function resolveProductionRouteProbe(declaration, harnessId, { job, runtim
     label: canonical.cli,
     mcpTool: canonical.mcpTool,
   };
+}
+
+/**
+ * 子プロセスを起動する作業フォルダ（cwd）のうち、深くなりうるもの（lib/windowsWorkPath.mjs が Windows で長さを見る）。
+ * どのハーネスもプロジェクトのフォルダで子を起動する（漫画は python・ffmpeg をプロジェクトのフォルダで起動し、
+ * 正規入口をこのリポジトリで起動する）。ナレーション物語は配置の root で正規入口を起動し、Job の run のフォルダの
+ * 中で ffmpeg を起動する（lib/narratedStoryPipeline.mjs の narratedStoryChildWorkDirs。同じ見積もりを pipeline も使う）。
+ */
+async function harnessChildWorkDirs({ projectDir, harnessId, job = null, runtime = {} }) {
+  const dirs = [{ path: path.resolve(projectDir), label: "プロジェクトのフォルダ" }];
+  if (!harnessId) return dirs;
+  if (harnessId !== "narrated-story-video") {
+    dirs.push({ path: REPO_ROOT, label: "BuzzAssist のフォルダ" });
+    return dirs;
+  }
+  try {
+    const deployment = job?.deployment && typeof job.deployment === "object" ? job.deployment : configuredHarnessDeployment(harnessId, runtime);
+    if (String(deployment?.root || "").trim()) dirs.push({ path: path.resolve(String(deployment.root)), label: "配置の root" });
+  } catch {
+    // 配置を読めなければ、正規入口の検査（harness-production-route）が理由を出す。
+  }
+  const { narratedStoryChildWorkDirs } = await import("../lib/narratedStoryPipeline.mjs");
+  // Job がまだ無い（setup・plan-request の doctor）ときは、このハーネスの Job の id と同じ長さの仮の id で見積もる。
+  dirs.push(...narratedStoryChildWorkDirs({
+    deploymentRoot: typeof job?.projectDir === "string" && job.projectDir ? job.projectDir : projectDir,
+    jobId: typeof job?.id === "string" && job.id ? job.id : `video-${harnessId}-${"0".repeat(16)}`,
+  }));
+  return dirs;
 }
 
 async function probeProductionRoute(declaration, harnessId, { runCommand = defaultRunCommand, job = null, runtime = {} } = {}) {
@@ -812,6 +846,21 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "",
     id: "disk-space",
     required: Boolean(harnessId),
     ...await probeDiskSpace(path.resolve(projectDir), runtime),
+  });
+
+  // Windows では、子プロセスを起動する作業フォルダが MAX_PATH を越えると起動できない（spawn が ENOENT）。
+  // 有料の処理を始めてから奥で落ちないよう、ハーネスを名指しした本番 preflight で止める（Windows 以外は見ない）。
+  const workPath = checkWindowsWorkPaths({
+    workDirs: await harnessChildWorkDirs({ projectDir, harnessId, job, runtime }),
+    platform: runtime.platform ?? process.platform,
+  });
+  add({
+    id: "windows-work-path",
+    required: Boolean(harnessId),
+    ok: workPath.ok,
+    ...(workPath.ok ? {} : { code: WINDOWS_WORK_PATH_TOO_LONG }),
+    detail: windowsWorkPathDetail(workPath),
+    fix: windowsWorkPathFix(workPath),
   });
 
   // --- 音声品質ゲート ---

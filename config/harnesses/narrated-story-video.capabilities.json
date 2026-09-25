@@ -78,6 +78,7 @@
     { "doctorCheckId": "ffprobe", "checkedAt": "before-job", "what": "ffprobe が起動する" },
     { "doctorCheckId": "ffmpeg-capability", "checkedAt": "before-job", "what": "libx264 と aac を含む ffmpeg で、1本作って読み返せる" },
     { "doctorCheckId": "disk-space", "checkedAt": "before-job", "what": "作業フォルダーの空き容量" },
+    { "doctorCheckId": "windows-work-path", "checkedAt": "before-job", "what": "Windows では、子プロセスを起動する作業フォルダが上限（238 字）に収まる（Windows 以外は見ない）" },
     { "doctorCheckId": "voice-quality-python", "checkedAt": "before-job", "what": "音声品質ゲートの Python 環境（UTMOS など）" },
     { "doctorCheckId": "reviewer-trust", "checkedAt": "before-job", "what": "運営者の reviewer 信頼リスト（環境変数 BUZZASSIST_REVIEWER_TRUST）" },
     { "doctorCheckId": "tts-key", "checkedAt": "job-prepare", "what": "署名 Channel Pack が指す声の adapter が、非課金の確認で ready（Job の prepare で Pack から決まる）" },
