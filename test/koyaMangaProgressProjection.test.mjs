@@ -245,6 +245,41 @@ test("本編の画はカット順の格子に QA と品質ループの合否の�
   assert.ok(elements.every((element) => element.x + element.width <= 0 && element.x >= CANVAS_RUN_PROGRESS_ORIGIN.x));
 });
 
+test("画の台帳が品質ループの合格まで止めた行（分割ページはコマ）は「人の確認待ち」と出し、画の工程も人待ちにする", async (t) => {
+  const projectDir = await project(t);
+  const job = await createKoyaProgressJob(projectDir, { adapterResult: { status: "awaiting-human-review" } });
+  await writeCharacterApprovalPending(job.executionProjectDir);
+  await approveNewCharacter(job.executionProjectDir);
+  await writeMidProduction(job.executionProjectDir);
+  const paths = koyaPaths(job.executionProjectDir);
+  // cut-02 の1枚の画は機械の QA を通ったが品質ループ待ちで止まり、分割ページは合成の行ではなくコマの行が止まった。
+  const plan = JSON.parse(await readFile(paths.plan, "utf8"));
+  plan.pages = plan.pages.map((page) => (page.assetJobId === "split-page:u-0004" ? { ...page, panelJobIds: ["panel:u-0004:1", "panel:u-0004:2"] } : page));
+  await writeFile(paths.plan, JSON.stringify(plan));
+  const ledger = JSON.parse(await readFile(paths.ledger, "utf8"));
+  const held = { status: "awaiting-human-review", qa: { pass: true, issues: [], technical: { pass: true }, semantic: { pass: true } }, assetQuality: { required: true, pass: false, reason: "loop-not-started" } };
+  ledger.jobs["panel:u-0003"] = { ...ledger.jobs["panel:u-0003"], ...held };
+  ledger.jobs["split-page:u-0004"] = { ...ledger.jobs["split-page:u-0004"], status: "pending", qa: undefined };
+  ledger.jobs["panel:u-0004:1"] = { id: "panel:u-0004:1", status: "complete", qa: { pass: true, issues: [] } };
+  ledger.jobs["panel:u-0004:2"] = { id: "panel:u-0004:2", ...held };
+  ledger.status = "awaiting-human-review";
+  await writeFile(paths.ledger, JSON.stringify(ledger));
+  const state = JSON.parse(await readFile(paths.state, "utf8"));
+  await writeFile(paths.state, JSON.stringify({ ...state, status: "awaiting-human-review", currentStage: "images" }));
+
+  const snapshot = await readKoyaMangaProgressSnapshot(job);
+  const images = snapshot.sections.find((section) => section.id === "scene-image").items;
+  const byKey = Object.fromEntries(images.map((item) => [item.key, item]));
+  assert.equal(byKey["panel:u-0003"].status, "awaiting-approval");
+  assert.deepEqual(byKey["panel:u-0003"].lines.slice(1), ["QA: 合格", "品質ループ: 未開始", "台帳: 人の確認待ち"]);
+  assert.equal(byKey["split-page:u-0004"].status, "awaiting-approval", "コマが止まった分割ページも人待ち");
+  assert.ok(byKey["split-page:u-0004"].lines.includes("台帳: 人の確認待ち"));
+  assert.equal(byKey["panel:u-0001"].status, "complete");
+  assert.equal(byKey["panel:u-0001"].lines.includes("台帳: 人の確認待ち"), false);
+  const statusOf = Object.fromEntries(snapshot.dag.nodes.map((node) => [node.id, node.status]));
+  assert.equal(statusOf.images, "awaiting-human-review");
+});
+
 test("要素の一覧は決定的で、2回投影しても増えず、状態の変化では変わった要素だけを更新する", async (t) => {
   const projectDir = await project(t);
   const job = await createKoyaProgressJob(projectDir, { adapterResult: { status: "waiting-usage-limit" } });
