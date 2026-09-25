@@ -11,6 +11,7 @@ import {
   SCRIPT_QUALITY_CHANNEL_CONFIG_FILE,
   SCRIPT_QUALITY_CHANNEL_CONFIG_VERSION,
   SCRIPT_QUALITY_LIMIT_DEFAULTS,
+  acceptScriptAsHumanVerified,
   createScriptQualityContract,
   normalizeScriptChannelConfig,
   recordScriptQualityRound,
@@ -19,6 +20,7 @@ import {
   scriptQualityPaths,
   scriptQualityReviewTemplate,
   scriptQualityStatus,
+  scriptQualityVerdict,
   startScriptQualityLoop,
 } from "../lib/scriptQualityLoop.mjs";
 import { runScriptQualityCli } from "../scripts/script-quality-loop.mjs";
@@ -484,6 +486,100 @@ test("指摘に id を付け、次の版は指摘ごとの採否と理由が無�
   assert.ok(second.round.improvement >= 1, "点は上がっている");
   assert.equal(second.state.stopReason, "no-improvement", "採用した指摘が直っていなければ停滞として止まる");
   assert.ok(second.issues.includes("script-quality-unresolved-findings:r1-f1"));
+});
+
+test("scriptQualityVerdict は合格した版の SHA だけを合格と答え、違う SHA は script-changed-after-pass、止まり方ごとに理由コードを返す", async (t) => {
+  const root = await workspace(t);
+  const verdict = (input) => scriptQualityVerdict({ workDir: root, ...input });
+  assert.equal((await verdict({ scriptSha256: sha(DRAFT) })).reasonCode, "script-quality-loop-not-started");
+  await start(root);
+  assert.equal((await verdict({ scriptSha256: sha(DRAFT) })).reasonCode, "script-quality-no-round");
+  await writeFile(join(root, "drafts/draft.md"), DRAFT);
+  const failed = await record(root, {
+    scriptPath: "drafts/draft.md", versionLabel: "v1", stage: "draft",
+    reviewPath: await writeReview(root, "r1", review({ context: "ctx-eval-1", script: DRAFT, rubricScores: scores({ "narration-voice": 40 }) })),
+  });
+  const notPassed = await verdict({ scriptPath: "drafts/draft.md" });
+  assert.equal(notPassed.pass, false);
+  assert.equal(notPassed.reasonCode, "script-quality-not-passed");
+  assert.equal(notPassed.failureFingerprint, failed.round.failureFingerprint);
+
+  await writeFile(join(root, "drafts/v2.md"), REWRITE);
+  await record(root, {
+    scriptPath: "drafts/v2.md", versionLabel: "v2", stage: "revision", revisionDelta: "語り口を直した",
+    reviewPath: await writeReview(root, "r2", review({ context: "ctx-eval-2", script: REWRITE, base: DRAFT })),
+  });
+  const passed = await verdict({ scriptPath: join(root, "drafts", "v2.md") });
+  assert.equal(passed.pass, true);
+  assert.equal(passed.reasonCode, "script-quality-passed");
+  assert.equal(passed.acceptedBy, "quality-loop");
+  assert.equal(passed.scriptSha256, sha(REWRITE));
+  assert.equal(passed.passedScriptSha256, sha(REWRITE));
+  assert.equal((await verdict({ scriptSha256: sha(REWRITE) })).pass, true);
+  // 合格した版と違う SHA の台本は不合格。
+  const otherSha = await verdict({ scriptSha256: sha(DRAFT) });
+  assert.equal(otherSha.pass, false);
+  assert.equal(otherSha.reasonCode, "script-changed-after-pass");
+  await writeFile(join(root, "drafts/v2.md"), `${REWRITE}足した行。\n`);
+  assert.equal((await verdict({ scriptPath: "drafts/v2.md" })).reasonCode, "script-changed-after-pass");
+  assert.equal((await verdict({ scriptPath: "drafts/missing.md" })).reasonCode, "script-quality-script-missing");
+  await assert.rejects(verdict({}), /scriptPath か scriptSha256/u);
+  await assert.rejects(verdict({ scriptPath: "drafts/v2.md", scriptSha256: sha(REWRITE) }), /どちらか1つ/u);
+  await assert.rejects(verdict({ scriptSha256: "abc" }), /64桁/u);
+
+  // 状態ファイルを手で書き換えた合格は、合格として答えない。
+  const statePath = scriptQualityPaths(root).statePath;
+  const original = await readFile(statePath, "utf8");
+  const loosened = JSON.parse(original);
+  loosened.script.contract.limits.targetScore = 10;
+  await writeFile(statePath, JSON.stringify(loosened));
+  assert.equal((await verdict({ scriptSha256: sha(REWRITE) })).reasonCode, "script-quality-state-inconsistent");
+  const forged = JSON.parse(original);
+  forged.script.versions.at(-1).reviews[0].rubricScores["meaning-preservation"] = 20;
+  await writeFile(statePath, JSON.stringify(forged));
+  assert.equal((await verdict({ scriptSha256: sha(REWRITE) })).reasonCode, "script-quality-state-inconsistent");
+  await writeFile(statePath, original);
+  assert.equal((await verdict({ scriptSha256: sha(REWRITE) })).pass, true);
+
+  // 組が欠けたまま・止まったループも、それぞれの理由で返す。
+  const { root: panelRoot, contract } = await startPanel(t, { evaluators: ["eval-a", "eval-b"] });
+  await writeFile(join(panelRoot, "drafts/draft.md"), DRAFT);
+  await record(panelRoot, { scriptPath: "drafts/draft.md", versionLabel: "v1", stage: "draft", reviewPath: await writeReview(panelRoot, "a", review({ context: "ctx-a", script: DRAFT, evaluatorId: "eval-a", rubricScores: scores({}, contract) })) });
+  assert.equal((await scriptQualityVerdict({ workDir: panelRoot, scriptPath: "drafts/draft.md" })).reasonCode, "script-quality-panel-incomplete");
+});
+
+test("運営者が自分で書いた台本は、人の確認つきの受け入れを別の理由（script-quality-human-accepted）で合格と答える", async (t) => {
+  const root = await workspace(t);
+  await writeFile(join(root, "operator-script.md"), CHECKED);
+  const verdict = () => scriptQualityVerdict({ workDir: root, scriptPath: "operator-script.md" });
+  assert.equal((await verdict()).pass, false);
+  await assert.rejects(acceptScriptAsHumanVerified({ workDir: root, scriptPath: "operator-script.md", reviewer: "operator", reason: "運営者が自分で書いた", humanVerified: true, isInteractive: false, now }), /対話端末/u);
+  await assert.rejects(acceptScriptAsHumanVerified({ workDir: root, scriptPath: "operator-script.md", reviewer: "operator", reason: "", humanVerified: true, isInteractive: true, now }), /--reason/u);
+  const agent = await acceptScriptAsHumanVerified({ workDir: root, scriptPath: "operator-script.md", reviewer: "operator", reason: "運営者が自分で書いた", agentAttested: true, now });
+  assert.equal(agent.counted, false);
+  assert.deepEqual(agent.issues, ["script-quality-human-acceptance-not-counted:agent-self-attested"]);
+  assert.equal((await verdict()).pass, false, "機械の申告は人の受け入れに数えない");
+  const human = await acceptScriptAsHumanVerified({ workDir: root, scriptPath: "operator-script.md", reviewer: "operator", reason: "運営者が自分で書いた台本をそのまま使う", humanVerified: true, isInteractive: true, now });
+  assert.equal(human.counted, true);
+  const accepted = await verdict();
+  assert.equal(accepted.pass, true);
+  assert.equal(accepted.reasonCode, "script-quality-human-accepted");
+  assert.equal(accepted.acceptedBy, "human");
+  assert.equal(accepted.humanAcceptance.reviewer, "operator");
+  assert.equal(accepted.humanAcceptance.scriptPath, "operator-script.md");
+  // 受け入れた版と違う SHA は受け入れていない。
+  await writeFile(join(root, "operator-script.md"), `${CHECKED}足した行。\n`);
+  assert.equal((await verdict()).pass, false);
+  // 記録は作業フォルダの中に、本文を持たずに残る。
+  const text = await readFile(join(root, "quality", "script-human-acceptance.json"), "utf8");
+  assert.equal(text.includes("合成の地の文"), false);
+  // CLI: verdict は合格なら 0、不合格なら 4。accept-human は数えた受け入れだけ 0。
+  const out = [];
+  const stdout = { write: (value) => out.push(value) };
+  assert.equal((await runScriptQualityCli(["verdict", "--work-dir", root, "--script", "operator-script.md"], { stdout })).exitCode, 4);
+  assert.equal((await runScriptQualityCli(["accept-human", "--work-dir", root, "--script", "operator-script.md", "--reviewer", "operator", "--reason", "書き足した版も確かめた", "--human-verified"], { stdout, now, isInteractive: true })).exitCode, 0);
+  assert.equal((await runScriptQualityCli(["verdict", "--work-dir", root, "--script", "operator-script.md", "--json"], { stdout })).exitCode, 0);
+  assert.equal((await runScriptQualityCli(["accept-human", "--work-dir", root, "--script", "operator-script.md", "--reviewer", "operator", "--reason", "機械の申告", "--agent-attested"], { stdout, now })).exitCode, 3);
 });
 
 test("持ち越しの記録が無い前の版の状態でも、history に残したループを累計に数える", async (t) => {

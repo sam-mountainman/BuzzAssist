@@ -6,6 +6,9 @@
 //   node scripts/script-quality-loop.mjs record --work-dir <dir> --script <版のファイル> --version <版の名前> \
 //        --stage <draft|external-rewrite|meaning-check|revision> --review <採点ファイル> [--external-call <id>]...
 //   node scripts/script-quality-loop.mjs status --work-dir <dir> [--require-pass]
+//   node scripts/script-quality-loop.mjs verdict --work-dir <dir> (--script <台本> | --script-sha256 <sha>)
+//   node scripts/script-quality-loop.mjs accept-human --work-dir <dir> --script <台本> --reviewer <名前> --reason "..." --human-verified
+//   node scripts/script-quality-loop.mjs reset-cumulative --work-dir <dir> --reviewer <名前> --reason "..." --human-verified
 //
 // 版ごとに、その版を作った文脈とは別の評価文脈の採点を1回として記録する。実装の正本は
 // lib/scriptQualityLoop.mjs（中核は lib/qualityLoop.mjs）。状態は作業フォルダの quality/ に書く。
@@ -17,6 +20,7 @@ import { captureScriptRoundLearning } from "../lib/scriptQualityLearning.mjs";
 import {
   SCRIPT_QUALITY_GENRES,
   SCRIPT_STAGES,
+  acceptScriptAsHumanVerified,
   createScriptQualityContract,
   loadScriptChannelConfig,
   recordScriptQualityRound,
@@ -25,13 +29,14 @@ import {
   scriptQualityReviewSheet,
   scriptQualityReviewTemplate,
   scriptQualityStatus,
+  scriptQualityVerdict,
   startScriptQualityLoop,
 } from "../lib/scriptQualityLoop.mjs";
 
 const VALUE_OPTIONS = new Set([
   "--work-dir", "--genre", "--generator-context", "--generator-host", "--channel-pack", "--channel-config",
   "--reason", "--script", "--version", "--stage", "--review", "--base-version", "--revision-delta",
-  "--blocking-condition", "--cost", "--ledger", "--reviewer", "--finding-dispositions",
+  "--blocking-condition", "--cost", "--ledger", "--reviewer", "--finding-dispositions", "--script-sha256",
 ]);
 const REPEATABLE_OPTIONS = new Set(["--producer-context", "--external-call"]);
 const FLAG_OPTIONS = new Set(["--json", "--restart", "--require-pass", "--human-verified", "--agent-attested", "--help", "-h"]);
@@ -118,6 +123,17 @@ export function scriptQualityHelp() {
             check.cumulative にこの作業フォルダの累計（ループ数・回数・費用・時間・費用の不明な件数）が出る
     --work-dir <dir> [--require-pass]   未合格なら終了コード 4
 
+  verdict   制作側が使う答え。この台本（SHA）を使ってよいかと理由コード。何も書かない
+    --work-dir <dir> (--script <台本のファイル> | --script-sha256 <sha>) [--json]
+                                  使ってよい（終了コード 0）: script-quality-passed（ループが合格した版と同じ SHA）/
+                                  script-quality-human-accepted（人がそのまま使うと認めた SHA）。
+                                  使えない（終了コード 4）: script-changed-after-pass・script-quality-not-passed など
+
+  accept-human  運営者が自分で書いた台本（依頼者が書いた台本など）を、AI の点で止めずにそのまま使うと記録する。
+            品質ループの合格とは別の理由として verdict が返す
+    --work-dir <dir> --script <台本> --reason "誰が書いた台本か・何を確かめたか" --reviewer <名前> --human-verified
+                                  確認した人が自分の対話端末から打つ。--agent-attested は記録するが数えない
+
   reset-cumulative  この作業フォルダの累計を 0 へ戻す。止まったループでだけ、理由と人の確認が要る
     --work-dir <dir> --reason "何が変わったか" --reviewer <名前> --human-verified
                                   確認した人が自分の対話端末から打つ。--agent-attested は数えず何も変えない。
@@ -190,6 +206,26 @@ export async function runScriptQualityCli(argv = process.argv.slice(2), {
       print(stdout, result, args.json);
       return { exitCode: result.started && (result.issues || []).length === 0 ? 0 : 3, result };
     }
+    case "verdict": {
+      const result = await scriptQualityVerdict({ workDir: args.workDir, scriptPath: args.script, scriptSha256: args.scriptSha256 });
+      if (args.json) stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+      else stdout.write(`${result.pass ? "使ってよい" : "使えない"}: ${result.reasonCode}\n${result.detail}\n`);
+      return { exitCode: result.pass ? 0 : 4, result };
+    }
+    case "accept-human": {
+      const result = await acceptScriptAsHumanVerified({
+        workDir: args.workDir,
+        scriptPath: args.script,
+        reviewer: args.reviewer,
+        reason: args.reason,
+        humanVerified: args.humanVerified === true,
+        agentAttested: args.agentAttested === true,
+        isInteractive,
+        ...(now ? { now } : {}),
+      });
+      print(stdout, result, args.json);
+      return { exitCode: result.counted ? 0 : 3, result };
+    }
     case "reset-cumulative": {
       const result = await resetScriptQualityCumulative({
         workDir: args.workDir,
@@ -256,7 +292,7 @@ export async function runScriptQualityCli(argv = process.argv.slice(2), {
       return { exitCode: args.requirePass && !result.deliverable ? 4 : 0, result };
     }
     default:
-      throw new Error(`不明なアクション: ${args.action}（contract / start / sheet / record / status）`);
+      throw new Error(`不明なアクション: ${args.action}（contract / start / sheet / record / status / verdict / accept-human / reset-cumulative）`);
   }
 }
 
