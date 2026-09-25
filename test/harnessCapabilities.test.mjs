@@ -161,6 +161,7 @@ test("Koya のカードの start 引数は、Job を作る前に止める表（K
   assert.ok(narratedOptions.every((entry) => typeof entry.requiredWhen === "string" && entry.requiredWhen.length > 0));
   assert.deepEqual(narratedOptions.map(({ key, cliFlag }) => ({ key, cliFlag })), [
     { key: "operatorImageManifestPath", cliFlag: "--operator-image-manifest" },
+    { key: "operatorVideoManifestPath", cliFlag: "--operator-video-manifest" },
   ]);
   const cli = await readFile(join(root, "scripts", "run-video-harness.mjs"), "utf8");
   for (const entry of [...card.inputs.startOptions, ...narratedOptions]) {
@@ -177,7 +178,10 @@ test("条件つきの start 引数は、足りなくても blockers にせず条
   const without = checkHarnessInputs(view, { script, channelPack: pack });
   assert.equal(without.status, "ok");
   assert.deepEqual(without.startOptions.required, []);
-  assert.deepEqual(without.startOptions.conditional.map((entry) => [entry.key, entry.provided]), [["operatorImageManifestPath", false]]);
+  assert.deepEqual(without.startOptions.conditional.map((entry) => [entry.key, entry.provided]), [
+    ["operatorImageManifestPath", false],
+    ["operatorVideoManifestPath", false],
+  ]);
   const withManifest = checkHarnessInputs(view, { script, channelPack: pack, options: { operatorImageManifestPath: "/fixture/manifest.json" } });
   assert.equal(withManifest.startOptions.conditional[0].provided, true);
   const bad = minimalCard({ inputs: { scriptFormats: [{ id: "raw-text", what: "x" }], startOptions: [{ key: "x", cliFlag: "--x", what: "x", requiredWhen: " " }] } });

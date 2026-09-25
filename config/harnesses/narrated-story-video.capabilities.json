@@ -24,6 +24,12 @@
         "cliFlag": "--operator-image-manifest",
         "requiredWhen": "Channel Pack の image.source が operator-file のとき",
         "what": "運営者が用意した本編の画の取り込みの記録（buzzassist-operator-image-manifest-v1）"
+      },
+      {
+        "key": "operatorVideoManifestPath",
+        "cliFlag": "--operator-video-manifest",
+        "requiredWhen": "Channel Pack が bookends.opening.kind: episode-video か bookends.review.presenter.episodeVideo を宣言したとき",
+        "what": "回ごとの OP 映像・感想パートの人物の映像の取り込みの記録（buzzassist-operator-video-manifest-v1）"
       }
     ]
   },
