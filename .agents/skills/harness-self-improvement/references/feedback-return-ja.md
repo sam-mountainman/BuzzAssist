@@ -61,10 +61,19 @@ HTTPSに限り、URL内credential・query・fragmentを拒否する。network、
 管理側の入口は`harness-feedback-ingest.mjs`だけを使う。
 
 ```bash
-# ownerが公開鍵と許可Harnessをローカル登録（この操作はHTTPへ公開しない）
+# ownerが公開鍵と許可をローカル登録（この操作はHTTPへ公開しない）
+# 手動の bundle（v2）の鍵: 許可する build の一覧をファイルで渡す
 node scripts/harness-feedback-ingest.mjs enroll \
   --root var/feedback-ingest --operator <operator-id> \
-  --public-key <operator-public.pem> --harnesses <harness-id> \
+  --public-key <operator-public.pem> --allowed-builds <allowed-builds.json> \
+  --approved-by <owner-id>
+
+# 自動の bundle（v3）の鍵（運営者の端末の keys/operator-feedback-ed25519.pub.pem）: 許可するハーネスを並べる。
+# 用途の違う鍵は互いに使えない（--allowed-builds は渡さない）
+node scripts/harness-feedback-ingest.mjs enroll \
+  --root var/feedback-ingest --operator <operator-id> \
+  --public-key <operator-feedback-ed25519.pub.pem> \
+  --key-use auto-feedback --allowed-harness-ids <harness-id>[,<harness-id>...] \
   --approved-by <owner-id>
 
 # upload API。tokenは引数へ書かず環境変数で渡す
@@ -82,3 +91,28 @@ node scripts/harness-feedback-ingest.mjs approve \
 未登録・不正bundleはraw bytesを保存せず失敗metadataだけを残す。検証済みbundleも
 即時反映せず`verified-quarantine`へ置き、owner承認後のimportも既知proposal IDの
 観測回数にだけ加える。未知IDから規則本文を捏造せず、**正本は一切書き換えない**。
+
+### 受け取り口の書き出しを取り込む（自動の bundle v3）
+
+自動の bundle は提供元の受け取り口が受け、owner がその書き出し（JSON Lines）を `import-export` で取り込む。
+受け取り口は gateId と catalog の照合を省いているので、ゲートの宣言・公開 catalog・本文の privacy の照合は
+ここで必ず行う。通ったものも `verified-quarantine` に置くだけで、集計へ入るのは既存の `approve` のあと。
+
+```bash
+# まず何も書かずに照合だけ見る
+node scripts/harness-feedback-ingest.mjs import-export --root var/feedback-ingest \
+  --export feedback-export.jsonl --provider-key-fingerprint ed25519:<24桁hex> --dry-run
+
+# 照合を通った bundle を verified-quarantine へ置く
+node scripts/harness-feedback-ingest.mjs import-export --root var/feedback-ingest \
+  --export feedback-export.jsonl --provider-key-fingerprint ed25519:<24桁hex>
+```
+
+- `--provider-key-fingerprint` は受け取り口の受領証の鍵の指紋。渡さないと照合だけして「未検証」として数え、
+  隔離へは置かない（取り込みの記録だけを残して exit 2）。`--dry-run` は何も書かない
+- 書き出しは差分ではなく、毎回「保持期限内の全件」。取り込みは `bundleDigest` で冪等で、前に取り込んだものは
+  「取り込み済み」として数える。前に取り込んだ bundle が次の書き出しに出てこなくなるのは正常で、記録は消さない
+- 運営者の公開鍵の登録と失効は、受け取り口と管理側の**両方**で行う。受け取り口だけで失効すると書き出しに出なく
+  なり、管理側だけで失効すると取り込みで `FEEDBACK_SIGNER_REVOKED` になる
+- 落ちた bundle は理由のコードを取り込みの記録（`export-imports/`）に残し、隔離へ入れない。本文は記録へ写さない。
+  受け取る側の詳しい仕様は、リポジトリの docs/harness-feedback-receiver-spec-ja.md の「持ち主の取り込み」

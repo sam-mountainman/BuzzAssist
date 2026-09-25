@@ -155,6 +155,16 @@
         "回そのものは記録されていて、学習だけが積まれていないことを伝える",
         "どの手がかりが別のチャンネルを指しているかを確かめて直し、推測でどちらかへ寄せて積まない"
       ]
+    },
+    {
+      "id": "feedback-export-import",
+      "prompt": "受け取り口から書き出した feedback の JSON Lines を取り込んで、運営者の結果を集計に入れておいて。",
+      "shouldTrigger": true,
+      "invariants": [
+        "harness-feedback-ingest.mjs import-export で取り込み、まず --dry-run で照合だけ見る",
+        "受領証の鍵の指紋（--provider-key-fingerprint）が無ければ隔離へ置かれないことを踏まえる",
+        "通ったものも verified-quarantine に置くだけで、集計へ入るのは owner が確かめて approve したあとだと伝える"
+      ]
     }
   ]
 }
