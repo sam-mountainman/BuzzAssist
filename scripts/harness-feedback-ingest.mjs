@@ -1,12 +1,16 @@
 #!/usr/bin/env node
 // BuzzAssist管理側の署名feedback intake。upload APIはbundle受付だけを公開し、
 // operator enrollmentとowner decisionはローカルCLIに限定する。
+// 自動の bundle（v3）は別製品のサーバーの受け取り口が受け、その書き出しを import-export で取り込む。
 
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
+import { importHarnessFeedbackExport } from "../lib/harnessFeedbackExportImport.mjs";
 import {
+  HARNESS_FEEDBACK_KEY_USE_AUTO,
+  HARNESS_FEEDBACK_KEY_USE_MANUAL,
   createHarnessFeedbackUploadHandler,
   decideHarnessFeedbackBundle,
   enrollHarnessFeedbackOperator,
@@ -42,8 +46,14 @@ function help() {
     "BuzzAssist central feedback ingest",
     "",
     "enroll --root DIR --operator ID --public-key FILE --allowed-builds FILE --approved-by OWNER",
+    "enroll --root DIR --operator ID --public-key FILE --key-use auto-feedback --allowed-harness-ids ID[,ID...] --approved-by OWNER",
+    "       (自動の bundle v3 の鍵。運営者の端末の keys/operator-feedback-ed25519.pub.pem。--allowed-builds は渡さない)",
     "revoke --root DIR --operator ID [--key-id ID] --revoked-by OWNER --reason TEXT",
     "ingest --root DIR --bundle FILE",
+    "import-export --root DIR --export FILE --provider-key-fingerprint ed25519:<24桁hex> [--dry-run]",
+    "              [--proposal-catalog FILE] [--code-root DIR]",
+    "       (受け取り口の書き出し JSON Lines から v3 bundle を照合して verified-quarantine へ置く。",
+    "        指紋が無ければ照合だけして置かず、取り込みの記録を残して exit 2。--dry-run は何も書かない)",
     "approve --root DIR --bundle-digest SHA --approved-by OWNER --reason TEXT",
     "reject --root DIR --bundle-digest SHA --approved-by OWNER --reason TEXT",
     "list-approved --root DIR   (署名鍵が後に失効したimportはrevokedAfterApprovalへ分離し、importsへは数えない)",
@@ -61,15 +71,32 @@ async function main() {
   }
   let result;
   if (args.command === "enroll") {
-    required(args, ["root", "operator", "publicKey", "allowedBuilds", "approvedBy"]);
-    const buildDocument = JSON.parse(await readFile(resolve(args.allowedBuilds), "utf8"));
-    result = await enrollHarnessFeedbackOperator({
-      rootDir: resolve(args.root),
-      operatorId: args.operator,
-      publicKeyPem: await readFile(resolve(args.publicKey), "utf8"),
-      allowedBuilds: Array.isArray(buildDocument) ? buildDocument : buildDocument.allowedBuilds,
-      approvedBy: args.approvedBy,
-    });
+    const keyUse = typeof args.keyUse === "string" ? args.keyUse : HARNESS_FEEDBACK_KEY_USE_MANUAL;
+    if (keyUse === HARNESS_FEEDBACK_KEY_USE_AUTO) {
+      required(args, ["root", "operator", "publicKey", "allowedHarnessIds", "approvedBy"]);
+      if (args.allowedBuilds !== undefined) throw new Error("--key-use auto-feedback には --allowed-builds を渡さない（v3 は release tuple を運ばない）。");
+      result = await enrollHarnessFeedbackOperator({
+        rootDir: resolve(args.root),
+        operatorId: args.operator,
+        publicKeyPem: await readFile(resolve(args.publicKey), "utf8"),
+        keyUse,
+        allowedHarnessIds: args.allowedHarnessIds.split(",").map((value) => value.trim()).filter(Boolean),
+        approvedBy: args.approvedBy,
+      });
+    } else {
+      if (keyUse !== HARNESS_FEEDBACK_KEY_USE_MANUAL) {
+        throw new Error(`--key-use は ${HARNESS_FEEDBACK_KEY_USE_MANUAL} か ${HARNESS_FEEDBACK_KEY_USE_AUTO}。`);
+      }
+      required(args, ["root", "operator", "publicKey", "allowedBuilds", "approvedBy"]);
+      const buildDocument = JSON.parse(await readFile(resolve(args.allowedBuilds), "utf8"));
+      result = await enrollHarnessFeedbackOperator({
+        rootDir: resolve(args.root),
+        operatorId: args.operator,
+        publicKeyPem: await readFile(resolve(args.publicKey), "utf8"),
+        allowedBuilds: Array.isArray(buildDocument) ? buildDocument : buildDocument.allowedBuilds,
+        approvedBy: args.approvedBy,
+      });
+    }
   } else if (args.command === "revoke") {
     required(args, ["root", "operator", "revokedBy", "reason"]);
     result = await revokeHarnessFeedbackOperator({
@@ -87,6 +114,18 @@ async function main() {
       bundle: JSON.parse(bytes.toString("utf8")),
       bundleBytes: bytes,
     });
+  } else if (args.command === "import-export") {
+    required(args, ["root", "export"]);
+    result = await importHarnessFeedbackExport({
+      rootDir: resolve(args.root),
+      exportText: await readFile(resolve(args.export), "utf8"),
+      providerKeyFingerprint: typeof args.providerKeyFingerprint === "string" ? args.providerKeyFingerprint : "",
+      // 値つきで渡されても（--dry-run false など）書かない側へ倒す。
+      dryRun: args.dryRun !== undefined,
+      ...(typeof args.codeRoot === "string" ? { codeRoot: resolve(args.codeRoot) } : {}),
+      ...(typeof args.proposalCatalog === "string" ? { proposalCatalogPath: resolve(args.proposalCatalog) } : {}),
+    });
+    if (!result.ok) process.exitCode = 2;
   } else if (["approve", "reject"].includes(args.command)) {
     required(args, ["root", "bundleDigest", "approvedBy", "reason"]);
     result = await decideHarnessFeedbackBundle({
