@@ -91,20 +91,104 @@ export function validateHarness(h) {
 // ルーターを書いても、正しいかどうかを確かめる手段がない。
 // 効くのは「候補と、その根拠と、足りない入力」を並べて人に見せることの方。
 export function matchHarnesses(harnesses, want) {
-  const query = String(want ?? "").toLowerCase();
-  if (!query.trim()) return [];
-  return harnesses
-    .map((h) => {
-      // 日本語の依頼文は空白で区切れないので、依頼文を刻むのではなく
-      // **ハーネス側の語が依頼文に現れるか**を見る。最初この向きを逆に
-      // 書いて、「漫画で解説する動画を作りたい」が1語として扱われ、
-      // 何にも一致しなかった。
-      const keywords = harnessKeywords(h);
-      const hits = keywords.filter((k) => query.includes(k));
-      return { harness: h, score: hits.length, hits };
-    })
+  return analyzeHarnessRequest(harnesses, want)
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score);
+}
+
+// 否定の節を見分ける手掛かり。日本語は「〜は使わず」「〜ではなく」のように**前の語を**
+// 否定する後置型、英語は "not / without" のように**後ろの語を**否定する前置型。
+// 「漫画、吹き出しは使わず、朗読にしたい」で吹き出しまで加点して漫画を選んでいた。
+const JAPANESE_SUFFIX_NEGATIONS = [
+  "ではなくて", "ではなく", "でなくて", "でなく", "じゃなくて", "じゃなく", "ではない", "じゃない",
+  "使わずに", "使わず", "使わない", "入れずに", "入れず", "入れない", "付けずに", "付けず", "付けない",
+  "つけずに", "つけず", "つけない", "出さずに", "出さず", "出さない", "せずに", "せず", "しない",
+  "いらない", "要らない", "不要", "なしで", "無しで", "なし", "無し", "ナシ", "抜きで", "抜き", "以外",
+  "はやめて", "をやめて", "は避けて", "を避けて", "禁止",
+].sort((left, right) => right.length - left.length);
+// 「昔ばなし」「おはなし」の「なし」は否定ではない。
+const NOT_NEGATION_BEFORE_NASHI = /(?:ば|おは|お話|話)$/u;
+const ENGLISH_PREFIX_NEGATIONS = /\b(?:not|no|without|never|don't use|do not use|instead of)\b/giu;
+const CLAUSE_BOUNDARY = /[、。，．,.;；:：!！?？\n()（）「」『』]|\b(?:but|rather|instead)\b/giu;
+
+function normalizeRequest(want) {
+  return String(want ?? "").normalize("NFKC").toLowerCase();
+}
+
+/**
+ * 依頼文を節に分け、それぞれが否定されているかを返す。
+ * - 日本語の後置否定: 直前の区切りから否定語までが否定の節
+ * - 英語の前置否定: 否定語から次の区切りまでが否定の節
+ */
+export function splitRequestClauses(want) {
+  const text = normalizeRequest(want);
+  const clauses = [];
+  // 英語の前置否定を先に見つけ、その範囲（次の区切りまで）を否定にする。
+  const negatedRanges = [];
+  for (const match of text.matchAll(ENGLISH_PREFIX_NEGATIONS)) {
+    const start = match.index + match[0].length;
+    CLAUSE_BOUNDARY.lastIndex = start;
+    const boundary = CLAUSE_BOUNDARY.exec(text);
+    negatedRanges.push([start, boundary ? boundary.index : text.length]);
+  }
+  let start = 0;
+  let index = 0;
+  const push = (end, suffixNegated) => {
+    const body = text.slice(start, end);
+    if (!body.trim()) return;
+    // 英語の前置否定の範囲と重なる節も否定。
+    const prefixNegated = negatedRanges.some(([rangeStart, rangeEnd]) => rangeStart < end && rangeEnd > start);
+    clauses.push({ text: body, negated: suffixNegated || prefixNegated });
+  };
+  while (index < text.length) {
+    CLAUSE_BOUNDARY.lastIndex = index;
+    const boundary = CLAUSE_BOUNDARY.exec(text);
+    if (boundary && boundary.index === index) {
+      push(index, false);
+      index += Math.max(1, boundary[0].length);
+      start = index;
+      continue;
+    }
+    const marker = JAPANESE_SUFFIX_NEGATIONS.find((candidate) => text.startsWith(candidate, index));
+    if (marker && !(/^(?:なし|無し)/u.test(marker) && NOT_NEGATION_BEFORE_NASHI.test(text.slice(start, index)))) {
+      push(index, true);
+      index += marker.length;
+      start = index;
+      continue;
+    }
+    index += 1;
+  }
+  push(text.length, false);
+  return clauses;
+}
+
+/**
+ * ハーネスごとに、依頼文の肯定の節に現れた語（加点）と否定の節に現れた語（減点）を返す。
+ * score = 肯定の語の数 − 否定の語の数。
+ */
+export function analyzeHarnessRequest(harnesses, want) {
+  const query = normalizeRequest(want);
+  if (!query.trim()) return [];
+  const clauses = splitRequestClauses(query);
+  const positiveText = clauses.filter((clause) => !clause.negated).map((clause) => clause.text);
+  const negatedText = clauses.filter((clause) => clause.negated).map((clause) => clause.text);
+  return harnesses.map((h) => {
+    // 日本語の依頼文は空白で区切れないので、依頼文を刻むのではなく
+    // **ハーネス側の語が依頼文に現れるか**を見る。最初この向きを逆に
+    // 書いて、「漫画で解説する動画を作りたい」が1語として扱われ、
+    // 何にも一致しなかった。
+    const keywords = harnessKeywords(h).map((k) => k.normalize("NFKC"));
+    const positiveHits = keywords.filter((k) => positiveText.some((body) => body.includes(k)));
+    const negatedHits = keywords.filter((k) => negatedText.some((body) => body.includes(k)));
+    return {
+      harness: h,
+      score: positiveHits.length - negatedHits.length,
+      // hits は従来どおり「加点した語」。
+      hits: positiveHits,
+      positiveHits,
+      negatedHits,
+    };
+  });
 }
 
 // ハーネスを言い当てる語。宣言の文章をそのまま使うと長すぎて一致しないので、
@@ -168,8 +252,9 @@ function main() {
         );
         break;
       }
-      for (const { harness: h, hits } of matched) {
-        process.stdout.write(`\n■ ${h.displayName}  [${h.id}]（一致: ${hits.join(", ")}）\n`);
+      for (const { harness: h, hits, negatedHits = [] } of matched) {
+        const negated = negatedHits.length > 0 ? ` / 否定の節で減点: ${negatedHits.join(", ")}` : "";
+        process.stdout.write(`\n■ ${h.displayName}  [${h.id}]（一致: ${hits.join(", ")}${negated}）\n`);
         process.stdout.write(`   ${h.produces.description}\n`);
         process.stdout.write(`   入口: ${h.entrypoint}\n`);
         const blocking = (h.requiresFromOperator ?? []).filter((r) => r.blocking);
