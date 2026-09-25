@@ -53,6 +53,15 @@ jobs:
       # Homebrew の ffmpeg は freetype 無しでビルドされ、タイトルカードの drawtext を持たない
       # （2026-09-24、CI で落ちた）。必須の道具の欠けは skip の許可リストに入れない決まりなので、
       # 道具のほうを揃える。運営者と同じ ffmpeg で試験することにもなる。
+      # 配布元が一時的に応答しないと公開前ゲートごと止まる（2026-09-25 に1回あった）。取得した
+      # 固定版は GitHub のキャッシュに置く。キャッシュから戻しても、下の ensureManagedFfmpeg が
+      # 記録した SHA-256 と実行ファイルの起動を確かめ直してから使う。
+      - name: Cache the pinned ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/buzzassist-tools
+          key: buzzassist-ffmpeg-9.0.2-${{ runner.os }}-${{ runner.arch }}
       - name: Install the pinned ffmpeg (macOS)
         if: runner.os == 'macOS'
         shell: bash
