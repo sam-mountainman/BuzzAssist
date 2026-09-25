@@ -116,10 +116,11 @@ export function ledgerPathFor(target, kind = "proposals") {
   const resolvedTarget = resolveTarget(String(target || ""));
   if (resolvedTarget.startsWith("channel-pack:")) {
     const definition = loadTargets()[resolvedTarget] ?? {};
-    if (definition.relativeToDeployment) {
-      const deployment = resolveDeploymentRoot(definition.relativeToDeployment);
-      if (deployment) return path.resolve(REPO_ROOT, deployment, "docs", "learning", name);
-    }
+    // チャンネルの学習の保存先は、制作プログラムの配備 root とは別の設定で決める
+    // （resolveChannelLearningStore）。配備 root が "." のとき、以前はここが共有台帳と同じ
+    // 場所に解決され、隔離の検査で捕捉そのものが止まっていた。
+    const store = resolveChannelLearningStore(resolvedTarget, definition);
+    if (store) return path.join(store.root, "docs", "learning", name);
     // ambient BUZZASSIST_CHANNEL_PACK_ID を使うと、narrated-story宛の提案が
     // たまたまactiveなKoya packへ入る。target自身をpack IDとして固定する。
     const packId = packIdForTarget(resolvedTarget, definition);
@@ -133,9 +134,99 @@ export function learningLedgerPaths(kind = "proposals") {
   const paths = new Set([path.join(LEARN_DIR, `${kind}.jsonl`)]);
   for (const [target, definition] of Object.entries(loadTargets())) {
     if (definition.scope !== "channel-pack") continue;
-    paths.add(ledgerPathFor(target, kind));
+    try {
+      paths.add(ledgerPathFor(target, kind));
+    } catch (error) {
+      // 保存先の設定が壊れているチャンネルは読まない（書く工程は同じ理由で止まる）。
+      // 他のチャンネルと共有台帳の読み取りまで止めない。
+      if (error?.code !== CHANNEL_LEARNING_STORE_ERROR) throw error;
+    }
   }
   return [...paths];
+}
+
+/** チャンネルの学習の保存先が決められない・共有台帳と重なるときの失敗コード。 */
+export const CHANNEL_LEARNING_STORE_ERROR = "channel-learning-store-invalid";
+
+function channelLearningStoreError(target, reason) {
+  const error = new Error(
+    `${CHANNEL_LEARNING_STORE_ERROR}: ${target} の学習の保存先を使えません。${reason}`
+    + " チャンネルの台帳と提案は、共有台帳（docs/learning）とも公開リポジトリの作業木の直下とも別の場所"
+    + "（Channel Pack か運営者の私有プロジェクト）に置くこと。",
+  );
+  error.code = CHANNEL_LEARNING_STORE_ERROR;
+  return error;
+}
+
+function samePath(left, right) {
+  const normalize = (value) => {
+    try { return fs.realpathSync(value); } catch { return path.resolve(value); }
+  };
+  return normalize(left) === normalize(right);
+}
+
+/**
+ * 運営者の配置表（追跡外の config/harness-deployments.json）の `channelLearning` で宣言した、
+ * チャンネルの学習の保存先（運営者の私有プロジェクト）。制作プログラムの配備（deployments[].root）
+ * とは別の設定。形:
+ *   "channelLearning": [{ "target": "channel-pack:<id>", "root": "<私有プロジェクトの dir>" }]
+ * root は配置表のあるリポジトリからの相対か絶対。宣言が無ければ null。
+ */
+function operatorChannelLearningRoot(target, repoRoot = REPO_ROOT) {
+  const operatorMap = path.join(repoRoot, "config", "harness-deployments.json");
+  if (!fs.existsSync(operatorMap)) return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(operatorMap, "utf8"));
+  } catch {
+    return null;
+  }
+  if (parsed?.channelLearning === undefined) return null;
+  if (!Array.isArray(parsed.channelLearning)) {
+    throw channelLearningStoreError(target, "config/harness-deployments.json の channelLearning が配列ではありません。");
+  }
+  const rows = parsed.channelLearning.filter((row) => resolveTarget(String(row?.target || "")) === target);
+  if (rows.length === 0) return null;
+  if (rows.length > 1) throw channelLearningStoreError(target, "channelLearning に同じ target が2回あります（どちらが効くか決められない）。");
+  const value = typeof rows[0]?.root === "string" ? rows[0].root.trim() : "";
+  if (!value || /<[^>]+>/u.test(value)) throw channelLearningStoreError(target, "channelLearning の root が未完成です。");
+  return path.isAbsolute(value) ? path.resolve(value) : path.resolve(repoRoot, value);
+}
+
+/**
+ * channel-pack 宛の学習の保存先（正本の台帳・提案台帳・反映記録を置く root）。
+ *   1. 運営者の配置表の channelLearning（私有プロジェクト）
+ *   2. 配置先相対の宛先（relativeToDeployment）で、配備 root がリポジトリの外にあるもの（従来の配置）
+ *   3. どちらも無ければ null（Channel Pack: channel-packs/<packId>、正本は pack-first）
+ * 共有台帳と同じ場所・リポジトリの作業木の直下に解決されたら、黙って使わず理由つきで止める（fail-closed）。
+ */
+export function resolveChannelLearningStore(target, definition = {}, {
+  repoRoot = REPO_ROOT,
+  deploymentRootFor = undefined,
+} = {}) {
+  if (!isChannelPackTarget(target)) return null;
+  const sharedLedgerDir = path.join(repoRoot, "docs", "learning");
+  const checked = (root, source) => {
+    if (samePath(root, repoRoot)) {
+      throw channelLearningStoreError(target, `保存先がリポジトリの作業木の直下（${source}）に解決されました。そこへ書くと台帳が公開面に混ざり、提案は共有台帳と同じ場所になります。`);
+    }
+    if (samePath(path.join(root, "docs", "learning"), sharedLedgerDir)) {
+      throw channelLearningStoreError(target, `提案台帳が共有台帳と同じ場所（${source}）に解決されました。`);
+    }
+    return { root, source };
+  };
+  const declared = operatorChannelLearningRoot(target, repoRoot);
+  if (declared) return checked(declared, "operator-project");
+  if (definition?.relativeToDeployment) {
+    const deployment = (deploymentRootFor ?? ((id) => resolveDeploymentRoot(id, repoRoot)))(definition.relativeToDeployment);
+    if (deployment) {
+      const absolute = path.resolve(repoRoot, deployment);
+      // 配備 root がリポジトリそのもの（既定の "."）なら、それは制作プログラムの置き場であって
+      // チャンネルの学習の保存先ではない。Channel Pack へ置く。
+      if (!samePath(absolute, repoRoot)) return checked(absolute, "deployment");
+    }
+  }
+  return null;
 }
 
 // 提案が向かう先。ここに無いものは apply できない。
@@ -775,6 +866,7 @@ export const CANONICAL_SOURCE_LABELS = Object.freeze({
   "channel-pack": "Channel Pack",
   "channel-pack-env": "Channel Pack（BUZZASSIST_CHANNEL_PACK）",
   deployment: "配置先（config/harness-deployments.json）",
+  "operator-project": "運営者の私有プロジェクト（config/harness-deployments.json の channelLearning）",
   repository: "リポジトリ",
 });
 
@@ -852,18 +944,20 @@ export function resolveCanonicalTarget(rawTarget, {
     );
   }
   let rel = def.canonical;
-  if (def.relativeToDeployment) {
-    const root = (deploymentRootFor ?? ((id) => resolveDeploymentRoot(id, repoRoot)))(def.relativeToDeployment);
-    if (!root) {
-      // 捕捉は「あとで判断するための記録」なので、配置先が未設定でも受け取る
-      // （下の「正本が手元に無い」と同じ扱い）。ここで投げていたので、配置表を持たない
-      // 環境（CI・clone 直後）では pack 宛の捕捉が、台帳の隔離の検査より前に落ちていた。
-      // 書き込む工程（requireWritableTarget）だけが配置先を要求する。
-      return { target, rel, full: null, missing: true, missingDeployment: def.relativeToDeployment, source: "deployment" };
+  if (isChannelPackTarget(target)) {
+    // 運営者の私有プロジェクト（channelLearning）か、リポジトリの外の配備。共有台帳と重なる設定は止める。
+    const store = resolveChannelLearningStore(target, def, { repoRoot, deploymentRootFor });
+    if (store?.source === "operator-project") {
+      // 記録には保存先の中の相対 path だけを残す（端末の絶対 path を記録に持ち込まない）。
+      const full = path.resolve(store.root, rel);
+      return { target, rel, full, missing: !fs.existsSync(full), source: "operator-project", storeRoot: store.root };
     }
-    rel = path.join(root, rel);
-    const full = path.resolve(repoRoot, rel);
-    return { target, rel, full, missing: !fs.existsSync(full), source: "deployment" };
+    if (store?.source === "deployment") {
+      const root = path.relative(repoRoot, store.root);
+      rel = path.join(root && !root.startsWith("..") && !path.isAbsolute(root) ? root : store.root, rel);
+      const full = path.resolve(repoRoot, rel);
+      return { target, rel, full, missing: !fs.existsSync(full), source: "deployment" };
+    }
   }
   if (isChannelPackTarget(target)) {
     // 捕捉は正本が手元に無くても受け取る（missing を返すだけ）。書き込む工程
@@ -928,7 +1022,19 @@ export function resolveRecordedCanonical(record, {
     return { full, source: "repository", missing: !fs.existsSync(full) };
   }
   const def = (targets ?? loadTargetsFor(repoRoot))[target] ?? {};
-  if (def.relativeToDeployment) {
+  let store = null;
+  try {
+    store = resolveChannelLearningStore(target, def, { repoRoot });
+  } catch (error) {
+    if (error?.code !== CHANNEL_LEARNING_STORE_ERROR) throw error;
+    return { full: null, source: "operator-project", missing: true };
+  }
+  if (store?.source === "operator-project") {
+    // 私有プロジェクトへの記録は、保存先の中の相対 path で残っている。
+    const full = path.resolve(store.root, rel);
+    return { full, source: "operator-project", missing: !fs.existsSync(full) };
+  }
+  if (store?.source === "deployment") {
     // 記録の targetPath は配置先を含む形で残っている。配置先がそのチャンネルの置き場。
     const full = path.resolve(repoRoot, rel);
     return { full, source: "deployment", missing: !fs.existsSync(full) };

@@ -46,10 +46,10 @@
     "channel-pack:narrated-story": {
       "mode": "review-only",
       "canonical": "docs/requirements-ledger.md",
-      "reason": "要求台帳は承認と監査の記録そのもの。機械が書き足すと、何を人が決めたのかが分からなくなる。音声ゲートの数値基準は docs/AUDIO-BGM-GATES.md（台帳から参照）。パスは deployment 相対。配置先は config/harness-deployments.json（追跡しない）が持つ。",
+      "reason": "要求台帳は承認と監査の記録そのもの。機械が書き足すと、何を人が決めたのかが分からなくなる。音声ゲートの数値基準は docs/AUDIO-BGM-GATES.md（台帳から参照）。パスは保存先の root からの相対。保存先は制作プログラムの配備 root とは別の設定で、運営者の配置表 config/harness-deployments.json（追跡しない）の channelLearning で宣言した私有プロジェクト、宣言が無ければ Channel Pack（channel-packs/narrated-story、正本は BUZZASSIST_CHANNEL_PACK も見る）。共有台帳と同じ場所には解決しない（重なれば理由つきで止まる）。",
       "scope": "channel-pack",
-      "confidential": true,
-      "relativeToDeployment": "narrated-story-video"
+      "packId": "narrated-story",
+      "confidential": true
     },
     "channel-pack:narrated-story-script": {
       "mode": "review-only",
