@@ -70,9 +70,17 @@ test("過去の版の Receipt は従来どおり検証が通り、ホストは u
     const receipt = PAST_REVISIONS.revisions[String(revision)];
     const verdict = verifyRunReceiptInvocation(receipt);
     assert.equal(verdict.ok, true, `revision ${revision}: ${verdict.failures.join(", ")}`);
-    if (revision < RUN_RECEIPT_INVOCATION_IN_FORCE_SINCE) assert.equal(verdict.status, "not-in-force");
-    assert.equal(runReceiptHostSummary(receipt).hostKey, "unrecorded");
-    assert.equal(redactForPlatform(receipt).host.hostKey, "unrecorded");
+    if (revision < RUN_RECEIPT_INVOCATION_IN_FORCE_SINCE) {
+      assert.equal(verdict.status, "not-in-force");
+      assert.equal(runReceiptHostSummary(receipt).hostKey, "unrecorded");
+      assert.equal(redactForPlatform(receipt).host.hostKey, "unrecorded");
+    } else {
+      // ホストの記録がある版は、当時の記録どおりに読む（後から unrecorded へ落とさない）。
+      assert.equal(verdict.status, "recorded");
+      assert.notEqual(runReceiptHostSummary(receipt).hostKey, "unrecorded");
+    }
     assert.equal(redactForPlatform(receipt).durationSeconds, null);
+    // 工程ごとの内訳（timing.stages）は版 3 から。それより前の記録は空の内訳として読む。
+    assert.deepEqual(redactForPlatform(receipt).stageDurations, []);
   }
 });
