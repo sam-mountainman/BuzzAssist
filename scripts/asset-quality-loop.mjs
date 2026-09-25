@@ -8,6 +8,10 @@
 //   node scripts/asset-quality-loop.mjs verify --work-dir <dir> --stage <工程> --subject <id> --asset <file> \
 //        --check <identity|hand-safety> (--pass|--reject) --reviewer <名前> --note "..." --human-verified
 //   node scripts/asset-quality-loop.mjs status --work-dir <dir> [--stage <工程> --subject <id>] [--asset <file>] [--require-pass]
+//   node scripts/asset-quality-loop.mjs sheet  --work-dir <dir> --stage <工程> --batch <対象の一覧.json>
+//   node scripts/asset-quality-loop.mjs record --work-dir <dir> --stage <工程> --batch <対象の一覧.json> --review <batch の採点ファイル>
+//        （まとめて評価する回。同じ工程・同じ作業フォルダの対象を1つの評価文脈で採点し、対象ごとに1回として記録する。
+//          上限は1回 50 件。人の確認は batch では記録できず、要る対象は1件ずつ verify する）
 //
 // 工程: character（人物の設定画）/ location（背景・場所。漫画固有）/ scene-image（本編の画）/
 // thumbnail（サムネ）/ voice-take（声のテイク）。実装の正本は lib/assetQualityLoop.mjs（中核は
@@ -22,8 +26,10 @@ import {
   ASSET_GENERATION_ROUTES,
   ASSET_HUMAN_CHECKS,
   ASSET_MACHINE_GATES,
+  ASSET_QUALITY_BATCH_MAX_ITEMS,
   ASSET_QUALITY_HARNESSES,
   ASSET_STAGES,
+  assetQualityBatchReviewTemplate,
   assetQualityHarness,
   assetQualityReviewTemplate,
   assetQualityStage,
@@ -32,6 +38,7 @@ import {
   listAssetQualityStatus,
   loadAssetChannelConfig,
   recordAssetHumanVerification,
+  recordAssetQualityBatch,
   recordAssetQualityRound,
   startAssetQualityLoop,
 } from "../lib/assetQualityLoop.mjs";
@@ -40,7 +47,13 @@ const VALUE_OPTIONS = new Set([
   "--work-dir", "--harness", "--stage", "--subject", "--generator-context", "--generator-host", "--channel-pack",
   "--channel-config", "--reason", "--asset", "--version", "--review", "--producer-host", "--route",
   "--reference-exempt-reason", "--approved-references", "--measurement", "--revision-delta", "--previous-failure",
-  "--blocking-condition", "--cost", "--reviewer", "--note",
+  "--blocking-condition", "--cost", "--reviewer", "--note", "--batch",
+]);
+// batch で使えない（対象ごとの値）オプション。対象の一覧（--batch）の各行に書く。
+const PER_SUBJECT_OPTIONS = Object.freeze([
+  ["subject", "--subject"], ["asset", "--asset"], ["version", "--version"], ["measurement", "--measurement"],
+  ["revisionDelta", "--revision-delta"], ["previousFailure", "--previous-failure"], ["referenceExemptReason", "--reference-exempt-reason"],
+  ["cost", "--cost"], ["blockingCondition", "--blocking-condition"],
 ]);
 const REPEATABLE_OPTIONS = new Set(["--producer-context", "--reference", "--check"]);
 const FLAG_OPTIONS = new Set([
@@ -126,6 +139,22 @@ export function assetQualityHelp() {
     --work-dir <dir> [--stage <工程> [--subject <id> [--asset <file>]]] [--require-pass]   未合格なら終了コード 4
     --asset を付けると、そのファイルが合格した版そのものかも見る
 
+  まとめて評価する回（batch。長い動画の声のテイク・本編の画のように対象が多いとき）
+    同じ工程・同じ作業フォルダの対象を、1つの評価文脈で1回に採点し、対象ごとにそのループの1回として記録する。
+    1回 ${ASSET_QUALITY_BATCH_MAX_ITEMS} 件まで。ループは対象ごとに start してから使う。
+    sheet  --work-dir <dir> --stage <工程> --batch <対象の一覧.json>
+           評価シート（合格点・下限・重み・前の回の点数は載せない）と batch の採点ファイルの雛形。載るのは採点を
+           待っている対象だけで、合格した対象・人の確認待ち・止まったループは excluded に出す（再評価は不合格の対象だけ）
+    record --work-dir <dir> --stage <工程> --batch <対象の一覧.json> --review <batch の採点ファイル>
+           [--producer-context <id>... --producer-host <host> --route <経路> --approved-references <json>]
+           （対象の一覧に書かない既定値。対象ごとの版・成果物・測定・直しの差分は一覧の各行に書く）
+           1つの対象が不合格・人待ちでも他の対象の記録は有効。合格した対象は記録し直さない。同じ所見の写しを
+           複数の対象に貼った採点は記録しない。採点ファイルの形が壊れていれば何も記録しない
+    対象の一覧: { "version": "buzzassist-asset-quality-batch-v1", "stage", "producerContexts", "producerHost", "route",
+                 "approvedReferences"?, "items": [{ "subjectId", "asset", "version", "references"?, "referenceExemptReason"?,
+                 "measurement"?, "previousFailureFingerprint"?, "revisionDelta"? }] }
+    人の確認（verify）は batch では記録できない。要る対象は1件ずつ verify する
+
   機械ゲート: ${Object.keys(ASSET_MACHINE_GATES).join(" / ")}
   終了コード: 0 済んだ / 3 人待ち・直しが要る / 4 --require-pass で未合格 / 2 入力の誤り
 `;
@@ -165,6 +194,17 @@ export async function runAssetQualityCli(argv = process.argv.slice(2), {
   }
   const injected = { ...(now ? { now } : {}), ...(loadChannel ? { loadChannel } : {}) };
   const learn = captureLearning || ((input) => captureAssetLearning({ ...input, env }));
+  if (args.batch) {
+    if (args.action === "verify") {
+      throw new Error("人の確認は対象ごと（--batch は使えない）。確認した人が対象ごとに verify --subject <id> --asset <file> を打つ。");
+    }
+    if (!["sheet", "record"].includes(args.action)) throw new Error("--batch は sheet と record だけで使える。");
+    const conflicting = PER_SUBJECT_OPTIONS.filter(([key]) => args[key] !== undefined).map(([, option]) => option);
+    if (args.reference.length > 0) conflicting.push("--reference");
+    if (conflicting.length > 0) {
+      throw new Error(`--batch と ${conflicting.join(" / ")} は同時に使えない（--batch と --subject など、対象ごとの値は対象の一覧の各行に書く）。`);
+    }
+  }
   switch (args.action) {
     case "contract": {
       const harness = assetQualityHarness(args.harness);
@@ -201,6 +241,12 @@ export async function runAssetQualityCli(argv = process.argv.slice(2), {
       return { exitCode: result.started ? 0 : 3, result };
     }
     case "sheet": {
+      if (args.batch) {
+        const result = await assetQualityBatchReviewTemplate({ workDir: args.workDir, stage: args.stage, manifestPath: args.batch });
+        stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        // 採点を待っている対象が無ければ人待ち（何を採点すればよいかが無い）。
+        return { exitCode: result.sheet.items.length > 0 ? 0 : 3, result };
+      }
       const result = await assetQualityReviewTemplate({
         workDir: args.workDir, stage: args.stage, subjectId: args.subject, assetPath: args.asset, references: args.reference,
       });
@@ -208,6 +254,32 @@ export async function runAssetQualityCli(argv = process.argv.slice(2), {
       return { exitCode: 0, result };
     }
     case "record": {
+      if (args.batch) {
+        const result = await recordAssetQualityBatch({
+          workDir: args.workDir,
+          stage: args.stage,
+          manifestPath: args.batch,
+          reviewPath: args.review,
+          producerContexts: args.producerContext,
+          producerHost: args.producerHost,
+          generationRoute: args.route,
+          approvedReferencesPath: args.approvedReferences,
+          env,
+          ...injected,
+          captureLearning: learn,
+        });
+        if (args.json) stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        else {
+          const lines = [result.detail];
+          for (const issue of result.results.length === 0 ? result.issues : []) lines.push(`  - ${issue}`);
+          for (const row of result.results) {
+            const state = row.recorded ? `記録（${row.check?.status}）` : (row.alreadyRecorded ? "記録済み" : "記録していない");
+            lines.push(`  ${row.subjectId}: ${state}${row.issues?.length ? ` ${row.issues.join(", ")}` : ""}`);
+          }
+          stdout.write(`${lines.join("\n")}\n`);
+        }
+        return { exitCode: result.waiting === 0 && result.results.length > 0 ? 0 : 3, result };
+      }
       const result = await recordAssetQualityRound({
         workDir: args.workDir,
         stage: args.stage,
