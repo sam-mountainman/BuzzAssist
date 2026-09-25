@@ -36,6 +36,13 @@ import {
 } from "../lib/pluginAutoUpdate.mjs";
 import { envWithNodeOnPath, resolveNpmInvocation } from "../lib/npmInvocation.mjs";
 import { MANAGED_BLOCK_MARKER, antigravitySetupBlock, applyManagedBlock } from "../lib/hostInstructionFiles.mjs";
+import {
+  deliverLearningOverlays,
+  learningOverlayCopies,
+  migrateLegacyLearningState,
+  resolveLearningState,
+} from "../lib/harnessLearningState.mjs";
+import { CODEX_HOOK_TRUST_FIX, probeCodexLearningHookTrust } from "../lib/codexHookTrust.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const pluginName = "buzzassist";
@@ -871,6 +878,38 @@ async function rewriteSkillRelativeDepth(skillDir) {
   return managedPluginRoot;
 }
 
+// ---- 学習の状態（~/.buzzassist/learning/）を setup と自動更新で守る ------------------------
+//
+// 運営者の端末の学習は、プラグインの写し（~/plugins/buzzassist/plugin と各ホストの版別キャッシュ）の
+// 外に置く（lib/harnessLearningState.mjs）。setup はその写しを丸ごと置き換えるので:
+//   1. 置き換える前に、古い写しに残った台帳を状態の置き場へ取り込む（1回だけ・元は消さない）
+//   2. ホストの設定が済んだあと、状態の置き場にあるこの端末の overlay 区画を、ホストが読む
+//      全部の写しの references/learned-auto.md へ届け直す（同梱の項目には触らない）
+function operatorLearningState() {
+  return resolveLearningState({ codeRoot: managedPluginRoot, env: process.env, homeDir, developmentCheckout: false });
+}
+
+function migrateOperatorLearningBeforeRefresh({ state = operatorLearningState(), dry = dryRun } = {}) {
+  const result = migrateLegacyLearningState({ state, homeDir, dryRun: dry });
+  console.log(`BUZZASSIST_LEARNING_DIR=${state.stateDir}`);
+  console.log(`BUZZASSIST_LEARNING_MIGRATED=${result.imported}${result.skippedReason ? ` (${result.skippedReason})` : ""}`);
+  if (result.imported > 0) {
+    const { proposals = 0, applied = 0, archived = 0, receipts = 0 } = result.byKind || {};
+    console.log(`  古い写しの学習の台帳を${dry ? "取り込む予定" : "取り込みました"}: 提案 ${proposals} / 反映 ${applied} / 退避 ${archived} / Receipt ${receipts}（元のファイルは消していません）`);
+  }
+  return result;
+}
+
+function deliverOperatorLearningOverlays({ state = operatorLearningState(), dry = dryRun } = {}) {
+  const delivery = deliverLearningOverlays({
+    overlaysDir: state.overlaysDir,
+    copies: learningOverlayCopies({ homeDir }),
+    dryRun: dry,
+  });
+  console.log(`BUZZASSIST_LEARNING_OVERLAYS=${delivery.skillsWithLocalBlock.length} skills / ${delivery.written.length} files${dry ? " (dry-run)" : ""}`);
+  return delivery;
+}
+
 async function removeCodexPersonalMarketplaceEntry() {
   const marketplace = await readJson(personalMarketplacePath, null);
   if (!marketplace || !Array.isArray(marketplace.plugins)) return;
@@ -1481,6 +1520,21 @@ export async function runSetupAgents() {
     console.log(`BUZZASSIST_UPDATER_INSTALL=${updaterInstall.signal}`);
   }
 
+  // 写しを置き換える前に、写しの中に残った学習の台帳を状態の置き場へ取り込む。
+  // 取り込めないまま置き換えると台帳が消えるので、通常の setup は止める。自動更新は
+  // 置き換える前に控え（~/.buzzassist/backups）を取っており、止めると直す版も届かないので進める。
+  try {
+    migrateOperatorLearningBeforeRefresh();
+  } catch (error) {
+    console.log(`BUZZASSIST_LEARNING_MIGRATED=failed (${String(error?.message || error).slice(0, 160)})`);
+    if (!updaterInstall.updater) {
+      throw new Error(
+        "学習の台帳を状態の置き場（~/.buzzassist/learning/、BUZZASSIST_LEARNING_DIR）へ取り込めませんでした。"
+        + "このまま写しを置き換えると台帳が消えるので止めます。置き場に書けるか確かめてから、同じコマンドを再実行してください。",
+      );
+    }
+  }
+
   // A normal setup must not stage a plugin or modify host configuration before
   // returning HARNESS_READY=no. Only the explicit diagnostic override reaches
   // host/plugin mutation with missing prerequisites.
@@ -1491,6 +1545,12 @@ export async function runSetupAgents() {
     results[agent] = await setupAgent(agent, pluginDir);
   }
   const autoUpdateStatus = await configureAutoUpdate(pluginDir, results);
+  // 置き換えた写しと、ホストが読む写しへ、この端末の overlay 区画を届け直す。
+  try {
+    deliverOperatorLearningOverlays();
+  } catch (error) {
+    console.log(`BUZZASSIST_LEARNING_OVERLAYS=failed (${String(error?.message || error).slice(0, 160)})`);
+  }
 
   const tunnelStatus = launchTunnel ? await launchCanvasTunnel() : null;
   const discovery = launchCanvas
@@ -1520,6 +1580,12 @@ export async function runSetupAgents() {
   if (targetAgents.some((agent) => agent === "codex" || agent === "claude")) {
     console.log("BUZZASSIST_HOST_RESTART_REQUIRED=yes");
     console.log("Start a new Codex task or Claude Code session after setup so the newly installed skills and MCP tools are loaded.");
+  }
+  // Codex は /hooks で信頼したフックだけを動かす（信頼が無いと学習フックは黙って飛ばされる）。
+  if (results.codex || detectInstalledBuzzAssistHosts({ homeDir }).includes("codex")) {
+    const hookTrust = probeCodexLearningHookTrust({ env: process.env, homeDir });
+    console.log(`BUZZASSIST_LEARNING_HOOK_TRUST=${hookTrust.status}`);
+    if (!hookTrust.ok) console.log(`次にやること（Codex）: ${CODEX_HOOK_TRUST_FIX}`);
   }
   // reviewer 信頼リストの MCP 経路（R6-F2）。設定ファイルには env 名だけを書いたこと、
   // 値は host を起動するシェルに置くことを、値を印字せずに報告する。

@@ -205,6 +205,97 @@ process.exit(0);
   await chmod(commandPath, 0o755);
 }
 
+// ---- 学習の状態（~/.buzzassist/learning/）の配布経路の確かめ ----------------------------------
+// 人名・台本・端末のパスは使わない（すべて合成）。
+const LEARNING_OVERLAY_SKILL = "platform-craft";
+const LOCAL_BLOCK_MARKER = "<!-- buzzassist-learning-local:begin";
+
+function syntheticProposal({ target = "platform:platform-craft", text, session }) {
+  const entry = { kind: "fact", target, text, evidence: "配布経路の合成データ", session, capturedAt: "2026-09-01T00:00:00.000Z" };
+  const id = createHash("sha256").update([entry.kind, entry.target, entry.text].join("\u001f")).digest("hex").slice(0, 12);
+  return { ...entry, id };
+}
+
+async function writeJsonlFile(file, rows) {
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, rows.map((row) => `${JSON.stringify(row)}\n`).join(""));
+}
+
+async function readJsonlFile(file) {
+  if (!existsSync(file)) return [];
+  return (await readFile(file, "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line));
+}
+
+async function seedLegacyLearning(homeDir) {
+  const shared = syntheticProposal({ text: "配布経路の試験用に合成した共有層の指摘", session: "dist-seed-a" });
+  const onlyInCache = syntheticProposal({ text: "版別キャッシュにだけ残っていた合成の指摘", session: "dist-seed-b" });
+  const channel = syntheticProposal({ target: "channel-pack:narrated-story", text: "合成のチャンネル宛の指摘", session: "dist-seed-c" });
+  const managed = path.join(homeDir, "plugins", "buzzassist", "plugin");
+  const cache = path.join(homeDir, ".claude", "plugins", "cache", "buzzassist", "buzzassist", "0.0.1");
+  await writeJsonlFile(path.join(managed, "docs", "learning", "proposals.jsonl"), [shared]);
+  await writeJsonlFile(path.join(managed, "channel-packs", "narrated-story", "docs", "learning", "proposals.jsonl"), [channel]);
+  // ホストの版別キャッシュは配布元の写しなので、同じ行が重複して残る。
+  await writeJsonlFile(path.join(cache, "docs", "learning", "proposals.jsonl"), [shared, onlyInCache]);
+  // この端末の sync が状態の置き場に書いた overlay 区画（合成）。
+  const block = [
+    `${LOCAL_BLOCK_MARKER} 合成 -->`,
+    "",
+    "## この端末で積み上がった指摘",
+    "",
+    "- **配布経路の試験用に合成した共有層の指摘**",
+    "<!-- buzzassist-learning-local:end -->",
+    "",
+  ].join("\n");
+  const overlay = path.join(homeDir, ".buzzassist", "learning", "overlays", LEARNING_OVERLAY_SKILL, "learned-auto.md");
+  await mkdir(path.dirname(overlay), { recursive: true });
+  await writeFile(overlay, block);
+  return { ids: [shared.id, onlyInCache.id], channelId: channel.id, cacheLedger: path.join(cache, "docs", "learning", "proposals.jsonl") };
+}
+
+async function assertLearningStateSurvivesSetup({ result, runSetup, env, homeDir, pluginRoot, seed }) {
+  const stateDir = path.join(homeDir, ".buzzassist", "learning");
+  const sharedLedger = path.join(stateDir, "shared", "proposals.jsonl");
+  const channelLedger = path.join(stateDir, "channel-packs", "narrated-story", "proposals.jsonl");
+  assert.match(result.stdout, /BUZZASSIST_LEARNING_MIGRATED=3\b/u, "古い写しの台帳（重複を除いて3件）を取り込んでいない");
+  assert.match(result.stdout, /BUZZASSIST_LEARNING_OVERLAYS=1 skills/u);
+  assert.deepEqual((await readJsonlFile(sharedLedger)).map((row) => row.id).sort(), [...seed.ids].sort());
+  assert.deepEqual((await readJsonlFile(channelLedger)).map((row) => row.id), [seed.channelId]);
+  assert.equal(existsSync(seed.cacheLedger), true, "取り込んだ元のファイルを消した");
+
+  // 配布された写しから capture すると、写しの中ではなく状態の置き場の台帳へ入る。
+  const capture = spawnSync(process.execPath, [
+    path.join(pluginRoot, "scripts", "harness-learn.mjs"), "capture",
+    "--kind", "fact", "--target", "platform:platform-craft",
+    "--text", "配布された写しから合成の指摘を捕捉する", "--evidence", "配布経路の合成データ", "--session", "dist-capture",
+  ], { cwd: pluginRoot, env, encoding: "utf8", timeout: 30_000 });
+  assert.equal(capture.status, 0, `${capture.stdout}\n${capture.stderr}`);
+  assert.equal(existsSync(path.join(pluginRoot, "docs", "learning", "proposals.jsonl")), false, "写しの中に台帳を書いた（更新で消える）");
+  const afterCapture = await readJsonlFile(sharedLedger);
+  assert.equal(afterCapture.length, 3);
+
+  const overlayFiles = [
+    path.join(pluginRoot, "skills", LEARNING_OVERLAY_SKILL, "references", "learned-auto.md"),
+    path.join(pluginRoot, ".agents", "skills", LEARNING_OVERLAY_SKILL, "references", "learned-auto.md"),
+  ];
+  const shipped = await readFile(path.join(repoRoot, ".agents", "skills", LEARNING_OVERLAY_SKILL, "references", "learned-auto.md"), "utf8");
+  for (const file of overlayFiles) {
+    const text = await readFile(file, "utf8");
+    assert.equal(text.startsWith(shipped.trimEnd()), true, `同梱の overlay を書き換えた: ${file}`);
+    assert.equal(text.split(LOCAL_BLOCK_MARKER).length - 1, 1, `この端末の区画が届いていない（または二重）: ${file}`);
+  }
+
+  // setup をもう一度流す（自動更新と同じく写しを置き換える）。提案・区画は残り、二重に取り込まない。
+  const again = runSetup();
+  assert.equal(again.status, 0, `second setup failed:\n${again.stdout}\n${again.stderr}`);
+  assert.match(again.stdout, /BUZZASSIST_LEARNING_MIGRATED=0 \(already-migrated\)/u);
+  assert.deepEqual(await readJsonlFile(sharedLedger), afterCapture, "setup をもう一度流したら台帳が変わった");
+  for (const file of overlayFiles) {
+    const text = await readFile(file, "utf8");
+    assert.equal(text.split(LOCAL_BLOCK_MARKER).length - 1, 1, `2回目の setup のあと区画が消えた（または二重）: ${file}`);
+  }
+  console.log("Learning state verified: legacy ledgers imported once, capture lands outside the plugin copy, overlay block delivered and kept across setup reruns.");
+}
+
 async function runHostSetup(host) {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), `buzzassist-${host}-distribution-`));
   const homeDir = path.join(tempRoot, "home");
@@ -261,8 +352,15 @@ async function runHostSetup(host) {
       BUZZASSIST_REVIEWER_TRUST_JSON: "",
       BUZZASSIST_KOYA_REVIEWER_TRUST: "",
       BUZZASSIST_KOYA_REVIEWER_TRUST_JSON: "",
+      // 学習の状態の置き場は隔離した HOME の ~/.buzzassist/learning/ を使う（上書きを持ち込まない）。
+      BUZZASSIST_LEARNING_DIR: "",
+      BUZZASSIST_LEARNING_HOOK_LOG: "off",
+      BUZZASSIST_LEARNING_WRITE_FORBIDDEN: "",
     };
-    const result = spawnSync(
+    // 以前の版が写しの中に残した学習の台帳（合成）。setup は写しを置き換える前にこれを
+    // 状態の置き場へ取り込み、元のファイルは消さない。
+    const learningSeed = await seedLegacyLearning(homeDir);
+    const runSetup = () => spawnSync(
       process.execPath,
       [
         path.join(repoRoot, "scripts", "setup-agents.mjs"),
@@ -277,6 +375,7 @@ async function runHostSetup(host) {
       ],
       { cwd: repoRoot, env, encoding: "utf8", timeout: 120_000 },
     );
+    const result = runSetup();
     assert.equal(result.status, 0, `${host} setup failed:\n${result.stdout}\n${result.stderr}`);
     const label = host === "codex" ? "Codex" : "Claude Code";
     assert.match(result.stdout, new RegExp(`${label}: configured`));
@@ -360,26 +459,38 @@ async function runHostSetup(host) {
     const narratedDeployment = deploymentRuntime.resolveHarnessDeployment("narrated-story-video", { repoRoot: pluginRoot });
     const narratedCommand = deploymentRuntime.resolveHarnessDeploymentCommand(narratedDeployment, { additionalArgs: ["help"] });
     assert.equal(narratedCommand.entrypointPath, path.join(pluginRoot, "scripts", "narrated-story-video.mjs"));
-    const learningRuntime = await import(
-      `${pathToFileURL(path.join(pluginRoot, "scripts", "harness-learn.mjs")).href}?distribution=${host}-${Date.now()}`
-    );
-    const narratedFeedbackLedger = learningRuntime.ledgerPathFor("channel-pack:narrated-story", "proposals");
+    // 運営者の端末（配布された写し）では、チャンネルの学習の台帳は写しの中ではなく、学習の
+    // 状態の置き場（隔離した HOME の ~/.buzzassist/learning/channel-packs/<id>/）に解決される。
+    // 写しの中に置くと、setup・自動更新・ホストの版上げのたびに消える。解決は隔離した環境の
+    // 子プロセスで行う（このプロセスの HOME は本物なので、ここで import すると本物を指す）。
+    const resolvedLedgers = JSON.parse(spawnSync(process.execPath, [
+      "--input-type=module",
+      "-e",
+      `const m = await import(${JSON.stringify(pathToFileURL(path.join(pluginRoot, "scripts", "harness-learn.mjs")).href)});`
+        + "const s = m.learningState();"
+        + "console.log(JSON.stringify({ mode: s.mode, stateDir: s.stateDir,"
+        + " narrated: m.ledgerPathFor('channel-pack:narrated-story', 'proposals'),"
+        + " shared: m.ledgerPathFor('platform:platform-craft', 'proposals') }));",
+    ], { cwd: tempRoot, env, encoding: "utf8", timeout: 30_000 }).stdout.trim().split("\n").at(-1));
     const canonicalPluginRoot = await realpath(pluginRoot);
+    const canonicalStateDir = await canonicalPathOfPossiblyMissing(path.join(homeDir, ".buzzassist", "learning"));
     // 比べる両方を同じ形に揃える。Windows の一時ディレクトリは短い名前
     // （RUNNER~1）で返り、realpath は長い名前を返すので、片方だけ正規化すると
     // 中にある台帳まで「外」と判定し、逆に同じファイルでも「別」と判定してしまう。
-    const canonicalLedger = await canonicalPathOfPossiblyMissing(narratedFeedbackLedger);
-    assert.notEqual(
-      canonicalLedger,
-      path.join(canonicalPluginRoot, "docs", "learning", "proposals.jsonl"),
-      "narrated operator feedback must never resolve to the shared plugin learning ledger",
-    );
-    const ledgerInsidePack = path.relative(path.join(canonicalPluginRoot, "channel-packs", "narrated-story"), canonicalLedger);
-    assert.equal(
-      ledgerInsidePack !== "" && ledgerInsidePack !== ".." && !ledgerInsidePack.startsWith(`..${path.sep}`) && !path.isAbsolute(ledgerInsidePack),
-      true,
-      `narrated operator feedback ledger escaped its private Channel Pack root: ${narratedFeedbackLedger}`,
-    );
+    const canonicalLedger = await canonicalPathOfPossiblyMissing(resolvedLedgers.narrated);
+    const canonicalSharedLedger = await canonicalPathOfPossiblyMissing(resolvedLedgers.shared);
+    const inside = (parent, child) => {
+      const rel = path.relative(parent, child);
+      return rel !== "" && rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
+    };
+    assert.equal(resolvedLedgers.mode, "installed", "配布された写しを開発用チェックアウトとして扱った");
+    assert.equal(await canonicalPathOfPossiblyMissing(resolvedLedgers.stateDir), canonicalStateDir);
+    assert.equal(inside(canonicalPluginRoot, canonicalLedger), false, `チャンネルの台帳が写しの中にある（更新で消える）: ${resolvedLedgers.narrated}`);
+    assert.equal(inside(canonicalPluginRoot, canonicalSharedLedger), false, `共有の台帳が写しの中にある（更新で消える）: ${resolvedLedgers.shared}`);
+    assert.equal(inside(path.join(canonicalStateDir, "channel-packs", "narrated-story"), canonicalLedger), true,
+      `narrated operator feedback ledger escaped its private state root: ${resolvedLedgers.narrated}`);
+    assert.equal(inside(path.dirname(canonicalSharedLedger), canonicalLedger), false,
+      "narrated operator feedback must never resolve inside the shared learning ledger directory");
     const narratedHelp = spawnSync(narratedCommand.command, narratedCommand.args, {
       cwd: narratedCommand.cwd,
       env,
@@ -421,6 +532,10 @@ async function runHostSetup(host) {
     }
     await readFile(path.join(pluginRoot, "docs", "learning", "proposals.public.jsonl"), "utf8");
     await readFile(path.join(pluginRoot, "docs", "koya-harness-handoff-ja.md"), "utf8");
+
+    // 学習の状態: 古い写しの台帳を取り込み（ID と session で重複を除く・元は消さない）、
+    // この端末の overlay 区画をホストが読む写しへ届け、setup をもう一度流しても残ること。
+    await assertLearningStateSurvivesSetup({ result, runSetup, env, homeDir, pluginRoot, seed: learningSeed });
 
     // 配布は allowlist。config/ 直下に列挙外のものが1つでも入っていたら止める。
     //
