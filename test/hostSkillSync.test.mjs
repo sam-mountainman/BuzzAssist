@@ -128,3 +128,94 @@ test("開発用チェックアウトではアダプターが正本を直接読�
   assert.match(verdict.detail, /正本を直接読む/u);
   await rm(base, { recursive: true, force: true });
 });
+
+// 外部レビューの指摘: SKILL.md しか比べておらず、references/・scripts/・assets/ のずれを
+// 見落としていた。Codex の使用中の版は cache の最大の版からの推定だった。
+
+async function addSkillFile(root, relative, content) {
+  const target = join(root, ...relative.split("/"));
+  await mkdir(join(target, ".."), { recursive: true });
+  await writeFile(target, content);
+}
+
+test("スキルのディレクトリ内の全ファイル（references・scripts・assets）を比べる", async () => {
+  const { base, repo, home } = await fixture();
+  const canonical = join(repo, ".agents", "skills", "alpha");
+  await addSkillFile(canonical, "references/quality.md", "正本の手順は ../../../docs/x.md\n");
+  await addSkillFile(canonical, "scripts/check.py", "print('new')\n");
+  await addSkillFile(canonical, "assets/sheet.bin", "binary-new");
+  const root = await installCodex(home, "0.2.0");
+  const installed = join(root, "skills", "alpha");
+  // references の .md は配布時に相対参照が1階層浅くなる。その差は差にしない。
+  await addSkillFile(installed, "references/quality.md", "正本の手順は ../../docs/x.md\n");
+  await addSkillFile(installed, "scripts/check.py", "print('old')\n");
+  // assets/sheet.bin は入っていない。代わりに正本に無いファイルが残っている。
+  await addSkillFile(installed, "assets/leftover.bin", "stale");
+  const { drift } = compareHostSkillSync({ repoRoot: repo, homeDir: home });
+  const found = drift.filter((entry) => entry.skill === "alpha").map((entry) => `${entry.file}:${entry.reason}`).sort();
+  assert.deepEqual(found, ["assets/leftover.bin:extra", "assets/sheet.bin:missing", "scripts/check.py:stale"]);
+  await rm(base, { recursive: true, force: true });
+});
+
+test("機械が書く references/learned-auto.md は全ファイルの比較に入れず、overlay として1件だけ報告する", async () => {
+  const { base, repo, home } = await fixture();
+  await installCodex(home, "0.2.0", { overlay: "# 機械が書く層（古い）\n" });
+  const { drift } = compareHostSkillSync({ repoRoot: repo, homeDir: home });
+  assert.deepEqual(drift.map((entry) => `${entry.skill}:${entry.file}:${entry.reason}`), ["alpha:learned-auto:stale"]);
+  await rm(base, { recursive: true, force: true });
+});
+
+async function codexConfig(home, text) {
+  await mkdir(join(home, ".codex"), { recursive: true });
+  await writeFile(join(home, ".codex", "config.toml"), text);
+}
+
+async function codexMarketplace(home, version) {
+  const source = join(home, "plugins", "buzzassist");
+  await mkdir(join(source, "plugin", ".codex-plugin"), { recursive: true });
+  await writeFile(join(source, "plugin", ".codex-plugin", "plugin.json"), JSON.stringify({ name: "buzzassist", version }));
+  return source;
+}
+
+test("Codex の使用中の版は、設定の plugin の記録（有効か・どの marketplace か）から決める", async () => {
+  const { base, repo, home } = await fixture();
+  await installCodex(home, "0.2.0");
+  await installCodex(home, "0.3.0", { skill: "まだ有効になっていない新しい版\n" });
+  const source = await codexMarketplace(home, "0.2.0");
+  await codexConfig(home, [
+    "# 利用者の設定",
+    "[marketplaces.buzzassist]",
+    'source_type = "local"',
+    `source = ${JSON.stringify(source)}`,
+    "",
+    '[plugins."buzzassist@buzzassist"]',
+    "enabled = true",
+    "",
+  ].join("\n"));
+  const codex = resolveHostPluginInstalls({ homeDir: home }).find((install) => install.host === "codex");
+  assert.equal(codex.version, "0.2.0", "cache の最大の版（0.3.0）ではなく、設定が指す marketplace の版");
+  assert.equal(codex.versionSource, "codex-config");
+  assert.equal(codex.estimated, false);
+  assert.equal(compareHostSkillSync({ repoRoot: repo, homeDir: home }).drift.length, 0);
+  await rm(base, { recursive: true, force: true });
+});
+
+test("Codex の設定が読めないときは cache から推定し、推定であることを結果に出す", async () => {
+  const { base, repo, home } = await fixture();
+  await installCodex(home, "0.2.0");
+  const codex = resolveHostPluginInstalls({ homeDir: home }).find((install) => install.host === "codex");
+  assert.equal(codex.version, "0.2.0");
+  assert.equal(codex.estimated, true);
+  assert.equal(codex.versionSource, "estimated-newest-cache");
+  const verdict = probeHostSkillSync({ repoRoot: repo, homeDir: home });
+  assert.match(verdict.detail, /codex 0\.2\.0（推定）/u);
+  await rm(base, { recursive: true, force: true });
+});
+
+test("Codex の設定で BuzzAssist が無効なら、Codex は読んでいないとして比べない", async () => {
+  const { base, repo, home } = await fixture();
+  await installCodex(home, "0.1.9", { skill: "古い\n" });
+  await codexConfig(home, '[plugins."buzzassist@buzzassist"]\nenabled = false\n');
+  assert.deepEqual(resolveHostPluginInstalls({ homeDir: home }).map((install) => install.host), []);
+  await rm(base, { recursive: true, force: true });
+});
