@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "manifestVersion": "1.13.0",
+  "manifestVersion": "1.14.0",
   "namespace": "buzzassist",
   "classifications": [
     "installed",
@@ -12,8 +12,8 @@
     {
       "id": "buzzassist:platform-craft",
       "name": "platform-craft",
-      "version": "1.6.0",
-      "contentSha256": "sha256:cd55d68ec70cf30db8e454780299d350d6c3d698ea139744f2fd5c73a4972b4d",
+      "version": "1.7.0",
+      "contentSha256": "sha256:24b9aa11273685e340b821cb025d2522a40e5f4215baba4d8065ecf980a4ac0c",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",
@@ -51,8 +51,8 @@
     {
       "id": "buzzassist:harness-parallel-execution",
       "name": "harness-parallel-execution",
-      "version": "1.1.0",
-      "contentSha256": "sha256:aa4c53b9719dd4c32e38925fbdd3d97b62552481889a8aac5b42155ac95e2317",
+      "version": "1.2.0",
+      "contentSha256": "sha256:f6c6432dd6f6b2b2e4721fae2ac3384187e1911e340640a71fddc8e93814c2f4",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",
@@ -90,8 +90,8 @@
     {
       "id": "buzzassist:harness-self-improvement",
       "name": "harness-self-improvement",
-      "version": "1.4.0",
-      "contentSha256": "sha256:e799976f147b50acbcab3cb273cad5cf8bbbc339b446f53b1c7994b337387783",
+      "version": "1.5.0",
+      "contentSha256": "sha256:fb8a2530ffb979ab820682c641c576bb706fd55111e81a7ea44f7a9c74946ce2",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",
@@ -129,8 +129,8 @@
     {
       "id": "buzzassist:manga-video-production",
       "name": "manga-video-production",
-      "version": "1.7.0",
-      "contentSha256": "sha256:dade49836bc622e93559d3e03c2ef2db3cf324cd0945c3f4c01f2e48a9ebee47",
+      "version": "1.8.0",
+      "contentSha256": "sha256:6187f06dbb6c976e16cca52ac03ba1d9ae42c26eace664f2ee922ca02bb1ae91",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",
@@ -207,8 +207,8 @@
     {
       "id": "buzzassist:narrated-story-video",
       "name": "narrated-story-video",
-      "version": "1.4.0",
-      "contentSha256": "sha256:1d924eac04748df0932750b5030c2f218a43c6679c821a0139ac2898d26847b7",
+      "version": "1.5.0",
+      "contentSha256": "sha256:9bc7310901164a5cd203f2798ea7ee03486ea1549dcecc1dfaea49dc4b275722",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",
@@ -246,8 +246,8 @@
     {
       "id": "buzzassist:skill-creator",
       "name": "skill-creator",
-      "version": "0.1.0",
-      "contentSha256": "sha256:6bf00a8ef45cab253bddbe10e4b4c7b8dacbfa6ce0a8095d87fafe91bd5bc1fc",
+      "version": "0.2.0",
+      "contentSha256": "sha256:41990c7fe1ee3269016cdde12b48b1b611fe307fb642bff3de576aec4c3edcda",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",
