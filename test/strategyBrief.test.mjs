@@ -109,6 +109,12 @@ test("スキーマの欄と検査の欄が一致する", async () => {
   assert.deepEqual(keys(schema.$defs.metric.properties.expected), [...STRATEGY_BRIEF_FIELDS.expected].sort());
   assert.deepEqual(keys(schema.properties.provenance), [...STRATEGY_BRIEF_FIELDS.provenance].sort());
   assert.deepEqual(keys(schema.properties.provenance.properties.strategySkill), [...STRATEGY_BRIEF_FIELDS.strategySkill].sort());
+  assert.deepEqual(keys(schema.properties.observations.items), [...STRATEGY_BRIEF_FIELDS.observation].sort());
+  assert.deepEqual(keys(schema.properties.hypotheses.items), [...STRATEGY_BRIEF_FIELDS.hypothesis].sort());
+  assert.deepEqual(keys(schema.properties.openQuestions.items), [...STRATEGY_BRIEF_FIELDS.openQuestion].sort());
+  assert.deepEqual(keys(schema.properties.openQuestions.items.properties.resolution), [...STRATEGY_BRIEF_FIELDS.resolution].sort());
+  // 観測・仮説・未確認事項は任意の欄（今までのブリーフはそのまま通る）。
+  for (const key of ["observations", "hypotheses", "openQuestions"]) assert.equal(schema.required.includes(key), false, key);
 });
 
 test("根拠のパスは作業フォルダからの相対だけ。Windows の区切りは / へそろえ、ドライブ名と .. は拒む", () => {

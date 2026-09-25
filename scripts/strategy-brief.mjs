@@ -101,7 +101,10 @@ export function strategyBriefHelp() {
   verdict      制作へ渡す前の判定。合格した版と同じ SHA か、根拠のファイルが揃い 4分析の run が現行か、
                前提（問い・見る人・入口の約束）を変えて古くなった根拠が無いかを理由コードつきで返す。
                古い根拠があれば strategy-evidence-refresh-required（日数では決めない）。採点した版から
-               根拠の確かさを上げた書き換えは strategy-brief-evidence-upgraded-without-review:<id>
+               根拠の確かさを上げた書き換えは strategy-brief-evidence-upgraded-without-review:<id>。
+               制作を止める未確認事項（openQuestions の blocksProduction: true で open）が残れば
+               strategy-brief-open-question-blocks-production:<id>。採点した版から未確認を確認済みにした・
+               仮説の状態を変えた書き換えは、新しい根拠が無ければ ...-without-new-evidence:<id>
     --brief <file> [--work-dir <dir>] [--require-pass]     pass でなければ終了コード 4
 
   next         公開後の数字から次のブリーフの下書きを作る（照合と下書きだけ。数字の解釈と次の企画の判断は

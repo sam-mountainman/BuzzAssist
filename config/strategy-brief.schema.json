@@ -126,6 +126,71 @@
         "metrics": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/metric" } }
       }
     },
+    "observations": {
+      "type": "array",
+      "maxItems": 50,
+      "description": "観測したこと（任意）。どれも根拠（evidence の id）に結ぶ。解釈は hypotheses に分ける",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement", "evidenceIds"],
+        "properties": {
+          "id": { "$ref": "#/$defs/itemId" },
+          "statement": { "type": "string", "minLength": 4, "maxLength": 300 },
+          "evidenceIds": { "type": "array", "minItems": 1, "maxItems": 30, "items": { "$ref": "#/$defs/itemId" } },
+          "note": { "type": "string", "minLength": 1, "maxLength": 300 }
+        }
+      }
+    },
+    "hypotheses": {
+      "type": "array",
+      "maxItems": 30,
+      "description": "仮説（任意）。supported / weakened と書くなら根拠の id が要る。前の版から状態を変えるなら、その版で新しく足した根拠を指す",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement", "evidenceIds", "status"],
+        "properties": {
+          "id": { "$ref": "#/$defs/itemId" },
+          "statement": { "type": "string", "minLength": 4, "maxLength": 300 },
+          "evidenceIds": { "type": "array", "maxItems": 30, "items": { "$ref": "#/$defs/itemId" } },
+          "status": { "enum": ["untested", "supported", "weakened"] },
+          "note": { "type": "string", "minLength": 1, "maxLength": 300 }
+        },
+        "allOf": [
+          { "if": { "properties": { "status": { "enum": ["supported", "weakened"] } } }, "then": { "properties": { "evidenceIds": { "minItems": 1 } } } }
+        ]
+      }
+    },
+    "openQuestions": {
+      "type": "array",
+      "maxItems": 30,
+      "description": "未確認事項（任意）。blocksProduction: true のまま open の事項が残るブリーフは、verdict が制作へ渡せない。確認済み（resolved）にするには resolution.evidenceIds が要り、前の版で open だった事項なら、その版で新しく足した根拠を指す",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "question", "blocksProduction", "plannedCheck"],
+        "properties": {
+          "id": { "$ref": "#/$defs/itemId" },
+          "question": { "type": "string", "minLength": 4, "maxLength": 300 },
+          "blocksProduction": { "type": "boolean" },
+          "plannedCheck": { "type": "string", "minLength": 4, "maxLength": 300, "description": "どう確かめるか" },
+          "status": { "enum": ["open", "resolved"], "description": "既定 open" },
+          "resolution": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["evidenceIds", "note"],
+            "properties": {
+              "evidenceIds": { "type": "array", "minItems": 1, "maxItems": 30, "items": { "$ref": "#/$defs/itemId" } },
+              "note": { "type": "string", "minLength": 4, "maxLength": 300 }
+            }
+          }
+        },
+        "allOf": [
+          { "if": { "properties": { "status": { "const": "resolved" } }, "required": ["status"] }, "then": { "required": ["resolution"] }, "else": { "not": { "required": ["resolution"] } } }
+        ]
+      }
+    },
     "provenance": {
       "type": "object",
       "additionalProperties": false,
