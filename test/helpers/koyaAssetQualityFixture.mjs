@@ -27,8 +27,10 @@ let counter = 0;
  * references: 参照にした承認済みの画のファイル（人物の設定画・本編の画・サムネで人物が写るとき）。
  * approvedReferencesPath を渡さなければ、references の SHA だけを載せた承認一覧を作業フォルダに書く。
  * stopBefore: "review"（start だけ）/ "human"（評価者の採点は合格、人の確認なし）/ "failing-review"（不合格の採点）
+ * harnessId: ループを始めるハーネス（既定は漫画。ナレーション物語のサムネの試験は narrated-story-video を渡す）
  */
 export async function passKoyaAssetQualityLoop({
+  harnessId = "koya-manga-video",
   workDir,
   stage,
   subjectId,
@@ -43,7 +45,7 @@ export async function passKoyaAssetQualityLoop({
   const tag = `${stage}-${counter}`;
   const started = await startAssetQualityLoop({
     workDir,
-    harnessId: "koya-manga-video",
+    harnessId,
     stage,
     subjectId,
     generatorContextId: `ctx-synthetic-maker-${tag}`,
