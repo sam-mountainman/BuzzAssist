@@ -751,7 +751,7 @@ test("漫画と解説動画の台本のジャンルを持ち、どちらも全�
   const manga = createScriptQualityContract({ genre: "manga" }).contract;
   const explainer = createScriptQualityContract({ genre: "explainer" }).contract;
   assert.deepEqual(manga.rubric.map((row) => row.id), ["source-fidelity", "speaker-attribution", "panel-premise", "bubble-fit", "reading-clarity", "beat-pacing"]);
-  assert.deepEqual(explainer.rubric.map((row) => row.id), ["question-clarity", "first-view-comprehension", "evidence-scope", "discovery-progression", "opening-promise-payoff", "reading-clarity"]);
+  assert.deepEqual(explainer.rubric.map((row) => row.id), ["question-clarity", "first-view-comprehension", "evidence-scope", "discovery-progression", "opening-promise-payoff", "visual-narration-alignment", "pacing", "reading-clarity"]);
   for (const contract of [manga, explainer]) {
     assert.equal(Math.round(contract.rubric.reduce((sum, row) => sum + row.weight, 0)), 100);
     for (const row of contract.rubric) {

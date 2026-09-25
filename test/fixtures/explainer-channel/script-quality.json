@@ -1,0 +1,12 @@
+{
+  "version": "buzzassist-script-quality-channel-v1",
+  "genre": "explainer",
+  "floors": {
+    "evidence-scope": 90,
+    "visual-narration-alignment": 85
+  },
+  "limits": {
+    "targetScore": 90,
+    "maximumReviewRounds": 5
+  }
+}
