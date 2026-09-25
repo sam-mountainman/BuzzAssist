@@ -5,6 +5,7 @@
 //   node scripts/harness-receipts.mjs rollup
 //   node scripts/harness-receipts.mjs rollup --harness koya-manga-video
 //   node scripts/harness-receipts.mjs rollup --by host
+//   node scripts/harness-receipts.mjs rollup --channel <チャンネルの id>
 //   node scripts/harness-receipts.mjs export --out docs/learning/platform-rollup.json
 //
 // なぜ集計が要るか:
@@ -16,6 +17,11 @@
 //
 // export が出すのはチャンネル固有のものを一切含まない形。運営者の手元で
 // 回った結果をこちら側へ返す道を、返せるものだけで作るため。
+//
+// チャンネル（運営者の配置表の channels）で作った Job は、索引の行に Job の metadata.channel の id が載る
+// （--project-dir で読んだ Receipt は、同じ run のフォルダの job.json から）。rollup はチャンネルごとの内訳を出し、
+// --channel で絞れる。チャンネルの無い Job・欄の無い古い索引の行・どの Job か分からない記録は「チャンネルなし」。
+// チャンネルの id は運営者の手元の集計にだけ出し、export（プラットフォームへ返す形）には出さない。
 
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -25,14 +31,21 @@ import { fileURLToPath } from "node:url";
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
 import {
   isGateNotInForce,
+  issueCodeOf,
   redactForPlatform,
   runReceiptHostSummary,
   verifyRunReceiptInvocation,
 } from "../lib/harnessRunReceipt.mjs";
-import { readReceiptIndex, resolveLearningState } from "../lib/harnessLearningState.mjs";
+import { readReceiptIndex, receiptIndexChannelId, resolveLearningState } from "../lib/harnessLearningState.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MAX_RECEIPT_BYTES = 8 * 1024 * 1024;
+const MAX_JOB_BYTES = 8 * 1024 * 1024;
+
+/** チャンネルの無い Job（と、どの Job か分からない記録）を数える見出し。 */
+export const NO_CHANNEL_LABEL = "チャンネルなし";
+/** チャンネルごとの内訳に出す失敗の理由コードの数。 */
+export const CHANNEL_TOP_FAILURE_CODES = 5;
 
 /**
  * 既定の置き場。開発用チェックアウトは docs/learning/receipts、配布された写しは
@@ -74,6 +87,18 @@ export function projectReceiptPaths(projectDir) {
   return names.map((name) => path.join(runs, name, "run-receipt.json")).filter((file) => fs.existsSync(file));
 }
 
+/** project の run のフォルダの job.json から、Job を作ったチャンネルの id（無い・読めなければ ""）。 */
+function projectJobChannel(receiptFile) {
+  const file = path.join(path.dirname(receiptFile), "job.json");
+  try {
+    const info = fs.lstatSync(file, { throwIfNoEntry: false });
+    if (!info?.isFile() || info.isSymbolicLink() || info.size > MAX_JOB_BYTES) return "";
+    return receiptIndexChannelId(JSON.parse(fs.readFileSync(file, "utf8"))?.metadata?.channel?.id);
+  } catch {
+    return "";
+  }
+}
+
 /**
  * RunReceipt を集める。読むのは3か所で、同じ中身（sha256）は1件に数える。
  *
@@ -83,26 +108,38 @@ export function projectReceiptPaths(projectDir) {
  *   3. projectDirs の canvas/harness-runs/<job>/run-receipt.json（読み取り専用）
  *
  * 索引が指す先が消えていた（canvas を片づけた）ものは missing として数え、unreadable に混ぜない。
+ *
+ * 各件の channel は Job を作ったチャンネルの id（索引の行の channel か、project の job.json の metadata.channel）。
+ * 分からなければ付けない（「チャンネルなし」）。同じ中身を先にチャンネルの分からない所（dir）で読んでいたら、
+ * 後から読んだ索引・Job のチャンネルを足す。
  */
 export function loadReceipts(dir = defaultReceiptsDir(), { projectDirs = [], includeIndex = true } = {}) {
   const out = [];
-  const seen = new Set();
-  const push = (file, loaded, source) => {
-    if (loaded.missing) { out.push({ file, source, missing: true }); return; }
-    if (loaded.digest && seen.has(loaded.digest)) return;
-    if (loaded.digest) seen.add(loaded.digest);
-    if (loaded.error) { out.push({ file, source, error: loaded.error }); return; }
+  const seen = new Map();
+  const push = (file, loaded, source, channel = "") => {
+    const scoped = channel ? { channel } : {};
+    if (loaded.missing) { out.push({ file, source, missing: true, ...scoped }); return; }
+    if (loaded.digest && seen.has(loaded.digest)) {
+      const first = seen.get(loaded.digest);
+      if (channel && first && !first.channel) first.channel = channel;
+      return;
+    }
+    const record = (entry) => {
+      if (loaded.digest) seen.set(loaded.digest, entry);
+      if (entry) out.push(entry);
+    };
+    if (loaded.error) { record({ file, source, error: loaded.error, ...scoped }); return; }
     // finalize していない記録は集計に混ぜない。途中で落ちた実行を
     // 「ゲートが1件も落ちなかった実行」として数えると、失敗率が下がって見える。
-    if (loaded.receipt?.finalized !== true) return;
+    if (loaded.receipt?.finalized !== true) { record(null); return; }
     // ホストの欄（invocation）が digest と合わない記録は、書き出した後に書き換わっている。
     // 集計に混ぜると「どのホストで落ちたか」が改変された値で数えられる。
     const invocation = verifyRunReceiptInvocation(loaded.receipt);
     if (!invocation.ok) {
-      out.push({ file, source, invalid: true, error: `invocation の検証に失敗: ${invocation.failures.join(", ")}` });
+      record({ file, source, invalid: true, error: `invocation の検証に失敗: ${invocation.failures.join(", ")}`, ...scoped });
       return;
     }
-    out.push({ file, source, receipt: loaded.receipt, sha256: loaded.digest });
+    record({ file, source, receipt: loaded.receipt, sha256: loaded.digest, ...scoped });
   };
   if (fs.existsSync(dir)) {
     for (const name of fs.readdirSync(dir).sort()) {
@@ -115,18 +152,82 @@ export function loadReceipts(dir = defaultReceiptsDir(), { projectDirs = [], inc
         if (typeof row?.receiptPath !== "string" || !row.receiptPath) continue;
         const file = row.receiptPath;
         const loaded = readReceiptBytes(file);
+        // channel の欄の無い古い行は「チャンネルなし」（落とさない）。
+        const channel = receiptIndexChannelId(row.channel);
         if (!loaded.missing && loaded.digest && row.receiptSha256 && loaded.digest !== row.receiptSha256) {
-          out.push({ file, source: "index", error: "索引の sha256 と一致しない（決着後に書き換わった）" });
+          out.push({ file, source: "index", error: "索引の sha256 と一致しない（決着後に書き換わった）", ...(channel ? { channel } : {}) });
           continue;
         }
-        push(file, loaded, "index");
+        push(file, loaded, "index", channel);
       }
     }
   }
   for (const projectDir of projectDirs) {
-    for (const file of projectReceiptPaths(projectDir)) push(file, readReceiptBytes(file), "project");
+    for (const file of projectReceiptPaths(projectDir)) push(file, readReceiptBytes(file), "project", projectJobChannel(file));
   }
   return out;
+}
+
+/**
+ * --channel の絞り込み。channelId が null / undefined なら絞らない。"" は「チャンネルなし」の記録だけ。
+ */
+export function entriesForChannel(entries, channelId = null) {
+  if (channelId === null || channelId === undefined) return entries;
+  return entries.filter((entry) => (entry.channel || "") === channelId);
+}
+
+/**
+ * 1件の Receipt の失敗の理由コード（重複なし）。落ちたゲートの id と、knownRemainingIssues をコードへ丸めたもの
+ * （lib/harnessRunReceipt.mjs の issueCodeOf。自由文は運ばず、形の合わないものは unclassified）。
+ */
+export function receiptFailureCodes(receipt) {
+  const gates = receipt?.gates || {};
+  const gateIds = new Set([...Object.keys(gates), ...(receipt?.harnessBuild?.declaredGates || []).map(String)]);
+  const failedGates = Array.isArray(receipt?.summary?.failedGates)
+    ? receipt.summary.failedGates.map(String)
+    : Object.entries(gates).filter(([, gate]) => gate?.verdict === "fail").map(([id]) => id);
+  const issues = (Array.isArray(receipt?.knownRemainingIssues) ? receipt.knownRemainingIssues : [])
+    .map((issue) => issueCodeOf(issue, { gateIds, auditToGate: new Map() }));
+  return [...new Set([...failedGates.filter((id) => gateIds.has(id)), ...issues])];
+}
+
+/**
+ * チャンネルごとの内訳: Receipt 数・合否・pass 率・失敗の理由コードの上位（そのコードが出た Receipt の数）。
+ * チャンネルの無い記録は channel: null（label は「チャンネルなし」）の1行にまとめ、最後に並べる。
+ */
+export function rollupByChannel(entries, { harnessId = null, top = CHANNEL_TOP_FAILURE_CODES } = {}) {
+  const groups = new Map();
+  const groupFor = (channel) => {
+    const key = channel || "";
+    if (!groups.has(key)) {
+      groups.set(key, { channel: key || null, label: key || NO_CHANNEL_LABEL, receipts: 0, passed: 0, failed: 0, missing: 0, unreadable: 0, invalid: 0, codes: new Map() });
+    }
+    return groups.get(key);
+  };
+  for (const entry of entries) {
+    if (entry.missing) { groupFor(entry.channel).missing += 1; continue; }
+    if (entry.invalid) { groupFor(entry.channel).invalid += 1; continue; }
+    if (entry.error) { groupFor(entry.channel).unreadable += 1; continue; }
+    const receipt = entry.receipt;
+    const harness = receipt?.harnessBuild?.harness;
+    if (!harness) { groupFor(entry.channel).unreadable += 1; continue; }
+    if (!verifyRunReceiptInvocation(receipt).ok) { groupFor(entry.channel).invalid += 1; continue; }
+    if (harnessId && harness.id !== harnessId) continue;
+    const group = groupFor(entry.channel);
+    group.receipts += 1;
+    if (receipt.outcome === "pass") group.passed += 1; else group.failed += 1;
+    for (const code of receiptFailureCodes(receipt)) group.codes.set(code, (group.codes.get(code) || 0) + 1);
+  }
+  return [...groups.values()]
+    .sort((a, b) => (a.channel === null) - (b.channel === null) || String(a.channel).localeCompare(String(b.channel)))
+    .map(({ codes, ...group }) => ({
+      ...group,
+      passRate: rate(group.passed, group.receipts),
+      topFailureCodes: [...codes]
+        .map(([code, count]) => ({ code, count }))
+        .sort((a, b) => b.count - a.count || a.code.localeCompare(b.code))
+        .slice(0, top),
+    }));
 }
 
 /**
@@ -134,7 +235,8 @@ export function loadReceipts(dir = defaultReceiptsDir(), { projectDirs = [], inc
  * 版をまたいで混ぜない——混ぜると、直した後も古い失敗が率に残り、
  * 改善したことも悪化したことも見えなくなる。
  */
-export function rollup(entries, { harnessId = null, minRuns = DEFAULT_HOST_MIN_RUNS, gap = DEFAULT_HOST_PASS_RATE_GAP } = {}) {
+export function rollup(allEntries, { harnessId = null, channelId = null, minRuns = DEFAULT_HOST_MIN_RUNS, gap = DEFAULT_HOST_PASS_RATE_GAP } = {}) {
+  const entries = entriesForChannel(allEntries, channelId);
   const byBuild = new Map();
   let unreadable = 0;
   let missing = 0;
@@ -192,11 +294,14 @@ export function rollup(entries, { harnessId = null, minRuns = DEFAULT_HOST_MIN_R
   // 「この版で落ちるのは片方のホストだけか」が同じ出力の中で読める。
   const byHost = rollupByHost(entries, { harnessId, minRuns, gap });
   return {
+    ...(channelId === null || channelId === undefined ? {} : { channel: channelId }),
     builds,
     hostSubtotals: byHost.groups.map(({ harnessId: id, host, buzzassistVersion, receipts, passed, passRate, medianDurationSeconds }) => ({
       harnessId: id, host, buzzassistVersion, receipts, passed, passRate, medianDurationSeconds,
     })),
     hostWarnings: byHost.warnings,
+    // チャンネルごとの内訳（Job の metadata.channel。無い Job は「チャンネルなし」）。
+    channels: rollupByChannel(entries, { harnessId }),
     receiptCount: entries.filter((entry) => !entry.missing).length,
     unreadable,
     missing,
@@ -233,7 +338,8 @@ function rate(numerator, denominator) {
  * 最も高いホストより gap 以上 pass 率が低いホストを挙げる。件数が足りない比較は警告しない
  * （少数の偶然を「ホストの差」と言わない）が、比べられなかった組は skippedComparisons に残す。
  */
-export function rollupByHost(entries, { harnessId = null, minRuns = DEFAULT_HOST_MIN_RUNS, gap = DEFAULT_HOST_PASS_RATE_GAP } = {}) {
+export function rollupByHost(allEntries, { harnessId = null, channelId = null, minRuns = DEFAULT_HOST_MIN_RUNS, gap = DEFAULT_HOST_PASS_RATE_GAP } = {}) {
+  const entries = entriesForChannel(allEntries, channelId);
   const groups = new Map();
   let unreadable = 0;
   let missing = 0;
@@ -342,6 +448,7 @@ export function rollupByHost(entries, { harnessId = null, minRuns = DEFAULT_HOST
 
   return {
     by: "host",
+    ...(channelId === null || channelId === undefined ? {} : { channel: channelId }),
     thresholds: { minRuns, gap },
     groups: rows,
     warnings,
@@ -391,21 +498,30 @@ async function main() {
   const args = parseArgs(rest);
   const dir = args.dir ? path.resolve(String(args.dir)) : defaultReceiptsDir();
   const projectDirs = typeof args["project-dir"] === "string" ? [path.resolve(String(args["project-dir"]))] : [];
-  const entries = loadReceipts(dir, { projectDirs });
+  let channelId = null;
+  if (args.channel !== undefined) {
+    // プラットフォームへ返す形はチャンネルを区別しない（redactForPlatform はチャンネル固有のものを含めない）。
+    if (command === "export") throw new Error("export は --channel を受け付けない（プラットフォームへ返す形はチャンネルを区別しない）。");
+    channelId = receiptIndexChannelId(args.channel);
+    if (!channelId) throw new Error(`--channel はチャンネルの id（英小文字・数字・_・- の64文字まで）: ${String(args.channel).slice(0, 80)}`);
+  }
+  const entries = entriesForChannel(loadReceipts(dir, { projectDirs }), channelId);
 
   switch (command) {
     case "list": {
       print({
         dir: displayPath(dir),
         ...(projectDirs.length ? { projectDirs: projectDirs.map(displayPath) } : {}),
+        ...(channelId ? { channel: channelId } : {}),
         count: entries.length,
         receipts: entries.map((entry) => entry.missing
-          ? { file: entry.file, source: entry.source, missing: true }
+          ? { file: entry.file, source: entry.source, channel: entry.channel || null, missing: true }
           : entry.error
-          ? { file: entry.file, source: entry.source, ...(entry.invalid ? { invalid: true } : {}), error: entry.error }
+          ? { file: entry.file, source: entry.source, channel: entry.channel || null, ...(entry.invalid ? { invalid: true } : {}), error: entry.error }
           : {
             source: entry.source,
             file: entry.file,
+            channel: entry.channel || null,
             harness: entry.receipt.harnessBuild.harness.id,
             version: entry.receipt.harnessBuild.harness.version,
             host: runReceiptHostSummary(entry.receipt).hostKey,
@@ -425,7 +541,9 @@ async function main() {
       if (args.by !== undefined && args.by !== "host" && args.by !== "build") {
         throw new Error(`--by は host か build: ${String(args.by)}`);
       }
-      print(args.by === "host" ? rollupByHost(entries, options) : rollup(entries, options));
+      // entries は --channel で絞ってある。出力にも絞ったチャンネルを残す。
+      const scoped = { ...options, ...(channelId ? { channelId } : {}) };
+      print(args.by === "host" ? rollupByHost(entries, scoped) : rollup(entries, scoped));
       break;
     }
     case "export": {
@@ -446,13 +564,19 @@ async function main() {
     default:
       process.stdout.write([
         "使い方:",
-        "  node scripts/harness-receipts.mjs list                    記録の一覧",
-        "  node scripts/harness-receipts.mjs rollup [--harness ID]   版ごとのゲート失敗率（ホスト別の小計と警告つき）",
+        "  node scripts/harness-receipts.mjs list                    記録の一覧（Job を作ったチャンネルつき）",
+        "  node scripts/harness-receipts.mjs rollup [--harness ID]   版ごとのゲート失敗率（ホスト別の小計と警告、",
+        "                                                           チャンネルごとの内訳つき）",
         "  node scripts/harness-receipts.mjs rollup --by host        ハーネス × ホスト × BuzzAssist の版ごとの pass 率・",
         "                                                           落ちるゲート・所要時間の中央値と、片方のホストだけ低い組の警告",
         "      [--min-runs N]  警告に使う各ホストの最少 Receipt 数（既定 3）",
         "      [--gap X]       警告にする pass 率の差（既定 0.2）",
-        "  node scripts/harness-receipts.mjs export [--out PATH]     プラットフォームへ返す形",
+        "  list / rollup の --channel ID",
+        "                      そのチャンネル（運営者の配置表の channels の id）で作った Job の記録だけを数える。",
+        "                      チャンネルは索引の行（Job の metadata.channel）か、--project-dir の job.json から読む。",
+        `                      チャンネルの無い Job・欄の無い古い索引の行は「${NO_CHANNEL_LABEL}」として内訳に出る`,
+        "  node scripts/harness-receipts.mjs export [--out PATH]     プラットフォームへ返す形（チャンネルは出さない。",
+        "                                                           --channel は受け付けない）",
         "",
         "  既定の置き場: 学習の状態の置き場の receipts/（索引 index.jsonl が指す RunReceipt も読む）",
         "  --dir DIR           置き場を指定する",

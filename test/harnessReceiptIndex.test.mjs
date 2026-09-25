@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { childAgentEnvironment } from "../lib/harnessLearningGuard.mjs";
 import { resolveLearningState } from "../lib/harnessLearningState.mjs";
 import { captureSettledJobLearning, defaultReceiptIndexPath } from "../lib/harnessReceiptLearning.mjs";
-import { defaultReceiptsDir, loadReceipts, rollup } from "../scripts/harness-receipts.mjs";
+import { NO_CHANNEL_LABEL, defaultReceiptsDir, loadReceipts, rollup, rollupByHost } from "../scripts/harness-receipts.mjs";
 
 const SOURCE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const RECEIPTS_SCRIPT = path.join(SOURCE_ROOT, "scripts", "harness-receipts.mjs");
@@ -25,7 +25,7 @@ function tempRoot(t) {
   return root;
 }
 
-function receiptFixture({ outcome = "fail", failed = ["final-audit"], version = "1.0.0", finalizedAt = "2026-09-24T00:00:00.000Z" } = {}) {
+function receiptFixture({ outcome = "fail", failed = ["final-audit"], version = "1.0.0", finalizedAt = "2026-09-24T00:00:00.000Z", issues = [] } = {}) {
   return {
     version: "harness-run-receipt-v1",
     finalized: true,
@@ -35,7 +35,7 @@ function receiptFixture({ outcome = "fail", failed = ["final-audit"], version = 
     harnessBuild: { harness: { id: "sample-harness", version, declarationDigest: "b".repeat(64) }, genreSkills: {}, declaredGates: ["final-audit"] },
     gates: { "final-audit": { verdict: failed.includes("final-audit") ? "fail" : "pass", evidenceDigest: "d".repeat(64) } },
     summary: { failedGates: failed, skippedGates: [], incompleteMediaJobCount: 0 },
-    knownRemainingIssues: [],
+    knownRemainingIssues: issues,
     mediaJobs: [],
   };
 }
@@ -159,4 +159,97 @@ test("索引と rollup の既定の置き場は、学習の状態の置き場の
   assert.equal(defaultReceiptIndexPath(), path.join(SOURCE_ROOT, "docs", "learning", "receipts", "index.jsonl"));
   const installed = resolveLearningState({ codeRoot: path.join(os.tmpdir(), "copy"), homeDir: path.join(os.tmpdir(), "home"), env: {}, developmentCheckout: false });
   assert.equal(installed.receiptIndexPath, path.join(os.tmpdir(), "home", ".buzzassist", "learning", "receipts", "index.jsonl"));
+});
+
+test("索引に Job のチャンネルを載せ、rollup はチャンネルごとの内訳（件数・合否・失敗の理由コードの上位）と --channel の絞り込みを出す。欄の無い古い行は「チャンネルなし」", async (t) => {
+  const root = tempRoot(t);
+  const project = path.join(root, "project");
+  const receiptsDir = path.join(root, "state", "receipts");
+  const indexPath = path.join(receiptsDir, "index.jsonl");
+  // チャンネル・Job・issue の文はすべて合成。issue の自由文はコードへ丸める（形の合わないものは unclassified）。
+  const receipts = {
+    "video-alpha-fail": writeRunReceipt(project, "video-alpha-fail", receiptFixture({ issues: ["synthetic-voice-drift: 合成の詳細", "合成の自由文"] })),
+    "video-alpha-pass": writeRunReceipt(project, "video-alpha-pass", receiptFixture({ outcome: "pass", failed: [], finalizedAt: "2026-09-24T01:00:00.000Z" })),
+    "video-beta-fail": writeRunReceipt(project, "video-beta-fail", receiptFixture({ finalizedAt: "2026-09-24T02:00:00.000Z", issues: ["synthetic-voice-drift"] })),
+    "video-unscoped": writeRunReceipt(project, "video-unscoped", receiptFixture({ finalizedAt: "2026-09-24T03:00:00.000Z" })),
+  };
+  const settle = (jobId, channel) => captureSettledJobLearning({
+    job: {
+      id: jobId,
+      status: "completed",
+      harness: { id: "koya-manga-video" },
+      artifacts: [{ kind: "run-receipt", path: receipts[jobId].file, sha256: receipts[jobId].sha256 }],
+      ...(channel ? { metadata: { channel: { id: channel, selectedBy: "explicit" } } } : {}),
+    },
+    env: {}, capture: noCapture, receiptIndexPath: indexPath,
+  });
+  await settle("video-alpha-fail", "alpha");
+  await settle("video-alpha-pass", "alpha");
+  await settle("video-beta-fail", "beta");
+  await settle("video-unscoped", null);
+  const rows = readJsonl(indexPath);
+  assert.deepEqual(rows.map((row) => [row.jobId, row.channel ?? null]), [
+    ["video-alpha-fail", "alpha"], ["video-alpha-pass", "alpha"], ["video-beta-fail", "beta"], ["video-unscoped", null],
+  ]);
+  // 欄を足す前の索引の行（channel が無い）と、形の合わない channel の行も読めて、「チャンネルなし」に数える。
+  const old = writeRunReceipt(project, "video-old", receiptFixture({ finalizedAt: "2026-09-24T04:00:00.000Z" }));
+  const odd = writeRunReceipt(project, "video-odd", receiptFixture({ outcome: "pass", failed: [], finalizedAt: "2026-09-24T05:00:00.000Z" }));
+  fs.appendFileSync(indexPath, [
+    JSON.stringify({ version: "buzzassist-receipt-index-v1", jobId: "video-old", harnessId: "sample-harness", status: "completed", receiptSource: "run-receipt", receiptPath: old.file, receiptSha256: old.sha256, settledAt: "2026-09-24T04:00:00.000Z" }),
+    JSON.stringify({ version: "buzzassist-receipt-index-v1", jobId: "video-odd", harnessId: "sample-harness", status: "completed", receiptSource: "run-receipt", receiptPath: odd.file, receiptSha256: odd.sha256, channel: "../Odd Channel" }),
+  ].join("\n") + "\n");
+  // 同じ中身を従来の置き場（dir 直下の *.json）でも読む: 1件に数え、索引のチャンネルを付ける。
+  fs.copyFileSync(receipts["video-beta-fail"].file, path.join(receiptsDir, "legacy-beta.json"));
+
+  const entries = loadReceipts(receiptsDir);
+  const report = rollup(entries);
+  assert.equal(report.receiptCount, 6);
+  assert.equal(report.channel, undefined, "絞っていないときは channel を出さない");
+  assert.deepEqual(report.channels.map((row) => [row.channel, row.label, row.receipts, row.passed, row.failed]), [
+    ["alpha", "alpha", 2, 1, 1],
+    ["beta", "beta", 1, 0, 1],
+    [null, NO_CHANNEL_LABEL, 3, 1, 2],
+  ]);
+  assert.equal(report.channels[0].passRate, 0.5);
+  assert.deepEqual(report.channels[0].topFailureCodes, [
+    { code: "final-audit", count: 1 }, { code: "synthetic-voice-drift", count: 1 }, { code: "unclassified", count: 1 },
+  ]);
+  assert.deepEqual(report.channels[2].topFailureCodes, [{ code: "final-audit", count: 2 }]);
+  assert.ok(!JSON.stringify(report).includes("合成の"), "issue の自由文を出さない");
+
+  const alpha = rollup(entries, { channelId: "alpha" });
+  assert.equal(alpha.channel, "alpha");
+  assert.equal(alpha.builds[0].runs, 2);
+  assert.deepEqual(alpha.channels.map((row) => row.channel), ["alpha"]);
+  assert.equal(rollupByHost(entries, { channelId: "beta" }).groups.reduce((sum, row) => sum + row.receipts, 0), 1);
+  assert.equal(rollup(entries, { channelId: "gamma" }).receiptCount, 0, "無いチャンネルは0件（ほかのチャンネルへ落とさない）");
+
+  // CLI: --channel で絞る。export はチャンネルを出さず、--channel を受け付けない。
+  const cli = (...args) => spawnSync(process.execPath, [RECEIPTS_SCRIPT, ...args, "--dir", receiptsDir], { encoding: "utf8", timeout: 30_000 });
+  const beta = cli("rollup", "--channel", "beta");
+  assert.equal(beta.status, 0, beta.stderr);
+  assert.equal(JSON.parse(beta.stdout).channel, "beta");
+  assert.equal(JSON.parse(beta.stdout).builds[0].runs, 1);
+  const listed = cli("list", "--channel", "alpha");
+  assert.equal(listed.status, 0, listed.stderr);
+  assert.deepEqual(JSON.parse(listed.stdout).receipts.map((entry) => entry.channel), ["alpha", "alpha"]);
+  assert.notEqual(cli("rollup", "--channel", "Not A Channel").status, 0);
+  const refused = cli("export", "--channel", "alpha");
+  assert.notEqual(refused.status, 0);
+  assert.match(refused.stderr, /--channel を受け付けない/u);
+  const exported = cli("export");
+  assert.equal(exported.status, 0, exported.stderr);
+  assert.equal(JSON.parse(exported.stdout).receiptCount, 6);
+  assert.doesNotMatch(exported.stdout, /"channel"|alpha|beta/u, "プラットフォームへ返す形にチャンネルを出さない");
+});
+
+test("--project-dir で読む Receipt は、同じ run のフォルダの job.json から Job のチャンネルを読む", async (t) => {
+  const root = tempRoot(t);
+  const project = path.join(root, "project");
+  writeRunReceipt(project, "video-project-alpha", receiptFixture());
+  fs.writeFileSync(path.join(project, "canvas", "harness-runs", "video-project-alpha", "job.json"), JSON.stringify({ id: "video-project-alpha", metadata: { channel: { id: "alpha" } } }));
+  writeRunReceipt(project, "video-project-none", receiptFixture({ finalizedAt: "2026-09-24T01:00:00.000Z" }));
+  const entries = loadReceipts(path.join(root, "empty"), { projectDirs: [project] });
+  assert.deepEqual(entries.map((entry) => entry.channel ?? null).sort(), ["alpha", null]);
+  assert.deepEqual(rollup(entries).channels.map((row) => [row.label, row.receipts]), [["alpha", 1], [NO_CHANNEL_LABEL, 1]]);
 });
