@@ -22,6 +22,7 @@ import {
 import { buildHarnessFeedbackPayload, signHarnessFeedbackBundle } from "../lib/harnessFeedbackBundle.mjs";
 import {
   EXPORT_IMPORT_REASON_CODES,
+  EXPORT_IMPORT_WARNING_CODES,
   HARNESS_FEEDBACK_EXPORT_IMPORT_DIR,
   importHarnessFeedbackExport,
 } from "../lib/harnessFeedbackExportImport.mjs";
@@ -204,8 +205,11 @@ function rejectionLine(code = "FEEDBACK_SIGNATURE_INVALID") {
   return { record: "rejection", code, httpStatus: 400, requestSha256: sha(`req-${code}`), bodyBytes: 1234, signerKeyId: null, receivedAt: RECEIVED_AT };
 }
 
-/** 書き出しの本文。summary の bundles は既定で bundle 行の数（受け取り口の数え方と同じ）。 */
-function exportText(records, { summary = true, bundles = undefined, excludedInactiveSigner = 0 } = {}) {
+/**
+ * 書き出しの本文。summary の bundles は既定で bundle 行の数（受け取り口の数え方と同じ）。
+ * inactiveSigners を渡したときだけ summary にその欄を入れる（受け取り口が欄を足した後の形）。
+ */
+function exportText(records, { summary = true, bundles = undefined, excludedInactiveSigner = 0, inactiveSigners = undefined } = {}) {
   const lines = records.map((record) => canonicalJson(record));
   if (summary) {
     lines.push(canonicalJson({
@@ -214,6 +218,7 @@ function exportText(records, { summary = true, bundles = undefined, excludedInac
       bundles: bundles ?? records.filter((record) => record.record === "bundle").length,
       excludedInactiveSigner,
       rejections: records.filter((record) => record.record === "rejection").length,
+      ...(inactiveSigners === undefined ? {} : { inactiveSigners }),
     }));
   }
   return `${lines.join("\n")}\n`;
@@ -388,6 +393,109 @@ test("summary の件数の不一致・summary 無しは記録して ok: false �
   assert.equal(missing.ok, false);
   assert.deepEqual(missing.issues, ["FEEDBACK_EXPORT_SUMMARY_MISSING"]);
   assert.equal(missing.counts.alreadyImported, 1);
+});
+
+test("summary の inactiveSigners は欄が無くても有っても読み、こちらでまだ active な鍵だけを件数つきで警告する", async (t) => {
+  const fx = fixture(t);
+  await enrollAuto(fx); // A: 受け取り口で失効、こちらでは active
+  const pairB = keys(); // B: こちらでも失効済み
+  await enrollAuto(fx, pairB, "operator-synthetic-b");
+  await revokeHarnessFeedbackOperator({ rootDir: fx.root, operatorId: "operator-synthetic-b", revokedBy: OWNER, reason: "合成の運営者の端末を手放した", revokedAt: RECEIVED_AT });
+  const pairC = keys(); // C: こちらの登録簿に無い
+  const pairD = keys(); // D: 受け取り口で利用者が止まった、こちらでは active
+  await enrollAuto(fx, pairD, "operator-synthetic-d");
+
+  // 欄が無い書き出し（受け取り口が欄を入れる前の形）。
+  const first = sign(payload(), fx.operator);
+  const second = sign(payload({ source: "source-2" }), fx.operator);
+  const before = await importExport(fx, exportText([bundleLine(first, fx.provider), bundleLine(second, fx.provider)]));
+  assert.equal(before.ok, true);
+  assert.deepEqual(before.summary.inactiveSigners, { present: false });
+  assert.deepEqual(before.warnings, []);
+  await decideHarnessFeedbackBundle({ rootDir: fx.root, bundleDigest: autoFeedbackBundleDigest(first), decision: "approve", approvedBy: OWNER, reason: "合成の決着だけを確認した" });
+
+  // 空配列（欄が入った後で、止まった送り手がいない）。
+  const empty = await importExport(fx, exportText([], { inactiveSigners: [] }), { now: () => "2026-09-26T02:00:00.000Z" });
+  assert.equal(empty.ok, true);
+  assert.deepEqual(empty.summary.inactiveSigners, { present: true, total: 0, byReason: { "key-revoked": 0, "user-inactive": 0 } });
+  assert.deepEqual(empty.warnings, []);
+
+  // 両方の reason。signerKeyId の昇順に並べる（受け取り口の出し方）。
+  const inactive = [
+    { signerKeyId: fx.operator.keyId, reason: "key-revoked", revokedAt: "2026-09-26T05:00:00.000Z" },
+    { signerKeyId: pairB.keyId, reason: "key-revoked", revokedAt: "2026-09-26T05:00:00.000Z" },
+    { signerKeyId: pairC.keyId, reason: "user-inactive", revokedAt: null },
+    { signerKeyId: pairD.keyId, reason: "user-inactive", revokedAt: null },
+  ].sort((left, right) => (left.signerKeyId < right.signerKeyId ? -1 : 1));
+  const beforeFiles = listFiles(fx.root);
+  const dry = await importExport(fx, exportText([], { inactiveSigners: inactive }), { dryRun: true });
+  assert.deepEqual(listFiles(fx.root), beforeFiles, "警告を出すだけで、dry-run は何も書かない");
+  const after = await importExport(fx, exportText([], { inactiveSigners: inactive }), { now: () => "2026-09-26T06:00:00.000Z" });
+  for (const result of [dry, after]) {
+    assert.equal(result.ok, true, "警告は取り込みの失敗ではない");
+    assert.deepEqual(result.summary.inactiveSigners, { present: true, total: 4, byReason: { "key-revoked": 2, "user-inactive": 2 } });
+    const warnings = [...result.warnings].sort((left, right) => left.operatorId.localeCompare(right.operatorId));
+    assert.deepEqual(warnings.map((warning) => ({
+      code: warning.code,
+      signerKeyId: warning.signerKeyId,
+      operatorId: warning.operatorId,
+      upstreamReason: warning.upstreamReason,
+      upstreamRevokedAt: warning.upstreamRevokedAt,
+      importedBundles: warning.importedBundles,
+      approvedImports: warning.approvedImports,
+    })), [
+      {
+        code: "FEEDBACK_EXPORT_SIGNER_INACTIVE_UPSTREAM",
+        signerKeyId: fx.operator.keyId,
+        operatorId: "operator-synthetic-a",
+        upstreamReason: "key-revoked",
+        upstreamRevokedAt: "2026-09-26T05:00:00.000Z",
+        importedBundles: 2,
+        approvedImports: 1,
+      },
+      {
+        code: "FEEDBACK_EXPORT_SIGNER_INACTIVE_UPSTREAM",
+        signerKeyId: pairD.keyId,
+        operatorId: "operator-synthetic-d",
+        upstreamReason: "user-inactive",
+        upstreamRevokedAt: null,
+        importedBundles: 0,
+        approvedImports: 0,
+      },
+    ], "こちらで失効済みの鍵（B）と登録簿に無い鍵（C）は警告しない");
+    assert.ok(Object.hasOwn(EXPORT_IMPORT_WARNING_CODES, result.warnings[0].code));
+  }
+  // 自動では失効も削除もしない（owner が既存の revoke で決める）。
+  const ledger = await loadHarnessFeedbackImportLedger({ rootDir: fx.root });
+  assert.deepEqual(ledger.approved.map((entry) => entry.bundleDigest), [autoFeedbackBundleDigest(first)]);
+  assert.equal(listFiles(path.join(fx.root, "curation")).length, 2);
+});
+
+test("summary の inactiveSigners の形が違えば止める（昇順でない・重複・項目の形の違い）", async (t) => {
+  const fx = fixture(t);
+  await enrollAuto(fx);
+  const low = `ed25519:${"1".repeat(24)}`;
+  const high = `ed25519:${"f".repeat(24)}`;
+  const revoked = (signerKeyId, revokedAt = "2026-09-26T05:00:00.000Z") => ({ signerKeyId, reason: "key-revoked", revokedAt });
+  const cases = {
+    "昇順でない": [revoked(high), revoked(low)],
+    "重複": [revoked(low), revoked(low)],
+    "signerKeyId の形": [revoked("ed25519:ZZZ")],
+    "未知の reason": [{ signerKeyId: low, reason: "suspended", revokedAt: null }],
+    "key-revoked に失効時刻が無い": [{ signerKeyId: low, reason: "key-revoked", revokedAt: null }],
+    "user-inactive に時刻がある": [{ signerKeyId: low, reason: "user-inactive", revokedAt: "2026-09-26T05:00:00.000Z" }],
+    "ミリ秒の無い時刻": [revoked(low, "2026-09-26T05:00:00Z")],
+    "項目に余分な field": [{ ...revoked(low), note: "x" }],
+    "項目が object でない": [low],
+    "配列でない": { [low]: "key-revoked" },
+  };
+  for (const [label, inactiveSigners] of Object.entries(cases)) {
+    const result = await importExport(fx, exportText([], { inactiveSigners }), { dryRun: true });
+    assert.equal(result.ok, false, label);
+    assert.equal(result.stopped?.code, "FEEDBACK_EXPORT_LINE_INVALID", label);
+  }
+  const ok = await importExport(fx, exportText([], { inactiveSigners: [revoked(low), { signerKeyId: high, reason: "user-inactive", revokedAt: null }] }), { dryRun: true });
+  assert.equal(ok.ok, true, "正しい形は通る");
 });
 
 test("壊れた行・未知の record・summary の後ろの行はその行で止め、どこまで取り込んだかを出す", async (t) => {
