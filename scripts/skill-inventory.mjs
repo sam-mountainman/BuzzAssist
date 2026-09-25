@@ -2,7 +2,7 @@
 
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildSkillInventory, recordSkillApproval } from "../lib/skillInventory.mjs";
+import { CHANNEL_SKILLS_ENV, buildSkillInventory, recordSkillApproval } from "../lib/skillInventory.mjs";
 
 function parseArgs(argv) {
   const args = { declaredSkillIds: [] };
@@ -12,12 +12,13 @@ function parseArgs(argv) {
       args[token.slice(2).replace(/-([a-z])/gu, (_match, letter) => letter.toUpperCase())] = true;
       continue;
     }
-    if (["--project-dir", "--profile", "--declared-skill", "--approve", "--reviewer"].includes(token)) {
+    if (["--project-dir", "--profile", "--declared-skill", "--approve", "--reviewer", "--channel-skills"].includes(token)) {
       const value = argv[index + 1];
       if (!value || value.startsWith("--")) throw new Error(`${token} requires a value`);
       if (token === "--declared-skill") args.declaredSkillIds.push(value);
       else if (token === "--approve") args.approve = value;
       else if (token === "--reviewer") args.reviewer = value;
+      else if (token === "--channel-skills") args.channelSkillsDir = value;
       else args[token === "--profile" ? "profileId" : "projectDir"] = value;
       index += 1;
       continue;
@@ -52,6 +53,9 @@ function printHumanReport(report) {
   process.stdout.write(`Exact mirrors (incl. shipped depth-rewrite copies): ${report.analysis.exactMirrors.length}\n`);
   process.stdout.write(`Same generic name across explicit scopes: ${report.analysis.crossScopeSameNames.length}\n`);
   process.stdout.write(`Production skills without a human approval bound to the current version/SHA: ${report.analysis.unapprovedProductionSkills.length}\n`);
+  if (report.channel) {
+    process.stdout.write(`Channel-private skills (namespace ${report.channel.namespace || "unknown"}, manifest ${report.channel.manifestVersion || "unreadable"}): ${report.channel.skills}\n`);
+  }
   if (report.profile) {
     const allowedSkills = report.profile.skills.filter((entry) => entry.allowed).length;
     const allowedPlugins = report.profile.plugins.filter((entry) => entry.allowed).length;
@@ -89,7 +93,7 @@ function printHumanReport(report) {
   if (report.analysis.unapprovedProductionSkills.length > 0) {
     process.stdout.write("\nUnapproved production skills (record a human approval with --approve <id> --reviewer <name> --human-verified from that person's terminal):\n");
     report.analysis.unapprovedProductionSkills.forEach((entry) => {
-      process.stdout.write(`  - ${entry.id} ${entry.version} (${entry.approvalState})\n`);
+      process.stdout.write(`  - ${entry.id} ${entry.version} (${entry.approvalState}${entry.scope ? `, ${entry.scope}` : ""})\n`);
     });
   }
   if (report.analysis.externalDivergentHashes.length > 0) {
@@ -102,15 +106,20 @@ function printHumanReport(report) {
 
 export async function runSkillInventoryCli(argv = process.argv.slice(2), options = {}) {
   const args = parseArgs(argv);
+  // チャンネル専用スキルの在庫（私有）。明示の --channel-skills が環境変数に勝つ。
+  const env = options.env || process.env;
+  const channelDir = args.channelSkillsDir || String(env[CHANNEL_SKILLS_ENV] || "").trim();
+  const channelSkillsDir = channelDir ? resolve(channelDir) : "";
   if (args.approve) {
     const result = await recordSkillApproval({
       projectDir: resolve(args.projectDir || process.cwd()),
+      channelSkillsDir,
       skillId: args.approve,
       reviewer: args.reviewer,
       humanVerified: Boolean(args.humanVerified),
       isInteractive: options.isInteractive ?? process.stdin.isTTY === true,
     });
-    process.stdout.write(`${result.skillId} ${result.approval.version} を人の承認として記録しました（reviewer: ${result.approval.reviewer}、SHA ${result.approval.contentSha256.slice(7, 19)}）\n`);
+    process.stdout.write(`${result.skillId} ${result.approval.version} を人の承認として記録しました（reviewer: ${result.approval.reviewer}、SHA ${result.approval.contentSha256.slice(7, 19)}${result.scope === "channel" ? "、私有の在庫" : ""}）\n`);
     return result;
   }
   const report = await buildSkillInventory({
@@ -119,6 +128,7 @@ export async function runSkillInventoryCli(argv = process.argv.slice(2), options
     includePluginCache: Boolean(args.includePluginCache),
     profileId: args.profileId,
     declaredSkillIds: args.declaredSkillIds,
+    channelSkillsDir,
   });
   if (args.json) process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   else printHumanReport(report);
