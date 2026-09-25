@@ -95,7 +95,8 @@ const AUTOMATIC_EXEMPT = new Set(["perceptualReviewChecks", "perceptualReviewBou
 function assertAutomaticAuditsPass(outcome) {
   for (const [auditId, value] of Object.entries(outcome.auditChecks || {})) {
     if (AUTOMATIC_EXEMPT.has(auditId)) continue;
-    assert.equal(value.pass, true, `${auditId}: ${value.detail}`);
+    const failedRows = [...(value.measurement?.cues || []), ...(value.measurement?.shots || [])].filter((row) => row.pass === false);
+    assert.equal(value.pass, true, `${auditId}: ${value.detail} ${JSON.stringify(failedRows.map((row) => [row.id, row.problems, row.metrics]))}`);
   }
 }
 
@@ -156,6 +157,76 @@ test("焼き込み字幕: 書体に無い字を含む台本は、有料生成の
     assert.equal(adapters.calls.generation, 0, "有料生成へ進まない");
     const plan = await inspectNarratedStoryPlan({ scriptPath, channelPackDir: payloadDir });
     assert.ok(plan.blockers.some((issue) => issue.startsWith("subtitle-font-missing-glyphs:1:")), plan.blockers.join(", "));
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+const CAMERA_PACK = {
+  moves: { "slow-push-in": { zoomPerSecond: 0.02, maxZoom: 1.12 }, "pan-left": { panPerSecond: 0.03, zoom: 1.1 } },
+  sequence: ["slow-push-in"],
+};
+
+function cameraScript(story) {
+  return JSON.stringify({
+    format: "buzzassist-narrated-script-package-v1",
+    story,
+    reviewMarker: "---感想---",
+    review: [{ id: "r1", text: "感想の一文目です。" }],
+  });
+}
+
+test("カメラ: 台本パッケージで1つの場面を文ごとに分けても1つの動きで通し、場面の指定した型を使い、完成 MP4 で測った動きが計画どおり", {
+  skip: toolchain.ok ? false : "ffmpeg/ffprobe is unavailable",
+}, async () => {
+  assert.ok(fontPath, "日本語の書体が見つからない");
+  const temp = await mkdtemp(join(os.tmpdir(), "narrated-visual-camera-"));
+  try {
+    const env = await trustEnv(temp);
+    const fixture = await createBookendFixtureMedia(join(temp, "fixture-media"), toolchain);
+    const { outcome } = await runVisualFixture({
+      root: join(temp, "run"),
+      env,
+      fixture,
+      script: cameraScript([
+        { id: "p1", text: "最初の物語です。次の場面です。終わりの場面です。" },
+        { id: "p2", text: "最初の物語です。", camera: "pan-left" },
+      ]),
+      extend: (config) => ({ ...config, camera: CAMERA_PACK }),
+    });
+    assert.equal(outcome.status, "awaiting-human-review", JSON.stringify(outcome.knownRemainingIssues));
+    assertAutomaticAuditsPass(outcome);
+    const camera = outcome.auditChecks.cameraMotionMeasured.measurement;
+    assert.deepEqual(camera.shots.map((shot) => [shot.move, shot.segmentIds.length]), [["slow-push-in", 3], ["pan-left", 1]]);
+    // 同じ画の中の文の境目（2か所）でも、動きは計画どおりに続いている（始め直していない）。
+    assert.equal(camera.shots[0].intervals.filter((interval) => interval.kind === "cut").length, 2);
+    const manifest = JSON.parse(await readFile(outcome.artifacts.generationManifest.path, "utf8"));
+    assert.equal(manifest.camera.source, "channel-pack");
+    assert.deepEqual(manifest.camera.shots.map((shot) => shot.requested), [false, true]);
+    assert.ok(manifest.segments.filter((segment) => segment.part === "story").every((segment) => ["slow-push-in", "pan-left"].includes(segment.camera.mode)));
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("カメラ: 台本パッケージが Pack に無い型を指定したら、有料生成の前に止まる", {
+  skip: toolchain.ok ? false : "ffmpeg/ffprobe is unavailable",
+}, async () => {
+  assert.ok(fontPath, "日本語の書体が見つからない");
+  const temp = await mkdtemp(join(os.tmpdir(), "narrated-visual-camera-undeclared-"));
+  try {
+    const env = await trustEnv(temp);
+    const fixture = await createBookendFixtureMedia(join(temp, "fixture-media"), toolchain);
+    const { outcome, adapters } = await runVisualFixture({
+      root: join(temp, "run"),
+      env,
+      fixture,
+      script: cameraScript([{ id: "p1", text: "最初の物語です。", camera: "pan-right" }]),
+      extend: (config) => ({ ...config, camera: CAMERA_PACK }),
+    });
+    assert.equal(outcome.status, "awaiting-operator-input");
+    assert.ok(outcome.knownRemainingIssues.includes("camera-move-undeclared:p1"), JSON.stringify(outcome.knownRemainingIssues));
+    assert.equal(adapters.calls.generation, 0);
   } finally {
     await rm(temp, { recursive: true, force: true });
   }

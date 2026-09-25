@@ -85,7 +85,8 @@
         "text": { "$ref": "#/$defs/segmentText" },
         "speaker": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
         "sceneIntent": { "type": "string", "maxLength": 2000, "description": "画面の意図（場所・人物・寄り引き）。画像の指示に使う" },
-        "musicSection": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$", "description": "BGM の区分（Channel Pack の musicPlan.sections[].id）" }
+        "musicSection": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$", "description": "BGM の区分（Channel Pack の musicPlan.sections[].id）" },
+        "camera": { "$ref": "#/$defs/cameraMove" }
       }
     },
     "reviewSegment": {
@@ -100,8 +101,13 @@
         "operatorReplacementRequired": {
           "type": "boolean",
           "description": "運営者本人の体験へ差し替える文。true の間は声にも字幕にもせず、有料生成の前に止まる"
-        }
+        },
+        "camera": { "$ref": "#/$defs/cameraMove" }
       }
+    },
+    "cameraMove": {
+      "enum": ["slow-push-in", "slow-pull-out", "pan-left", "pan-right", "static"],
+      "description": "この場面（画1枚）のカメラの型。Channel Pack の camera.moves に宣言した型だけ。無ければ Pack の camera.sequence を順に当てる。話者ごとに分けた文も同じ画の続きなので、1つの動きを通しで続ける"
     }
   }
 }
