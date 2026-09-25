@@ -519,3 +519,64 @@ test("plan-only start reports the read-only preflight blockers without running d
   assert.deepEqual(thrown.preflight.blockers, ["plan-preflight-failed"]);
   assert.equal(thrown.status, "planned");
 });
+
+test("Koya の start は、後から足せない必須引数が欠けていれば Job を作らずに名指しして止める（plan-only でも）", async () => {
+  const calls = [];
+  const service = createVideoHarnessService(runtimeFixture({
+    createJob: async (input) => {
+      calls.push(["create", input.harnessId]);
+      return { job: fixtureJob({ projectDir: input.projectDir, harness: { id: "koya-manga-video" } }), attached: false };
+    },
+    runJob: async () => { calls.push(["run"]); return fixtureJob({ status: "completed" }); },
+    projectCanvas: async () => { calls.push(["project"]); },
+    planPreflight: async () => null,
+  }));
+  const base = { projectDir: "/tmp/video-service-project", scriptPath: "script.txt", channelPackPath: "channel-pack", harnessId: "koya-manga-video" };
+  const complete = {
+    episodeId: "manga-fixture-001",
+    protagonistSpeakerId: "fixture-lead",
+    characterBiblePath: "/tmp/fixture-character-bible.json",
+    storyReviewPath: "/tmp/fixture-story-review.json",
+  };
+  for (const confirmed of [false, true]) {
+    for (const omitted of Object.keys(complete)) {
+      const options = { ...complete };
+      delete options[omitted];
+      await assert.rejects(
+        () => service.start({ ...base, options, confirmed }),
+        (error) => {
+          assert.equal(error.code, "koya-start-options-missing");
+          assert.deepEqual(error.missingOptions.map((entry) => entry.key), [omitted]);
+          const flag = `--${omitted.replace(/[A-Z]/gu, (letter) => `-${letter.toLowerCase()}`)}`;
+          assert.ok(error.message.includes(flag), `${omitted}: CLI の旗 ${flag} を名指しすること`);
+          assert.ok(error.message.includes(`options.${omitted}`), `${omitted}: MCP の引数名も名指しすること`);
+          assert.match(error.message, /Job は作っていない/u);
+          return true;
+        },
+      );
+    }
+    // 全部欠けていれば全部を1回で言う（1つ直すたびに次が出る往復をさせない）。
+    await assert.rejects(
+      () => service.start({ ...base, options: {}, confirmed }),
+      (error) => error.missingOptions.length === 4,
+    );
+    // 空白だけの値は欠けているのと同じ。
+    await assert.rejects(
+      () => service.start({ ...base, options: { ...complete, storyReviewPath: "   " }, confirmed }),
+      (error) => error.missingOptions[0].key === "storyReviewPath",
+    );
+  }
+  // 依頼文からの選択で Koya に決まった場合も同じ。
+  await assert.rejects(
+    () => service.start({ ...base, harnessId: "", want: "漫画の動画を作って", options: {} }),
+    /koya-start-options-missing/u,
+  );
+  assert.deepEqual(calls, [], "足りない間は Job を作らず、Canvas にも投影せず、実行もしない");
+
+  const planned = await service.start({ ...base, options: complete });
+  assert.equal(planned.execution.planOnly, true);
+  assert.deepEqual(calls.map(([kind]) => kind), ["create", "project"]);
+  // Koya 以外のハーネスには Koya の必須引数を課さない。
+  const narrated = await service.start({ ...base, harnessId: "narrated-story-video", options: {} });
+  assert.equal(narrated.execution.planOnly, true);
+});
