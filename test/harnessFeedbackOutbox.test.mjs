@@ -286,10 +286,12 @@ test("同意すると署名鍵ができ、決着時に本文・パス・人名�
   assert.equal(autoFeedbackBundleDigest(bundle), result.bundleSha256);
   verifyAutoFeedbackBundle({ bundle, trustedPublicKeyPem: fs.readFileSync(fx.paths.publicKey, "utf8") });
   assert.equal(bundle.signer.keyId, recorded.signer.keyId);
+  // 宣言の版は Receipt が今の宣言から写す。宣言を上げるたびに試験が落ちないよう、宣言そのものから読む。
+  const declaredVersion = JSON.parse(fs.readFileSync(path.join(SOURCE_ROOT, "config", "harnesses", `${HARNESS}.harness.json`), "utf8")).version;
   assert.deepEqual(bundle.build, {
     coreVersion: "9.9.9",
     harnessId: HARNESS,
-    harnessVersion: "1.7.0",
+    harnessVersion: declaredVersion,
     declarationDigest: bundle.build.declarationDigest,
   });
   // 決着の要約: ゲート id と判定・件数・ホスト（invocation）だけ。
