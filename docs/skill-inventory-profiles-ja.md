@@ -117,6 +117,40 @@ node scripts/skill-inventory.mjs --include-global --profile buzzassist-developme
 plugin cacheを含める場合だけ `--include-plugin-cache` を追加する。CLIはglobal設定やcacheを
 書き換えない。JSONを機械連携へ渡すときは `--json` を使う。
 
+## 評価（evals）を両ホストで流す
+
+件数を数えるだけの試験では「Claude Code と Codex で同じ品質か」は分からない。
+`scripts/skill-evals.mjs`（本体 `lib/skillEvals.mjs`）は正本スキルの `evals/evals.json` を
+両ホストで実際に流し、別の新しい文脈の採点者が確認項目を1つずつ判定する。
+
+```bash
+npm run skills:evals                         # 計画だけ（既定。モデルは呼ばない）
+node scripts/skill-evals.mjs run --execute \
+  --skill buzzassist:skill-creator --eval 3 \
+  --claude-model <id> --codex-model <id>     # 実行（両ホストの利用枠を使う）
+node scripts/skill-evals.mjs report          # 版ごと・ホストごとの合格率
+```
+
+- **実行者**: `claude -p`（`--safe-mode --restricted --disable-slash-commands --strict-mcp-config
+  --no-session-persistence`、道具は `Read,Glob,Grep` だけ、出力は `stream-json`）と
+  `codex exec`（`--sandbox read-only --ephemeral --ignore-user-config --ignore-rules`、
+  `--disable plugins/multi_agent/hooks`、`--json`）。作業ディレクトリは一時ディレクトリへ写した
+  正本スキルで、`evals/` は写さない。写しが書き換わった出力は採点しない
+- **採点者**: 既定は相手側のホスト（Claude の出力は Codex、Codex の出力は Claude）。
+  新しい文脈（Claude は道具なし、Codex は空のディレクトリで読み取り専用）で、渡すのは依頼・
+  読んだファイル・応答・確認項目だけ。合格点・前回の結果・
+  実行者のホスト名とモデル名は渡さない。`shouldTrigger` は採点者に任せず、SKILL.md を読んだかを
+  作業の記録から機械で決める
+- **記録**: `BUZZASSIST_LEARNING_DIR/evals`、開発用チェックアウトなら `docs/learning/evals/`、
+  それ以外は `~/.buzzassist/learning/evals/` に、1回の eval 実行ごと1行（JSONL）。スキル ID・版・
+  contentSha256・ホスト・モデル・eval ID・各確認項目の passed/evidence・所要時間を残す。
+  evidence から一時ディレクトリ・端末のパス・鍵らしい文字列は消す
+- **並列**: 既定 `auto`（claude は `min(10, max(2, コア-2))`、codex は 8）。
+  `harness-parallel-execution` の観測値16を超える `--concurrency` は受けない。
+  利用枠・認証で落ちたホストへは残りを投げない
+- **モデル**: 未指定だと claude はアカウントの既定、codex は CLI の既定（`config.toml` は読まない）。
+  ホスト間で比べるときは両方のモデルを明示する
+
 ## Skill Creator
 
 BuzzAssist版の正本は `.agents/skills/skill-creator/SKILL.md`。plugin配布時は
