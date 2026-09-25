@@ -85,6 +85,7 @@ import {
 } from "../lib/harnessLearningState.mjs";
 import { learningWritesForbidden } from "../lib/harnessLearningGuard.mjs";
 import { REFLECTION_INTERVAL_ENV, resetReflectionCounter } from "../lib/harnessLearningReflection.mjs";
+import { expandAppliedRecords } from "../lib/harnessLearningChangeRecords.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // リリースと一緒に配る設定（targets.json）の置き場。写しの側から読む。
@@ -553,6 +554,16 @@ function readJsonl(filePath) {
     });
 }
 
+/** 台帳（JSONL）を読む。壊れた行があれば止める（黙って読み飛ばさない）。 */
+export function readLearningJsonl(filePath) {
+  return readJsonl(filePath);
+}
+
+/** 台帳へ1行追記する（1回の write。他プロセスの行と混ざらない）。 */
+export function appendLearningJsonl(filePath, entry) {
+  appendJsonl(filePath, entry);
+}
+
 function appendJsonl(filePath, entry) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   // 1行を1回の write で出す。JSON.stringify は改行を含まないので、
@@ -670,12 +681,15 @@ export function isActuallyApplied(record, readCanonical, hashCanonical = null) {
 }
 
 export function summarizeProposals(proposals, applied, readCanonical = null, hashCanonical = null) {
+  // approve が書いた「適用した変更」の行（1変更に1行）は、提案ごとの反映記録として数える。
+  // 巻き戻した変更と、巻き戻しの行そのものは反映記録に数えない（lib/harnessLearningChangeRecords.mjs）。
+  const records = expandAppliedRecords(applied);
   const appliedIds = new Set(
     readCanonical
-      ? applied
+      ? records
         .filter((entry) => isActuallyApplied(entry, readCanonical, hashCanonical))
         .map((entry) => entry.id)
-      : applied.map((entry) => entry.id),
+      : records.map((entry) => entry.id),
   );
   const byId = new Map();
   const seenSessionOccurrences = new Set();
@@ -1643,7 +1657,15 @@ function printCurateReport(report) {
 }
 
 /** 台帳・overlay・正本側の記録を書く操作。子エージェントの印があれば拒否する。 */
-export const LEARNING_WRITE_ACTIONS = new Set(["capture", "sync", "promote", "apply", "curate"]);
+export const LEARNING_WRITE_ACTIONS = new Set(["capture", "sync", "promote", "apply", "curate", "pending", "approve", "reject"]);
+
+/** 読むだけの呼び方（curate の一覧、pending の一覧と表示）は子エージェントからも通す。 */
+export function isLearningWriteInvocation(args) {
+  if (!LEARNING_WRITE_ACTIONS.has(args.action)) return false;
+  if (args.action === "curate") return args.archive === true;
+  if (args.action === "pending") return typeof args.proposed === "string";
+  return true;
+}
 
 function parseArgs(argv) {
   const out = { action: argv[0] };
@@ -1705,6 +1727,29 @@ function printHelp() {
 
   apply     提案を反映済みとして記録する（promote と同じ検査を通す）
     --id <提案ID>  --reviewer <名前>  --note "何をどう書いたか"
+            人が skill-creator で正本を直接直したときの記録。正本を書き換える案を機械が作るなら、
+            下の pending → approve を使う（approve が apply と同じ記録を残すので、apply は要らない）
+
+  pending   正本（SKILL.md・台帳）の書き換え案を、差分と「読んだ時点の正本の sha256（base）」つきで
+            キューに置く。正本には触らない。案には提案ごとの印（buzzassist-learning:<提案ID>）と
+            --note と完全一致の規則本文が要る（apply と同じ反映証跡）。追加する本文は書き込み前の検査を通す
+    --id <提案ID>[,<提案ID>]  --proposed <書き換え後の正本の全文のファイル>  --note "規則本文"
+    [--base <案を作るときに読んだ正本の sha256>]  [--target <宛先>]
+            --base を渡せば今の正本と照合し、違えば base-changed で止める
+  pending   （--proposed なし）キューの一覧。base が今の正本と違うものは「base-changed」と出す
+    --all                     却下・承認・巻き戻し済みも出す
+    --show <変更ID>           差分を出す。--out <file> で書き換え後の全文を別のファイルへ書く
+                              （その写しで skill-evals を流すため。正本そのものへは書かない）
+
+  approve   キューの変更を正本へ当てる。人の確認（対話端末＋ --human-verified ＋ reviewer 名）でだけ通り、
+            --agent-attested では通らない。正本の今の sha256 が base と一致するときだけ書き、違えば
+            base-changed で拒否する（読んでから書く）。当てたら applied 台帳へ「適用した変更」
+            （対象・変更前後の sha256・承認者・時刻・元の提案 ID・差分）を1行残す
+    --change <変更ID>  --reviewer <名前>  --human-verified
+
+  reject    キューの変更を却下する（記録は消さない。正本は書き換えない）
+    --change <変更ID>  --reviewer <名前>  --reason "何を見て外したか"  [--human-verified | --agent-attested]
+
 
   自動で入ってくる提案（どちらも提案台帳への追記だけで、正本と overlay には触らない）:
     - Receipt からの自動捕捉: Video Harness の Job が completed / failed / awaiting-human-review で
@@ -1746,23 +1791,31 @@ function printHelp() {
 `);
 }
 
-function main() {
+async function main() {
   const args = parseArgs(process.argv.slice(2));
   const now = new Date().toISOString();
 
   if (!args.action || args.action === "--help" || args.action === "-h") {
     printHelp();
-    process.exit(args.action ? 0 : 2);
+    // process.exit を呼ばない。パイプへの stdout は非同期で、長い help が途中で切れる。
+    process.exitCode = args.action ? 0 : 2;
+    return;
   }
 
   // 書き込み系は、子エージェントの印があれば台帳を読む前に止める。
-  if (LEARNING_WRITE_ACTIONS.has(args.action) && !(args.action === "curate" && args.archive !== true)) {
+  if (isLearningWriteInvocation(args)) {
     assertLearningWriteAllowed(process.env, args.action);
   }
 
   // 配布された写しでは、ホストや版に依らず同じ状態の置き場を読む。初回だけ古い写しの台帳を取り込む。
   const state = learningState();
   process.stdout.write(describeMigration(ensureLearningStateReady({ state })));
+
+  // 差分の承認キュー（lib/harnessLearningChanges.mjs）。正本の書き換えはここだけが行う。
+  if (["pending", "approve", "reject"].includes(args.action)) {
+    await runLearningChangeCli(args, now);
+    return;
+  }
 
   const proposals = learningLedgerPaths("proposals").flatMap(readJsonl);
   const applied = learningLedgerPaths("applied").flatMap(readJsonl);
@@ -2086,11 +2139,99 @@ function main() {
   }
 }
 
+function attestationArgs(args) {
+  return {
+    reviewer: args.reviewer,
+    isInteractive: Boolean(process.stdin.isTTY),
+    agentAttested: args["agent-attested"] === true || args.agentAttested === true,
+    humanVerified: args["human-verified"] === true || args.humanVerified === true,
+  };
+}
+
+function shortSha(value) {
+  return String(value || "").slice(0, 12);
+}
+
+/** pending / approve / reject。本体は lib/harnessLearningChanges.mjs。 */
+async function runLearningChangeCli(args, now) {
+  const changes = await import("../lib/harnessLearningChanges.mjs");
+  const common = { repoRoot: REPO_ROOT, now: () => now };
+  switch (args.action) {
+    case "pending": {
+      if (typeof args.proposed === "string") {
+        const proposedPath = path.resolve(args.proposed);
+        const { change } = changes.enqueueLearningChange({
+          ...common,
+          proposalIds: String(args.id || "").split(",").map((value) => value.trim()).filter(Boolean),
+          proposedText: fs.readFileSync(proposedPath, "utf8"),
+          baseSha256: typeof args.base === "string" ? args.base : "",
+          note: typeof args.note === "string" ? args.note : "",
+          target: typeof args.target === "string" ? args.target : "",
+        });
+        process.stdout.write(
+          `キューに置きました: ${change.changeId}（${change.target} / ${change.targetPath}）\n`
+          + `  base ${shortSha(change.baseSha256)} → 変更後 ${shortSha(change.afterSha256)}`
+          + `（${change.stats.hunks} hunk、+${change.stats.added} -${change.stats.removed}）/ 提案 ${change.proposalIds.join(", ")}\n`
+          + "  正本はまだ書き換えていません。人が差分を読んで承認します:\n"
+          + `    node scripts/harness-learn.mjs pending --show ${change.changeId}\n`
+          + `    node scripts/harness-learn.mjs approve --change ${change.changeId} --reviewer <名前> --human-verified\n`,
+        );
+        return;
+      }
+      if (typeof args.show === "string") {
+        const shown = changes.showLearningChange({ ...common, changeId: args.show, out: typeof args.out === "string" ? args.out : "" });
+        const record = shown.change.record;
+        process.stdout.write(`${shown.change.changeId}（${shown.change.status}）${record.target} / 提案 ${(record.proposalIds || []).join(", ")}\n`);
+        process.stdout.write(shown.diff);
+        if (shown.written) process.stdout.write(`書き換え後の全文を書きました: ${shown.written}\n`);
+        return;
+      }
+      const list = changes.listLearningChanges({ ...common, includeClosed: args.all === true });
+      if (list.length === 0) {
+        process.stdout.write(args.all === true ? "変更の記録はありません\n" : "承認待ちの変更はありません\n");
+        return;
+      }
+      process.stdout.write(`${args.all === true ? "変更の記録" : "承認待ちの変更"} ${list.length} 件\n\n`);
+      for (const entry of list) {
+        const stale = entry.stale ? `  ⚠ base-changed（今の正本 ${shortSha(entry.currentSha256)}。pending を作り直す）` : "";
+        process.stdout.write(`  [${entry.changeId}] ${entry.status} → ${entry.target} ${entry.targetPath}${stale}\n`);
+        process.stdout.write(`      提案 ${entry.proposalIds.join(", ")} / base ${shortSha(entry.baseSha256)} → ${shortSha(entry.afterSha256)}`
+          + `${entry.stats ? `（+${entry.stats.added} -${entry.stats.removed}）` : ""}\n`);
+      }
+      process.stdout.write("\n差分: node scripts/harness-learn.mjs pending --show <変更ID>\n");
+      return;
+    }
+    case "approve": {
+      const result = changes.approveLearningChange({
+        ...common,
+        ...attestationArgs(args),
+        changeId: args.change,
+      });
+      process.stdout.write(
+        `${result.record.changeId} を ${result.targetRel} へ当てました（${shortSha(result.record.beforeSha256)} → ${shortSha(result.record.afterSha256)}、`
+        + `reviewer: ${result.record.reviewer}）。提案 ${result.record.proposalIds.join(", ")} は反映済みとして数えます。\n`,
+      );
+      if (result.canonicalSkill) {
+        process.stdout.write(
+          "  正本スキルを書き換えました。inventory.manifest.json の contentSha256 と版を上げ、"
+          + "skill-inventory --approve を人の端末で打ち直してください（未承認のままだと本番が止まります）。\n",
+        );
+      }
+      return;
+    }
+    case "reject": {
+      const { record } = changes.rejectLearningChange({ ...common, ...attestationArgs(args), changeId: args.change, reason: args.reason });
+      process.stdout.write(`${record.changeId} を却下しました（attestedBy: ${record.attestedBy}。記録は消していません）\n`);
+      return;
+    }
+    default:
+      throw new Error(`不明なアクション: ${args.action}`);
+  }
+}
+
 if (isDirectCli(import.meta.url)) {
-  try {
-    main();
-  } catch (error) {
+  main().catch((error) => {
     process.stderr.write(`${error.message}\n`);
     process.exit(2);
-  }
+  });
 }
