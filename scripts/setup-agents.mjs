@@ -1585,6 +1585,15 @@ export async function runSetupAgents() {
   } catch (error) {
     console.log(`BUZZASSIST_LEARNING_OVERLAYS=failed (${String(error?.message || error).slice(0, 160)})`);
   }
+  // 提供元へ学習を返すことへの同意。対話の setup でだけ聞き、対話でなければ聞かずに未同意のまま。
+  try {
+    const consent = dryRun || updaterInstall.updater
+      ? { status: "not-asked", reason: dryRun ? "dry-run" : "updater" }
+      : await (await import("../lib/harnessFeedbackOutbox.mjs")).promptFeedbackConsent({ state: operatorLearningState() });
+    console.log(`BUZZASSIST_FEEDBACK_CONSENT=${consent.status}${consent.reason ? ` (${consent.reason})` : ""}`);
+  } catch (error) {
+    console.log(`BUZZASSIST_FEEDBACK_CONSENT=failed (${String(error?.message || error).slice(0, 160)})`);
+  }
 
   const tunnelStatus = launchTunnel ? await launchCanvasTunnel() : null;
   const discovery = launchCanvas
