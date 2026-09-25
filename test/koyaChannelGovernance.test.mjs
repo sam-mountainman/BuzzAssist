@@ -27,6 +27,7 @@ import {
   resolveKoyaValidationCanary,
   koyaThumbnailCopySha256,
   validateKoyaShowBible,
+  koyaAlcoholHits,
 } from "../lib/koyaChannelGovernance.mjs";
 import { renderEditorialPlatePng } from "../lib/mangaScriptImagePipeline.mjs";
 import { parseMangaScript } from "../lib/mangaVideoPipeline.mjs";
@@ -899,4 +900,14 @@ test("共有層は特定チャンネルを既定として知らない", async ()
   assert.equal(resolveDefaultPackId(one), "solo", "1つしか無ければそれを使う");
 
   for (const dir of [bare, many, one]) await rm(dir, { recursive: true, force: true });
+});
+
+test("酒の語は重ならない出現を1回ずつ数え、長い語を先に取る（「日本酒」は1回）", () => {
+  const terms = ["日本酒", "焼酎", "ビール", "ワイン", "飲酒", "泥酔", "酒", "呑"];
+  assert.deepEqual(koyaAlcoholHits("日本酒で乾杯", terms), ["日本酒"], "日本酒1語で「酒」を重ねて数えない");
+  assert.deepEqual(koyaAlcoholHits("酒と日本酒と焼酎", terms), ["酒", "日本酒", "焼酎"]);
+  assert.deepEqual(koyaAlcoholHits("呑んだくれの夜", terms), ["呑"]);
+  assert.deepEqual(koyaAlcoholHits("記号.を含む語", ["."]), ["."], "語は正規表現として解釈しない");
+  assert.deepEqual(koyaAlcoholHits("", terms), []);
+  assert.deepEqual(koyaAlcoholHits("何も無い", []), []);
 });
