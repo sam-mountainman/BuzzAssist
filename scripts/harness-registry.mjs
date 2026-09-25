@@ -238,6 +238,9 @@ function main() {
         const blocking = (h.requiresFromOperator ?? []).filter((r) => r.blocking);
         process.stdout.write(`   運営者に要るもの: ${blocking.map((r) => r.what).join(" / ")}\n`);
         process.stdout.write(`   保証: ${(h.guarantees ?? []).map((g) => g.id).join(", ")}\n`);
+        // 能力カード（lib/harnessCapabilities.mjs）は宣言の隣の別ファイル。無いと plan-request が選ぶ材料を欠く。
+        const card = path.join(HARNESS_DIR, `${h.id}.capabilities.json`);
+        process.stdout.write(`   能力カード: ${fs.existsSync(card) ? path.relative(REPO_ROOT, card) : "無い（plan-request が受け取れる入力・前提を示せない）"}\n`);
       }
       break;
     }

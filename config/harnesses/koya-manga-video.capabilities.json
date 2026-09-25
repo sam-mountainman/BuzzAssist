@@ -1,0 +1,66 @@
+{
+  "schema": "buzzassist-harness-capabilities-v1",
+  "harnessId": "koya-manga-video",
+  "note": "能力カード。ハーネスを選ぶ側（ホストの LLM と run-video-harness plan-request）が読む。宣言（*.harness.json）とは別のファイルに置く——宣言の SHA は Job の識別子と RunReceipt の declarationDigest に入るので、説明を直しただけで走行中の Job を作り直させないため。保証の一覧は宣言の guarantees から、運営者に要る素材は requiresFromOperator から自動で作るのでここに書かない。実績（RunReceipt・skill evals）も書かない——選ぶときに記録から読む。クライアント名・チャンネル名・登場人物の名前は書かない。",
+  "inputs": {
+    "scriptFormats": [
+      {
+        "id": "raw-text",
+        "what": "日本語の生テキストの台本。「話者名：台詞」の行と【カット N：…】の見出しで書く"
+      },
+      {
+        "id": "markdown",
+        "what": "Markdown で包んだ同じ形の台本。前付け（タイトル・登場人物）と「#場面 N」の見出しで書く場面台本も読む"
+      }
+    ],
+    "startOptions": [
+      { "key": "episodeId", "cliFlag": "--episode-id", "what": "その回の ID" },
+      { "key": "protagonistSpeakerId", "cliFlag": "--protagonist-speaker-id", "what": "主人公の話者 ID（語りの四角い枠も主人公の承認済みの声で読む）" },
+      { "key": "characterBiblePath", "cliFlag": "--character-bible-path", "what": "その回の承認済みキャラ設定（character bible）" },
+      { "key": "storyReviewPath", "cliFlag": "--story-review-path", "what": "生成とは別の文脈で書いた台本のレビュー" }
+    ]
+  },
+  "outputs": [
+    { "id": "video", "what": "16:9 の完成 MP4（固定キャストの漫画ページ・カメラワーク・縦組みの吹き出し・声）" },
+    { "id": "contact-sheet", "what": "完成 MP4 から作る contact sheet（独立レビューが原寸で見る）" },
+    { "id": "final-audit", "what": "レンダー済み MP4 を実測する最終監査の記録" },
+    { "id": "run-receipt", "what": "保証ごとの判定と証拠の指紋を持つ RunReceipt" },
+    { "id": "canvas-projection", "what": "BuzzAssist Canvas への Job の投影（進み具合と成果物）" }
+  ],
+  "suitedFor": [
+    "固定キャストの漫画ページを動かし、縦組みの吹き出しと声で見せる動画",
+    "台詞の掛け合いが中心の話（スカッと系など）",
+    "キャラ設定と主人公の声が承認済みの番組"
+  ],
+  "notSuitedFor": [
+    "吹き出しを使わない、語りだけの物語動画（ナレーション物語動画のハーネスを使う）",
+    "キャラ設定や主人公の声がまだ承認されていない新しい番組（先に配役のゲートを通す）",
+    "台本がまだ無い依頼（先に台本を用意する）",
+    "縦型のショート動画（出力は 16:9 だけ）"
+  ],
+  "estimates": {
+    "cost": {
+      "status": "unknown",
+      "reason": "承認キャストで最終監査を通った本編がまだ無く、1本あたりの費用の記録が無い。有料生成の数と費用は Job の plan-only と RunReceipt の費用記録で確かめる"
+    },
+    "duration": {
+      "status": "unknown",
+      "reason": "同じく記録が無い。所要時間は画像の枚数・撮り直し・独立レビューの待ち時間で大きく変わる"
+    }
+  },
+  "prerequisites": [
+    { "doctorCheckId": "harness-production-route", "checkedAt": "before-job", "what": "配備先の正規入口が実際に起動する" },
+    { "doctorCheckId": "node", "checkedAt": "before-job", "what": "Node 20 以上" },
+    { "doctorCheckId": "ffmpeg", "checkedAt": "before-job", "what": "ffmpeg が起動する" },
+    { "doctorCheckId": "ffprobe", "checkedAt": "before-job", "what": "ffprobe が起動する" },
+    { "doctorCheckId": "ffmpeg-capability", "checkedAt": "before-job", "what": "libx264 と aac を含む ffmpeg で、1本作って読み返せる" },
+    { "doctorCheckId": "svg-rasterizer", "checkedAt": "before-job", "what": "縦組みの吹き出しを描く描画器（Chrome / Edge / Chromium）" },
+    { "doctorCheckId": "disk-space", "checkedAt": "before-job", "what": "作業フォルダーの空き容量" },
+    { "doctorCheckId": "voice-quality-python", "checkedAt": "before-job", "what": "音声品質ゲートの Python 環境（UTMOS など）" },
+    { "doctorCheckId": "tts-key", "checkedAt": "before-job", "what": "制作契約が指す台詞の声の adapter が、非課金の確認で ready（BUZZASSIST_MEDIA_JOB_API_BASE）" },
+    { "doctorCheckId": "image-key", "checkedAt": "before-job", "what": "本番契約の画像モデルの経路にログイン済み" },
+    { "doctorCheckId": "reviewer-trust", "checkedAt": "before-job", "what": "運営者の reviewer 信頼リスト（環境変数 BUZZASSIST_REVIEWER_TRUST）" },
+    { "doctorCheckId": "channel-pack", "checkedAt": "job-prepare", "what": "署名 Channel Pack から Job の作業場所へ復元した番組の正本（キャスト・舞台・画風）が読める" },
+    { "doctorCheckId": "host-skill-sync", "checkedAt": "before-job", "conditional": true, "what": "ホストが読むスキルの写しが配布元と同じ版（ずれているときだけ止まる）" }
+  ]
+}

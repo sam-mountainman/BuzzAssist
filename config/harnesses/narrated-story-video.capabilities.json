@@ -1,0 +1,66 @@
+{
+  "schema": "buzzassist-harness-capabilities-v1",
+  "harnessId": "narrated-story-video",
+  "note": "能力カード。ハーネスを選ぶ側（ホストの LLM と run-video-harness plan-request）が読む。宣言（*.harness.json）とは別のファイルに置く——宣言の SHA は Job の識別子と RunReceipt の declarationDigest に入るので、説明を直しただけで走行中の Job を作り直させないため。保証の一覧は宣言の guarantees から、運営者に要る素材は requiresFromOperator から自動で作るのでここに書かない。実績（RunReceipt・skill evals）も書かない——選ぶときに記録から読む。クライアント名・チャンネル名は書かない。",
+  "inputs": {
+    "scriptFormats": [
+      {
+        "id": "raw-text",
+        "what": "日本語の生テキストの台本。全行を語りにする（見出しらしい行があれば止まる）"
+      },
+      {
+        "id": "markdown",
+        "what": "Markdown の台本（script.md）。見出しは声にしない。本編・感想の見出しは Channel Pack の scriptIntake.markdown の宣言どおりに読み、宣言が無ければ推測せず止まる"
+      },
+      {
+        "id": "script-package",
+        "packageFormat": "buzzassist-narrated-script-package-v1",
+        "what": "台本パッケージ（script-package.json）。本編・感想・話者・読み・BGM の区分・場面の意図を機械が読める形で持つ、台本スキルの正式な出力"
+      }
+    ],
+    "startOptions": []
+  },
+  "outputs": [
+    { "id": "video", "what": "16:9 の完成 MP4（シーン画像のカメラワーク・語り・字幕・BGM）" },
+    { "id": "contact-sheet", "what": "完成 MP4 から作る contact sheet（独立レビューが原寸で見る）" },
+    { "id": "run-receipt", "what": "保証ごとの判定と証拠の指紋を持つ RunReceipt" },
+    { "id": "canvas-projection", "what": "BuzzAssist Canvas への Job の投影（進み具合と成果物）" }
+  ],
+  "suitedFor": [
+    "日本語の台本を語り（ナレーション）で読み上げる物語動画",
+    "実話・感動系など、語りと字幕と BGM で進む話",
+    "シーン画像にカメラワークを当てて見せる構成",
+    "本編のあとに感想パート（人物素材）を付ける構成"
+  ],
+  "notSuitedFor": [
+    "吹き出しとコマで見せる漫画動画（漫画動画のハーネスを使う）",
+    "固定キャストの掛け合いを顔と声で見せる動画",
+    "台本がまだ無い依頼（先に台本を用意する）",
+    "縦型のショート動画（出力は 16:9 だけ）"
+  ],
+  "estimates": {
+    "cost": {
+      "status": "unknown",
+      "reason": "本番の尺で公式経路を最後まで回した記録がまだ無い。有料生成の数と費用は Job の plan-only と RunReceipt の費用記録で確かめる"
+    },
+    "duration": {
+      "status": "unknown",
+      "reason": "同じく記録が無い。所要時間は画像・声・BGM の生成と、独立レビューの待ち時間で大きく変わる"
+    }
+  },
+  "prerequisites": [
+    { "doctorCheckId": "harness-production-route", "checkedAt": "before-job", "what": "配備先の正規入口が実際に起動する" },
+    { "doctorCheckId": "node", "checkedAt": "before-job", "what": "Node 20 以上" },
+    { "doctorCheckId": "ffmpeg", "checkedAt": "before-job", "what": "ffmpeg が起動する" },
+    { "doctorCheckId": "ffprobe", "checkedAt": "before-job", "what": "ffprobe が起動する" },
+    { "doctorCheckId": "ffmpeg-capability", "checkedAt": "before-job", "what": "libx264 と aac を含む ffmpeg で、1本作って読み返せる" },
+    { "doctorCheckId": "disk-space", "checkedAt": "before-job", "what": "作業フォルダーの空き容量" },
+    { "doctorCheckId": "voice-quality-python", "checkedAt": "before-job", "what": "音声品質ゲートの Python 環境（UTMOS など）" },
+    { "doctorCheckId": "reviewer-trust", "checkedAt": "before-job", "what": "運営者の reviewer 信頼リスト（環境変数 BUZZASSIST_REVIEWER_TRUST）" },
+    { "doctorCheckId": "tts-key", "checkedAt": "job-prepare", "what": "署名 Channel Pack が指す声の adapter が、非課金の確認で ready（Job の prepare で Pack から決まる）" },
+    { "doctorCheckId": "image-key", "checkedAt": "job-prepare", "what": "署名 Channel Pack が指す画像の adapter が、非課金の確認で ready（Job の prepare で Pack から決まる）" },
+    { "doctorCheckId": "music-key", "checkedAt": "job-prepare", "what": "署名 Channel Pack が指す BGM の adapter が、非課金の確認で ready（Job の prepare で Pack から決まる）" },
+    { "doctorCheckId": "channel-pack", "checkedAt": "job-prepare", "what": "署名済み Channel Pack の検証の記録（Job の prepare が残す）" },
+    { "doctorCheckId": "host-skill-sync", "checkedAt": "before-job", "conditional": true, "what": "ホストが読むスキルの写しが配布元と同じ版（ずれているときだけ止まる）" }
+  ]
+}
