@@ -8,20 +8,30 @@
 //   node scripts/asset-quality-loop.mjs verify --work-dir <dir> --stage <工程> --subject <id> --asset <file> \
 //        --check <identity|hand-safety> (--pass|--reject) --reviewer <名前> --note "..." --human-verified
 //   node scripts/asset-quality-loop.mjs status --work-dir <dir> [--stage <工程> --subject <id>] [--asset <file>] [--require-pass]
+//   node scripts/asset-quality-loop.mjs measure-video --work-dir <dir> --asset <動画> --declaration <宣言.json> [--out <file>]
+//        （動画クリップの工程の測定。ffprobe / ffmpeg で形式・全フレームのデコード・尺・fps・解像度・音声の有無を測り、
+//          record --measurement に渡すファイルを書く）
 //   node scripts/asset-quality-loop.mjs sheet  --work-dir <dir> --stage <工程> --batch <対象の一覧.json>
 //   node scripts/asset-quality-loop.mjs record --work-dir <dir> --stage <工程> --batch <対象の一覧.json> --review <batch の採点ファイル>
 //        （まとめて評価する回。同じ工程・同じ作業フォルダの対象を1つの評価文脈で採点し、対象ごとに1回として記録する。
 //          上限は1回 50 件。人の確認は batch では記録できず、要る対象は1件ずつ verify する）
 //
 // 工程: character（人物の設定画）/ location（背景・場所。漫画固有）/ scene-image（本編の画）/
-// thumbnail（サムネ）/ voice-take（声のテイク）。実装の正本は lib/assetQualityLoop.mjs（中核は
+// thumbnail（サムネ）/ voice-take（声のテイク）/ video-clip（動画クリップ）。実装の正本は lib/assetQualityLoop.mjs（中核は
 // lib/qualityLoop.mjs）。状態は作業フォルダの quality/assets/ に書く。
 //
 // 終了コード: 0 = 済んだ / 3 = 人待ち・直しが要る（記録していない、または人の確認に数えない）/
 //             4 = --require-pass で未合格 / 2 = 入力の誤り
 
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { mkdir, readFile } from "node:fs/promises";
+import path from "node:path";
+
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
 import { captureAssetLearning } from "../lib/assetQualityLearning.mjs";
+import { resolveFfmpegToolchain } from "../lib/harnessRuntimeResolver.mjs";
+import { writeVideoClipMeasurement } from "../lib/videoClipMeasurement.mjs";
 import {
   ASSET_GENERATION_ROUTES,
   ASSET_HUMAN_CHECKS,
@@ -41,14 +51,17 @@ import {
   recordAssetQualityBatch,
   recordAssetQualityRound,
   startAssetQualityLoop,
+  workDirRelative,
 } from "../lib/assetQualityLoop.mjs";
 
 const VALUE_OPTIONS = new Set([
   "--work-dir", "--harness", "--stage", "--subject", "--generator-context", "--generator-host", "--channel-pack",
   "--channel-config", "--reason", "--asset", "--version", "--review", "--producer-host", "--route",
   "--reference-exempt-reason", "--approved-references", "--measurement", "--revision-delta", "--previous-failure",
-  "--blocking-condition", "--cost", "--reviewer", "--note", "--batch",
+  "--blocking-condition", "--cost", "--reviewer", "--note", "--batch", "--declaration", "--out",
 ]);
+/** measure-video の既定の書き先（作業フォルダからの相対）。record --measurement にそのまま渡す。 */
+export const VIDEO_CLIP_MEASUREMENT_DIR = "quality/video-clip-measurements";
 // batch で使えない（対象ごとの値）オプション。対象の一覧（--batch）の各行に書く。
 const PER_SUBJECT_OPTIONS = Object.freeze([
   ["subject", "--subject"], ["asset", "--asset"], ["version", "--version"], ["measurement", "--measurement"],
@@ -123,7 +136,8 @@ export function assetQualityHelp() {
     [--reference <file|sha>]...   参照に使った画の SHA かファイル（人物の設定画は必須。本編の画とサムネは
                                   人物が写るなら必須、写らないなら --reference-exempt-reason "理由"）
     [--approved-references <json>] 承認済みの参照の一覧（buzzassist-approved-references-v1）。参照があれば必須
-    [--measurement <json>]        声のテイク: scripts/audit-voice-quality.py の報告（このテイクの SHA に結び付くもの）
+    [--measurement <json>]        声のテイク: scripts/audit-voice-quality.py の報告（このテイクの SHA に結び付くもの）。
+                                  動画クリップ: measure-video が書いた測定（このクリップの SHA に結び付くもの）
     [--previous-failure <指紋> --revision-delta "..."]  2回目以降に必須（前回の失敗指紋と、それをどう直したか。
                                   quality/assets/<工程>--<対象>.revision-delta.json に書いてもよい）
     [--blocking-condition "..."]  人の判断が要るなら書く（ループは blocked で止まる）
@@ -138,6 +152,14 @@ export function assetQualityHelp() {
   status    今の状態。合格は、評価者の採点で合格し、要る人の確認が揃い、その版のファイルが今も同じときだけ
     --work-dir <dir> [--stage <工程> [--subject <id> [--asset <file>]]] [--require-pass]   未合格なら終了コード 4
     --asset を付けると、そのファイルが合格した版そのものかも見る
+
+  measure-video  動画クリップ（video-clip）を ffprobe / ffmpeg で測り、record --measurement に渡すファイルを書く
+    --work-dir <dir> --asset <動画> --declaration <宣言.json> [--out <file>]
+    宣言: { "version": "buzzassist-video-clip-declaration-v1", "durationSeconds": { "min", "max" },
+            "frameRate": { "min", "max" }, "width": { "min", "max"? }, "height": { "min", "max"? },
+            "aspectRatio": { "width", "height", "tolerance" }?, "audio": "required" | "forbidden" | "optional" }
+    書き先の既定は <work-dir>/${VIDEO_CLIP_MEASUREMENT_DIR}/<クリップの sha256 の先頭 16 桁>.json。
+    合否は record のときに測定の数値から決め直す（ここでは見込みを出すだけ）。見込みで落ちるゲートがあれば終了コード 3
 
   まとめて評価する回（batch。長い動画の声のテイク・本編の画のように対象が多いとき）
     同じ工程・同じ作業フォルダの対象を、1つの評価文脈で1回に採点し、対象ごとにそのループの1回として記録する。
@@ -186,6 +208,8 @@ export async function runAssetQualityCli(argv = process.argv.slice(2), {
   loadChannel,
   captureLearning,
   isInteractive = interactiveTerminal(),
+  // measure-video の ffmpeg / ffprobe（{ ffmpeg: { command, args }, ffprobe: {...} }）。無ければ解決する。
+  toolchain = null,
 } = {}) {
   const args = parseAssetQualityArgs(argv);
   if (!args.action || ["--help", "-h", "help"].includes(args.action) || args.help) {
@@ -358,9 +382,61 @@ export async function runAssetQualityCli(argv = process.argv.slice(2), {
       if (!result.started) return { exitCode: 3, result };
       return { exitCode: args.requirePass && !result.pass ? 4 : 0, result };
     }
+    case "measure-video": {
+      const result = await measureVideoClipCli(args, { toolchain, now });
+      if (args.json) stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+      else {
+        const failed = Object.entries(result.verdict.gates).filter(([, pass]) => !pass).map(([id]) => id);
+        stdout.write(`${result.reused ? "同じクリップ・同じ宣言の測定を使う" : "測った"}: ${result.measurementPath}（sha256 ${result.sha256.slice(0, 12)}）\n`
+          + `  ${result.measurement.probe.width ?? "?"}x${result.measurement.probe.height ?? "?"} ${result.measurement.probe.frameRate ?? "?"}fps `
+          + `${result.measurement.probe.durationSeconds ?? "?"}秒 音声${result.measurement.probe.hasAudio ? "あり" : "なし"} `
+          + `デコード ${result.measurement.decode.decodedFrames} フレーム\n`
+          + `  機械ゲートの見込み: ${failed.length === 0 ? "全部通る" : `落ちる ${failed.join(", ")}（${result.verdict.problems.join(", ")}）`}\n`
+          + `  record --stage video-clip --measurement ${result.measurementPath} で使う\n`);
+      }
+      return { exitCode: Object.values(result.verdict.gates).every(Boolean) ? 0 : 3, result };
+    }
     default:
-      throw new Error(`不明なアクション: ${args.action}（contract / start / sheet / record / verify / status）`);
+      throw new Error(`不明なアクション: ${args.action}（contract / start / sheet / record / verify / status / measure-video）`);
   }
+}
+
+/**
+ * measure-video: 動画クリップを ffprobe / ffmpeg で測り、作業フォルダの中へ測定のファイルを書く
+ * （lib/videoClipMeasurement.mjs の writeVideoClipMeasurement）。toolchain は試験で差し替えられる。
+ */
+async function measureVideoClipCli(args, { toolchain = null, now = null } = {}) {
+  if (!args.workDir) throw new Error("--work-dir に作業フォルダが要ります。");
+  const workDir = path.resolve(args.workDir);
+  const asset = workDirRelative(workDir, args.asset, "--asset");
+  if (!args.declaration) throw new Error("--declaration に動画クリップの宣言（JSON）が要ります（尺・fps・解像度・音声の有無）。");
+  let declaration;
+  try {
+    declaration = JSON.parse(await readFile(path.resolve(args.declaration), "utf8"));
+  } catch {
+    throw new Error("--declaration の宣言が JSON として読めない。");
+  }
+  const tools = toolchain || await resolveFfmpegToolchain();
+  if (!tools?.ffmpeg?.command || !tools?.ffprobe?.command || tools.ok === false) {
+    throw new Error("ffmpeg / ffprobe が見つからない（setup で入れるか、BUZZASSIST_FFMPEG / BUZZASSIST_FFPROBE で指す）。");
+  }
+  const assetSha256 = await new Promise((resolvePromise, reject) => {
+    const hash = createHash("sha256");
+    createReadStream(asset.full).on("data", (chunk) => hash.update(chunk)).on("error", reject).on("end", () => resolvePromise(hash.digest("hex")));
+  });
+  const out = args.out
+    ? workDirRelative(workDir, args.out, "--out")
+    : workDirRelative(workDir, path.join(VIDEO_CLIP_MEASUREMENT_DIR, `${assetSha256.slice(0, 16)}.json`), "--out");
+  await mkdir(path.dirname(out.full), { recursive: true });
+  const written = await writeVideoClipMeasurement({
+    assetPath: asset.full,
+    declaration,
+    outputPath: out.full,
+    ffprobe: tools.ffprobe,
+    ffmpeg: tools.ffmpeg,
+    ...(now ? { now } : {}),
+  });
+  return { measurementPath: out.rel, sha256: written.sha256, reused: written.reused, measurement: written.measurement, verdict: written.verdict };
 }
 
 if (isDirectCli(import.meta.url)) {
