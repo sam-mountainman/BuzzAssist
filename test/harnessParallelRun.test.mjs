@@ -475,6 +475,63 @@ test("別プロセスのランナーとも排他される", async () => {
   releaseCrossProcessLock(second);
 });
 
+test("持ち主の記録を書いている途中のロックは奪わない（空の pid・心拍の前）", (t) => {
+  // writeFileSync は開いた瞬間に空のファイルを見せる。以前はその空の pid を「pid 0 ＝死んだ持ち主」と
+  // 読んで、取ったばかりの生きたロックを消していた。心拍を置く前の隙間も「心拍が止まって久しい」と読んでいた。
+  const key = `path:/tmp/lock-in-creation-${process.pid}-${Math.floor(process.uptime() * 1000)}`;
+  const mine = acquireCrossProcessLock(key);
+  assert.ok(mine);
+  // 途中で落ちても、端末全体で共有されるロックの置き場に残骸を残さない。
+  t.after(() => { clearInterval(mine.timer); fsSync.rmSync(mine.dir, { recursive: true, force: true }); });
+  fsSync.writeFileSync(path.join(mine.dir, "pid"), "");
+  assert.equal(acquireCrossProcessLock(key), null, "書きかけ（空の pid）のロックを奪った");
+  fsSync.writeFileSync(path.join(mine.dir, "pid"), `${process.pid}\n`);
+  fsSync.rmSync(path.join(mine.dir, "heartbeat"));
+  assert.equal(acquireCrossProcessLock(key), null, "心拍を置く前のロックを奪った");
+  assert.equal(releaseCrossProcessLock(mine), true);
+});
+
+test("別プロセスのランナーが同じ鍵を取り合っても、2人が同時に持たず、例外で落ちない", { timeout: 120_000 }, async (t) => {
+  // 取得と解放を繰り返す子を並べ、持っている間だけ O_EXCL の目印を作る。2人が同時に持てば目印の作成が
+  // EEXIST になる。以前の実装は 8 プロセス×400 回で毎回、2人同時の保持と ENOTEMPTY / ENOENT を出した。
+  const dir = fsSync.mkdtempSync(path.join(os.tmpdir(), "harness-parallel-lock-race-"));
+  t.after(() => fsSync.rmSync(dir, { recursive: true, force: true }));
+  const moduleUrl = new URL("../scripts/harness-parallel-run.mjs", import.meta.url).href;
+  const key = `lock-race-${process.pid}-${Math.floor(process.uptime() * 1000)}`;
+  const worker = path.join(dir, "worker.mjs");
+  fsSync.writeFileSync(worker, [
+    "import { closeSync, openSync, unlinkSync } from 'node:fs';",
+    `const { acquireCrossProcessLock, releaseCrossProcessLock } = await import(${JSON.stringify(moduleUrl)});`,
+    `const marker = ${JSON.stringify(path.join(dir, "holder"))};`,
+    "const stats = { acquired: 0, doubleHold: 0, errors: [] };",
+    "for (let index = 0; index < 200; index += 1) {",
+    "  let handle = null;",
+    `  try { handle = acquireCrossProcessLock(${JSON.stringify(key)}); } catch (error) { stats.errors.push(String(error.code || error.message)); continue; }`,
+    "  if (!handle) { await new Promise((done) => setImmediate(done)); continue; }",
+    "  stats.acquired += 1;",
+    "  let fd = null;",
+    "  try { fd = openSync(marker, 'wx'); } catch { stats.doubleHold += 1; }",
+    "  await new Promise((done) => setTimeout(done, 1));",
+    "  if (fd !== null) { closeSync(fd); unlinkSync(marker); }",
+    "  try { releaseCrossProcessLock(handle); } catch (error) { stats.errors.push(`release ${error.code || error.message}`); }",
+    "}",
+    "process.stdout.write(JSON.stringify(stats));",
+  ].join("\n"));
+  const { spawn } = await import("node:child_process");
+  const results = await Promise.all(Array.from({ length: 6 }, () => new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [worker], { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", reject);
+    child.on("close", (code) => (code === 0 ? resolve(JSON.parse(stdout)) : reject(new Error(`worker exited ${code}: ${stderr}`))));
+  })));
+  assert.deepEqual(results.flatMap((row) => row.errors), [], "取り合いで例外が出た");
+  assert.equal(results.reduce((sum, row) => sum + row.doubleHold, 0), 0, "2人が同時にロックを持った");
+  assert.ok(results.reduce((sum, row) => sum + row.acquired, 0) > 0, "誰もロックを取れなかった");
+});
+
 test("別の鍵どうしは互いを妨げない", () => {
   const a = acquireCrossProcessLock(`a-${process.pid}`);
   const b = acquireCrossProcessLock(`b-${process.pid}`);

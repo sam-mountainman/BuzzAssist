@@ -274,30 +274,87 @@ function processAlive(pid) {
   try { process.kill(pid, 0); return true; } catch (error) { return error.code === "EPERM"; }
 }
 
+// 持ち主の記録（pid・token・心拍）は、同じディレクトリの一時ファイルに書いてから rename で置く。
+// writeFileSync は開いた瞬間に中身の無いファイルを見せる。別のランナーがその隙に pid を読むと
+// Number("") = 0 を「死んだ持ち主」と判定して、取ったばかりの生きたロックを消していた。
+// 8 プロセスで同じ鍵を取り合うと、2 人が同時に持ち、書きかけのディレクトリを消し合って
+// ENOTEMPTY / ENOENT で executePlan ごと落ちた（2026-09-26 実測）。
+function writeLockFileAtomic(dir, name, text) {
+  const temp = path.join(dir, `.${name}.${process.pid}.${randomUUID()}.tmp`);
+  fs.writeFileSync(temp, text);
+  fs.renameSync(temp, path.join(dir, name));
+}
+
+function readLockOwner(dir) {
+  let pidText = "";
+  try { pidText = fs.readFileSync(path.join(dir, "pid"), "utf8").trim(); } catch { return null; }
+  let token = "";
+  try { token = fs.readFileSync(path.join(dir, "token"), "utf8").trim(); } catch {}
+  const pid = Number(pidText);
+  return Number.isInteger(pid) && pid > 0 ? { pid, token } : null;
+}
+
+function ageMs(file) {
+  try { return Date.now() - fs.statSync(file).mtimeMs; } catch { return null; }
+}
+
 /**
- * 残っているロックを奪ってよいか。
+ * 残っているロックを奪ってよいか。奪ってよい残骸なら、判定に使った持ち主の記録を返す（奪えなければ null）。
  *
  * 以前は「30分以上古ければ、持ち主が生きていても奪う」だった。
  * 本編のレンダーや30セグメントの音声生成は平気で30分を超えるので、
  * **走っている最中に別のランナーが同じ台帳へ書ける**。時間で判断しては
  * いけない——見るべきは持ち主が生きているかどうか。
+ *
+ * 持ち主の記録がまだ無いディレクトリは、mkdir から pid を置くまでの隙間にいる
+ * 取ったばかりの相手なので奪わない。ただしその隙間で落ちたランナーの残骸は
+ * ずっと残るので、ディレクトリ自体が心拍の猶予より古ければ引き継ぐ。
  */
-function lockIsAbandoned(dir) {
-  let pid = null;
-  try {
-    pid = Number(fs.readFileSync(path.join(dir, "pid"), "utf8").trim());
-  } catch {
-    // mkdir が成功してから pid を書くまでの隙間。取ったばかりの相手を
-    // 追い出すと両方が走る（実測で再現した）。奪わない。
-    return false;
+function abandonedLockOwner(dir) {
+  const owner = readLockOwner(dir);
+  if (!owner) {
+    const dirAge = ageMs(dir);
+    return dirAge !== null && dirAge > HEARTBEAT_STALE_MS ? { pid: 0, token: "" } : null;
   }
-  if (!processAlive(pid)) return true;
+  if (!processAlive(owner.pid)) return owner;
 
   // PID は生きている。ただし OS が PID を使い回した可能性がある。
-  // 心拍が止まって久しければ、その PID はもう別のプロセス。
-  let heartbeatAgeMs = Infinity;
-  try { heartbeatAgeMs = Date.now() - fs.statSync(path.join(dir, "heartbeat")).mtimeMs; } catch {}
-  return heartbeatAgeMs > HEARTBEAT_STALE_MS;
+  // 心拍が止まって久しければ、その PID はもう別のプロセス。心拍を置く前の
+  // 取ったばかりの相手は、pid を置いた時刻を心拍の代わりにする（無いのを「止まって久しい」と読まない）。
+  const heartbeatAge = ageMs(path.join(dir, "heartbeat")) ?? ageMs(path.join(dir, "pid"));
+  return heartbeatAge !== null && heartbeatAge > HEARTBEAT_STALE_MS ? owner : null;
+}
+
+/**
+ * 残骸をよけて消す。rm -r は中のファイルを消してからディレクトリを消すので、同じ残骸を
+ * 2 人が同時に片付けると、片方が先に作り直したロックの中身まで消し、自分は ENOTEMPTY で落ちていた。
+ * rename は1人しか成功しないので、よけられた人だけが片付ける。
+ */
+function moveAsideLockDir(dir, reason) {
+  const aside = `${dir}.${reason}-${process.pid}-${randomUUID()}`;
+  try {
+    fs.renameSync(dir, aside);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+  return aside;
+}
+
+function takeOverAbandonedLock(dir) {
+  const judged = abandonedLockOwner(dir);
+  if (!judged) return false;
+  const aside = moveAsideLockDir(dir, "abandoned");
+  if (!aside) return false;
+  // 判定から rename までの間に、別のランナーが残骸を引き継いで生きたロックを作っていたら、
+  // それをよけてしまっている。持ち主の記録が判定のときと違えば元へ戻して、奪わない。
+  const moved = readLockOwner(aside) || { pid: 0, token: "" };
+  if (moved.pid !== judged.pid || moved.token !== judged.token) {
+    try { fs.renameSync(aside, dir); } catch { /* 戻せなければ、相手は解放時に token を見失うだけ */ }
+    return false;
+  }
+  fs.rmSync(aside, { recursive: true, force: true });
+  return true;
 }
 
 export function acquireCrossProcessLock(key) {
@@ -307,17 +364,23 @@ export function acquireCrossProcessLock(key) {
     fs.mkdirSync(dir);
   } catch (error) {
     if (error.code !== "EEXIST") throw error;
-    if (!lockIsAbandoned(dir)) return null;
-    fs.rmSync(dir, { recursive: true, force: true });
+    if (!takeOverAbandonedLock(dir)) return null;
     try { fs.mkdirSync(dir); } catch { return null; }
   }
   // 所有トークン。解放時に照合する——無条件に消していたので、
   // 奪われた側が後から解放して、奪った側のロックを外していた。
   const token = randomUUID();
-  fs.writeFileSync(path.join(dir, "pid"), `${process.pid}\n`);
-  fs.writeFileSync(path.join(dir, "key"), `${key}\n`);
-  fs.writeFileSync(path.join(dir, "token"), `${token}\n`);
-  fs.writeFileSync(path.join(dir, "heartbeat"), `${Date.now()}\n`);
+  try {
+    // 心拍を先に置く: pid が見えた時点で、心拍も見えている。
+    writeLockFileAtomic(dir, "heartbeat", `${Date.now()}\n`);
+    writeLockFileAtomic(dir, "token", `${token}\n`);
+    writeLockFileAtomic(dir, "key", `${key}\n`);
+    writeLockFileAtomic(dir, "pid", `${process.pid}\n`);
+  } catch (error) {
+    // 書いている途中でディレクトリが消えた（古い版のランナーに奪われた等）。取れなかったことにする。
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
   const timer = setInterval(() => {
     try { fs.writeFileSync(path.join(dir, "heartbeat"), `${Date.now()}\n`); } catch {}
   }, HEARTBEAT_INTERVAL_MS);
@@ -339,7 +402,10 @@ export function releaseCrossProcessLock(handle) {
     try { held = fs.readFileSync(path.join(dir, "token"), "utf8").trim(); } catch { return false; }
     if (held !== token) return false;   // もう自分のものではない
   }
-  fs.rmSync(dir, { recursive: true, force: true });
+  // よけてから消す。消している途中のディレクトリを、次に取る人の mkdir が EEXIST で見ない。
+  const aside = moveAsideLockDir(dir, "released");
+  if (!aside) return false;
+  fs.rmSync(aside, { recursive: true, force: true });
   return true;
 }
 
