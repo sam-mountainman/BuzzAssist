@@ -47,6 +47,20 @@ Fish Audio、ElevenLabs、字幕、retime、finalize用scriptを手で順番に�
   Pack の `scriptIntake.markdown` で本編・感想の見出しを宣言した `script.md` を受け取る。見出し・注記は
   声にしない。宣言の無い Markdown や、見出しらしい行を含む生テキストは推測せずに止まる。
 
+## 台本の関門（監査契約 v8 から）
+
+有料の処理の前に、使う台本のバイト列が台本の品質ループで合格した版か、人がそのまま使うと認めた版かを問う。
+どちらでもなければ `awaiting-human-review` で止まり、`script-quality-required:<理由>` と次に打つコマンドを
+返す。plan-only の start も同じ理由を `preflight.blockers` に出す。台本が通っていないまま画や声に払うと、
+直した台本で全部を払い直すことになるため。
+
+- 作業フォルダは start の `--script-quality-work-dir`（MCP は `options.scriptQualityWorkDir`。省けば台本の
+  あるフォルダ）。Job の識別子に入る
+- 運営者・依頼者が書いた台本をそのまま使うなら、確認した人が自分の端末で
+  `node scripts/script-quality-loop.mjs accept-human --work-dir <台本のフォルダ> --script <台本> --reviewer <名前> --reason "…" --human-verified`
+  を打つ。エージェントは代わりに打たない。直しを提案するなら台本の品質ループ（ジャンル narrated-story）を回す
+- ループの評価者の組・累計・指摘の採否は `../platform-craft/references/quality-loops-ja.md` にある
+
 ## 配役・読み・BGM
 
 - 地の文は Pack の `voice`、「」内の台詞は台本パッケージの `speakers[].castRole` → Pack の `cast.roles`
@@ -114,6 +128,12 @@ Fish Audio、ElevenLabs、字幕、retime、finalize用scriptを手で順番に�
 監査契約 v6 から、この4つを完成 MP4 のフレームで測る（`burnedSubtitlesMeasured`・
 `cameraMotionMeasured`・`reviewLayoutMeasured`・`episodeOpeningProvenance`）。字幕は輝度（Y）で測る。
 宣言していない機能は「描いていない」ことを確かめて通る。
+
+監査契約 v7 から、回ごとの OP 映像と感想パートの人物の映像も、途中の成果物の品質ループ（工程 video-clip）に
+合格した版でなければ使わない。取り込みの記録のフォルダで、先に `node scripts/asset-quality-loop.mjs measure-video`
+で測ってからループを回し、記録の各行に `assetLoop: { statePath, passedSha256 }` を書く。無い・未合格なら、
+有料の処理の前に `video-clip-asset-loop-not-passed:<枠>:<理由>` の `awaiting-human-review` で止まる。
+人物が写る映像は同一性と手指を人が確かめる（そのまま公開面に出るため）。
 
 ## 運営者が用意した画（image.source: operator-file）
 
@@ -284,6 +304,8 @@ subject を署名する唯一の経路であり、finalize と RunReceipt は `v
 - 途中の成果物の品質ループと画の来歴の実測 pass（`sceneImageAssetLoopPassed`・`characterAssetLoopPassed`・
   `voiceTakeAssetLoopPassed`・`sceneImageProvenance`）と、監査契約 v6 の見た目の4監査（宣言していない
   機能は描いていないことの確認）
+- 監査契約 v7・v8 の実測 pass（運営者の映像のループの合格 `operatorVideoAssetLoopPassed`、台本の受け入れ
+  `scriptQualityAccepted`）
 - `knownRemainingIssues`が空
 - Canvas Runが最終成果物と同じartifact SHAを表示
 

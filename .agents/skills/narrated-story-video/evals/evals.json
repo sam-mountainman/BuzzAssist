@@ -80,6 +80,16 @@
         "声のテイクは直前の地の文と続けて聞いて採点する",
         "ループを回してから同じ Job を resume する"
       ]
+    },
+    {
+      "id": "client-script-accept-human",
+      "prompt": "依頼者が書いた台本をそのまま使ってナレーション動画を作って。preflight に script-quality-required が出ている。",
+      "shouldTrigger": true,
+      "invariants": [
+        "台本の関門が通るまで --confirmed で有料の処理へ進めない",
+        "そのまま使うなら、確認した人が自分の端末で script-quality-loop.mjs accept-human --human-verified を打つよう案内する",
+        "エージェントが人の代わりに accept-human を打たない"
+      ]
     }
   ]
 }
