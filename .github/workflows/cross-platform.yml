@@ -46,9 +46,11 @@ jobs:
       # パッケージ管理で入れ、第三者の action は使わない（release の gate でも走るため）。
       # macOS と Windows の日本語データは、全言語で 686MB ある Homebrew の
       # tesseract-lang の代わりに、tessdata_fast 4.1.0 の1ファイルを SHA-256 で照合して置く。
+      # fonts-noto-cjk は吹き出しの縦書きを描くための日本語フォント。ランナーのイメージには
+      # 日本語フォントが無く、ブラウザーは字を豆腐（四角）で描く（下の描画器の検査が落とす）。
       - name: Install media and OCR tools (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg tesseract-ocr tesseract-ocr-jpn
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg tesseract-ocr tesseract-ocr-jpn fonts-noto-cjk
       # macOS は、setup が運営者の端末に入れるのと同じ固定版 ffmpeg（SHA-256 照合つき）を使う。
       # Homebrew の ffmpeg は freetype 無しでビルドされ、タイトルカードの drawtext を持たない
       # （2026-09-24、CI で落ちた）。必須の道具の欠けは skip の許可リストに入れない決まりなので、
@@ -95,6 +97,16 @@ jobs:
           ffprobe -hide_banner -version
           tesseract --version
           tesseract --list-langs
+      # 縦組みの吹き出しは SVG をブラウザー（Chrome / Edge / Chromium）で PNG にして載せる。
+      # 探索先が macOS の置き場所だけだった（2026-09-25 の外部レビュー）。ランナーには
+      # Ubuntu・Windows・macOS とも Chrome が入っている（Windows は Edge も）。doctor の
+      # svg-rasterizer と同じ関数で縦書きの小さな SVG を描いて読み返し、字が縦に並び
+      # 豆腐でないことを確かめる。どのブラウザーを使ったかもログに残す。
+      # 下の npm test でも test/svgRasterizer.test.mjs が同じことを確かめ、ブラウザーが
+      # 無くて skip した場合は skip 許可リストに無いので落ちる。
+      - name: Check the speech-bubble SVG rasterizer
+        shell: bash
+        run: node -e "import('./lib/svgRasterizer.mjs').then(async (m) => { const r = await m.probeSvgRasterizer(); console.log(JSON.stringify(r, null, 2)); if (!r.ok) process.exit(1); })"
       - name: Run tests including isolated Codex and Claude Code setup
         run: npm test -- --skip-policy config/ci-test-skip-allowlist.json
       # 公開面の検査。このリポジトリは PUBLIC なので、新しいファイルが1つ

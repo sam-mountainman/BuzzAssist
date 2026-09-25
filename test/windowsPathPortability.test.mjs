@@ -20,6 +20,10 @@ const FORBIDDEN = [
   { id: "/ 決め打ちの包含判定", pattern: /startsWith\(`\$\{\w*(?:Dir|Root|Path)\}\/`\)/u },
   // Windows の npm は npm.cmd で、シェルなしでは起動できない（spawnSync npm ENOENT）。
   { id: "npm のシェルなし起動", pattern: /\b(?:spawn|execFile)(?:Sync)?\(\s*["']npm["']/u },
+  // 文字列の連結で file URL を作ると、Windows の "C:\..." が URL にならず、空白や日本語の
+  // path も壊れる（吹き出しの描画でブラウザーへ渡す URL がこれだった）。pathToFileURL を使う。
+  // 説明のコメントは対象外。
+  { id: "文字列で組み立てた file URL", pattern: /`file:\/\/\$\{/u, skipComments: true },
 ];
 
 function sourceFiles(dir, { recursive = false, filter = () => true } = {}) {
@@ -48,7 +52,8 @@ test("配布コードとテストは file URL を pathname でパスにしない
   for (const file of files) {
     const lines = readFileSync(file, "utf8").split(/\r?\n/u);
     lines.forEach((line, index) => {
-      for (const { id, pattern } of FORBIDDEN) {
+      for (const { id, pattern, skipComments } of FORBIDDEN) {
+        if (skipComments && /^\s*(?:\/\/|\*|\/\*)/u.test(line)) continue;
         if (pattern.test(line)) hits.push(`${relative(root, file)}:${index + 1} ${id}`);
       }
     });

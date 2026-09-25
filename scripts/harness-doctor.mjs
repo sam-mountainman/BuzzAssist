@@ -58,6 +58,7 @@ import { probePaidMediaJobAdapter } from "../lib/paidMediaJobBroker.mjs";
 import { REVIEWER_TRUST_ENV_GUIDANCE, REVIEWER_TRUST_PATH_ENV, preflightReviewerTrust } from "../lib/koyaReviewAttestation.mjs";
 import { resolveCodexCommand } from "./codex-image-bridge.mjs";
 import { appendManagedToolsToPath } from "../lib/prerequisiteTools.mjs";
+import { probeSvgRasterizerCached } from "../lib/svgRasterizer.mjs";
 
 const defaultRunCommand = promisify(execFile);
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -732,6 +733,25 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "",
     ok: capability.ok,
     detail: capability.detail,
     fix: capability.ok ? "" : `この ffmpeg ビルドには本編のレンダーに要るものが足りない: ${capability.missing.join(", ") || capability.detail}。libx264 と aac を含むビルドを入れること（macOS の \`brew install ffmpeg\` は既定で含む）`,
+  });
+
+  // --- 吹き出しの描画器（漫画ハーネスでは必須） ---
+  // 縦組みの吹き出しは SVG をブラウザーで PNG にして載せる。探索先が macOS だけだった頃、
+  // Windows / Linux ではブラウザーが見つからず、有料の画像と音声を作り終えたあとの
+  // 合成で止まっていた。**本番と同じ rasterizeSvg で縦書きの小さな SVG を描き、
+  // 読み返して**、字が縦に並び、豆腐（フォント無しの四角）でないことまで確かめる。
+  // 漫画ハーネスを名指ししたときは必須（有料生成の前に止める）、それ以外は任意。
+  const svgRasterizer = typeof runtime.svgRasterizerProbe === "function"
+    ? await runtime.svgRasterizerProbe()
+    : await probeSvgRasterizerCached({ env: runtimeEnv, platform: runtime.platform ?? process.platform });
+  add({
+    id: "svg-rasterizer",
+    required: harnessId === "koya-manga-video" || declaration?.produces?.kind === "manga-video",
+    ok: svgRasterizer?.ok === true,
+    ...(svgRasterizer?.code ? { code: svgRasterizer.code } : {}),
+    ...(svgRasterizer?.backend ? { backend: svgRasterizer.backend } : {}),
+    detail: String(svgRasterizer?.detail || "吹き出しの描画器を確かめられなかった"),
+    fix: svgRasterizer?.ok === true ? "" : String(svgRasterizer?.fix || "Chrome / Edge / Chromium を入れるか BUZZASSIST_CHROME_PATH で指定する"),
   });
 
   // ハーネスを名指しした本番 preflight では必須、Harness 未選択の setup では任意。

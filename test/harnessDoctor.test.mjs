@@ -29,6 +29,8 @@ function deterministicDoctorRuntime(overrides = {}) {
     ttsProbe: async () => ({ ok: true, detail: "設定あり", fix: "" }),
     imageModel: "gpt-image-2-codex",
     imageHostProbe: async (model) => ({ ok: true, host: "codex", model, detail: `Codex / ${model}` }),
+    // ブラウザーの起動（1回5秒前後）を機械の差し替えで省く。実物の描画は test/svgRasterizer.test.mjs が見る。
+    svgRasterizerProbe: async () => ({ ok: true, backend: "chrome", detail: "縦書き 3 字の SVG を PNG にして読み返した（fixture）", fix: "" }),
     ...overrides,
   };
 }
@@ -634,4 +636,50 @@ test("空き容量を測れなかったときは、測れなかったと言う�
   assert.equal(disk.measured, false, "測っていないと記録すること");
   assert.match(disk.detail, /測れなかった/u);
   assert.ok(!/空き \d/u.test(disk.detail), "測っていない値を空きとして書かないこと");
+});
+
+test("吹き出しの描画器: 漫画ハーネスでは必須で有料生成の前に止め、setup と他ジャンルでは任意", async () => {
+  // 探索先が macOS だけだった頃、Windows / Linux では有料の画像と音声を作り終えたあとの
+  // 吹き出し合成で止まっていた。ready と言った直後に止まるなら、それは ready ではない。
+  const route = async () => ({ command: "fixture-node", args: ["koya-manga-video.mjs", "help"], cwd: root, label: "scripts/koya-manga-video.mjs", mcpTool: "run_video_harness" });
+  const missing = async () => ({
+    ok: false,
+    code: "browser-missing",
+    detail: "SVG を PNG にする描画器が無い（fixture）",
+    fix: "Chromium か Google Chrome を入れる（fixture）",
+  });
+  const run = (harnessId, svgRasterizerProbe) => runHarnessDoctor({
+    projectDir: root,
+    harnessId,
+    runtime: deterministicDoctorRuntime({
+      svgRasterizerProbe,
+      resolveProductionRoute: route,
+      mediaAdapterProbe: async (spec) => ({ ok: true, status: "ready", ...spec }),
+    }),
+  });
+
+  const manga = await run("koya-manga-video", missing);
+  const mangaCheck = manga.checks.find((check) => check.id === "svg-rasterizer");
+  assert.ok(mangaCheck, "svg-rasterizer が項目として出る");
+  assert.equal(mangaCheck.required, true, "漫画ハーネスでは必須");
+  assert.equal(mangaCheck.ok, false);
+  assert.equal(mangaCheck.code, "browser-missing");
+  assert.ok(manga.blocking.includes("svg-rasterizer"), "有料生成の前に止める側に入る");
+  assert.equal(manga.ready, false);
+  assert.match(mangaCheck.fix, /Chromium/u, "直し方が付く");
+
+  const passing = await run("koya-manga-video", async () => ({ ok: true, backend: "chrome", detail: "fixture", fix: "" }));
+  assert.ok(!passing.blocking.includes("svg-rasterizer"));
+  assert.equal(passing.checks.find((check) => check.id === "svg-rasterizer").backend, "chrome", "どの描画器で確かめたかを残す");
+
+  const setup = await run("", missing);
+  const setupCheck = setup.checks.find((check) => check.id === "svg-rasterizer");
+  assert.equal(setupCheck.required, false, "Harness 未選択の setup では任意（canvas だけ使う人を止めない）");
+  assert.ok(setup.advisory.includes("svg-rasterizer"), "足りないことは知らせる");
+
+  const narrated = await runHarnessDoctor({
+    harnessId: "narrated-story-video",
+    runtime: deterministicDoctorRuntime({ svgRasterizerProbe: missing }),
+  });
+  assert.equal(narrated.checks.find((check) => check.id === "svg-rasterizer").required, false, "吹き出しを使わないジャンルは止めない");
 });
