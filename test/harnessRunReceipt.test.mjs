@@ -665,6 +665,39 @@ test("ナレーション物語: 過去の監査契約を満たした回は保証
   assert.equal(record([...NARRATED_STORY_AUDIT_IDS], NARRATED_STORY_AUDIT_CONTRACT_VERSION).outcome, "pass");
 });
 
+test("ナレーション物語: 宣言の inForceSince から導いた効力のある必須監査は、過去の各監査契約の必須監査と一致し、宣言の版は今の監査契約", async () => {
+  // 共通 Receipt（lib/videoHarnessReceipt.mjs）は、制作契約を Job に固定しないハーネスでは、この導出で
+  // 「その Job に効いている契約の必須監査」を決める。過去の契約と一致しなければ、確定待ちの Job を落とすか、
+  // 当時あった監査を免除してしまう。
+  const { declaredAuditIdsInForce, declarationContractVersionFloor, contractVersionPredates } = await import("../lib/harnessRunReceipt.mjs");
+  const { NARRATED_STORY_AUDIT_CONTRACT_VERSION } = await import("../lib/narratedStoryPipeline.mjs");
+  const { NARRATED_STORY_AUDIT_IDS } = await import("../lib/narratedStoryOutcome.mjs");
+  const declaration = JSON.parse(readFileSync(join(root, "config/harnesses/narrated-story-video.harness.json"), "utf8"));
+  const fixture = JSON.parse(readFileSync(join(root, "test/fixtures/narrated-past-contract-audits.json"), "utf8"));
+  for (const entry of fixture.contracts) {
+    const derived = declaredAuditIdsInForce(declaration, entry.version);
+    assert.deepEqual([...derived.requiredAuditIds].sort(), [...entry.requiredAudits].sort(), `${entry.version}: 宣言から導いた必須監査が当時の契約と違う`);
+    assert.deepEqual(
+      [...derived.notInForceAuditIds].sort(),
+      NARRATED_STORY_AUDIT_IDS.filter((id) => !entry.requiredAudits.includes(id)).sort(),
+      `${entry.version}: 効力の外の監査は当時無かったものだけ`,
+    );
+  }
+  assert.deepEqual([...declaredAuditIdsInForce(declaration, NARRATED_STORY_AUDIT_CONTRACT_VERSION).requiredAuditIds].sort(), [...NARRATED_STORY_AUDIT_IDS].sort());
+  // 読めない・別系列の版は比べられないので全部効力あり（古いとは扱わない）。
+  for (const version of ["", "fixture-v1", "koya-manga-production-v1", "buzzassist-narrated-story-audit"]) {
+    assert.deepEqual(declaredAuditIdsInForce(declaration, version).notInForceAuditIds, [], `${version || "(空)"}: 比べられない版で監査を免除しない`);
+  }
+  assert.equal(declarationContractVersionFloor(declaration), NARRATED_STORY_AUDIT_CONTRACT_VERSION, "宣言の版（inForceSince の最新）は今の監査契約");
+  assert.equal(contractVersionPredates("buzzassist-narrated-story-audit-v4", declarationContractVersionFloor(declaration)), true);
+  // 漫画の宣言の版は、漫画の制作契約の系列（漫画は Job に固定した契約の requiredAudits で測る）。
+  const koya = JSON.parse(readFileSync(join(root, "config/harnesses/koya-manga-video.harness.json"), "utf8"));
+  assert.match(declarationContractVersionFloor(koya), /^koya-manga-production-v\d+$/u);
+  // 系列が混ざった宣言は、宣言の版を決められない（""）。
+  assert.equal(declarationContractVersionFloor({ guarantees: [{ id: "a", inForceSince: "x-v2", evidenceAuditIds: ["a"] }, { id: "b", inForceSince: "y-v3", evidenceAuditIds: ["b"] }] }), "");
+  assert.throws(() => declaredAuditIdsInForce({ guarantees: [{ id: "a", inForceSince: "v5", evidenceAuditIds: ["a"] }] }, "x-v1"), /inForceSince が契約の版として読めない/u);
+});
+
 test("実在する過去の監査レポートで、記録とレポートの判定が一致する", async (t) => {
   // 合成データだけで検証すると、実際の監査ステップ ID と対応表のずれを見逃す。
   const { readFileSync, existsSync } = await import("node:fs");

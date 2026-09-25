@@ -434,8 +434,11 @@ async function completedKoyaOuterFixture(root, options = {}) {
     reviewedAt: "2026-09-01T00:00:00.000Z",
   };
   const signoff = await artifact(root, "signoff-report", "koya-signoff.json", JSON.stringify(signoffDocument));
-  const declaration = JSON.parse(await readFile(join(process.cwd(), "config/harnesses/koya-manga-video.harness.json"), "utf8"));
-  const requiredAuditIds = declaration.guarantees.flatMap((entry) => entry.evidenceAuditIds);
+  // 実際の最終監査と同じく、report の必須監査は Job が固定した制作契約の requiredAudits。
+  // omitAuditIds: 監査を走らせなかった回（report の必須監査一覧と実測の両方から外す）。
+  const pinnedContract = JSON.parse(await readFile(resolvedProductionContract.contractPath, "utf8"));
+  const omitted = new Set(options.omitAuditIds || []);
+  const requiredAuditIds = pinnedContract.requiredAudits.filter((id) => !omitted.has(id));
   const steps = requiredAuditIds.map((id) => ({ id, pass: true, detail: "provider-free measured fixture" }));
   Object.assign(steps.find((step) => step.id === "agent-contact-sheet-review"), {
     evidencePath: signoff.path,
@@ -1354,5 +1357,167 @@ test("画像の失敗分を指紋迂回で作り直した Job は、その事実
     assert.equal(plain.receipt.imageRetry, undefined, "迂回引数を使っていない Job には作らない");
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------------------------
+// 効力のあった契約で測る（共通 Receipt）。監査契約を上げたあとも、上げる前の版のまま確定を待っている
+// Job は、その版の必須監査で確定する。宣言に足した保証は「当時は無かった」（not-in-force）であって、
+// 未実施ではない。ただし今の版の Job（この宣言で計画された Job）は、足した保証の監査が要る。
+// ---------------------------------------------------------------------------------------------
+
+const NARRATED_DECLARATION_PATH = fileURLToPath(new URL("../config/harnesses/narrated-story-video.harness.json", import.meta.url));
+const NARRATED_SERIES = "buzzassist-narrated-story-audit";
+
+async function pastNarratedAudits(version) {
+  const fixture = JSON.parse(await readFile(fileURLToPath(new URL("./fixtures/narrated-past-contract-audits.json", import.meta.url)), "utf8"));
+  const entry = fixture.contracts.find((row) => row.version === version);
+  if (!entry) throw new Error(`fixture has no ${version}`);
+  return entry.requiredAudits;
+}
+
+// Job が計画されたときの宣言（canonicalIdentity に残る SHA）。今の宣言と同じなら「今の版の Job」。
+function plannedJob(root, declarationSha256) {
+  return {
+    ...job(root),
+    canonicalIdentity: { harnessDeclaration: { path: NARRATED_DECLARATION_PATH, sha256: declarationSha256 } },
+  };
+}
+
+const OLDER_DECLARATION_SHA = "4".repeat(64);
+const onlyChecks = (ids) => Object.fromEntries(ids.map((id) => [id, true]));
+
+test("監査契約を上げる前の版で確定を待っている narrated Job は、共通 Receipt でもその版の必須監査で確定し、足した保証は not-in-force になる", async (t) => {
+  const cases = [
+    { version: `${NARRATED_SERIES}-v4`, notInForce: ["asset-quality-loop", "scene-image-provenance"] },
+    // v3→v4 のときも同じ穴だった（人物の同一性の signoff 結合と声の監査を後から求めていた）。
+    { version: `${NARRATED_SERIES}-v3`, notInForce: ["asset-quality-loop", "character-identity", "scene-image-provenance", "voice-quality"] },
+  ];
+  for (const { version, notInForce } of cases) {
+    await t.test(version, async () => {
+      const root = await mkdtemp(join(tmpdir(), "video-receipt-past-contract-"));
+      try {
+        const audits = await pastNarratedAudits(version);
+        // 実際の narrated の audit-report は requiredAuditIds を持たない。持っていても当時の一覧なら通る。
+        for (const includeRequiredAuditIds of [false, true]) {
+          const outcome = await completedFixture(root, {
+            checks: onlyChecks(audits),
+            requiredAuditIds: audits,
+            includeRequiredAuditIds,
+            reportOverrides: { contractVersion: version },
+          });
+          const result = await createVideoHarnessRunReceipt({ job: plannedJob(root, OLDER_DECLARATION_SHA), outcome, now: () => "2026-09-25T00:00:00.000Z" });
+          assert.equal(result.receipt.outcome, "pass", JSON.stringify(result.receipt.summary));
+          assert.deepEqual([...result.receipt.summary.notInForceGates].sort(), notInForce);
+          for (const id of notInForce) assert.equal(result.receipt.gates[id].verdict, "skip", "測っていないものを pass と書かない");
+          assert.equal(result.receipt.summary.skipped, 0);
+        }
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
+test("効力のある契約の必須監査が欠ければ、過去の版の Job でも今の版の Job でも共通 Receipt は落ちる", async (t) => {
+  const declarationSha256 = sha256(await readFile(NARRATED_DECLARATION_PATH));
+  const v4 = await pastNarratedAudits(`${NARRATED_SERIES}-v4`);
+  const v5 = Object.keys(CHECKS);
+  const cases = [
+    ["v4 の Job で v4 の必須監査（声のテイク）が欠けた", plannedJob, OLDER_DECLARATION_SHA, `${NARRATED_SERIES}-v4`, v4.filter((id) => id !== "voiceTakeQuality")],
+    ["v5 の Job で途中の成果物の品質ループの監査が欠けた", plannedJob, declarationSha256, `${NARRATED_SERIES}-v5`, v5.filter((id) => id !== "sceneImageAssetLoopPassed")],
+    // 今の宣言で計画された Job が、audit-report で古い版を名乗っても、宣言が書かれた版（v5）で測る。
+    ["今の宣言で計画された Job が v4 を名乗った", plannedJob, declarationSha256, `${NARRATED_SERIES}-v4`, v4],
+    // 計画時の宣言の記録が無い Job は、今の宣言で計画されたものとして扱う（欠落を免除にしない）。
+    ["計画時の宣言の記録が無い Job が v4 を名乗った", (root) => job(root), "", `${NARRATED_SERIES}-v4`, v4],
+  ];
+  for (const [name, makeJob, planned, version, audits] of cases) {
+    await t.test(name, async () => {
+      const root = await mkdtemp(join(tmpdir(), "video-receipt-in-force-missing-"));
+      try {
+        const outcome = await completedFixture(root, {
+          checks: onlyChecks(audits),
+          includeRequiredAuditIds: false,
+          reportOverrides: { contractVersion: version },
+        });
+        await assert.rejects(
+          createVideoHarnessRunReceipt({ job: makeJob(root, planned), outcome }),
+          /共通RunReceiptがpassにならなかった/u,
+        );
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+  }
+  await t.test("v5 の Job で全部の監査が揃えば合格し、対象外は無い", async () => {
+    const root = await mkdtemp(join(tmpdir(), "video-receipt-in-force-current-"));
+    try {
+      const outcome = await completedFixture(root, { includeRequiredAuditIds: false, reportOverrides: { contractVersion: `${NARRATED_SERIES}-v5` } });
+      const result = await createVideoHarnessRunReceipt({ job: plannedJob(root, declarationSha256), outcome });
+      assert.equal(result.receipt.outcome, "pass");
+      assert.equal(result.receipt.summary.notInForce, 0);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+  await t.test("過去の版の Job の report が、当時の必須監査より縮んだ一覧を名乗れば拒否する", async () => {
+    const root = await mkdtemp(join(tmpdir(), "video-receipt-in-force-roster-"));
+    try {
+      const outcome = await completedFixture(root, {
+        checks: onlyChecks(v4),
+        requiredAuditIds: v4.filter((id) => id !== "voiceCastRouting"),
+        reportOverrides: { contractVersion: `${NARRATED_SERIES}-v4` },
+      });
+      await assert.rejects(
+        createVideoHarnessRunReceipt({ job: plannedJob(root, OLDER_DECLARATION_SHA), outcome }),
+        /必須監査集合がHarness宣言と一致しない/u,
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+test("漫画: Job に固定した制作契約（v53 でも v54 でも）の必須監査で測り、v53→v54 で確定待ちの Job を落とさない", async (t) => {
+  const current = JSON.parse(await readFile(join(process.cwd(), "config/koya-manga-production-contract.json"), "utf8"));
+  assert.equal(current.version, "koya-manga-production-v54", "この試験は v54 の契約を前提にしている（上げたら v54 を過去の版として足す）");
+  const past = JSON.parse(await readFile(fileURLToPath(new URL("./fixtures/koya-past-contract-audits.json", import.meta.url)), "utf8"));
+  // v53 の契約: 途中の成果物の品質ループの節（v54 から）が無く、必須監査は当時の一覧（asset-quality-loops が無い）。
+  const v53 = structuredClone(current);
+  v53.version = "koya-manga-production-v53";
+  delete v53.assetQualityGate;
+  v53.requiredAudits = [...past.contracts.find((entry) => entry.version === "koya-manga-production-v53").requiredAudits];
+  assert.equal(v53.requiredAudits.includes("asset-quality-loops"), false);
+  assert.equal(current.requiredAudits.includes("asset-quality-loops"), true, "v54 は途中の成果物の品質ループの監査を足した");
+  for (const [name, contract, notInForce] of [["v53", v53, ["asset-quality-loops"]], ["v54", current, []]]) {
+    await t.test(`${name} の契約に固定した Job は合格する`, async () => {
+      const root = await mkdtemp(join(tmpdir(), `video-koya-contract-${name}-`));
+      try {
+        const contractPath = join(root, `koya-contract-${name}.json`);
+        await writeFile(contractPath, `${JSON.stringify(contract, null, 2)}\n`);
+        const fixture = await completedKoyaOuterFixture(root, { contractPath });
+        assert.equal(fixture.job.resolvedProductionContract.contractVersion, contract.version);
+        const result = await createVideoHarnessRunReceipt({ job: fixture.job, outcome: fixture.outcome });
+        assert.equal(result.receipt.outcome, "pass", JSON.stringify(result.receipt.summary));
+        assert.deepEqual(result.receipt.summary.notInForceGates, notInForce, "v54 で足した保証だけが v53 の Job で対象外");
+        for (const id of notInForce) assert.equal(result.receipt.gates[id].verdict, "skip");
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+    await t.test(`${name} の契約に固定した Job で、契約の必須監査（wardrobe-readiness）を走らせなければ落ちる`, async () => {
+      const root = await mkdtemp(join(tmpdir(), `video-koya-contract-${name}-missing-`));
+      try {
+        const contractPath = join(root, `koya-contract-${name}.json`);
+        await writeFile(contractPath, `${JSON.stringify(contract, null, 2)}\n`);
+        const fixture = await completedKoyaOuterFixture(root, { contractPath, omitAuditIds: ["wardrobe-readiness"] });
+        await assert.rejects(
+          createVideoHarnessRunReceipt({ job: fixture.job, outcome: fixture.outcome }),
+          /必須監査集合がHarness宣言と一致しない[\s\S]*wardrobe-readiness/u,
+        );
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
   }
 });
