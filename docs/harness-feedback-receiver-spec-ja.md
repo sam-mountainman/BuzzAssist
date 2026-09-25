@@ -138,6 +138,20 @@ Ed25519 秘密鍵で署名したもの（v1 と同じ方式）。`signer.keyId` 
 8. `newCandidates[].candidateId` が既に catalog にあれば、その件は既知の提案の観測として数え、文は捨てる
 9. 冪等と replay の検査（下）
 
+### 照合を owner の取り込みへ回す実装（2026-09-26 に許した差分）
+
+受け取り口が BuzzAssist の宣言と公開 catalog を持たない実装（BuzzAssist 本体とは別の製品のサーバーに置く場合）は、
+次の照合を受け取り口で行わず、owner が集計へ入れる段（取り込み）で行ってよい。
+
+- 手順 2 のうち「`settlement.gates[].gateId` が `build.harnessId` の宣言にあること」（書式の検査は受け取り口に残す）
+- 手順 7（`proposals[].id` が catalog にあり、kind / target が一致すること）と手順 8（既知の候補の数え直し）
+
+この場合、catalog に無い提案 id を持つ bundle も 422 にならずに隔離（verified-quarantine）へ入る。
+取り込みの段は、宣言に無い gateId・catalog に無い提案 id・kind / target の食い違いを、集計に入れずに
+理由つきで残す（受け取り口の 422 と同じ理由コードを使う）。形・登録簿・`allowedHarnessIds`・署名・冪等と replay の
+検査は、受け取り口で必ず行う。置き場はファイルの木でなくデータベースの表でもよい（下の置き場の役割、すなわち
+受け付けたもの・受領証・出どころの索引・拒否の metadata を保てばよい）。
+
 ## 冪等・replay・二重計上
 
 - `bundleDigest = sha256(canonicalJson(bundle))`（署名を含む全体）
