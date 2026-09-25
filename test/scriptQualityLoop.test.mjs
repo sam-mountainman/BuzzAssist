@@ -415,6 +415,77 @@ test("--restart しても同じ作業フォルダの回数・時間を持ち越�
   assert.equal(again.state.script.history.length, 4, "始め直しても前のループは全部残る");
 });
 
+test("指摘に id を付け、次の版は指摘ごとの採否と理由が無ければ記録せず、採用した指摘が次の回でも出たら停滞に数える", async (t) => {
+  const root = await workspace(t);
+  const configPath = join(root, "script-quality.json");
+  await writeFile(configPath, JSON.stringify({ version: SCRIPT_QUALITY_CHANNEL_CONFIG_VERSION, limits: { maximumStagnantRounds: 1, maximumReviewRounds: 6 } }));
+  await start(root, { channelConfig: configPath });
+  await writeFile(join(root, "drafts/draft.md"), DRAFT);
+  const failing = (overrides) => scores({ "duration-fit": 30, ...overrides });
+  const first = await record(root, {
+    scriptPath: "drafts/draft.md", versionLabel: "v1", stage: "draft",
+    reviewPath: await writeReview(root, "r1", {
+      ...review({ context: "ctx-eval-1", script: DRAFT, rubricScores: failing({ "narration-voice": 55 }) }),
+      findings: ["三行目の台詞で読点が落ちている", { text: "山場が前に寄っている", criterionId: "beat-structure" }],
+    }),
+  });
+  assert.deepEqual(first.version.findingRecords.map((row) => row.id), ["r1-f1", "r1-f2"]);
+  assert.equal(first.version.findingRecords[1].criterionId, "beat-structure");
+  assert.deepEqual(first.version.findings, ["三行目の台詞で読点が落ちている", "山場が前に寄っている"], "今までの文の一覧も残す");
+  assert.deepEqual(first.check.pendingFindingIds, ["r1-f1", "r1-f2"]);
+  const { template } = await scriptQualityReviewTemplate({ workDir: root, scriptPath: "drafts/draft.md", stage: "revision" });
+  assert.deepEqual(template.previousFindings.map((row) => row.id), ["r1-f1", "r1-f2"]);
+
+  await writeFile(join(root, "drafts/v2.md"), REWRITE);
+  const secondReview = (name, findings) => writeReview(root, name, {
+    ...review({ context: "ctx-eval-2", script: REWRITE, base: DRAFT, rubricScores: failing({ "narration-voice": 75 }) }), findings,
+  });
+  const attempt = async (extra, findings = []) => record(root, {
+    scriptPath: "drafts/v2.md", versionLabel: "v2", stage: "revision", revisionDelta: "読点を戻し、語り口を整えた",
+    reviewPath: await secondReview(`r2-${Math.random().toString(16).slice(2)}`, findings), ...extra,
+  });
+  assert.deepEqual((await attempt({})).issues, ["script-quality-finding-dispositions-required:r1-f1,r1-f2"]);
+  assert.deepEqual((await attempt({ findingDispositions: [{ findingId: "r1-f1", decision: "adopted", reason: "読点を戻した" }] })).issues, ["script-quality-finding-dispositions-required:r1-f2"]);
+  const noReason = await attempt({ findingDispositions: [
+    { findingId: "r1-f1", decision: "adopted", reason: "読点を戻した" },
+    { findingId: "r1-f2", decision: "rejected", reason: "" },
+  ] });
+  assert.deepEqual(noReason.issues, ["script-quality-finding-disposition-reason-required:r1-f2"]);
+  const unknown = await attempt({ findingDispositions: [
+    { findingId: "r1-f1", decision: "adopted", reason: "読点を戻した" },
+    { findingId: "r1-f2", decision: "maybe", reason: "考え中の指摘" },
+    { findingId: "r1-f9", decision: "adopted", reason: "無い指摘への採否" },
+  ] });
+  assert.deepEqual(unknown.issues, ["script-quality-finding-disposition-invalid:r1-f2", "script-quality-finding-disposition-unknown:r1-f9"]);
+  const badRecurrence = await attempt({ findingDispositions: [
+    { findingId: "r1-f1", decision: "adopted", reason: "読点を戻した" },
+    { findingId: "r1-f2", decision: "rejected", reason: "山場の位置は宣言した拍どおり" },
+  ] }, [{ text: "前にも出た指摘", recurrenceOf: "r9-f1" }]);
+  assert.deepEqual(badRecurrence.issues, ["script-quality-review-recurrence-unknown:r9-f1"]);
+  assert.equal(JSON.parse(await readFile(scriptQualityPaths(root).statePath, "utf8")).rounds.length, 1, "採否の無い版は記録しない");
+
+  // 採否は修正内容のファイルにも書ける。採用した r1-f1 が同じ文で、却下した r1-f2 が recurrenceOf で再び出た。
+  await writeFile(scriptQualityPaths(root).revisionDeltaPath, JSON.stringify({
+    previousFailureFingerprint: first.round.failureFingerprint,
+    revisionDelta: "読点を戻し、語り口を整えた",
+    findingDispositions: [
+      { findingId: "r1-f1", decision: "adopted", reason: "読点を戻した" },
+      { findingId: "r1-f2", decision: "rejected", reason: "山場の位置は宣言した拍どおり" },
+    ],
+  }));
+  const second = await record(root, {
+    scriptPath: "drafts/v2.md", versionLabel: "v2", stage: "revision",
+    reviewPath: await secondReview("r2", [" 三行目の台詞で 読点が落ちている", { text: "山場がまだ前寄り", recurrenceOf: "r1-f2" }]),
+  });
+  assert.equal(second.recorded, true);
+  assert.deepEqual(second.version.findingDispositions.map((row) => [row.findingId, row.decision]), [["r1-f1", "adopted"], ["r1-f2", "rejected"]]);
+  assert.deepEqual(second.round.unresolvedFindingIds, ["r1-f1"], "却下した指摘の再登場は直っていない指摘に数えない");
+  assert.deepEqual(second.version.findingRecords.map((row) => row.unresolvedOf || []), [["r1-f1"], []]);
+  assert.ok(second.round.improvement >= 1, "点は上がっている");
+  assert.equal(second.state.stopReason, "no-improvement", "採用した指摘が直っていなければ停滞として止まる");
+  assert.ok(second.issues.includes("script-quality-unresolved-findings:r1-f1"));
+});
+
 test("持ち越しの記録が無い前の版の状態でも、history に残したループを累計に数える", async (t) => {
   const root = await workspace(t);
   await start(root);

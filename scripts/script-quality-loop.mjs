@@ -31,7 +31,7 @@ import {
 const VALUE_OPTIONS = new Set([
   "--work-dir", "--genre", "--generator-context", "--generator-host", "--channel-pack", "--channel-config",
   "--reason", "--script", "--version", "--stage", "--review", "--base-version", "--revision-delta",
-  "--blocking-condition", "--cost", "--ledger", "--reviewer",
+  "--blocking-condition", "--cost", "--ledger", "--reviewer", "--finding-dispositions",
 ]);
 const REPEATABLE_OPTIONS = new Set(["--producer-context", "--external-call"]);
 const FLAG_OPTIONS = new Set(["--json", "--restart", "--require-pass", "--human-verified", "--agent-attested", "--help", "-h"]);
@@ -92,6 +92,12 @@ export function scriptQualityHelp() {
     --work-dir <dir> --script <版のファイル> --version <版の名前> --stage <${SCRIPT_STAGES.join("|")}>
     --review <採点ファイル>        { evaluatorId, evaluatorContextId, evaluatorHost, scriptSha256,
                                     baseScriptSha256（初稿以外）, rubricScores, notes, findings }
+                                  findings は文か { text, criterionId, recurrenceOf } の一覧。回ごとに
+                                  r<回>-f<番号> の id が付く。前の回の指摘がまだ当てはまるなら recurrenceOf に id
+    [--finding-dispositions <file>]  2回目以降、前の回に指摘があれば必須。前の回の指摘ごとの採否と理由
+                                  [{ "findingId": "r1-f1", "decision": "adopted|rejected", "reason": "..." }]
+                                  （quality/script-revision-delta.json の findingDispositions に書いてもよい）。
+                                  採用した指摘が次の回でも出たら「直っていない指摘」として停滞に数える
     [--producer-context <id>]...  この版を作ったほかの文脈（採点できない）
     [--external-call <id>]...     harness-external-call が返した id（外部モデルの手直しの版には必須）
     [--base-version <版>]         意味の保持を比べる前の版（既定は直前の版）
@@ -218,6 +224,7 @@ export async function runScriptQualityCli(argv = process.argv.slice(2), {
         blockingCondition: args.blockingCondition,
         // 書かなければ「分からない」（0円として数えない）。
         cost: args.cost === undefined ? null : Number(args.cost),
+        findingDispositionsPath: args.findingDispositions,
         ledgerPath: args.ledger,
         env,
         ...injected,

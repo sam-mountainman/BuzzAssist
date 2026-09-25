@@ -325,6 +325,33 @@ test("前のループから持ち越した回数・費用・時間を、止ま�
   assert.equal(first({ rounds: 0, cost: 0, elapsedMs: contract.limits.maximumElapsedMs, loops: 1 }).stopReason, "time-limit");
 });
 
+test("採用した指摘が次の回でも出たら、点が上がっても停滞として数える（渡さなければ今までと同じ）", () => {
+  const limited = createMangaQualityContract({ manifest: { id: "synthetic-episode" }, overrides: { maximumReviewRounds: 5, maximumStagnantRounds: 1 } });
+  const start = createQualityLoopState({ contract: limited, generatorId: "gen", generatorContextId: "generator-context", startedAt: "2026-09-24T00:00:00Z" });
+  const reviewWith = (context, value) => ({
+    evaluatorId: "evaluator", evaluatorContextId: context, notes: `全尺を見た（${context}）`, evidence: EVIDENCE,
+    scores: Object.fromEntries(limited.rubric.map((criterion) => [criterion.id, criterion.id === "voice-performance" ? value : 100])),
+  });
+  const next = (state, context, value, extra = {}) => recordQualityRound({
+    contract: limited,
+    state,
+    hardGateReport: { pass: true, failedGateIds: [], contractDigest: limited.digest },
+    reviews: [reviewWith(context, value)],
+    evidence: EVIDENCE,
+    observedAt: "2026-09-24T01:00:00Z",
+    ...(state.rounds.length ? { previousFailureFingerprint: state.rounds.at(-1).failureFingerprint, revisionDelta: "声を差し替えた" } : {}),
+    ...extra,
+  });
+  const first = next(start, "ctx-1", 40);
+  const improved = next(first, "ctx-2", 60);
+  assert.equal(improved.status, "active", "点が上がり、直っていない指摘も無ければ止まらない");
+  assert.equal(improved.rounds[1].unresolvedFindingIds, undefined);
+  const recurring = next(first, "ctx-2", 60, { unresolvedFindingIds: ["r1-f1"] });
+  assert.equal(recurring.stagnantRounds, 1);
+  assert.equal(recurring.stopReason, "no-improvement");
+  assert.deepEqual(recurring.rounds[1].unresolvedFindingIds, ["r1-f1"]);
+});
+
 test("each-evaluator は宣言した評価者それぞれの総合点と項目の下限を見て、平均だけ目標を越える回を合格にしない", () => {
   const each = { ...contract, acceptance: { mode: "each-evaluator", evaluators: ["eval-a", "eval-b"] } };
   const average = { ...contract, acceptance: { mode: "average", evaluators: ["eval-a", "eval-b"] } };
