@@ -24,13 +24,15 @@ test("エンジン指定が使えないときは黙って別のへ落ちない",
 });
 
 test("実行ファイルが無いエンジンは理由つきで落とす", async () => {
-  // claude は入っているが未ログインのことがある。どちらの理由でも
-  // available=false になり、reason が空にならないことを確かめる。
-  const probe = await probeEngine("claude", { timeoutMs: 120_000 });
-  if (!probe.available) {
-    assert.ok(typeof probe.reason === "string" && probe.reason.length > 0);
-  } else {
-    assert.ok(probe.binary);
+  // 以前は本物の PATH で claude をプローブしていたので、ログイン済みの機械では試験のたびに
+  // 実際のモデル呼び出しが走っていた。空の PATH で「見つからない」経路だけを見る。
+  const empty = mkdtempSync(join(tmpdir(), "parallel-agent-empty-path-"));
+  try {
+    const probe = await probeEngine("claude", { env: { PATH: empty } });
+    assert.equal(probe.available, false);
+    assert.match(probe.reason, /実行ファイルが見つかりません/u);
+  } finally {
+    rmSync(empty, { recursive: true, force: true });
   }
 });
 
@@ -82,7 +84,7 @@ test("ログに残す前に、形の分かる秘密を伏せる", () => {
 });
 
 test("read-only を要求したら、保証できないエンジンは選ばない", async () => {
-  // claude は read-only を保証できないので、read-only 指定では候補から外れる。
+  // read-only の引数を持たない claude（古い CLI）は、read-only 指定では候補から外れる。
   // codex が使えない環境では「使えるエージェントCLIがない」で落ちるのが正しく、
   // 黙って書き込み可能な claude へ落ちてはいけない。
   // 認証状態とは無関係に、read-only を保証できないという理由で落ちること。
@@ -91,23 +93,28 @@ test("read-only を要求したら、保証できないエンジンは選ばな�
   // 以前は2つ目の assert で本物のプローブを呼び、「この機械では claude が
   // 使えない」ことを期待していた。環境の事実を振る舞いとして固定していたので
   // ログイン済みの機械では必ず落ち、しかも落ちる前に**実際のモデル呼び出しが
-  // 走っていた**。プローブを差し替えて、判定の経路だけを見る。
+  // 走っていた**。プローブと引数の判定を差し替えて、判定の経路だけを見る。
+  // （引数を持つ claude が読み取り専用で選ばれる経路は harnessParallelAgentsPortability、
+  // 書き込みが本当に止まることは harnessParallelAgentsClaudeReadOnly が見る。）
   let probed = 0;
   const probe = async (engineId) => {
     probed += 1;
     return { engineId, available: false, reason: "テスト用の未ログイン" };
   };
+  const readOnlySupport = async (engineId) => (engineId === "codex"
+    ? { supported: true, missing: [] }
+    : { supported: false, missing: ["--tools"] });
   await assert.rejects(
-    () => selectEngine("claude", { readOnly: true, probe }),
+    () => selectEngine("claude", { readOnly: true, probe, readOnlySupport }),
     /read-only を保証できません/u,
   );
   assert.equal(probed, 0, "read-only で弾くときは、エンジンを起動しない（実行も課金もしない）");
   // read-only を要求しなければ、判定理由は認証状態になる（別の経路）。
-  await assert.rejects(() => selectEngine("claude", { probe }), /使えません: テスト用の未ログイン/u);
+  await assert.rejects(() => selectEngine("claude", { probe, readOnlySupport }), /使えません: テスト用の未ログイン/u);
   assert.equal(probed, 1, "read-only でなければプローブで判定する");
   // 自動選択でも、read-only を保証できない claude はプローブせずに外す。
   probed = 0;
-  await assert.rejects(() => selectEngine("auto", { readOnly: true, probe }), /使えるエージェントCLIがありません/u);
+  await assert.rejects(() => selectEngine("auto", { readOnly: true, probe, readOnlySupport }), /使えるエージェントCLIがありません/u);
   assert.equal(probed, 1, "codex だけをプローブし、claude は起動しないこと");
 });
 

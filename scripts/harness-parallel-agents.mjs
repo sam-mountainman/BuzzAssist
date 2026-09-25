@@ -95,11 +95,19 @@ const ENGINES = {
       // claude -p もプロンプトは stdin で受ける。
       const args = ["-p"];
       if (task.model) args.push("--model", task.model);
-      // 読み取り専用を約束できないエンジンを read-only 指定で使わない。
-      // 「指定したのに書けた」は、指定しないより危ない。
+      // 読み取り専用は「書き込みの道具をそもそも渡さない」で作る（2026-09-25、claude 2.1.280 で
+      // 偽の API サーバーから Write / Edit / Bash を要求させて、全部「No such tool available」で
+      // 止まりファイルが作られないことを実測。test/harnessParallelAgentsClaudeReadOnly.test.mjs）。
+      //   --tools             渡す組み込みの道具を読むものだけにする（Agent・Bash・Write 等は存在しない）
+      //   --disallowedTools   念のため書き込み・コマンド実行の道具を名指しで禁止する
+      //   --permission-mode dontAsk  許可の要る操作は尋ねずに拒否する（利用者の設定の許可より優先）
+      //   --strict-mcp-config MCP の道具は書き込めるかもしれないので読まない（--mcp-config を渡さない）
       if (readOnly || task.readOnly) {
-        throw new Error(
-          "claude CLI は read-only を保証できません。--read-only では codex を使ってください",
+        args.push(
+          "--permission-mode", "dontAsk",
+          "--tools", CLAUDE_READ_ONLY_TOOLS.join(","),
+          "--disallowedTools", CLAUDE_WRITE_TOOLS.join(","),
+          "--strict-mcp-config",
         );
       }
       return args;
@@ -109,24 +117,102 @@ const ENGINES = {
   },
 };
 
-function which(command) {
-  if (command.includes("/")) return fs.existsSync(command) ? command : null;
-  const dirs = (process.env.PATH ?? "").split(":").filter(Boolean);
-  for (const dir of dirs) {
-    const full = path.join(dir, command);
-    try {
-      fs.accessSync(full, fs.constants.X_OK);
-      return full;
-    } catch {
-      /* 次の候補へ */
+const CLAUDE_READ_ONLY_TOOLS = Object.freeze(["Read", "Grep", "Glob"]);
+const CLAUDE_WRITE_TOOLS = Object.freeze(["Bash", "PowerShell", "Edit", "Write", "NotebookEdit"]);
+// 読み取り専用の引数が CLI に無ければ（古い版）、read-only の実行には使わない。
+export const CLAUDE_READ_ONLY_REQUIRED_FLAGS = Object.freeze([
+  "--permission-mode", "dontAsk", "--tools", "--disallowedTools", "--strict-mcp-config",
+]);
+
+export function buildEngineArgs(engineId, task, options = {}) {
+  const engine = ENGINES[engineId];
+  if (!engine) throw new Error(`未知のエンジン: ${engineId}`);
+  return engine.buildArgs(task, options);
+}
+
+/** `claude --help` の本文から、読み取り専用の引数が揃っているかを判定する。 */
+export function claudeReadOnlySupportFromHelp(helpText) {
+  const text = String(helpText ?? "");
+  const missing = CLAUDE_READ_ONLY_REQUIRED_FLAGS.filter((flag) => !text.includes(flag));
+  return { supported: missing.length === 0, missing };
+}
+
+function envPath(env) {
+  if (typeof env.PATH === "string") return env.PATH;
+  const key = Object.keys(env).find((name) => name.toUpperCase() === "PATH");
+  return key ? String(env[key] ?? "") : "";
+}
+
+function defaultFileExists(candidate, platform) {
+  try {
+    if (platform === "win32") return fs.statSync(candidate).isFile();
+    fs.accessSync(candidate, fs.constants.X_OK);
+    return fs.statSync(candidate).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 実行ファイルを PATH から探す。PATH の区切りは OS ごと（Windows は ";"）、Windows では
+ * PATHEXT の拡張子を付けて探す（拡張子なしの npm の sh 用 shim は Windows で起動できないので
+ * 候補にしない）。以前は ":" 決め打ちで、Windows ではエンジンが1つも見つからなかった。
+ */
+export function resolveExecutable(command, {
+  env = process.env,
+  platform = process.platform,
+  fileExists = defaultFileExists,
+} = {}) {
+  const pathApi = platform === "win32" ? path.win32 : path.posix;
+  const text = String(command ?? "");
+  if (!text) return null;
+  const windows = platform === "win32";
+  const extensions = windows
+    ? String(env.PATHEXT || env.Pathext || ".COM;.EXE;.BAT;.CMD").split(";").map((ext) => ext.trim()).filter(Boolean)
+    : [];
+  const hasKnownExtension = windows && extensions.some((ext) => text.toLowerCase().endsWith(ext.toLowerCase()));
+  const variants = (base) => (!windows || hasKnownExtension ? [base] : extensions.map((ext) => `${base}${ext.toLowerCase()}`));
+  const hasDirectory = windows ? /[\\/]/u.test(text) : text.includes("/");
+  if (hasDirectory) {
+    return variants(text).find((candidate) => fileExists(candidate, platform)) ?? null;
+  }
+  const delimiter = windows ? ";" : ":";
+  for (const dir of envPath(env).split(delimiter).map((entry) => entry.trim().replace(/^"(.*)"$/u, "$1")).filter(Boolean)) {
+    for (const candidate of variants(pathApi.join(dir, text))) {
+      if (fileExists(candidate, platform)) return candidate;
     }
   }
   return null;
 }
 
-function resolveBinary(engine) {
+// cmd.exe の特殊文字。cross-spawn と同じく、.cmd の shim を通るので2段でエスケープする。
+const CMD_META_CHARS = /[()%!^"<>&|;, ]/gu;
+
+function quoteWindowsCmdArgument(value) {
+  let arg = String(value);
+  arg = arg.replace(/(\\*)"/gu, "$1$1\\\"");
+  arg = arg.replace(/(\\*)$/u, "$1$1");
+  arg = `"${arg}"`;
+  arg = arg.replace(CMD_META_CHARS, "^$&");
+  return arg.replace(CMD_META_CHARS, "^$&");
+}
+
+/**
+ * spawn に渡す形。Windows の .cmd / .bat（npm で入れた claude・codex）は、Node が直接起動を
+ * 拒むので cmd.exe 越しに起動する。プロンプトは stdin で渡すので、引数は短い旗とパスだけ。
+ */
+export function spawnInvocation(binary, args = [], { platform = process.platform, env = process.env } = {}) {
+  if (platform === "win32" && /\.(?:cmd|bat)$/iu.test(String(binary))) {
+    const comspec = env.ComSpec || env.COMSPEC || "cmd.exe";
+    const line = [String(binary).replace(CMD_META_CHARS, "^$&"), ...args.map(quoteWindowsCmdArgument)].join(" ");
+    return { command: comspec, args: ["/d", "/s", "/c", `"${line}"`], options: { windowsVerbatimArguments: true } };
+  }
+  return { command: binary, args: [...args], options: {} };
+}
+
+function resolveBinary(engine, options = {}) {
   for (const candidate of engine.candidates) {
-    const resolved = which(candidate);
+    const resolved = resolveExecutable(candidate, options);
     if (resolved) return resolved;
   }
   return null;
@@ -135,10 +221,10 @@ function resolveBinary(engine) {
 // エンジンが「実際に使えるか」は、存在するかではなく認証が通っているかで決まる。
 // claude CLI は入っていてもログインしていないと即座に失敗する。存在だけを見て
 // 選ぶと、全タスクが同じエラーで落ちてから気づくことになる。
-export async function probeEngine(engineId, { timeoutMs = 60_000 } = {}) {
+export async function probeEngine(engineId, { timeoutMs = 60_000, readOnly = false, env = process.env } = {}) {
   const engine = ENGINES[engineId];
   if (!engine) return { engineId, available: false, reason: `未知のエンジン: ${engineId}` };
-  const binary = resolveBinary(engine);
+  const binary = resolveBinary(engine, { env });
   if (!binary) return { engineId, available: false, reason: "実行ファイルが見つかりません" };
 
   const probeTask = { prompt: "Reply with exactly: PROBE-OK" };
@@ -146,13 +232,20 @@ export async function probeEngine(engineId, { timeoutMs = 60_000 } = {}) {
     os.tmpdir(),
     `harness-agent-probe-${engineId}-${process.pid}.txt`,
   );
-  const args = engine.buildArgs(probeTask, { outputPath, disableMcp: true, readOnly: false });
+  // read-only で使うなら、プローブも同じ引数で起動する（引数を受け付けない版をここで落とす）。
+  const args = engine.buildArgs(probeTask, { outputPath, disableMcp: true, readOnly });
+  const invocation = spawnInvocation(binary, args, { env });
 
   const outcome = await new Promise((resolve) => {
     let stdout = "";
     let stderr = "";
     let settled = false;
-    const child = spawn(binary, args, { cwd: REPO_ROOT, env: childAgentEnvironment(process.env), stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(invocation.command, invocation.args, {
+      ...invocation.options,
+      cwd: REPO_ROOT,
+      env: childAgentEnvironment(env),
+      stdio: ["pipe", "pipe", "pipe"],
+    });
     child.stdin.on("error", () => { /* 相手が先に終了していれば無視 */ });
     child.stdin.end(probeTask.prompt);
     const timer = setTimeout(() => {
@@ -186,16 +279,43 @@ export async function probeEngine(engineId, { timeoutMs = 60_000 } = {}) {
   return { engineId, binary, available: outcome.ok, reason: outcome.reason ?? null };
 }
 
-// エンジンが read-only を守れるかは、認証やインストール状態とは別の話。
-// 守れないエンジンは、明示指定であっても read-only 実行に使わせない。
-const READ_ONLY_CAPABLE = new Set(["codex"]);
+/**
+ * エンジンが read-only を守れるか。認証やインストール状態とは別の話で、守れないエンジンは
+ * 明示指定であっても read-only 実行に使わせない。
+ * - codex: sandbox_mode="read-only"
+ * - claude: 書き込みの道具を渡さない引数（buildArgs 参照）。古い CLI にその引数が無ければ使わない。
+ *   判定は `claude --help` の本文で行う（モデルは呼ばない）
+ */
+export async function engineReadOnlySupport(engineId, { env = process.env, platform = process.platform } = {}) {
+  if (engineId === "codex") return { supported: true, missing: [] };
+  if (engineId !== "claude") return { supported: false, missing: ["read-only mechanism"] };
+  const binary = resolveBinary(ENGINES.claude, { env, platform });
+  if (!binary) return { supported: false, missing: ["claude executable"] };
+  try {
+    const invocation = spawnInvocation(binary, ["--help"], { env, platform });
+    const help = execFileSync(invocation.command, invocation.args, {
+      ...invocation.options,
+      encoding: "utf8",
+      timeout: 20_000,
+      env: childAgentEnvironment(env),
+    });
+    return claudeReadOnlySupportFromHelp(help);
+  } catch (error) {
+    return { supported: false, missing: [`claude --help failed: ${String(error?.message || error).slice(0, 120)}`] };
+  }
+}
 
 export async function selectEngine(requested, options = {}) {
+  const readOnlySupport = options.readOnlySupport ?? engineReadOnlySupport;
   if (requested && requested !== "auto") {
-    if (options.readOnly && !READ_ONLY_CAPABLE.has(requested)) {
-      throw new Error(
-        `エンジン ${requested} は read-only を保証できません。--read-only では codex を使ってください`,
-      );
+    if (options.readOnly) {
+      const support = ENGINES[requested] ? await readOnlySupport(requested, options) : { supported: false, missing: [] };
+      if (!support.supported) {
+        throw new Error(
+          `エンジン ${requested} は read-only を保証できません（${support.missing.join(", ") || "仕組みが無い"}）。`
+          + "--read-only では codex か、読み取り専用の引数を持つ claude を使ってください",
+        );
+      }
     }
     // テストや呼び出し側がプローブを差し替えられるようにする。本物のプローブは
     // エンジンの CLI を起動してモデルに応答させるので、テストから呼ぶと
@@ -208,10 +328,13 @@ export async function selectEngine(requested, options = {}) {
   }
   const probes = [];
   for (const id of ["codex", "claude"]) {
-    // read-only を要求されているのに保証できないエンジンは候補から外す。
-    if (options.readOnly && !READ_ONLY_CAPABLE.has(id)) {
-      probes.push({ engineId: id, available: false, reason: "read-only を保証できません" });
-      continue;
+    // read-only を要求されているのに保証できないエンジンは候補から外す（起動もしない）。
+    if (options.readOnly) {
+      const support = await readOnlySupport(id, options);
+      if (!support.supported) {
+        probes.push({ engineId: id, available: false, reason: `read-only を保証できません（${support.missing.join(", ")}）` });
+        continue;
+      }
     }
     const probe = await (options.probe ?? probeEngine)(id, options);
     probes.push(probe);
@@ -240,7 +363,9 @@ async function runTask(task, { engine, binary, outDir, disableMcp, readOnly, def
     let stdout = "";
     let stderr = "";
     let settled = false;
-    const child = spawn(binary, args, {
+    const invocation = spawnInvocation(binary, args);
+    const child = spawn(invocation.command, invocation.args, {
+      ...invocation.options,
       cwd: path.resolve(task.cwd ?? REPO_ROOT),
       // 子には「学習を書かない」印を渡す。子が並列に capture / sync すると同じ台帳の
       // 取り合いになり、同じ観測が子の数だけ別の回数として数えられる。捕捉したい
@@ -316,7 +441,8 @@ async function runTask(task, { engine, binary, outDir, disableMcp, readOnly, def
 // 再現しようとしたときに、どちらで走ったのか分からないと困る。
 function describeBinary(binaryPath) {
   try {
-    const out = execFileSync(binaryPath, ["--version"], { encoding: "utf8", timeout: 20_000 });
+    const invocation = spawnInvocation(binaryPath, ["--version"]);
+    const out = execFileSync(invocation.command, invocation.args, { ...invocation.options, encoding: "utf8", timeout: 20_000 });
     return out.trim().split("\n")[0];
   } catch {
     return null;

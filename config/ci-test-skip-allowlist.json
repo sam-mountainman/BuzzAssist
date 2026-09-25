@@ -271,6 +271,17 @@
         "win32"
       ],
       "justification": "macOS の Command Line Tools 導入スタブを踏まないことの試験で、Windows には該当する実行ファイルも実行権限の仕組みも無い。macOS と Linux の CI で走る。"
+    },
+    {
+      "name": "claude の読み取り専用の引数で、偽のモデルが要求した書き込みが本当に止まる",
+      "reason": "claude CLI が無い",
+      "category": "optional-heavy-qa",
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
+      "justification": "実物の claude CLI を偽の API サーバーへ向けて書き込みの道具を要求させる試験で、CI runner には claude CLI を入れない（入れるとログイン状態に依存する）。読み取り専用の引数の組み立て・--help による版の判定・選択の経路は test/harnessParallelAgentsPortability.test.mjs が全 OS で見る。"
     }
   ]
 }
