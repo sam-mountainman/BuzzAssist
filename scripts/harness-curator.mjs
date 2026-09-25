@@ -22,8 +22,9 @@ import {
   renderPublicProposalCatalog,
 } from "../lib/harnessLearningCurator.mjs";
 import { loadHarnessFeedbackImportLedger } from "../lib/harnessFeedbackIngest.mjs";
+import { resolveLearningState, sharedLedgerPath } from "../lib/harnessLearningState.mjs";
 import { createCanonicalReaders } from "./harness-learn.mjs";
-import { loadReceipts } from "./harness-receipts.mjs";
+import { defaultReceiptsDir, loadReceipts } from "./harness-receipts.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SUBCOMMANDS = new Set(["report", "export-public"]);
@@ -100,8 +101,11 @@ function exportPublicCatalog(args, proposalFiles) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  // 共有 ledger の置き場は harness-learn と同じ（開発用チェックアウトは docs/learning、
+  // 配布された写しは ~/.buzzassist/learning/shared）。写しの中の台帳は更新で消える。
+  const learning = resolveLearningState({ codeRoot: REPO_ROOT });
   const proposalFiles = [
-    path.join(REPO_ROOT, "docs", "learning", "proposals.jsonl"),
+    sharedLedgerPath(learning, "proposals"),
     ...(typeof args.proposals === "string" ? String(args.proposals).split(",").map((value) => path.resolve(value)) : []),
   ];
   if (args.command === "export-public") {
@@ -110,14 +114,14 @@ async function main() {
     return;
   }
   const appliedFiles = [
-    path.join(REPO_ROOT, "docs", "learning", "applied.jsonl"),
+    sharedLedgerPath(learning, "applied"),
     ...(typeof args.applied === "string" ? String(args.applied).split(",").map((value) => path.resolve(value)) : []),
   ];
   const proposals = proposalFiles.flatMap(readJsonl);
   const applied = appliedFiles.flatMap(readJsonl);
   const receiptsDir = typeof args.receiptsDir === "string"
     ? path.resolve(args.receiptsDir)
-    : path.join(REPO_ROOT, "docs", "learning", "receipts");
+    : defaultReceiptsDir();
   // approved だけでなく revokedAfterApproval も渡す（R2-D2-1）。以前は approved
   // だけを読んでいたので、鍵が後に失効した import は報告から消えていた——
   // 観測数へ数えないのは正しいが、「数えなかったものが何件あるか」も

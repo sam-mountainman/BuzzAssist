@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 import { childAgentEnvironment } from "../lib/harnessLearningGuard.mjs";
@@ -23,6 +23,9 @@ const SYNTHETIC_PATH = ["", "Users", "synthetic-operator", "work", "episode", "c
 const SYNTHETIC_NAME = "架空太郎";
 const SKILL_TREE = "a".repeat(64);
 const DECLARATION = loadHarnessDeclaration("koya-manga-video");
+// 決着の索引（receipts/index.jsonl）はリポジトリへ書かせない。試験ごとの一時ディレクトリへ向ける。
+const TEST_RECEIPT_INDEX = join(mkdtempSync(join(tmpdir(), "receipt-index-")), "index.jsonl");
+test.after(() => rmSync(dirname(TEST_RECEIPT_INDEX), { recursive: true, force: true }));
 
 function receiptFixture(overrides = {}) {
   return {
@@ -149,7 +152,7 @@ test("決着した Job の Receipt から Channel Pack 宛の台帳へ追記し�
       knownRemainingIssues: [],
     };
     const { rows, paths, options } = captureHarness();
-    const first = await captureSettledJobLearning({ job, env: {}, captureOptions: options, now: () => "2026-09-24T01:00:00.000Z" });
+    const first = await captureSettledJobLearning({ receiptIndexPath: TEST_RECEIPT_INDEX, job, env: {}, captureOptions: options, now: () => "2026-09-24T01:00:00.000Z" });
     assert.equal(first.skippedReason, undefined);
     assert.equal(first.receiptSource, "run-receipt");
     assert.equal(first.target, "channel-pack:koya");
@@ -171,7 +174,7 @@ test("決着した Job の Receipt から Channel Pack 宛の台帳へ追記し�
       assert.equal(serialized.includes(SYNTHETIC_PATH) || serialized.includes(SYNTHETIC_NAME) || serialized.includes(dir), false);
       assert.match(row.evidence, /^auto-receipt-v1 source=run-receipt receipt=[a-f0-9]{16} outcome=fail harness=koya-manga-video@1\.1\.0 count=\d+$/u);
     }
-    const second = await captureSettledJobLearning({ job, env: {}, captureOptions: options, now: () => "2026-09-24T02:00:00.000Z" });
+    const second = await captureSettledJobLearning({ receiptIndexPath: TEST_RECEIPT_INDEX, job, env: {}, captureOptions: options, now: () => "2026-09-24T02:00:00.000Z" });
     assert.equal(second.captured, 0);
     assert.equal(second.duplicates, first.captured);
     assert.equal(rows.length, first.captured, "同じ Receipt から二重に積んだ");
@@ -181,7 +184,7 @@ test("決着した Job の Receipt から Channel Pack 宛の台帳へ追記し�
     const otherPath = join(dir, "run-receipt-2.json");
     writeFileSync(otherPath, otherBytes);
     const otherDigest = createHash("sha256").update(otherBytes).digest("hex");
-    const third = await captureSettledJobLearning({
+    const third = await captureSettledJobLearning({ receiptIndexPath: TEST_RECEIPT_INDEX,
       job: { ...job, artifacts: [{ kind: "run-receipt", path: otherPath, sha256: otherDigest }] },
       env: {}, captureOptions: options,
     });
@@ -190,7 +193,7 @@ test("決着した Job の Receipt から Channel Pack 宛の台帳へ追記し�
     assert.equal(finalAuditIds.size, 1, "同じゲートの不合格が別の提案として増えた");
 
     // Job の記録と SHA が合わない Receipt は材料にしない（completed なのに読めない＝推測で埋めない）。
-    const mismatch = await captureSettledJobLearning({
+    const mismatch = await captureSettledJobLearning({ receiptIndexPath: TEST_RECEIPT_INDEX,
       job: { ...job, artifacts: [{ kind: "run-receipt", path: receiptPath, sha256: "9".repeat(64) }] },
       env: {}, captureOptions: options,
     });
@@ -217,7 +220,7 @@ test("failed / awaiting-human-review も捕捉する（adapter の Receipt、無
       stages: [{ id: "production", status: "failed" }],
     };
     const { rows, options } = captureHarness();
-    const failed = await captureSettledJobLearning({ job: failedJob, env: {}, captureOptions: options });
+    const failed = await captureSettledJobLearning({ receiptIndexPath: TEST_RECEIPT_INDEX, job: failedJob, env: {}, captureOptions: options });
     assert.equal(failed.receiptSource, "adapter-run-receipt");
     assert.ok(rows.some((row) => row.text.includes("「paid-media-recovery-pending」")));
 
@@ -232,7 +235,7 @@ test("failed / awaiting-human-review も捕捉する（adapter の Receipt、無
       pendingReceiptFinalization: { attempts: 2 },
     };
     const before = rows.length;
-    const awaiting = await captureSettledJobLearning({ job: pending, env: {}, captureOptions: options });
+    const awaiting = await captureSettledJobLearning({ receiptIndexPath: TEST_RECEIPT_INDEX, job: pending, env: {}, captureOptions: options });
     assert.equal(awaiting.receiptSource, "job-state");
     assert.equal(awaiting.target, "channel-pack:narrated-story");
     const added = rows.slice(before);
@@ -240,7 +243,7 @@ test("failed / awaiting-human-review も捕捉する（adapter の Receipt、無
     assert.ok(added.every((row) => row.receiptDigest === jobStateDigest(pending)));
     assert.deepEqual(added[0].skillShaAtCapture, { "narrated-story-video": "4".repeat(64) });
     // 同じ Job の同じ版をもう一度見ても積まない。
-    const again = await captureSettledJobLearning({ job: pending, env: {}, captureOptions: options });
+    const again = await captureSettledJobLearning({ receiptIndexPath: TEST_RECEIPT_INDEX, job: pending, env: {}, captureOptions: options });
     assert.equal(again.captured, 0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -251,16 +254,16 @@ test("子エージェント・無効化・未決着・未知のハーネス・�
   const job = { id: "video-x", status: "failed", revision: 1, harness: { id: "koya-manga-video" }, blockers: ["canonical-identity-drift"] };
   let calls = 0;
   const capture = () => { calls += 1; return { appended: true, entry: { id: "0".repeat(12) } }; };
-  assert.equal((await captureSettledJobLearning({ job, env: childAgentEnvironment({}), capture })).skippedReason, "child-agent");
-  assert.equal((await captureSettledJobLearning({ job, env: { BUZZASSIST_LEARNING_AUTO_CAPTURE: "0" }, capture })).skippedReason, "disabled");
-  assert.equal((await captureSettledJobLearning({ job: { ...job, status: "cancelled" }, env: {}, capture })).skippedReason, "not-settled");
-  assert.equal((await captureSettledJobLearning({ job: { ...job, harness: { id: "unknown-harness" } }, env: {}, capture })).skippedReason, "unknown-harness-route");
+  assert.equal((await captureSettledJobLearning({ receiptIndexPath: TEST_RECEIPT_INDEX, job, env: childAgentEnvironment({}), capture })).skippedReason, "child-agent");
+  assert.equal((await captureSettledJobLearning({ receiptIndexPath: TEST_RECEIPT_INDEX, job, env: { BUZZASSIST_LEARNING_AUTO_CAPTURE: "0" }, capture })).skippedReason, "disabled");
+  assert.equal((await captureSettledJobLearning({ receiptIndexPath: TEST_RECEIPT_INDEX, job: { ...job, status: "cancelled" }, env: {}, capture })).skippedReason, "not-settled");
+  assert.equal((await captureSettledJobLearning({ receiptIndexPath: TEST_RECEIPT_INDEX, job: { ...job, harness: { id: "unknown-harness" } }, env: {}, capture })).skippedReason, "unknown-harness-route");
   assert.equal(calls, 0);
 
   // Channel Pack の台帳が共有台帳と分離されていなければ、Job を止めずに理由だけ返す。
   const { options } = captureHarness();
   const sameLedger = { ...options, ledgerPathResolver: () => join(tmpdir(), "synthetic-shared", "proposals.jsonl") };
-  const result = await captureSettledJobLearning({ job, env: {}, captureOptions: sameLedger, locateReceipt: async () => null });
+  const result = await captureSettledJobLearning({ receiptIndexPath: TEST_RECEIPT_INDEX, job, env: {}, captureOptions: sameLedger, locateReceipt: async () => null });
   assert.equal(result.skippedReason, "ledger-not-isolated");
   assert.equal(result.captured, 0);
 });
