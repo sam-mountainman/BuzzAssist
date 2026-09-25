@@ -309,6 +309,72 @@ test("品質ループはゲートと同じ置き場（<作業場>/canvas）か�
   assert.equal(snapshot.summaryLines.some((line) => line.includes("品質ループの記録")), false, "記録は読めている");
 });
 
+test("品質ループの対象 id はゲートと同じ（回 id つき、分割ページはコマ）: 採点した版を差し替えた成果物は「別の版を採点済み」と出す", async (t) => {
+  const projectDir = await project(t);
+  const job = await createKoyaProgressJob(projectDir, {
+    adapterResult: { status: "waiting-usage-limit" },
+    knownRemainingIssues: ["usage-limit"],
+  });
+  const workspace = job.executionProjectDir;
+  await writeCharacterApprovalPending(workspace);
+  await approveNewCharacter(workspace);
+  const mid = await writeMidProduction(workspace);
+  const paths = koyaPaths(workspace);
+  const contract = await currentKoyaContract(repoRoot);
+  const qualityDir = koyaAssetQualityWorkDir({ projectDir: workspace });
+  const takeGate = createKoyaVoiceTakeAssetQualityGate({ contract, canvasDir: qualityDir, episodeId: EPISODE_ID });
+  const imageGate = createKoyaSceneImageAssetQualityGate({ contract, canvasDir: qualityDir, episodeId: EPISODE_ID });
+  const itemOf = (snapshot, section, key) => snapshot.sections.find((row) => row.id === section).items.find((item) => item.key === key);
+  const loopLine = (item) => item.lines.find((line) => line.startsWith("品質ループ: "));
+
+  // 分割ページ u-0004 はコマ2枚から組む。ゲートが見るのは合成の行ではなくコマの行（計画にも台帳にも載る）。
+  const panelIds = ["panel:u-0004:1", "panel:u-0004:2"];
+  const panels = Object.fromEntries(panelIds.map((id, index) => [id, join(paths.assetDir, `panel-u-0004-${index + 1}.png`)]));
+  for (const [index, id] of panelIds.entries()) await writeFile(panels[id], png(160, 90, `synthetic-panel-${index + 1}`));
+  const plan = JSON.parse(await readFile(paths.plan, "utf8"));
+  plan.pages = plan.pages.map((page) => (page.assetJobId === "split-page:u-0004" ? { ...page, panelJobIds: panelIds } : page));
+  plan.jobs.push(...panelIds.map((id) => ({ id, kind: "split-panel", outputPath: panels[id] })));
+  await writeFile(paths.plan, JSON.stringify(plan));
+  const ledger = JSON.parse(await readFile(paths.ledger, "utf8"));
+  const qaPass = { pass: true, issues: [], technical: { pass: true }, semantic: { pass: true } };
+  ledger.jobs["split-page:u-0004"] = { ...ledger.jobs["split-page:u-0004"], status: "complete", qa: qaPass };
+  for (const id of panelIds) ledger.jobs[id] = { id, status: "complete", outputPath: panels[id], qa: qaPass };
+  await writeFile(paths.ledger, JSON.stringify(ledger));
+
+  const take = { cutId: "cut-01", takePath: mid.takes["cut-01"].path };
+  const image = { job: { id: "panel:u-0003", kind: "scene-image" }, outputPath: mid.images["panel:u-0003"].path };
+  const panel = { job: { id: "panel:u-0004:2", kind: "split-panel" }, outputPath: panels["panel:u-0004:2"] };
+  await passKoyaAssetQualityLoop({ workDir: qualityDir, stage: "voice-take", subjectId: koyaVoiceTakeAssetQualitySubjectId(EPISODE_ID, take.cutId), assetPath: take.takePath });
+  await passKoyaAssetQualityLoop({ workDir: qualityDir, stage: "scene-image", subjectId: koyaSceneImageAssetQualitySubjectId(EPISODE_ID, image.job.id), assetPath: image.outputPath });
+  for (const id of panelIds) {
+    await passKoyaAssetQualityLoop({ workDir: qualityDir, stage: "scene-image", subjectId: koyaSceneImageAssetQualitySubjectId(EPISODE_ID, id), assetPath: panels[id] });
+  }
+  // 前の版の進捗が探していたカット id そのままの記録。ゲートはこの id を読まない。
+  await passKoyaAssetQualityLoop({ workDir: qualityDir, stage: "voice-take", subjectId: "cut-02", assetPath: mid.takes["cut-02"].path });
+  for (const row of [await takeGate(take), await imageGate(image), await imageGate(panel)]) assert.equal(row.pass, true, JSON.stringify(row));
+
+  // 採点した版のまま: 分割ページは合成の画の SHA ではなく、コマのファイルで合格が出る。
+  const before = await readKoyaMangaProgressSnapshot(job);
+  assert.equal(loopLine(itemOf(before, "voice-take", "cut-01")), "品質ループ: 合格");
+  assert.equal(loopLine(itemOf(before, "scene-image", "panel:u-0003")), "品質ループ: 合格");
+  assert.equal(loopLine(itemOf(before, "scene-image", "split-page:u-0004")), "品質ループ: 合格");
+
+  // 採点の後にファイルを差し替えると、ゲートは asset-sha-mismatch で止め、進捗は「別の版を採点済み」と出す。
+  await writeFile(take.takePath, makeWav(1.4, 330));
+  await writeFile(image.outputPath, png(160, 90, "synthetic-redraw-u-0003"));
+  await writeFile(panel.outputPath, png(160, 90, "synthetic-redraw-u-0004-2"));
+  await writeFile(mid.takes["cut-02"].path, makeWav(1.7, 350));
+  for (const row of [await takeGate(take), await imageGate(image), await imageGate(panel)]) assert.equal(row.reason, "asset-sha-mismatch", JSON.stringify(row));
+  assert.equal((await takeGate({ cutId: "cut-02", takePath: mid.takes["cut-02"].path })).reason, "loop-not-started");
+
+  const after = await readKoyaMangaProgressSnapshot(job);
+  assert.equal(loopLine(itemOf(after, "voice-take", "cut-01")), "品質ループ: 別の版を採点済み");
+  assert.equal(loopLine(itemOf(after, "scene-image", "panel:u-0003")), "品質ループ: 別の版を採点済み");
+  assert.equal(loopLine(itemOf(after, "scene-image", "split-page:u-0004")), "品質ループ: 別の版を採点済み", "差し替えたコマが1枚でもあれば分割ページもそう出す");
+  assert.equal(loopLine(itemOf(after, "voice-take", "cut-02")), "品質ループ: 未開始", "ゲートが読まない id の記録は進捗にも出さない");
+  assert.equal(loopLine(itemOf(after, "scene-image", "panel:u-0005")), "品質ループ: 未開始");
+});
+
 test("画の台帳が品質ループの合格まで止めた行（分割ページはコマ）は「人の確認待ち」と出し、画の工程も人待ちにする", async (t) => {
   const projectDir = await project(t);
   const job = await createKoyaProgressJob(projectDir, { adapterResult: { status: "awaiting-human-review" } });
