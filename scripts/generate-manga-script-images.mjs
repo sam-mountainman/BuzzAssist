@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 import { resolve } from "node:path";
 
+import { checkCanonicalRouting } from "../lib/harnessRouting.mjs";
 import { runMangaScriptImagePipeline } from "../lib/mangaScriptImagePipeline.mjs";
+
+const ENTRYPOINT = "scripts/generate-manga-script-images.mjs";
 
 function parseArgs(argv) {
   const args = {};
@@ -34,14 +37,34 @@ Options:
   --qa-command <command>     Optional semantic image judge. Receives JSON in BUZZASSIST_IMAGE_QA_INPUT and prints {"pass":boolean,"issues":[]}
   --no-semantic-qa           Disable the default ephemeral Codex vision judge (technical QA still runs)
   --candidate-count <1-10>   New-character design candidates; default: 3
+  --benchmark-migration      In a project governed by the Koya manga channel pack, reproduce a historical benchmark only
 
-New characters intentionally pause once after candidate generation. Approve one candidate with the existing character workflow, then rerun this same command. Existing characters complete without a pause.`;
+New characters intentionally pause once after candidate generation. Approve one candidate with the existing character workflow, then rerun this same command. Existing characters complete without a pause.
+
+In a project governed by the Koya manga channel pack this generic tool stops before writing anything: it writes
+the same image plan and ledger as the official route but skips the scene-image asset quality loop and the
+channel rules. Use run_koya_manga_pipeline action "images" (node scripts/koya-manga-video.mjs images) inside
+the Video Harness Job instead.`;
 }
 
 const args = parseArgs(process.argv.slice(2));
 if (args.help) {
   process.stdout.write(`${usage()}\n`);
   process.exit(0);
+}
+// Koya の公式経路の対象のプロジェクトでは、何も書かないうちに止める。この汎用の道具は公式経路と同じ
+// 置き場（canvas/assets/<回>/script-image-plan.json と画の台帳）へ書くが、本編の画の品質ループ（契約 v54）・
+// 番組ルールを通らない。旧入口と同じく、過去成果物の再現と明言したときだけ通す。
+const routing = checkCanonicalRouting({
+  genre: "manga-video",
+  toolName: ENTRYPOINT,
+  projectDir: resolve(args.projectDir || process.cwd()),
+  acknowledgedBenchmarkMigration: args.benchmarkMigration === true,
+  acknowledgementHint: "--benchmark-migration",
+});
+if (!routing.allowed) {
+  process.stderr.write(`${ENTRYPOINT}: ${routing.message}\n`);
+  process.exit(2);
 }
 if (!args.scriptPath) throw new Error(`${usage()}\n\n--script-path is required.`);
 
@@ -70,6 +93,7 @@ const output = {
   summary: result.ledger?.summary,
   cast: result.cast,
   message: result.message,
+  ...(routing.benchmarkMigration ? { routing: { entrypoint: ENTRYPOINT, benchmarkMigration: true } } : {}),
 };
 process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
 if (result.status === "failed") process.exitCode = 1;
