@@ -6,7 +6,8 @@
 
 import assert from "node:assert/strict";
 import { execFile as execFileCallback } from "node:child_process";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -19,9 +20,10 @@ import {
   windowsCommandLineLength,
   windowsQuotedArgument,
 } from "../lib/ffmpegFilterArgs.mjs";
-import { concatAudioSequence, planSequenceChunks, renderVideoSequence } from "../lib/ffmpegSequenceRender.mjs";
+import { AUDIO_PIECE_MIX_ASSEMBLY, concatAudioSequence, planSequenceChunks, renderVideoSequence } from "../lib/ffmpegSequenceRender.mjs";
 import { resolveFfmpegToolchain } from "../lib/harnessRuntimeResolver.mjs";
 import { planNarratedCameraShots } from "../lib/narratedStoryCamera.mjs";
+import { buildNarratedMusicBed } from "../lib/narratedStoryMusicPlan.mjs";
 import { narratedSceneSequence, planNarratedSceneJoins } from "../lib/narratedStorySceneTransitions.mjs";
 import { ff, makeTexturedStill } from "./fixtures/narratedVisualFixture.mjs";
 
@@ -178,6 +180,73 @@ test("長い台本の声（深いフォルダの声 160 本、44.1kHz と 48kHz 
     };
     const [left, right] = await Promise.all([pcm(join(dir, "single.wav")), pcm(join(dir, "chunked.wav"))]);
     assert.ok(left.length > 0);
+    assert.equal(Buffer.compare(left, right), 0, "標本が1つも違わない");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+async function pcmS16(file) {
+  const { stdout } = await execFile(toolchain.ffmpeg.command, [...(toolchain.ffmpeg.args || []), "-hide_banner", "-loglevel", "error", "-i", file, "-f", "s16le", "-"], { encoding: "buffer", maxBuffer: 64 * 1024 * 1024 });
+  return stdout;
+}
+
+// 1回で描いたときの BGM の graph（塊に分ける前の実装が、下の 60 ブロックの計画で作った graph の sha256）。
+// 1回で収まるときの graph が変わっていないことを確かめる。graph に曲の path は入らないので端末に依らない
+// （Windows では上限を越える1回の呼び出しを起動できないので、Windows 以外の CI が確かめる）。
+const MUSIC_BED_SINGLE_GRAPH_SHA256 = "600d9df814be511ed5460105483232566153fbeaf499113713dc64ebd1c9f835";
+
+test("BGM の区分の曲をつなぐ工程（深いフォルダの曲 3 つ、60 ブロック）: 1回の呼び出しでは上限を越える長さでも、塊に分けて描き、1回で描いた版と標本が同じ。1回で描くときの graph は今までと同じ", {
+  skip: toolchain.ok ? false : "ffmpeg is unavailable",
+}, async () => {
+  const root = await mkdtemp(join(os.tmpdir(), "ffmpeg-music-bed-"));
+  try {
+    const dir = await deepDir(root);
+    const ids = ["part-a", "part-b", "part-c"];
+    const gains = [1, 0.8, 1.25];
+    const sections = [];
+    for (const [index, id] of ids.entries()) {
+      // 44.1kHz の曲も混ぜる（断片の本体で 48kHz へ揃える）。曲は短く、ブロックの長さまで繰り返して鳴らす。
+      const path = join(dir, `${id}.wav`);
+      await ff(toolchain, ["-f", "lavfi", "-i", `sine=frequency=${220 + index * 110}:duration=0.4:sample_rate=${index === 1 ? 44100 : 48000}`, "-af", "volume=0.3", "-ac", "2", "-c:a", "pcm_s16le", path]);
+      sections.push({ id, position: "any", maxBlocks: null, required: false, gain: gains[index], track: { kind: "operator-file", file: `music/${id}.wav`, path, available: true } });
+    }
+    // ブロックは 0.25 秒、区分の重ねは 0.1 秒（同じ時刻に鳴る断片は2つまで）。
+    const musicPlan = { enabled: true, defaultSection: "part-a", crossfadeSeconds: 0.1, sections };
+    const segments = Array.from({ length: 60 }, (_, index) => ({ id: `s${index}`, startSeconds: index * 0.25 }));
+    const blocks = segments.map((segment, index) => ({ index, sectionId: ids[index % 3], segmentIds: [segment.id] }));
+    const build = (outputPath, extra = {}) => buildNarratedMusicBed({
+      ffmpeg: toolchain.ffmpeg, musicPlan, blocks, segments, bedStartSeconds: 0, lengthSeconds: 15, workDir: dir, outputPath, ...extra,
+    });
+
+    // 比べる基準: 1回で描いた版。Windows では上限を越える1回の呼び出しは起動できない（ENAMETOOLONG）
+    // ので、塊の切れ目が違う別の分け方で描いた版を基準にする（どちらも上限の中）。
+    const single = await build(join(dir, "single.wav"), { budget: BASELINE_BUDGET });
+    if (IS_WINDOWS) {
+      assert.equal(single.graph.assembly, AUDIO_PIECE_MIX_ASSEMBLY);
+    } else {
+      assert.equal(single.graph.assembly, undefined, "1回で描いた");
+      assert.ok(single.graph.maxCommandLength > WINDOWS_COMMAND_LINE_MAX, `1回で描くと ${single.graph.maxCommandLength} 字（上限 ${WINDOWS_COMMAND_LINE_MAX}）`);
+      assert.equal(createHash("sha256").update(single.graph.filterGraph).digest("hex"), MUSIC_BED_SINGLE_GRAPH_SHA256, "1回で描く graph が塊に分ける前と違う");
+      assert.equal(single.manifest.assembly, undefined);
+    }
+    assert.equal(single.graph.inputCount, 60);
+
+    const chunked = await build(join(dir, "chunked.wav"));
+    if (IS_WINDOWS) assert.notEqual(chunked.graph.chunks.length, single.graph.chunks.length, "基準と同じ切れ目では比べる意味がない");
+    assert.equal(chunked.graph.assembly, AUDIO_PIECE_MIX_ASSEMBLY);
+    assert.ok(chunked.graph.chunks.length >= 2, `${chunked.graph.chunks.length} chunks`);
+    assert.ok(chunked.graph.maxCommandLength <= FFMPEG_COMMAND_LINE_BUDGET, `最長 ${chunked.graph.maxCommandLength} 字`);
+    assert.deepEqual(chunked.graph.chunks.flatMap((chunk) => chunk.pieceIds), blocks.map((block) => `block-${block.index}`), "断片を足し引きしていない");
+    assert.equal(chunked.graph.inputCount, 60);
+    assert.doesNotMatch(chunked.graph.filterGraph, /acrossfade/u, "区分のつなぎに acrossfade を使わない");
+    assert.equal(chunked.manifest.assembly, AUDIO_PIECE_MIX_ASSEMBLY);
+    assert.deepEqual(chunked.manifest.blocks, single.manifest.blocks);
+    assert.deepEqual((await readdir(join(dir, "chunked-chunks"))).filter((name) => name.endsWith(".wav")), [], "塊の WAV を残さない");
+
+    const [left, right] = await Promise.all([pcmS16(join(dir, "single.wav")), pcmS16(join(dir, "chunked.wav"))]);
+    assert.equal(left.length, 15 * 48_000 * 2 * 2);
+    assert.equal(right.length, left.length);
     assert.equal(Buffer.compare(left, right), 0, "標本が1つも違わない");
   } finally {
     await rm(root, { recursive: true, force: true });
