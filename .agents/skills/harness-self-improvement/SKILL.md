@@ -172,7 +172,7 @@ node scripts/harness-learn.mjs capture \
 
 置き場は `lib/harnessLearningState.mjs` の1か所で決まる。入口ごとに別の置き場を書かない。
 
-- **開発用チェックアウト**（`.git` と `.claude/skills` と `.codex/skills` がある）: 従来どおり
+- **開発用チェックアウト**（`.git` と `.claude/skills` と `.agents/skills` がある）: 従来どおり
   リポジトリの `docs/learning`（台帳は git で追跡され、commit を人が読む）
 - **運営者の端末**: Claude Code と Codex のどの版の写しから動かしても `~/.buzzassist/learning/`
   （`BUZZASSIST_LEARNING_DIR` で上書き可）。`shared/` に共有層の台帳、`channel-packs/<id>/` に保存先を

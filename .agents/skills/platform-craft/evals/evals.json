@@ -21,7 +21,7 @@
         "installed・bundled・productionAllowed・developmentOnlyを分ける",
         "skill-creatorを開発専用で保持する",
         "端末plugin一覧をHarness依存と混同しない",
-        "Claude CodeとCodexのadapterを同じ日本語正本へ向ける"
+        "Claude Codeは.claude/skillsのadapterから、Codexはリポジトリの.agents/skillsを直接、同じ日本語正本を読む"
       ]
     },
     {

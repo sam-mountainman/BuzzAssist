@@ -413,10 +413,11 @@ Skillを、正式ハーネスが依存していると説明しない。inventory
 skill-creatorは育成・正本改善のために保持し、不要物として削除しない。本番動画Jobのhot pathからだけ除外する。
 
 BuzzAssist正本は`.agents/skills`に置く。Claude Code は `.claude/skills` の薄い adapter から正本を読む
-（Claude Code は `.agents/skills` を読まない）。Codex はリポジトリの `.agents/skills` を直接読むので、
-`.codex/skills` の adapter は同じ Skill を一覧に2回出すだけになる（2026-09-25 実測）。今ある
-`.codex/skills` は リポジトリの docs/skill-inventory-profiles-ja.md の手順でまとめて外す予定で、外すまでは正本参照
-だけに保ち、手順を足さない。host名やCLI名を一括置換して別内容を作らない。正本更新時は
+（Claude Code は `.agents/skills` を読まない）。Codex はリポジトリの `.agents/skills` を直接読むので adapter を
+置かない。`.codex/skills` の adapter は同じ Skill を一覧に2回出すだけだった（2026-09-25 実測）ので
+2026-09-26 に外した（経緯はリポジトリの docs/skill-inventory-profiles-ja.md）。`.codex/skills` を作り直さない。
+開発用チェックアウトの判定（`lib/hostSkillSync.mjs` の `readsCanonicalDirectly`）は `.git`・`.claude/skills`・
+`.agents/skills` の3つで見る。host名やCLI名を一括置換して別内容を作らない。正本更新時は
 `skill-creator`、eval、inventoryのversion/content SHA、adapter検査をまとめて行う。正本はエージェントも
 直してよいが、人の承認は配る版を出すときの1回（上の「正本スキルの承認の状態を残す」）で、
 エージェントは `skill-inventory --approve` を打たない。

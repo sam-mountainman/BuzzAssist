@@ -15,9 +15,9 @@ Operator Production の動画生成経路からは呼ばない。端末にある
 
 - BuzzAssist共通正本は `.agents/skills/<name>/` に置く。
 - Claude Code のproject adapter（`.claude/skills`）は、正本を読むことだけを指示する薄い文書にする。
-  Codex はリポジトリの `.agents/skills` を直接読むので adapter は要らない。今ある `.codex/skills` は
-  同じ Skill を一覧に重複して出すだけで、リポジトリの docs/skill-inventory-profiles-ja.md の手順でまとめて外す予定。
-  外すまでは正本参照だけに保つ。
+  Codex はリポジトリの `.agents/skills` を直接読むので adapter を置かない。`.codex/skills` は同じ Skill を
+  一覧に重複して出すだけだったので 2026-09-26 に外した（経緯はリポジトリの docs/skill-inventory-profiles-ja.md）。
+  Skill を足すときも `.codex/skills` を作らない。
 - plugin cache、`~/.codex/skills/.system/`、ユーザーのglobal Skill、global plugin設定は変更しない。
 - 配布は正本 → build/stage → 署名Release → host update の一方向。cacheから正本へ逆輸入しない。
 - Channel Packの秘密、未公開台本、運営者固有の承認記録を共通Skillへ入れない。
@@ -29,7 +29,7 @@ Operator Production の動画生成経路からは呼ばない。端末にある
 3. Skillの目的、発火条件、対象外、必要な証拠を決める。一般的な能力説明は省き、BuzzAssist固有の判断だけを書く。
 4. `.agents/skills` の正本を日本語で変更する。条件別の詳細だけを `references/` へ分ける。
 5. `evals/evals.json` に現実的な正例と近接した負例を置き、観測可能な不変条件をテストする。
-6. Claude Code の adapter（と、外すまでの `.codex/skills`）は正本への相対参照だけに保ち、手順を複製しない。
+6. Claude Code の adapter（`.claude/skills`）は正本への相対参照だけに保ち、手順を複製しない。Codex 用の adapter は作らない。
 7. inventory manifestのsemver、言語、owner、由来、対応host、内容SHAを更新する。
    semver は「配った版・承認の付いた版から中身が変わったら上げる」。まだ配っていない（Release に載って
    いない・承認の付いていない）版がすでに上がっているなら、同じ版のまま内容SHAだけ更新する——承認は版と

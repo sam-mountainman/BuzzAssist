@@ -16,7 +16,7 @@
     {
       "id": 4,
       "prompt": "BuzzAssistに新しい正本スキルを1本足して、Claude CodeとCodexの両方から使えるようにしてください。",
-      "expected_output": "`.agents/skills`に日本語の正本を置き、Claude Code用に正本を読むだけの`.claude/skills`アダプターを足す。Codexはリポジトリの`.agents/skills`を直接読み、`.codex/skills`のアダプターは一覧の重複で外す予定であることを踏まえ、アダプターに手順を複製しない。manifestのSHAと版、evalsまで扱い、配る版を出す前の人の承認（承認者の端末の skill-inventory --approve）を待つ。",
+      "expected_output": "`.agents/skills`に日本語の正本を置き、Claude Code用に正本を読むだけの`.claude/skills`アダプターを足す。Codexはリポジトリの`.agents/skills`を直接読むので`.codex/skills`のアダプターは作らず（一覧に同じSkillが2回出るため外した）、アダプターに手順を複製しない。manifestのSHAと版、evalsまで扱い、配る版を出す前の人の承認（承認者の端末の skill-inventory --approve）を待つ。",
       "files": []
     },
     {
