@@ -1,6 +1,6 @@
 // 差分の承認キュー（harness-learn pending / approve / reject）の試験。
 //
-// 合成の開発用チェックアウト（.git と .claude/skills と .codex/skills の印を置いた一時ディレクトリ）と
+// 合成の開発用チェックアウト（.git と .claude/skills と .agents/skills の印を置いた一時ディレクトリ）と
 // 一時の学習の置き場（BUZZASSIST_LEARNING_DIR）だけを使い、本物のリポジトリの台帳・正本と
 // ~/.buzzassist には書かない。人名・提案・スキルはすべて合成。
 import assert from "node:assert/strict";

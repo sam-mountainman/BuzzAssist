@@ -164,9 +164,9 @@ function seedLedgers(layout, canonicalForA) {
  * REPO_ROOT はスクリプトの置き場所から決まるので、台帳も正本も一時ディレクトリを指す。
  */
 function stageCli(repo) {
-  // 開発用チェックアウトの印（.git・.claude/skills・.codex/skills）。これが無いと配布された写しと
+  // 開発用チェックアウトの印（.git・.claude/skills・.agents/skills）。これが無いと配布された写しと
   // 判定され、学習の状態が ~/.buzzassist/learning/ へ向く（lib/harnessLearningState.mjs）。
-  for (const marker of [".git", path.join(".claude", "skills"), path.join(".codex", "skills")]) {
+  for (const marker of [".git", path.join(".claude", "skills"), path.join(".agents", "skills")]) {
     fs.mkdirSync(path.join(repo, marker), { recursive: true });
   }
   const source = fs.readFileSync(LEARN_SCRIPT, "utf8");

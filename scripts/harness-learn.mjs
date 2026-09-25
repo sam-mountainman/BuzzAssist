@@ -1943,7 +1943,7 @@ function printHelp() {
   結果本文で親へ返し、親が確かめてから capture する。
 
   学習の置き場（台帳・applied・退避・Receipt の索引・sync の状態・この端末の overlay）:
-    開発用チェックアウト（.git と .claude/skills と .codex/skills がある）ではリポジトリの docs/learning。
+    開発用チェックアウト（.git と .claude/skills と .agents/skills がある）ではリポジトリの docs/learning。
     配布された写し（Claude Code と Codex の版別キャッシュ、~/plugins/buzzassist/plugin）では、
     どの写しから動かしても ~/.buzzassist/learning/（${LEARNING_DIR_ENV} で上書き可）。初回だけ古い写しに
     残った台帳を ID で重複を除いて取り込む（元のファイルは消さない）。配布された写しの sync は、

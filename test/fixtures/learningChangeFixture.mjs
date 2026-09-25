@@ -1,6 +1,6 @@
 // 差分の承認キューの試験が共有する合成の開発用チェックアウト。
 //
-// 一時ディレクトリに .git と .claude/skills と .codex/skills の印を置き、学習の置き場は
+// 一時ディレクトリに .git と .claude/skills と .agents/skills の印を置き、学習の置き場は
 // BUZZASSIST_LEARNING_DIR で一時ディレクトリへ向ける。本物のリポジトリの台帳・正本と
 // ~/.buzzassist には書かない。人名・提案・スキルはすべて合成。
 import fs from "node:fs";
@@ -77,7 +77,7 @@ export function fixture(t, { development = true } = {}) {
   write(path.join(repo, ...SKILL_REL.split("/")), BASE_SKILL);
   write(path.join(repo, "channel-packs", "sample-pack", "docs", "sample-ledger.md"), "# 合成の台帳\n\n## 規則\n\n- R1 合成\n");
   if (development) {
-    for (const marker of [".git", path.join(".claude", "skills"), path.join(".codex", "skills")]) fs.mkdirSync(path.join(repo, marker), { recursive: true });
+    for (const marker of [".git", path.join(".claude", "skills"), path.join(".agents", "skills")]) fs.mkdirSync(path.join(repo, marker), { recursive: true });
   }
   const home = path.join(root, "home");
   fs.mkdirSync(home, { recursive: true });

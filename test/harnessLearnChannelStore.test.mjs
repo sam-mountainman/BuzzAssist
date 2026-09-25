@@ -58,9 +58,9 @@ function tempRoot(t) {
 /** 本物の CLI を一時リポジトリで動かす（harnessLearnPackFirst.test.mjs と同じ写し方）。 */
 function stageRepo(root, { channelLearning } = {}) {
   const repo = path.join(root, "repo");
-  // 開発用チェックアウトの印（.git・.claude/skills・.codex/skills）。これが無いと配布された写しと
+  // 開発用チェックアウトの印（.git・.claude/skills・.agents/skills）。これが無いと配布された写しと
   // 判定され、学習の状態が ~/.buzzassist/learning/ へ向く（lib/harnessLearningState.mjs）。
-  for (const marker of [".git", path.join(".claude", "skills"), path.join(".codex", "skills")]) {
+  for (const marker of [".git", path.join(".claude", "skills"), path.join(".agents", "skills")]) {
     fs.mkdirSync(path.join(repo, marker), { recursive: true });
   }
   write(path.join(repo, "docs", "learning", "targets.json"), `${JSON.stringify({ targets: TARGETS }, null, 2)}\n`);

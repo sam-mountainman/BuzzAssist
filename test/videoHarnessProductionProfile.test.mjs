@@ -123,7 +123,7 @@ test("開発用チェックアウトでは、承認前の正本スキルでも�
   );
 });
 
-test("写しの種類は既定で repoRoot から決まる（.git と .claude/skills と .codex/skills が揃えば開発用）", async (t) => {
+test("写しの種類は既定で repoRoot から決まる（.git と .claude/skills と .agents/skills が揃えば開発用）", async (t) => {
   const tmp = realpathSync(mkdtempSync(join(tmpdir(), "skill-approval-checkout-")));
   t.after(() => rmSync(tmp, { recursive: true, force: true }));
   // 配布された写しの形: 正本スキルと在庫はあるが、.git もホストのアダプターも無い。
@@ -143,8 +143,13 @@ test("写しの種類は既定で repoRoot から決まる（.git と .claude/sk
     /has no human approval/u,
     "配布された写しの既定は止める",
   );
+  // 配布された写しは .agents/skills を持つ（setup-agents は .agents を写す）。.git だけ、または外した
+  // .codex/skills が残っているだけでは開発用にしない。Claude Code が正本へ届く .claude/skills が要る。
+  mkdirSync(join(copy, ".git"), { recursive: true });
+  mkdirSync(join(copy, ".codex", "skills"), { recursive: true });
+  assert.equal(skillApprovalCheckout(copy), "distributed", ".git と古い .codex/skills だけでは開発用にしない");
   // 同じ中身に開発用チェックアウトの印を置くと、既定で止めずに記録する。
-  for (const marker of [".git", join(".claude", "skills"), join(".codex", "skills")]) mkdirSync(join(copy, marker), { recursive: true });
+  for (const marker of [".git", join(".claude", "skills"), join(".agents", "skills")]) mkdirSync(join(copy, marker), { recursive: true });
   assert.equal(skillApprovalCheckout(copy), "development");
   const profile = await assertVideoHarnessProductionProfile({ job: koyaJob(copy), repoRoot: copy, loadPolicy: copiedPolicy, env: {} });
   assert.equal(profile.skillApproval.checkout, "development");

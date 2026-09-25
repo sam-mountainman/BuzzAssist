@@ -98,7 +98,7 @@ function stagePluginCopy(root, { version = "9.9.1", development = false } = {}) 
     write(path.join(base, "references", "learned-auto.md"), SHIPPED_OVERLAY);
   }
   if (development) {
-    for (const marker of [".git", path.join(".claude", "skills"), path.join(".codex", "skills")]) fs.mkdirSync(path.join(root, marker), { recursive: true });
+    for (const marker of [".git", path.join(".claude", "skills"), path.join(".agents", "skills")]) fs.mkdirSync(path.join(root, marker), { recursive: true });
   }
   return root;
 }

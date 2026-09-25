@@ -96,7 +96,7 @@ async function stageDevelopmentCheckout(root, { vocabulary }) {
   const receiptModule = stageScript(repo, "lib/harnessReceiptLearning.mjs");
   write(path.join(repo, "docs", "learning", "targets.json"), `${JSON.stringify({ targets: TARGETS }, null, 2)}\n`);
   write(path.join(repo, ".agents", "skills", SKILL, "SKILL.md"), "# 合成スキル\n");
-  for (const marker of [".git", path.join(".claude", "skills"), path.join(".codex", "skills")]) fs.mkdirSync(path.join(repo, marker), { recursive: true });
+  for (const marker of [".git", path.join(".claude", "skills"), path.join(".agents", "skills")]) fs.mkdirSync(path.join(repo, marker), { recursive: true });
   if (vocabulary) writeVocabulary(repo);
   const proposal = syntheticProposal("合成の手順では置き場を先に確かめる");
   write(path.join(repo, "docs", "learning", "proposals.jsonl"), `${JSON.stringify(proposal)}\n`);

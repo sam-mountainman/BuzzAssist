@@ -2,7 +2,7 @@
 //
 // 学習の置き場は試験ごとの一時ディレクトリ（BUZZASSIST_LEARNING_DIR）へ向け、本物の
 // ~/.buzzassist には書かない。capture は一時ディレクトリに写した開発用チェックアウト
-// （.git と .claude/skills と .codex/skills の印を置いたもの）から動かし、本物の台帳にも書かない。
+// （.git と .claude/skills と .agents/skills の印を置いたもの）から動かし、本物の台帳にも書かない。
 // 会話 ID・発言・人名はすべて合成。
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -92,7 +92,7 @@ function stageDevelopmentCheckout(root) {
     },
   }, null, 2)}\n`);
   write(path.join(repo, ".agents", "skills", SKILL, "SKILL.md"), "# 合成スキル\n");
-  for (const marker of [".git", path.join(".claude", "skills"), path.join(".codex", "skills")]) fs.mkdirSync(path.join(repo, marker), { recursive: true });
+  for (const marker of [".git", path.join(".claude", "skills"), path.join(".agents", "skills")]) fs.mkdirSync(path.join(repo, marker), { recursive: true });
   return repo;
 }
 

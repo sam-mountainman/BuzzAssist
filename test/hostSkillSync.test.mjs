@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { compareHostSkillSync, probeHostSkillSync, resolveHostPluginInstalls } from "../lib/hostSkillSync.mjs";
+import { compareHostSkillSync, probeHostSkillSync, readsCanonicalDirectly, resolveHostPluginInstalls } from "../lib/hostSkillSync.mjs";
 
 const CANONICAL = "---\nname: alpha\ndescription: 試験用\n---\n\n正本は ../../../lib/x.mjs を参照する。\n";
 const SHIPPED = CANONICAL.replaceAll("../../../", "../../");
@@ -115,17 +115,47 @@ test("束縛外のスキルのずれと、ハーネス未指定の確認では�
   await rm(base, { recursive: true, force: true });
 });
 
-test("開発用チェックアウトではアダプターが正本を直接読むので、ずれは知らせるだけで止めない", async () => {
+test("開発用チェックアウトではホストが正本を直接読むので、ずれは知らせるだけで止めない", async () => {
   const { base, repo, home } = await fixture();
+  // .codex/skills のアダプターは外した（Codex はリポジトリの .agents/skills を直接読む）。
+  // 印は .git と .claude/skills と .agents/skills（fixture が正本として置いている）の3つ。
   await mkdir(join(repo, ".git"), { recursive: true });
   await mkdir(join(repo, ".claude", "skills"), { recursive: true });
-  await mkdir(join(repo, ".codex", "skills"), { recursive: true });
   await installClaude(home, "0.1.9", { skill: "古い指示\n" });
   const verdict = probeHostSkillSync({ repoRoot: repo, homeDir: home, declaration: DECLARATION });
   assert.equal(verdict.developmentCheckout, true);
   assert.equal(verdict.ok, false, "ずれ自体は報告すること");
   assert.equal(verdict.required, false, "開発用チェックアウトでは本番を止めない");
   assert.match(verdict.detail, /正本を直接読む/u);
+  await rm(base, { recursive: true, force: true });
+});
+
+test("開発用チェックアウトの判定は .git・.claude/skills・.agents/skills の3つが揃ったときだけ（.codex/skills は見ない）", async () => {
+  const base = await mkdtemp(join(tmpdir(), "host-skill-sync-checkout-"));
+  const markers = {
+    git: [".git"],
+    claude: [".claude", "skills"],
+    canonical: [".agents", "skills"],
+    codexAdapter: [".codex", "skills"],
+  };
+  const stage = async (name, present) => {
+    const root = join(base, name);
+    await mkdir(root, { recursive: true });
+    for (const key of present) await mkdir(join(root, ...markers[key]), { recursive: true });
+    return root;
+  };
+  // 配布された写しの形（setup-agents は .agents を写し、.git も .claude も写さない）。
+  assert.equal(readsCanonicalDirectly(await stage("shipped", ["canonical"])), false);
+  // npm の tarball を展開した形（.claude/skills と .agents/skills はあるが .git が無い）。
+  assert.equal(readsCanonicalDirectly(await stage("tarball", ["claude", "canonical"])), false);
+  // 開発用チェックアウト。.codex/skills が無くても開発用。
+  assert.equal(readsCanonicalDirectly(await stage("checkout", ["git", "claude", "canonical"])), true);
+  // 外す前の古いチェックアウト（.codex/skills が残る）でも同じ判定。
+  assert.equal(readsCanonicalDirectly(await stage("legacy-checkout", ["git", "claude", "canonical", "codexAdapter"])), true);
+  // どれか1つ欠ければ開発用にしない。.codex/skills は .claude/skills・.agents/skills の代わりにならない。
+  assert.equal(readsCanonicalDirectly(await stage("no-claude", ["git", "canonical", "codexAdapter"])), false);
+  assert.equal(readsCanonicalDirectly(await stage("no-canonical", ["git", "claude", "codexAdapter"])), false);
+  assert.equal(readsCanonicalDirectly(await stage("no-git", ["claude", "canonical", "codexAdapter"])), false);
   await rm(base, { recursive: true, force: true });
 });
 
