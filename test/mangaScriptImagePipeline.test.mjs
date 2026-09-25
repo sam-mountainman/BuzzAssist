@@ -1347,3 +1347,136 @@ test("eye-open planning stops instead of guessing a subject, a variant, or a mis
     /unknown utterance: cut-09-u01/u,
   );
 });
+
+// --- 番組の画風（artStyle）と visual profile を本編と環境アトラスへ -------------------
+
+// 合成の画風宣言。実在チャンネルの画風ではない。
+const FIXTURE_ART_STYLE = Object.freeze({
+  id: "fixture-flat-2d-manga-v1",
+  medium: "clean 2D manga artwork, drawn by hand",
+  sharedIdiom: ["Draw this as clean 2D manga artwork. It is a drawing, never a photograph and never a 3D render."],
+  characterIdiom: ["a smooth simple face"],
+  environmentIdiom: ["Paint the location in the same drawn world as the characters, with no style seam."],
+  forbidden: ["photographic or photorealistic rendering of any kind"],
+});
+const FIXTURE_VISUAL_PROFILE = Object.freeze({
+  id: "fixture-visual-profile-v1",
+  stylePrompt: "Fixture style: thin even linework and flat cel fills.",
+  compositionPrompt: "Fixture composition: readable foreground subject.",
+  continuityPrompt: "Fixture continuity: keep the drawn world consistent.",
+  negativePrompt: "fixture-forbidden photographic texture",
+  referenceImages: [],
+});
+const STYLE_SCRIPT = "【カット1：朝の自宅】\nナレーション：朝の台所で、ふたりは黙っていた。\n美緒：もう行くね。\n【カット2：駅前】\n玲司：待ってくれ！";
+
+function stylePlan(root, channelStyle) {
+  return createMangaScriptImagePlan({
+    scriptText: STYLE_SCRIPT,
+    episodeId: "channel-style-test",
+    registry: {
+      characters: [
+        { id: "mio", name: "美緒", kind: "character", status: "approved", referenceImagePaths: [] },
+        { id: "reiji", name: "玲司", kind: "character", status: "approved", referenceImagePaths: [] },
+      ],
+    },
+    canvasDir: root,
+    assetDir: join(root, "assets"),
+    ...(channelStyle === undefined ? {} : { channelStyle }),
+  });
+}
+
+test("番組の画風と visual profile が、本編の画像と未登録の場所の環境アトラスのプロンプト冒頭に入り、QA も画風を見る", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-channel-style-"));
+  const plain = stylePlan(root);
+  const styled = stylePlan(root, { artStyle: FIXTURE_ART_STYLE, visualProfile: FIXTURE_VISUAL_PROFILE });
+  const paidKinds = new Set(["scene-image", "split-panel", "environment-sheet"]);
+  const styledPaid = styled.jobs.filter((job) => paidKinds.has(job.kind));
+  assert.ok(styledPaid.some((job) => job.kind === "environment-sheet"), "未登録の場所は環境アトラスを作る");
+  assert.ok(styledPaid.some((job) => job.kind !== "environment-sheet"), "本編の画像がある");
+  for (const job of styledPaid) {
+    assert.ok(job.prompt.startsWith(`CHANNEL ART STYLE (${FIXTURE_ART_STYLE.id})`), `${job.id}: 画風の宣言は冒頭に置く`);
+    assert.ok(job.prompt.includes(FIXTURE_ART_STYLE.medium), `${job.id}: 画材の一文が入る`);
+    assert.ok(job.prompt.includes(`NEVER: ${FIXTURE_ART_STYLE.forbidden[0]}`), `${job.id}: 禁止事項が入る`);
+    assert.deepEqual(job.channelArtStyle, { id: FIXTURE_ART_STYLE.id, medium: FIXTURE_ART_STYLE.medium });
+    const qa = mangaImageQaVisualPrompt({ job, outputPath: job.outputPath, technical: { pass: true, issues: [] }, attempt: 0 });
+    assert.match(qa, /Channel art-style contract \(fixture-flat-2d-manga-v1\)/u, `${job.id}: QA が写真風を不合格にする`);
+  }
+  const atlas = styledPaid.find((job) => job.kind === "environment-sheet");
+  assert.ok(atlas.prompt.includes(FIXTURE_ART_STYLE.environmentIdiom[0]));
+  assert.equal(atlas.prompt.includes("Characters are drawn with"), false, "人物なしの板には人物の描き方を渡さない");
+  assert.match(atlas.prompt, /CHANNEL VISUAL STYLE LOCK \[fixture-visual-profile-v1\] — drawing style only for this environment atlas/u);
+  assert.ok(atlas.prompt.includes(FIXTURE_VISUAL_PROFILE.stylePrompt));
+  assert.equal(atlas.prompt.includes(FIXTURE_VISUAL_PROFILE.compositionPrompt), false, "アトラスに本編のコマ運びは渡さない");
+  const scene = styledPaid.find((job) => job.kind !== "environment-sheet");
+  assert.ok(scene.prompt.includes("Characters are drawn with a smooth simple face."));
+  assert.match(scene.prompt, /CHANNEL VISUAL STYLE LOCK \[fixture-visual-profile-v1\] — mandatory for this frame/u);
+  assert.ok(scene.prompt.includes(FIXTURE_VISUAL_PROFILE.stylePrompt));
+  assert.deepEqual(styled.channelStyle, { artStyleId: FIXTURE_ART_STYLE.id, visualProfileId: FIXTURE_VISUAL_PROFILE.id });
+
+  // 宣言が無い経路は従来のまま（文面も入力 hash も、計画の形も変えない）。
+  for (const job of plain.jobs) {
+    assert.equal(String(job.prompt || "").includes("CHANNEL ART STYLE"), false);
+    assert.equal("channelArtStyle" in job, false);
+  }
+  assert.equal("channelStyle" in plain, false);
+  for (const empty of [null, {}, { artStyle: null, visualProfile: null }]) {
+    assert.deepEqual(stylePlan(root, empty).jobs.map((job) => job.inputHash), plain.jobs.map((job) => job.inputHash));
+  }
+  // 画風の無い宣言は受けない（画材の一文が無いと写真へ倒れる）。
+  assert.throws(() => stylePlan(root, { artStyle: { id: "no-medium" } }), /medium/u);
+});
+
+test("画風を入れると入力 hash が変わり、画風無しの完成画像を黙って再利用せず、同じ画風のあいだは再利用する", async () => {
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-channel-style-hash-"));
+  const plain = stylePlan(root);
+  const styledA = stylePlan(root, { artStyle: FIXTURE_ART_STYLE, visualProfile: FIXTURE_VISUAL_PROFILE });
+  const styledAgain = stylePlan(root, { artStyle: structuredClone(FIXTURE_ART_STYLE), visualProfile: structuredClone(FIXTURE_VISUAL_PROFILE) });
+  const styledB = stylePlan(root, { artStyle: { ...FIXTURE_ART_STYLE, id: "fixture-flat-2d-manga-v2", medium: "clean 2D manga artwork with ink hatching" }, visualProfile: FIXTURE_VISUAL_PROFILE });
+  const artOnly = stylePlan(root, { artStyle: FIXTURE_ART_STYLE });
+  const paid = (plan) => plan.jobs.filter((job) => job.imageCount === 1);
+  const hashes = (plan) => Object.fromEntries(plan.jobs.map((job) => [job.id, job.inputHash]));
+  assert.deepEqual(hashes(styledAgain), hashes(styledA), "同じ宣言からは同じ hash（再開で払い直さない）");
+  for (const job of paid(styledA)) {
+    assert.notEqual(hashes(plain)[job.id], job.inputHash, `${job.id}: 画風無しと画風ありは別の入力`);
+    assert.notEqual(hashes(styledB)[job.id], job.inputHash, `${job.id}: 画風を変えれば別の入力`);
+    assert.notEqual(hashes(artOnly)[job.id], job.inputHash, `${job.id}: visual profile の文面も入力に入る`);
+  }
+  // 決定論の合成（プレート）は画風に依らない。
+  for (const job of plain.jobs.filter((entry) => entry.kind === "editorial-plate")) {
+    assert.equal(hashes(styledA)[job.id], job.inputHash);
+  }
+
+  const png = renderEditorialPlatePng("pastel-sky", 320, 180);
+  let generated = 0;
+  const generateImage = async (input) => {
+    generated += 1;
+    return { buffer: png, fileName: input.fileName, mimeType: "image/png" };
+  };
+  const visualQa = async () => ({ pass: true, issues: [] });
+  const run = (plan) => executeMangaScriptImagePlan(plan, { concurrency: 2, maxRetries: 0, generateImage, visualQa, autoSemanticQa: false });
+  const first = await run(plain);
+  assert.equal(first.ledger.status, "complete");
+  assert.equal(generated, paid(plain).length);
+  const afterPlain = generated;
+  const styledRun = await run(styledA);
+  assert.equal(styledRun.ledger.status, "complete");
+  assert.equal(generated - afterPlain, paid(styledA).length, "画風無しで作った画像は、画風ありの計画で作り直す（有料の画像の枚数ちょうど）");
+  const afterStyled = generated;
+  const again = await run(styledAgain);
+  assert.equal(again.ledger.status, "complete");
+  assert.equal(generated, afterStyled, "同じ画風の再開では1枚も払い直さない");
+});
+
+test("Koya の本編の画風は show bible の artStyle から作り、宣言が無ければ有料生成の前に止める", async () => {
+  const { resolveKoyaSceneChannelStyle } = await import("../lib/koyaMangaProduction.mjs");
+  const showBible = JSON.parse(await readFile(new URL("./fixtures/channel-pack/config/koya-show-bible.json", import.meta.url), "utf8"));
+  const root = await mkdtemp(join(tmpdir(), "buzzassist-koya-channel-style-"));
+  const channelStyle = await resolveKoyaSceneChannelStyle({ projectDir: root, canvasDir: join(root, "canvas"), showBible });
+  assert.equal(channelStyle.artStyle.id, showBible.artStyle.id);
+  assert.equal(channelStyle.artStyle.medium, showBible.artStyle.medium);
+  assert.equal("styleReference" in channelStyle.artStyle, false, "文面に出ない項目は入力に入れない");
+  assert.equal(channelStyle.visualProfile, null, "profile の無い作業場では profile の文面を足さない");
+  const withoutStyle = structuredClone(showBible);
+  delete withoutStyle.artStyle;
+  await assert.rejects(() => resolveKoyaSceneChannelStyle({ projectDir: root, canvasDir: join(root, "canvas"), showBible: withoutStyle }), /artStyle is required/u);
+});

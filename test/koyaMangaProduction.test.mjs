@@ -1439,6 +1439,13 @@ test("Koya production planning writes a contract snapshot and resumable state wi
   assert.ok(state.generatorProvenance.contextId);
   assert.deepEqual(result.plan.production.channelDirectives.knownIncidents, ["hard-gate:seed-rule:seed failure"]);
   assert.equal(result.plan.production.incidentLedger.promotedIncidentCount, 1);
+  // 番組の画風が本編の画像プロンプトの冒頭に入り、計画にどの宣言で作ったかが残る。
+  const artStyleId = result.channelStyle.artStyle.id;
+  assert.ok(artStyleId);
+  assert.equal(result.plan.production.channelStyle.artStyleId, artStyleId);
+  const paidJobs = result.plan.jobs.filter((job) => job.imageCount === 1);
+  assert.ok(paidJobs.length > 0);
+  for (const job of paidJobs) assert.ok(job.prompt.startsWith(`CHANNEL ART STYLE (${artStyleId})`), `${job.id}: 画風が冒頭に無い`);
 });
 
 test("Koya planning refuses to overwrite an episode id owned by another script", async (t) => {
