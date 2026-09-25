@@ -57,16 +57,24 @@ test("別のセッションが枠を持っている間は待ち、放された�
   withEnv(t, { BUZZASSIST_STATE_DIR: join(root, "state"), BUZZASSIST_MACHINE_SLOTS_PAID_SPEECH: "1" });
   const held = tryAcquireMachineSlot("paid-speech", { label: "another session" });
   assert.ok(held);
-  const releasedAt = { ms: 0 };
-  setTimeout(() => { releasedAt.ms = Date.now(); releaseMachineSlot(held); }, 700);
-  const startedAt = Date.now();
-  const summary = await executePlan({ jobs: [{ id: "waits", ...sleeper(50), slots: ["paid-speech"] }] }, {
+  // 「放される前に走っていない」を、試験の時計と計画の中の相対時刻（起点が違う）の比較で見ていた。
+  // 負荷の高い端末では計画の起点が試験の時計より遅れ、正しく待っていても落ちた（4 本並列で1回）。
+  // 放す直前に目印を置き、ジョブ自身が走った瞬間に目印を見る（見えたなら放された後に走った）。
+  const releasedMarker = join(root, "released");
+  setTimeout(() => { writeFileSync(releasedMarker, "released\n"); releaseMachineSlot(held); }, 700);
+  const summary = await executePlan({
+    jobs: [{
+      id: "waits",
+      command: process.execPath,
+      args: ["-e", `process.stdout.write(require("node:fs").existsSync(${JSON.stringify(releasedMarker)}) ? "after-release" : "before-release")`],
+      slots: ["paid-speech"],
+    }],
+  }, {
     concurrency: 1,
     logDir: join(root, "logs"),
   });
   assert.equal(summary.ok, true);
-  assert.ok(releasedAt.ms > 0, "枠が放される前に計画が終わった（待っていない）");
-  assert.ok(startedAt + summary.jobs[0].startedAtMs >= releasedAt.ms, "枠が放される前に走った");
+  assert.equal(readFileSync(summary.jobs[0].stdoutPath, "utf8"), "after-release", "枠が放される前に走った");
 });
 
 test("取った枠は子へ渡り、子の中の有料呼び出しは同じ枠を使う（親が持ったまま子が待ち続けない）", { timeout: 60_000 }, async (t) => {
