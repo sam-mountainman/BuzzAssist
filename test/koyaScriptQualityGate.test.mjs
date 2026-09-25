@@ -28,6 +28,7 @@ import {
   koyaScriptTextSha256,
   validateKoyaScriptQualityGateContract,
 } from "../lib/koyaScriptQualityGatePolicy.mjs";
+import { deriveKoyaProgressDag } from "../lib/koyaMangaProgressSnapshot.mjs";
 import { planOnlyPreflight } from "../lib/videoHarnessService.mjs";
 import { executeVideoHarnessAdapter } from "../lib/videoHarnessAdapters.mjs";
 import { SCRIPT_QUALITY_WORK_DIR_UNBOUND_CODE } from "../lib/scriptQualityUseGate.mjs";
@@ -269,4 +270,23 @@ test("plan-only の漫画の Job も、同じ理由コードと次のコマン�
   await acceptScriptForTests(fixture.scriptPath);
   const accepted = await planOnlyPreflight({ job: job(KOYA_SCRIPT_QUALITY_IN_FORCE_SINCE), scriptPath: fixture.scriptPath });
   assert.deepEqual([accepted.ok, accepted.blockers, accepted.scriptQuality.acceptedBy], [true, [], "human"]);
+});
+
+test("Canvas の工程 DAG に「台本の確認」を出し、答えの状態（人待ち・合格）を載せる", () => {
+  const titles = (dag) => Object.fromEntries(dag.nodes.map((node) => [node.id, node]));
+  const waiting = titles(deriveKoyaProgressDag(
+    { status: "awaiting-human-review", stages: [{ id: "doctor", status: "pass" }], adapterResult: { status: KOYA_SCRIPT_QUALITY_PAUSE_STATUS } },
+    { state: { scriptQuality: { pass: false, reasonCode: "script-quality-loop-not-started" } } },
+  ));
+  assert.equal(waiting["script-quality"].title, "台本の確認");
+  assert.equal(waiting["script-quality"].status, "awaiting-human-review");
+  assert.match(waiting["script-quality"].detail, /script-quality-loop-not-started/u);
+  assert.equal(waiting.images.status, "pending");
+  assert.ok(waiting.images.needs.includes("script-quality"));
+  const accepted = titles(deriveKoyaProgressDag(
+    { status: "running", stages: [{ id: "doctor", status: "pass" }] },
+    { state: { status: "planned", currentStage: "images", scriptQuality: { pass: true, acceptedBy: "human", reasonCode: "script-quality-human-accepted" } } },
+  ));
+  assert.equal(accepted["script-quality"].status, "pass");
+  assert.equal(accepted["script-quality"].detail, "人がそのまま使うと認めた台本");
 });

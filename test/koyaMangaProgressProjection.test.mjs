@@ -610,7 +610,7 @@ test("作業場ができる前の Job でも工程の DAG だけを出し、何�
     ],
   });
   const snapshot = await readKoyaMangaProgressSnapshot(job);
-  assert.equal(snapshot.dag.nodes.length, 12);
+  assert.equal(snapshot.dag.nodes.length, 13, "台本の確認（制作契約 v56 から）を含む");
   assert.ok(snapshot.dag.nodes.every((node) => node.status === "pending"));
   assert.ok(snapshot.sections.every((section) => section.items.length === 1 && section.items[0].key === "empty"));
   const result = await projectCanvasRunProgress({ projectDir }, snapshot);
