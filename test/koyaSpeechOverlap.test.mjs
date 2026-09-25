@@ -281,7 +281,10 @@ async function fullRun(projectDir, { speechOverlap, imageMs = 120, speechMs = 10
       order.push("speech");
       adoption = options.adoptOverlappedSpeech || null;
       // 取り込みが無い（直列の）ときは、ここで音声を作るのと同じ時間がかかる。
-      if (!adoption) await sleep(speechMs);
+      if (!adoption) {
+        order.push("speech:synthesize");
+        await sleep(speechMs);
+      }
       return { waiting: false, partial: false, report: { mediaJobs: [speechJob] }, overlapAdoption: adoption ? { adoptedCutIds: ["cut-01"] } : undefined };
     },
     substituteVideos: async () => ({}),
@@ -306,7 +309,7 @@ test("full runs the images and the speech at the same time, renders only after b
   }
   assert.equal(serial.adoption, null);
   assert.equal(serial.result.payload.speechOverlap, undefined);
-  assert.deepEqual(serial.order, ["images:start", "images:end", "prepare", "speech", "render"]);
+  assert.deepEqual(serial.order, ["images:start", "images:end", "prepare", "speech", "speech:synthesize", "render"]);
   assert.deepEqual(overlapped.adoption, { manifestPath: "/fixture/definition.json", reportPath: "/fixture/overlap-report.json" });
   assert.ok(overlapped.order.indexOf("overlap:start") < overlapped.order.indexOf("images:end"), "音声は画の途中で始まる");
   assert.ok(overlapped.order.indexOf("render") > overlapped.order.indexOf("overlap:end"), "描くのは両方が揃ってから");
@@ -319,7 +322,17 @@ test("full runs the images and the speech at the same time, renders only after b
   const speechOverlap = stages.find((row) => row.id === "speech-overlap");
   assert.ok(Date.parse(speechOverlap.startedAt) < Date.parse(images.finishedAt), "記録の上でも音声と画が重なっている");
   assert.equal(speechOverlap.overlapsWith, "images");
-  assert.ok(overlapped.elapsedMs < serial.elapsedMs, `重ねた方が短い（serial=${serial.elapsedMs}ms overlapped=${overlapped.elapsedMs}ms）`);
+  // 重ねると短くなる理由は、音声を作る工程が画の後ろに直列で並ばないこと。それを事象で確かめる:
+  // 直列の回は画が終わってから音声を作り、重ねた回は画の最中に作った音声を取り込むだけで作り直さない。
+  // 壁時計の比較（重ねた方が短い）は、端末に負荷がかかっていると 100ms の差がぶれで埋もれるので、
+  // 合否にせず記録だけにする。
+  const synthesizedAfterImages = (run) => run.order.slice(run.order.indexOf("images:end")).filter((step) => step === "speech:synthesize").length;
+  assert.equal(synthesizedAfterImages(serial), 1, "直列の回は画の後に音声を作る");
+  assert.equal(synthesizedAfterImages(overlapped), 0, "重ねた回は画の後に音声を作り直さない");
+  assert.equal(overlapped.order.includes("speech:synthesize"), false);
+  if (!(overlapped.elapsedMs < serial.elapsedMs)) {
+    t.diagnostic(`重ねた方が短くならなかった（serial=${serial.elapsedMs}ms overlapped=${overlapped.elapsedMs}ms）: 端末の負荷で壁時計がぶれた`);
+  }
 });
 
 test("when the images stop, full still waits for the overlapped speech and reports what it paid for", async (t) => {
