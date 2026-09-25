@@ -66,7 +66,7 @@ function usage() {
     "  必須にするかはチャンネルの台帳の strategy.requireBrief で決まる（台帳のチャンネルでなければ合否で止めない）。",
     "  ブリーフのファイルの場所は Job の metadata に残り、resume は start のときの SHA と今のファイルの SHA を比べて、",
     "  違えば strategy-brief-changed-since-start（無ければ strategy-brief-missing-at-resume）で止める（新しい Job として start する）。",
-    "resume --job-id ID --project-dir DIR --confirmed [--reviewer-trust-path JSON] [--retry-failed-images] [--host-model ID]",
+    "resume --job-id ID --project-dir DIR --confirmed [--reviewer-trust-path JSON] [--retry-failed-images] [--finalize-after-update] [--host-model ID]",
     "status --job-id ID --project-dir DIR",
     "cancel --job-id ID --project-dir DIR",
     "list   --project-dir DIR",
@@ -96,6 +96,10 @@ function usage() {
     "",
     "--reviewer-trust-path は MCP の run_video_harness / resume_video_harness_job の reviewerTrustPath と同じ照合用引数です。",
     "--retry-failed-images は、失敗した画像だけを同じ Job のまま作り直します（完成済みは再課金しない）。Job の識別子には入らず、使った事実は台帳と Receipt に残ります。",
+    "--finalize-after-update（resume）: BuzzAssist の更新で canonical-identity-drift に止まった Job を、入力（台本・Channel Pack・options・",
+    "  取り込みの記録）が同じなら、作り直さず・新しい有料の呼び出しをせずに、Job に固定した契約の版で確定までやり直します。",
+    "  新しい有料の呼び出しが1件でも要れば送る前に止め（finalize-after-update-paid-call-required）、入力が変わっていれば",
+    "  今までどおり止めます。どちらも新しい Job を作ってください。Job ID は変わらず、RunReceipt の codeIdentity に残ります。",
     "  reviewer 信頼リストの唯一の信頼アンカーは運営者が実行側に設定する環境変数 BUZZASSIST_REVIEWER_TRUST",
     "  （または BUZZASSIST_REVIEWER_TRUST_JSON。旧 BUZZASSIST_KOYA_REVIEWER_TRUST(_JSON) は互換で読み、新旧不一致は env-ambiguous）。",
     "  明示 path の内容が env と一致しなければ reviewer-trust-conflict、env 未設定なら明示 path があっても",
@@ -244,6 +248,7 @@ async function main() {
         confirmed: true,
         reviewerTrustPath: reviewerTrustPathFrom(args),
         retryFailedImages: args.retryFailedImages === true,
+        finalizeAfterUpdate: args.finalizeAfterUpdate === true,
         invocation: cliHostInvocation(args),
       });
       print(result);

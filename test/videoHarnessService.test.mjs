@@ -580,3 +580,29 @@ test("Koya の start は、後から足せない必須引数が欠けていれ�
   const narrated = await service.start({ ...base, harnessId: "narrated-story-video", options: {} });
   assert.equal(narrated.execution.planOnly, true);
 });
+
+test("resume の finalizeAfterUpdate は Job 層へ渡し、計画時のスキルの SHA では前もって止めず、画像の作り直しとは併用させない", async () => {
+  const runs = [];
+  const profiled = [];
+  const service = createVideoHarnessService(runtimeFixture({
+    runJob: async (input) => {
+      runs.push(input);
+      return fixtureJob({ id: input.jobId, status: "completed" });
+    },
+    productionProfile: async ({ job }) => { profiled.push(job?.id); return {}; },
+  }));
+  const args = { projectDir: "/tmp/video-service-project", jobId: "video-fixture-0123456789abcdef", confirmed: true };
+
+  await service.resume({ ...args, finalizeAfterUpdate: true });
+  assert.equal(runs[0].finalizeAfterUpdate, true, "Job 層に付け替えと再利用だけの実行を頼む");
+  assert.equal(profiled.length, 0, "計画時の Job のスキルの SHA では確かめない（更新で変わっている。Job 層が今のスキルで確かめる）");
+  assert.equal(runs[0].options, undefined, "resume は options を作らない（identity を変えない）");
+
+  await service.resume(args);
+  assert.equal("finalizeAfterUpdate" in runs[1], false, "指定が無ければ渡さない");
+  assert.equal(profiled.length, 1, "ふつうの resume は今までどおり前もって確かめる");
+
+  await assert.rejects(service.resume({ ...args, finalizeAfterUpdate: true, retryFailedImages: true }), /一緒に使えない/u);
+  await assert.rejects(service.resume({ ...args, confirmed: false, finalizeAfterUpdate: true }), /confirmed=true/u);
+  assert.equal(runs.length, 2);
+});

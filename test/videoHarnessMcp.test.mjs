@@ -79,7 +79,11 @@ test("generic MCP definitions expose plan/run, get/list/cancel/resume without se
   ]);
   const resume = definitions.find((definition) => definition.name === TOOL_RESUME_VIDEO_HARNESS_JOB);
   assert.deepEqual(resume.inputSchema.required, ["jobId", "confirmed"]);
-  assert.deepEqual(Object.keys(resume.inputSchema.properties).sort(), ["confirmed", "hostModel", "jobId", "projectDir", "retryFailedImages", "reviewerTrustPath"]);
+  assert.deepEqual(Object.keys(resume.inputSchema.properties).sort(), ["confirmed", "finalizeAfterUpdate", "hostModel", "jobId", "projectDir", "retryFailedImages", "reviewerTrustPath"]);
+  assert.equal(resume.inputSchema.properties.finalizeAfterUpdate.type, "boolean");
+  assert.match(resume.inputSchema.properties.finalizeAfterUpdate.description, /--finalize-after-update/u, "CLI と同じ引数だと説明する");
+  assert.match(resume.inputSchema.properties.finalizeAfterUpdate.description, /finalize-after-update-paid-call-required/u, "新しい有料の呼び出しは送る前に止まると説明する");
+  assert.doesNotMatch(JSON.stringify(run.inputSchema.properties), /finalizeAfterUpdate/u, "start には無い（実行文脈は resume だけ）");
   assert.equal(resume.inputSchema.properties.retryFailedImages.type, "boolean");
   assert.match(resume.inputSchema.properties.retryFailedImages.description, /re-billing/u, "再課金の事実が記録されると説明する");
   assert.match(resume.inputSchema.properties.retryFailedImages.description, /--retry-failed-images/u, "CLI と同じ引数だと説明する");
@@ -173,7 +177,7 @@ test("MCP handler is a thin dispatcher and preserves the service result envelope
   await handleVideoHarnessToolCall({ name: TOOL_CANCEL_VIDEO_HARNESS_JOB, arguments: { jobId: "video-a" } }, { service, feedbackCollector, env });
   await handleVideoHarnessToolCall({
     name: TOOL_RESUME_VIDEO_HARNESS_JOB,
-    arguments: { jobId: "video-a", confirmed: true, reviewerTrustPath: "/secure/reviewer-trust.json", retryFailedImages: true },
+    arguments: { jobId: "video-a", confirmed: true, reviewerTrustPath: "/secure/reviewer-trust.json", retryFailedImages: true, finalizeAfterUpdate: false },
   }, { service, feedbackCollector, env });
   const feedback = await handleVideoHarnessToolCall({
     name: TOOL_COLLECT_VIDEO_HARNESS_FEEDBACK,
@@ -200,6 +204,7 @@ test("MCP handler is a thin dispatcher and preserves the service result envelope
   assert.equal(calls[4][1].confirmed, true);
   assert.equal(calls[4][1].reviewerTrustPath, resolve("/secure/reviewer-trust.json"), "MCP 引数の信頼リスト path は service.resume まで届く");
   assert.equal(calls[4][1].retryFailedImages, true, "retryFailedImages は service.resume へそのまま届く");
+  assert.equal(calls[4][1].finalizeAfterUpdate, false, "finalizeAfterUpdate も service.resume へそのまま届く");
   assert.equal(calls[6][1].reviewerKeyPath, "/secure/k.pem", "signoff 引数は reviewer adapter までそのまま届く");
   assert.equal(feedback.structuredContent.captured, 1);
   assert.match(feedback.content[0].text, /captured=1/u);
