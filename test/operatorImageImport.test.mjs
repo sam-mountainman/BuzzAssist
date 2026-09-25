@@ -426,3 +426,17 @@ test("取り込み: 決まった寸法の PNG にし、同じ鍵なら作り直�
   assert.equal(changed.ok, false);
   assert.deepEqual(changed.issues, ["operator-image-changed-during-import:s001"]);
 });
+
+test("品質ループの状態の置き場: 本体の規則（<作業フォルダ>/quality/assets/<工程>--<対象 id>.json）だけを受け、作業フォルダと対象 id を戻す", async () => {
+  const { assetLoopStateLocation } = await import("../lib/operatorImageImport.mjs");
+  const layout = await import("../lib/assetQualityLoop.mjs");
+  const workDir = path.resolve(tmpdir(), "asset-loop-layout-fixture");
+  const statePath = path.join(workDir, "quality", "assets", "scene-image--s001.json");
+  assert.deepEqual(assetLoopStateLocation(statePath, "scene-image", layout), { ok: true, workDir, subjectId: "s001", statePath });
+  // 別の工程の状態・置き場の外へ写した状態・空の値は、推測で読まずに理由つきで止める。
+  assert.deepEqual(assetLoopStateLocation(path.join(workDir, "quality", "assets", "character--c01.json"), "scene-image", layout), { ok: false, detail: "asset-loop-state-not-this-stage" });
+  assert.deepEqual(assetLoopStateLocation(path.join(workDir, "elsewhere", "scene-image--s001.json"), "scene-image", layout), { ok: false, detail: "asset-loop-state-path-layout" });
+  assert.deepEqual(assetLoopStateLocation("", "scene-image", layout), { ok: false, detail: "asset-loop-state-not-this-stage" });
+  // 本体の置き場の宣言が読めないときも止める（置き場の深さを推測しない）。
+  assert.equal(assetLoopStateLocation(statePath, "scene-image", { assetQualityPaths: layout.assetQualityPaths }).ok, false);
+});
