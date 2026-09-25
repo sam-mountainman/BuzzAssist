@@ -20,6 +20,9 @@ const DISTRIBUTED_RUNTIME_ENTRIES = [
   "lib/harnessDeploymentResolver.mjs",
   "scripts/harness-learn.mjs",
   "scripts/narrated-story-video.mjs",
+  // Job の決着時に提供元へ返す bundle を作って送る（lib/harnessReceiptLearning.mjs が使う瞬間に読む）。
+  "lib/harnessFeedbackOutbox.mjs",
+  "scripts/harness-feedback.mjs",
 ];
 
 function externalImports(entry) {

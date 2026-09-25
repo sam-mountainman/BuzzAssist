@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 // read-only curator reportを、本文無しの署名feedback bundleへ変換・検証する。
+// 運営者の端末から提供元へ自動で返す流れ（同意・送信待ち・送信・削除）の入口も兼ねる
+// （本体は lib/harnessFeedbackOutbox.mjs）。
 
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -7,8 +9,19 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { writeJsonAtomic } from "../lib/canvasScene.mjs";
+import { writeJsonAtomic } from "../lib/atomicJsonFile.mjs";
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
+import {
+  clearFeedbackDestination,
+  flushFeedbackOutbox,
+  listFeedbackOutbox,
+  purgeFeedbackOutbox,
+  readFeedbackDestination,
+  recordFeedbackConsent,
+  writeFeedbackDestination,
+} from "../lib/harnessFeedbackOutbox.mjs";
+import { assertLearningWriteAllowed } from "../lib/harnessLearningGuard.mjs";
+import { FEEDBACK_CONSENT_SCOPES, readFeedbackConsent, resolveLearningState } from "../lib/harnessLearningState.mjs";
 import {
   HARNESS_FEEDBACK_PUBLIC_CATALOG_PATH,
   buildHarnessFeedbackPayload,
@@ -56,7 +69,70 @@ function help() {
     "createは管理側catalog（既定: 同梱の docs/learning/proposals.public.jsonl）に無いproposalをbundleへ入れず、",
     "匿名化した草案 <outputのdir>/unregistered-candidates/<name>.unregistered-candidates.json（--unregistered-outputで変更可）へ書く。",
     "草案はuploadされず、sync --bundle-dir の対象にも入らない（bundle dir直下ではなく子dirに置くため）。ownerへは人手で渡す。",
+    "",
+    "運営者の端末から提供元へ自動で返す（既定は送らない。Job の決着時に bundle を作って送信待ちに積む）:",
+    `consent [--enable [--scopes ${FEEDBACK_CONSENT_SCOPES.join(",")}] | --disable]`,
+    "    引数なしで今の同意を表示。--enable は範囲を省くと settlements,proposals（未知の提案の文は明示したときだけ）。",
+    "    同意すると、この端末の署名鍵（Ed25519）を作り、提供元へ渡す公開鍵の置き場と keyId を表示する。",
+    "destination [--endpoint HTTPS_URL --provider-key-fingerprint ed25519:<24hex> | --clear]",
+    "    送り先（受け取る側の /v2/feedback/bundles と、受領証に署名する提供元の鍵の指紋）。未設定なら貯めるだけ。",
+    "outbox    同意・送り先・照合の可否・送信待ち・届いた件数・送らずに残した提案の件数を表示",
+    "send [--max-attempts N]    送信待ちを今送る（上限つきで再送。届いたものは二度と送らない）",
+    "purge [--sent] [--confirm]    送信待ちを消す（--confirm が無ければ件数だけ表示）。--sent は届いた控えも消す",
   ].join("\n");
+}
+
+function feedbackState() {
+  return resolveLearningState({ codeRoot: PACKAGE_ROOT, env: process.env });
+}
+
+async function runOutboxCommand(args) {
+  const state = feedbackState();
+  const now = new Date().toISOString();
+  if (args.command === "consent") {
+    if (args.enable === true && args.disable === true) throw new Error("--enable と --disable は同時に使えない。");
+    if (args.enable !== true && args.disable !== true) return { consent: readFeedbackConsent(state) };
+    assertLearningWriteAllowed(process.env, "feedback consent");
+    const scopes = typeof args.scopes === "string" ? args.scopes.split(",").map((scope) => scope.trim()).filter(Boolean) : [];
+    const recorded = recordFeedbackConsent({
+      state,
+      enabled: args.enable === true,
+      scopes,
+      via: "cli",
+      interactive: Boolean(process.stdin.isTTY && process.stdout.isTTY),
+      now,
+    });
+    return {
+      ok: true,
+      ...recorded,
+      next: recorded.signer
+        ? "公開鍵（signer.publicKeyPath）を提供元へ渡して登録してもらい、destination で送り先を設定する。送り先が無いあいだは貯めるだけ。"
+        : "以後の決着では bundle を作らない。貯まった送信待ちは purge で消せる。",
+    };
+  }
+  if (args.command === "destination") {
+    if (args.clear === true) {
+      assertLearningWriteAllowed(process.env, "feedback destination");
+      return { ok: true, ...clearFeedbackDestination({ state }) };
+    }
+    if (args.endpoint === undefined && args.providerKeyFingerprint === undefined) {
+      return { destination: readFeedbackDestination({ state, codeRoot: PACKAGE_ROOT }) };
+    }
+    required(args, ["endpoint", "providerKeyFingerprint"]);
+    assertLearningWriteAllowed(process.env, "feedback destination");
+    return { ok: true, destination: writeFeedbackDestination({ state, endpoint: args.endpoint, providerKeyFingerprint: args.providerKeyFingerprint, now }) };
+  }
+  if (args.command === "outbox") return listFeedbackOutbox({ state, codeRoot: PACKAGE_ROOT });
+  if (args.command === "send") {
+    assertLearningWriteAllowed(process.env, "feedback send");
+    const maxAttempts = args.maxAttempts === undefined ? undefined : Number(args.maxAttempts);
+    return flushFeedbackOutbox({ state, codeRoot: PACKAGE_ROOT, mode: "manual", ...(maxAttempts === undefined ? {} : { maxAttempts }) });
+  }
+  if (args.command === "purge") {
+    if (args.confirm === true) assertLearningWriteAllowed(process.env, "feedback purge");
+    return purgeFeedbackOutbox({ state, includeSent: args.sent === true, confirm: args.confirm === true });
+  }
+  return null;
 }
 
 async function main() {
@@ -66,6 +142,10 @@ async function main() {
     return;
   }
   let result;
+  if (["consent", "destination", "outbox", "send", "purge"].includes(args.command)) {
+    process.stdout.write(`${JSON.stringify(await runOutboxCommand(args), null, 2)}\n`);
+    return;
+  }
   const uploadToken = (commandArgs) => {
     const tokenEnv = typeof commandArgs.tokenEnv === "string"
       ? commandArgs.tokenEnv
