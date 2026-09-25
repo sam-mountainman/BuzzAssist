@@ -175,15 +175,15 @@ node scripts/harness-learn.mjs capture \
 - **開発用チェックアウト**（`.git` と `.claude/skills` と `.agents/skills` がある）: 従来どおり
   リポジトリの `docs/learning`（台帳は git で追跡され、commit を人が読む）
 - **運営者の端末**: Claude Code と Codex のどの版の写しから動かしても `~/.buzzassist/learning/`
-  （`BUZZASSIST_LEARNING_DIR` で上書き可）。`shared/` に共有層の台帳、`channel-packs/<id>/` に保存先を
-  宣言していないチャンネルの台帳、`receipts/index.jsonl` に Job の決着、`overlays/<skill>/learned-auto.md`
-  にこの端末の項目を置く。**写しの中に台帳を書かない**（setup・自動更新・ホストの版上げで消える）
-- 初回だけ、古い写しに残った台帳を取り込む（提案は ID と session で重複を除く。元は消さない）
-- 運営者の端末の `sync` は同梱の overlay を書き直さず、この端末の項目を印で囲んだ区画として、ホストが
-  読む全部の写しの `references/learned-auto.md` の末尾へ届ける。setup のたびにも届け直す
-- チャンネルの台帳の保存先は、運営者の配置表 harness-deployments.json（配布物の
-  `config/harness-deployments.example.json` から作る、運営者の手元だけのファイル）の `channelLearning`（運営者の私有
-  プロジェクト）か Channel Pack。配備 root とは別の設定で、共有台帳には決して解決しない
+  （`BUZZASSIST_LEARNING_DIR` で上書き可）。**写しの中に台帳を書かない**（setup・自動更新・ホストの版上げで消える）
+- **チャンネル**: 運営者の配置表の `channels` のチャンネルで作った Job（Job の `metadata.channel` に残る）の学習は、
+  そのチャンネルの保存先へ積む（`channelLearning` の宣言か、無ければ `~/.buzzassist/learning/channels/<id>`）。
+  同じハーネスのチャンネルが2つあっても学習が混ざらないようにするため。見る・直すときは `harness-learn` に
+  `--channel <id>` を付ける。付けない一覧にはチャンネルの中身は出ない（末尾に件数だけ）
+
+置き場の中の配置、古い写しからの初回の取り込み、sync の届け方、チャンネルの保存先の決め方・重なりの拒否・
+理由コードは `references/learning-store-ja.md` にある。置き場や保存先を決めるコード・配置表を直すとき、
+学習が見つからないときに読む。
 
 ## 書き込み前の検査
 
@@ -215,36 +215,15 @@ sync は Job の決着時と setup のたびにも、同じ本体で自動で走
 `--allow-missing-vocabulary` の抜け道は無い。`BUZZASSIST_LEARNING_AUTO_SYNC=0` で止まり、
 子エージェントでは走らない。
 
-**sync は検査語彙を照合できなければ止まる（fail-closed）。** overlay へ書く前に、
-Channel Pack 由来の語と、リポジトリ側にだけ置く検査語彙（`sensitive-vocabulary.digest.json`、
-配布物には入れない）で私的語を除去する。一覧が壊れている・**無い**・**鍵が無い**の
-どれでも同じく throw する——以前は「壊れていれば止まる、無ければ通る」で、語彙無しの
-overlay は私的語の残存を検出できないのに出力は「除去済み」と区別が付かなかった
-（欠落を許可として扱う型）。
+**sync は検査語彙を照合できなければ止まる（fail-closed）。** overlay へ書く前に、Channel Pack 由来の語と
+リポジトリ側にだけ置く検査語彙（`sensitive-vocabulary.digest.json`、配布物には入れない）で私的語を除去し、
+一覧が壊れている・**無い**・**鍵が無い**のどれでも止まる（無ければ通すと、私的語の残存を検出できないのに
+「除去済み」と区別が付かない）。検査語彙は**鍵つき**（HMAC）で、鍵はリポジトリの外にだけ置き、出力・
+コミットしない。共有台帳（公開される）への `capture` も、同じ語彙に一致する語——人の名前、顧客の識別子、
+端末のパス——を含めば拒否するので、発言をそのまま引用せず、何を直すべきかの形に書き直す。
 
-検査語彙は**鍵つき**（HMAC）で、鍵はリポジトリの外にだけ置く——環境変数
-`BUZZASSIST_SENSITIVE_VOCABULARY_KEY` か、`~/.buzzassist/sensitive-vocabulary.key`。
-以前の形式は公開した salt を使っていて、語彙を持たない第三者が短い名前を総当たりで
-戻せた（ひらがな・カタカナ3文字までで 28 語中 4 語が 1.9 秒）。鍵を出力・コミットしない。
-違う鍵で照合すると何にも当たらず「無検出」に見えるので、鍵の指紋が合わなければ止まる。
-
-```bash
-# 語彙を作る（平文一覧も鍵も git 追跡外、digest だけコミット）。初回は --new-key で鍵を作る
-node scripts/audit-package-tarball.mjs build-vocabulary \
-  --terms-file docs/learning/sensitive-vocabulary.local.txt \
-  --include-channel-packs --new-key \
-  --output docs/learning/sensitive-vocabulary.digest.json
-
-# 開発用途に限り、語彙無しで生成する。overlay ヘッダに「語彙照合なし」が刻まれる
-node scripts/harness-learn.mjs sync --allow-missing-vocabulary
-```
-
-共有台帳（公開される）への `capture` も、同じ語彙に一致する語——人の名前、顧客の
-識別子、端末のパス——を含めば拒否する。発言をそのまま引用せず、何を直すべきかの
-形に書き直す。鍵の無い端末では通るが、push 前の検査が同じ語彙で止める。
-
-`--allow-missing-vocabulary` で作った overlay は、ヘッダの印で読む側・監査側が見分けられる。
-CI・配布・本番端末では使わず、印の付いた overlay をそのまま release へ載せない。
+語彙の作り方・鍵の置き場・開発用の `--allow-missing-vocabulary`（CI・配布・本番端末では使わない）は
+`references/sensitive-vocabulary-ja.md` にある。sync が語彙で止まったとき、語彙を作り直すときに読む。
 
 宛先と方式は `docs/learning/targets.json` が持つ。overlay は
 **次のセッションが読む**ので、これだけで学習は成立する。
@@ -353,6 +332,8 @@ completed / failed / awaiting-human-review で決着すると、その Receipt �
   同じ Receipt からは二重に積まない。全部通った Run からは何も積まない
 - 宛先は Channel Pack 宛の非公開台帳。genre / platform へ一般化するときは、人が
   target を明示して別の提案として capture する
+- Job の `metadata.channel` があれば、そのチャンネルの保存先へ積む。保存先を決められなければ
+  `channel-learning-store-unresolved` で積まない（チャンネルの無い保存先へ落とすと、別のチャンネルと混ざる）
 - 捕捉に失敗しても Job の結果は変えない。`BUZZASSIST_LEARNING_AUTO_CAPTURE=0` で止まる
 
 ### Canvas のフィードバック
@@ -365,7 +346,8 @@ Canvas Run上の採択・却下・改善コメントは、次の投影より前�
   evidenceへ残し、同じ要素・同じrevisionの再読込をexactly-onceで処理する
 - コメントからcredential、絶対path、台本本文、Channel Pack本文を除外する
 - 既定のchannel-pack宛は、その運営者専用の非公開台帳が共有リポジトリから物理的に
-  分離されている場合だけ許す。共有pathやsymlink経由の衝突はfail-closedにする
+  分離されている場合だけ許す。共有pathやsymlink経由の衝突はfail-closedにする。
+  `metadata.channel` の Job では、channel-pack 宛の提案はそのチャンネルの保存先へ積む
 - genre/platformへ一般化する場合は、利用者がtargetとgeneralizeを明示する。推測で
   チャンネル固有情報を共有層へ持ち上げない
 - collectorが途中で落ちても、proposal追記とpending/captured journalを照合して
@@ -508,3 +490,5 @@ genre/platformへ引き上げる。
 - 開発用チェックアウトで承認前の正本のまま作った成果物を、Receipt の `skillApproval` を伏せて報告する
 - 運営者の代わりに `harness-feedback.mjs consent --enable` を打つ
 - 学習の台帳をホストの写し（plugin cache・`~/plugins/buzzassist/plugin`）の中へ書く
+- 共有層（genre: / platform:）の宛先に `--channel` を付けて捕捉する（拒否される。一般化はチャンネルを外して
+  別の提案にする）。チャンネルの学習を `--channel` なしで探して「無い」と判断する
