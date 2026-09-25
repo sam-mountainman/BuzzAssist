@@ -166,6 +166,8 @@ test("requireBrief: 合格したブリーフで start すると、台帳の作�
   assert.equal(job.options.strategyBriefSha256, brief.sha256);
   assert.deepEqual(job.metadata.strategyBrief, { path: brief.briefPath, sha256: brief.sha256 });
   assert.deepEqual(job.metadata.channel, { id: "alpha", selectedBy: "explicit" });
+  // 台本の品質ループの作業フォルダは、チャンネルのハーネスの規則で入る（省けば台本のあるフォルダ）。
+  assert.equal(job.options.scriptQualityWorkDir, path.dirname(fixture.script));
   // ブリーフの場所は Job の識別子に入らない（同じ SHA なら同じ Job）。
   const again = await service.start({ channelId: "alpha", scriptPath: fixture.script, options: { strategyBriefSha256: brief.sha256 } });
   assert.equal(again.jobId, started.jobId);

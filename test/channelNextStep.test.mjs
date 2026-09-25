@@ -417,7 +417,24 @@ test("台本の添削: 戦略スキルの添削から、チャンネルの台帳
   const betaStart = beta.workflow.recommended.then[0].cli;
   assert.ok(betaStart.includes("--genre manga"), betaStart);
   assert.ok(betaStart.includes(`--channel-pack "${fixture.byId.beta.channelPack}"`), betaStart);
-  // 台本の品質ループの設定が無いチャンネルは、推測で埋めずに「台帳に無い」と言う。
+  // 作業フォルダは start が Job の options.scriptQualityWorkDir に入れるのと同じ（明示があればそれ）。
+  const loopDir = path.join(fixture.byId.alpha.projectDir, "episode-01");
+  const explicitDir = await fixture.plan({ channelId: "alpha", request: "この台本を添削して", scriptPath: fixture.script, options: { scriptQualityWorkDir: loopDir } });
+  assert.equal(explicitDir.workflow.recommended.scriptQuality.workDir, loopDir);
+  assert.ok(explicitDir.workflow.recommended.then[0].cli.includes(`--work-dir "${loopDir}"`));
+  // 相対の明示はチャンネルの作業フォルダから解く（start と同じ）。
+  const relativeDir = await fixture.plan({ channelId: "alpha", request: "この台本を添削して", scriptPath: fixture.script, options: { scriptQualityWorkDir: "episode-01" } });
+  assert.equal(relativeDir.workflow.recommended.scriptQuality.workDir, loopDir);
+  const produce = await fixture.plan({ channelId: "alpha", request: "確定稿から動画を作って", scriptPath: fixture.script, options: { scriptQualityWorkDir: loopDir } });
+  const produceStep = produce.workflow.alternatives.find((entry) => entry.id === "produce");
+  assert.deepEqual(produceStep.scriptQuality, { genre: "narrated-story", workDir: loopDir });
+  assert.ok(produceStep.cli.includes(`--script-quality-work-dir "${loopDir}"`), produceStep.cli);
+  // 台帳に scriptQuality が無いハーネスのチャンネルは、制作のハーネスが問うジャンルを使う（別のチャンネルの設定ではない）。
+  const bare = { ...fixture.registry, channels: fixture.registry.channels.map((entry) => (entry.id === "alpha" ? { ...entry, scriptQuality: undefined } : entry)) };
+  const harnessGenre = await fixture.plan({ channelId: "alpha", request: "この台本を添削して", channelRegistry: bare });
+  assert.equal(harnessGenre.workflow.recommended.scriptQuality.genre, "narrated-story");
+  assert.equal(harnessGenre.workflow.recommended.scriptQuality.genreSource, "production-harness");
+  // 台本の品質ループの設定が無く、制作も外部のチャンネルは、推測で埋めずに「台帳に無い」と言う。
   const gamma = await fixture.plan({ channelId: "gamma", request: "この台本を添削して" });
   assert.equal(gamma.workflow.recommended.scriptQuality.status, "not-configured");
   assert.ok(gamma.workflow.recommended.then[0].cli.includes("--genre <台帳の scriptQuality.genre>"));

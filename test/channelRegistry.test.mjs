@@ -144,6 +144,14 @@ test("台帳: 形の誤り（requireBrief の省略・知らない欄・未完�
     "channel-id-invalid:Bad Id",
   ]) assert.ok(codes.includes(expected), `${expected} が無い: ${codes.join(", ")}`);
   assert.throws(() => validateChannelRegistry({ channels: {} }), { code: CHANNEL_REGISTRY_INVALID_CODE });
+  // 台本のジャンルは、制作のハーネスが有料の処理の前に問うジャンルとそろえる（外部の制作は問わない）。
+  const genreForHarness = (harnessId) => ({ "narrated-story-video": "narrated-story", "koya-manga-video": "manga" })[harnessId] || "";
+  const mismatch = issueCodes(() => validate([channel(root, "alpha", { scriptQuality: { genre: "manga" } })], { genreForHarness }));
+  assert.ok(mismatch.includes("channel-script-quality-genre-mismatch:alpha"), mismatch.join(", "));
+  assert.equal(validate([
+    channel(root, "alpha"),
+    channel(root, "beta", { production: { kind: "external", note: "合成: 既存の仕組み" }, scriptQuality: { genre: "explainer" } }),
+  ], { genreForHarness }).length, 2);
   // channels が無ければ空の台帳。
   assert.deepEqual(validateChannelRegistry({ deployments: [] }), []);
 });
