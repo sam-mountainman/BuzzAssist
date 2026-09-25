@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import test from "node:test";
 
 import { childAgentEnvironment } from "../lib/harnessLearningGuard.mjs";
-import { SCRIPT_LEARNING_ROUTES } from "../lib/harnessLearningTargets.mjs";
+import { HARNESS_LEARNING_ROUTES, SCRIPT_LEARNING_ROUTES } from "../lib/harnessLearningTargets.mjs";
 import {
   AUTO_SCRIPT_QUALITY_CREATOR,
   captureScriptRoundLearning,
@@ -195,15 +195,44 @@ test("品質ループの record は、合格しなかった回でだけ学習の
   assert.equal(called, false);
 });
 
-test("学習の宛先が決まっていない台本のジャンル（漫画・解説動画）は、推測で別の台帳へ積まない", async () => {
+test("学習の宛先が決まっていない台本のジャンル（解説動画）は、推測で別の台帳へ積まない", async () => {
   const harness = captureHarness();
-  for (const genre of ["manga", "explainer"]) {
-    const { contract } = createScriptQualityContract({ genre });
-    const input = failingRound({ state: { script: { genre } } });
-    const result = await captureScriptRoundLearning({ ...input, contract, env: {}, now, captureOptions: harness.options });
-    assert.equal(result.skippedReason, "unknown-genre-route", genre);
-  }
+  const { contract } = createScriptQualityContract({ genre: "explainer" });
+  const input = failingRound({ state: { script: { genre: "explainer" } } });
+  const result = await captureScriptRoundLearning({ ...input, contract, env: {}, now, captureOptions: harness.options });
+  assert.equal(result.skippedReason, "unknown-genre-route");
+  assert.equal(SCRIPT_LEARNING_ROUTES.explainer, undefined, "宛先を作らない");
   assert.equal(harness.rows.length, 0);
+});
+
+test("漫画の台本の不合格の回は、漫画のハーネスの既存のチャンネルの宛先（新しい台帳を作らない）へ積む", async () => {
+  const route = HARNESS_LEARNING_ROUTES["koya-manga-video"].channel;
+  assert.equal(SCRIPT_LEARNING_ROUTES.manga, route);
+  const definition = loadTargets()[route];
+  assert.equal(definition.scope, "channel-pack");
+  assert.equal(definition.mode, "review-only");
+  assert.equal(definition.confidential, true);
+  const harness = captureHarness();
+  const { contract } = createScriptQualityContract({ genre: "manga" });
+  const input = failingRound({
+    state: { script: { genre: "manga" } },
+    round: { floorFailures: ["speaker-attribution"], failedGateIds: [] },
+    version: { rubricScores: { "speaker-attribution": 50 } },
+  });
+  const result = await captureScriptRoundLearning({ ...input, contract, env: {}, now, captureOptions: harness.options });
+  assert.equal(result.target, route);
+  assert.equal(result.captured, 1);
+  assert.equal(harness.rows[0].target, route);
+  assert.equal(harness.rows[0].harness.id, "koya-manga-video");
+  assert.match(harness.rows[0].text, /台本の品質ループ（manga）の外部モデルの手直しの版で、評価項目 speaker-attribution が下限を割った/u);
+  assert.equal(JSON.stringify(harness.rows[0]).includes("合成の"), false, "本文・所見が台帳へ運ばれた");
+});
+
+test("コードの台本の学習の宛先は、docs/learning/targets.json の scriptQualityRoutes と一致し、既存の宛先だけを指す", async () => {
+  const document = JSON.parse(await readFile(join(process.cwd(), "docs", "learning", "targets.json"), "utf8"));
+  assert.deepEqual({ ...SCRIPT_LEARNING_ROUTES }, document.scriptQualityRoutes.routes);
+  for (const target of Object.values(SCRIPT_LEARNING_ROUTES)) assert.ok(document.targets[target], `${target} は targets に既にある宛先`);
+  assert.deepEqual(Object.keys(document.scriptQualityRoutes.deferred), ["explainer"]);
 });
 
 test("台本の直し・訂正は、人が harness-learn capture で台本の非公開台帳へ積める", () => {

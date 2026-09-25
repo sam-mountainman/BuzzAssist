@@ -67,6 +67,16 @@
       "scope": "platform"
     }
   },
+  "scriptQualityRoutes": {
+    "note": "台本の品質ループ（lib/scriptQualityLoop.mjs）のジャンルごとに、不合格の回から自動で拾った候補を積む宛先（コードの SCRIPT_LEARNING_ROUTES と同じ。試験が一致を見る）。宛先は上の targets の既存のものだけで、ここで新しい宛先を作らない。",
+    "routes": {
+      "narrated-story": "channel-pack:narrated-story-script",
+      "manga": "channel-pack:koya"
+    },
+    "deferred": {
+      "explainer": "解説動画のハーネスもチャンネルの台帳もまだ無いので宛先を作らない。自動の捕捉は unknown-genre-route で積まずに返す（推測で別の台帳へ積まない）"
+    }
+  },
   "scopes": {
     "platform": "運営者・ジャンルに依らない craft（有償APIの扱い、証跡、並列制御など）。全ハーネスへ効く",
     "genre": "ジャンル共通のハーネス（漫画動画、ナレーション物語）。そのジャンルの全チャンネルへ効く",

@@ -91,9 +91,9 @@ export function scriptQualityHelp() {
     --work-dir <dir> --script <版のファイル> --stage <${SCRIPT_STAGES.join("|")}> [--base-version <版>]
 
   record    1つの版を1回として記録する。合格しなかった回は、評価項目 id・機械ゲート id・止まった
-            理由のコードだけを台本の非公開台帳（channel-pack:narrated-story-script）へ自動で積む
-            （本文は入れない。BUZZASSIST_LEARNING_AUTO_CAPTURE=0 で止まる。学習の宛先がまだ無いジャンル
-            manga / explainer では積まない）
+            理由のコードだけをチャンネルの非公開台帳へ自動で積む（narrated-story は channel-pack:narrated-story-script、
+            manga は漫画のチャンネルの channel-pack:koya。本文は入れない。BUZZASSIST_LEARNING_AUTO_CAPTURE=0 で止まる。
+            学習の宛先がまだ無いジャンル explainer では積まない）
     --work-dir <dir> --script <版のファイル> --version <版の名前> --stage <${SCRIPT_STAGES.join("|")}>
     --review <採点ファイル>        { evaluatorId, evaluatorContextId, evaluatorHost, scriptSha256,
                                     baseScriptSha256（初稿以外）, rubricScores, notes, findings }
