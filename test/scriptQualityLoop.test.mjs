@@ -415,9 +415,14 @@ test("CLI は人待ちを終了コード 3、未合格の --require-pass を 4 �
   const reviewPath = await writeReview(root, "r1", review({ context: WRITER, script: DRAFT }));
   const waitingRun = await runScriptQualityCli(["record", "--work-dir", root, "--script", "drafts/draft.md", "--version", "v1", "--stage", "draft", "--review", reviewPath], { stdout, now });
   assert.equal(waitingRun.exitCode, 3);
-  const passing = await writeReview(root, "r2", review({ context: "ctx-eval-1", script: DRAFT, rubricScores: scores({ "narration-voice": 10 }) }));
-  const recorded = await runScriptQualityCli(["record", "--work-dir", root, "--script", "drafts/draft.md", "--version", "v1", "--stage", "draft", "--review", passing, "--json"], { stdout, now });
+  const failing = await writeReview(root, "r2", review({ context: "ctx-eval-1", script: DRAFT, rubricScores: scores({ "narration-voice": 10 }) }));
+  // 試験では本物の非公開台帳へ学習候補を積まない（自動捕捉は環境変数で止まる）。
+  const recorded = await runScriptQualityCli(
+    ["record", "--work-dir", root, "--script", "drafts/draft.md", "--version", "v1", "--stage", "draft", "--review", failing, "--json"],
+    { stdout, now, env: { BUZZASSIST_LEARNING_AUTO_CAPTURE: "0" } },
+  );
   assert.equal(recorded.exitCode, 0);
+  assert.equal(recorded.result.learning.skippedReason, "disabled");
   assert.equal((await runScriptQualityCli(["status", "--work-dir", root, "--require-pass"], { stdout })).exitCode, 4);
   out.length = 0;
   assert.equal((await runScriptQualityCli(["contract"], { stdout })).exitCode, 0);

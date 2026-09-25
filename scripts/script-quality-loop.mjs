@@ -13,6 +13,7 @@
 // 終了コード: 0 = 済んだ / 3 = 人待ち・直しが要る（記録していない）/ 4 = --require-pass で未合格 / 2 = 入力の誤り
 
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
+import { captureScriptRoundLearning } from "../lib/scriptQualityLearning.mjs";
 import {
   SCRIPT_QUALITY_GENRES,
   SCRIPT_STAGES,
@@ -79,7 +80,9 @@ export function scriptQualityHelp() {
   sheet     評価者へ渡す採点ファイルの雛形を出す（scriptSha256 / baseScriptSha256 を計算して埋める）
     --work-dir <dir> --script <版のファイル> --stage <${SCRIPT_STAGES.join("|")}> [--base-version <版>]
 
-  record    1つの版を1回として記録する
+  record    1つの版を1回として記録する。合格しなかった回は、評価項目 id・機械ゲート id・止まった
+            理由のコードだけを台本の非公開台帳（channel-pack:narrated-story-script）へ自動で積む
+            （本文は入れない。BUZZASSIST_LEARNING_AUTO_CAPTURE=0 で止まる）
     --work-dir <dir> --script <版のファイル> --version <版の名前> --stage <${SCRIPT_STAGES.join("|")}>
     --review <採点ファイル>        { evaluatorId, evaluatorContextId, evaluatorHost, scriptSha256,
                                     baseScriptSha256（初稿以外）, rubricScores, notes, findings }
@@ -179,9 +182,16 @@ export async function runScriptQualityCli(argv = process.argv.slice(2), {
         ledgerPath: args.ledger,
         env,
         ...injected,
-        ...(captureLearning ? { captureLearning } : {}),
+        // 合格しなかった回は、評価項目 id・機械ゲート id・止まった理由のコードだけを台本の
+        // 非公開台帳へ積む（lib/scriptQualityLearning.mjs。BUZZASSIST_LEARNING_AUTO_CAPTURE=0 で止まる）。
+        captureLearning: captureLearning || ((input) => captureScriptRoundLearning({ ...input, env })),
       });
       print(stdout, result, args.json);
+      if (!args.json && result.learning) {
+        stdout.write(result.learning.skippedReason
+          ? `学習候補は積んでいません（${result.learning.skippedReason}）\n`
+          : `学習候補 ${result.learning.captured} 件を ${result.learning.target} へ積みました（既にあったもの ${result.learning.duplicates} 件）\n`);
+      }
       return { exitCode: result.recorded || result.alreadyRecorded ? 0 : 3, result };
     }
     case "status": {

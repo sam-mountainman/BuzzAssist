@@ -1208,8 +1208,8 @@ export function assertPromotableProposal(entry, note = "", { homeRoot = homedir(
 // 自由文を入れさせないよう、キーごとに形を固定する。
 const SHA256_HEX = /^[a-f0-9]{64}$/u;
 const METADATA_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u;
-export const PROPOSAL_METADATA_CREATORS = new Set(["auto-receipt"]);
-export const PROPOSAL_RECEIPT_SOURCES = new Set(["run-receipt", "adapter-run-receipt", "job-state"]);
+export const PROPOSAL_METADATA_CREATORS = new Set(["auto-receipt", "auto-script-quality"]);
+export const PROPOSAL_RECEIPT_SOURCES = new Set(["run-receipt", "adapter-run-receipt", "job-state", "script-quality-round"]);
 
 export function normalizeProposalMetadata(metadata) {
   if (metadata === undefined || metadata === null) return {};
@@ -1470,6 +1470,11 @@ function printHelp() {
       同じ Receipt からは二重に積まない。全部通った Run からは何も積まない）。
       BUZZASSIST_LEARNING_AUTO_CAPTURE=0 で止まる
     - Canvas feedback: Canvas 上の採択・却下・コメント（collect_video_harness_feedback）
+    - 台本の品質ループ: scripts/script-quality-loop.mjs record で合格しなかった回の、下限割れの
+      評価項目 id・落ちた機械ゲート id・止まった理由のコードを、台本の非公開台帳
+      （channel-pack:narrated-story-script）へ createdBy=auto-script-quality として積む（本文なし・
+      同じ回からは二重に積まない）。BUZZASSIST_LEARNING_AUTO_CAPTURE=0 で止まる
+  台本の直し・訂正を人から受けたら、--target channel-pack:narrated-story-script で capture する。
   ユーザーの訂正らしい発言は、プラグインの UserPromptSubmit フック（scripts/harness-learn-hook.mjs）が
   見つけてエージェントに capture を促す。フックは何も書き換えず、発言本文も保存しない。
 

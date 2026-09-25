@@ -51,6 +51,15 @@
       "confidential": true,
       "relativeToDeployment": "narrated-story-video"
     },
+    "channel-pack:narrated-story-script": {
+      "mode": "review-only",
+      "canonical": "docs/script-requirements-ledger.md",
+      "reason": "台本の直し・訂正と、台本の品質ループの不合格から自動で拾った候補の台帳。チャンネルの台本の型を人が直すための材料で、承認の記録そのものなので機械は書き足さない。台帳は channel-pack:narrated-story と同じ非公開の置き場（channel-packs/narrated-story/docs/learning/）に、宛先で区別して積む。",
+      "scope": "channel-pack",
+      "area": "script",
+      "packId": "narrated-story",
+      "confidential": true
+    },
     "platform:platform-craft": {
       "mode": "auto-guidance",
       "canonical": ".agents/skills/platform-craft/SKILL.md",
