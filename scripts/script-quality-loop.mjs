@@ -20,6 +20,7 @@ import {
   createScriptQualityContract,
   loadScriptChannelConfig,
   recordScriptQualityRound,
+  resetScriptQualityCumulative,
   scriptQualityGenre,
   scriptQualityReviewSheet,
   scriptQualityReviewTemplate,
@@ -30,10 +31,10 @@ import {
 const VALUE_OPTIONS = new Set([
   "--work-dir", "--genre", "--generator-context", "--generator-host", "--channel-pack", "--channel-config",
   "--reason", "--script", "--version", "--stage", "--review", "--base-version", "--revision-delta",
-  "--blocking-condition", "--cost", "--ledger",
+  "--blocking-condition", "--cost", "--ledger", "--reviewer",
 ]);
 const REPEATABLE_OPTIONS = new Set(["--producer-context", "--external-call"]);
-const FLAG_OPTIONS = new Set(["--json", "--restart", "--require-pass", "--help", "-h"]);
+const FLAG_OPTIONS = new Set(["--json", "--restart", "--require-pass", "--human-verified", "--agent-attested", "--help", "-h"]);
 
 function camel(option) {
   return option.replace(/^--?/u, "").replace(/-([a-z])/gu, (_match, letter) => letter.toUpperCase());
@@ -77,7 +78,9 @@ export function scriptQualityHelp() {
                                   評価項目を足し、下限を上げられる（下げられない）。検証の公開鍵は
                                   BUZZASSIST_CHANNEL_PACK_PUBLIC_KEY
     [--channel-config <file>]     署名の無い設定（手元の試行用。契約に unsigned-file と刻まれる）
-    [--restart --reason "..."]    止まったループだけ始め直せる（前の状態は history に残る）
+    [--restart --reason "..."]    止まったループだけ始め直せる（前の状態は history に残る）。同じ作業フォルダの
+                                  回数・費用・時間の累計は持ち越し、止まる条件は累計でも判定する。累計が上限に
+                                  届いていれば、新しいループは始めた時点で止まっている（終了コード 3）
 
   sheet     評価者へ渡す採点ファイルの雛形を出す（scriptSha256 / baseScriptSha256 を計算して埋める）
     --work-dir <dir> --script <版のファイル> --stage <${SCRIPT_STAGES.join("|")}> [--base-version <版>]
@@ -95,7 +98,9 @@ export function scriptQualityHelp() {
     [--revision-delta "..."]      2回目以降に必須。前回の失敗をどう直したか
                                   （quality/script-revision-delta.json に書いてもよい）
     [--blocking-condition "..."]  人の判断が要るなら書く（ループは blocked で止まる）
-    [--cost <n>] [--ledger <file>]
+    [--cost <n>]                  この回の費用。書かなければ「分からない」として、参照した外部モデルの呼び出しを
+                                  0円ではなく不明の件数に数える（同じ呼び出しは1回だけ数える）
+    [--ledger <file>]
             Pack の script-quality.json が acceptance.evaluators で評価者を宣言していれば、採点は
             「評価の組」に入り、宣言した評価者が全員そろった時点で1回として閉じる。組が開いている間は
             record --work-dir <dir> --review <採点ファイル> だけでよい（版・工程・台本は組を開いた記録を使う）。
@@ -103,8 +108,14 @@ export function scriptQualityHelp() {
             合否は acceptance.mode で決まる: average（既定。評価者の平均）/ each-evaluator（評価者それぞれの
             総合点が minimumEvaluatorScore（無ければ目標点）以上で、各自の項目の下限も満たす）
 
-  status    今の状態。deliverable は合格して、その版の台本が今も同じバイト列のときだけ
+  status    今の状態。deliverable は合格して、その版の台本が今も同じバイト列のときだけ。
+            check.cumulative にこの作業フォルダの累計（ループ数・回数・費用・時間・費用の不明な件数）が出る
     --work-dir <dir> [--require-pass]   未合格なら終了コード 4
+
+  reset-cumulative  この作業フォルダの累計を 0 へ戻す。止まったループでだけ、理由と人の確認が要る
+    --work-dir <dir> --reason "何が変わったか" --reviewer <名前> --human-verified
+                                  確認した人が自分の対話端末から打つ。--agent-attested は数えず何も変えない。
+                                  戻す前の累計は cumulativeResets に残る
 
   終了コード: 0 済んだ / 3 人待ち・直しが要る（記録していない）/ 4 --require-pass で未合格 / 2 入力の誤り
 `;
@@ -125,12 +136,17 @@ function print(stdout, value, json) {
   stdout.write(`${lines.join("\n")}\n`);
 }
 
+function interactiveTerminal() {
+  return process.stdin.isTTY === true && process.stdout.isTTY === true;
+}
+
 export async function runScriptQualityCli(argv = process.argv.slice(2), {
   env = process.env,
   stdout = process.stdout,
   now,
   loadChannel,
   captureLearning,
+  isInteractive = interactiveTerminal(),
 } = {}) {
   const args = parseScriptQualityArgs(argv);
   if (!args.action || ["--help", "-h", "help"].includes(args.action) || args.help) {
@@ -166,7 +182,20 @@ export async function runScriptQualityCli(argv = process.argv.slice(2), {
         ...injected,
       });
       print(stdout, result, args.json);
-      return { exitCode: result.started ? 0 : 3, result };
+      return { exitCode: result.started && (result.issues || []).length === 0 ? 0 : 3, result };
+    }
+    case "reset-cumulative": {
+      const result = await resetScriptQualityCumulative({
+        workDir: args.workDir,
+        reviewer: args.reviewer,
+        reason: args.reason,
+        humanVerified: args.humanVerified === true,
+        agentAttested: args.agentAttested === true,
+        isInteractive,
+        ...(now ? { now } : {}),
+      });
+      print(stdout, result, args.json);
+      return { exitCode: result.reset ? 0 : 3, result };
     }
     case "sheet": {
       const result = await scriptQualityReviewTemplate({
@@ -187,7 +216,8 @@ export async function runScriptQualityCli(argv = process.argv.slice(2), {
         baseVersion: args.baseVersion,
         revisionDelta: args.revisionDelta,
         blockingCondition: args.blockingCondition,
-        cost: args.cost === undefined ? 0 : Number(args.cost),
+        // 書かなければ「分からない」（0円として数えない）。
+        cost: args.cost === undefined ? null : Number(args.cost),
         ledgerPath: args.ledger,
         env,
         ...injected,

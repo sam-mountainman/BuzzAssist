@@ -14,6 +14,7 @@ import {
   createScriptQualityContract,
   normalizeScriptChannelConfig,
   recordScriptQualityRound,
+  resetScriptQualityCumulative,
   scriptQualityGenre,
   scriptQualityPaths,
   scriptQualityReviewTemplate,
@@ -341,6 +342,140 @@ test("上限の回数に届くと人待ちで止まり、止まったループ�
   assert.equal(restarted.state.script.history.length, 1);
   assert.equal(restarted.state.script.history[0].status, "needs-human-approval");
   assert.equal(restarted.state.rounds.length, 0);
+});
+
+test("--restart しても同じ作業フォルダの回数・時間を持ち越し、止まる条件は累計で判定し、累計は人の確認つきの操作でだけ戻せる", async (t) => {
+  const root = await workspace(t);
+  const configPath = join(root, "script-quality.json");
+  await writeFile(configPath, JSON.stringify({ version: SCRIPT_QUALITY_CHANNEL_CONFIG_VERSION, limits: { maximumReviewRounds: 3 } }));
+  await start(root, { channelConfig: configPath });
+  const texts = [DRAFT, REWRITE, CHECKED, `${CHECKED}足した行。\n`];
+  let previous = null;
+  const recordVersion = async (index, extra = {}) => {
+    const file = `drafts/v${index + 1}.md`;
+    await writeFile(join(root, file), texts[index]);
+    const result = await record(root, {
+      scriptPath: file, versionLabel: `v${index + 1}`, stage: previous ? "revision" : "draft",
+      ...(previous ? { revisionDelta: "拍の位置を直した" } : {}),
+      reviewPath: await writeReview(root, `r${index + 1}`, review({
+        context: `ctx-eval-${index + 1}`, script: texts[index], ...(previous ? { base: previous } : {}), rubricScores: scores({ "duration-fit": 30 }),
+      })),
+      ...extra,
+    });
+    previous = texts[index];
+    return result;
+  };
+  await recordVersion(0);
+  const blocked = await recordVersion(1, { blockingCondition: "拍の表そのものを人が見直す" });
+  assert.equal(blocked.state.status, "blocked");
+  const firstLoopElapsed = blocked.state.elapsedMs;
+
+  // 始め直しても、前のループの2回を持ち越す。3回目（累計）で回数の上限に届いて止まる。
+  const restarted = await start(root, { channelConfig: configPath, restart: true, restartReason: "拍の表を作り直した" });
+  assert.equal(restarted.started, true);
+  assert.deepEqual(restarted.state.carriedOver, { loops: 1, rounds: 2, cost: 0, elapsedMs: firstLoopElapsed, unpricedCount: 0 });
+  previous = null;
+  const third = await recordVersion(2);
+  assert.equal(third.state.rounds.length, 1, "新しいループの回は1から数える");
+  assert.equal(third.state.stopReason, "round-limit", "停止条件は累計で判定する");
+  const status = await scriptQualityStatus({ workDir: root });
+  assert.equal(status.check.cumulative.rounds, 3);
+  assert.equal(status.check.cumulative.loops, 2);
+  assert.equal(status.check.cumulative.elapsedMs, firstLoopElapsed + third.state.elapsedMs);
+
+  // 累計が上限に届いたまま始め直しても、新しいループは始めた時点で止まっていて回を足せない。
+  const refused = await start(root, { channelConfig: configPath, restart: true, restartReason: "もう一度だけ回したい" });
+  assert.deepEqual(refused.issues, ["script-quality-cumulative-limit-reached:round-limit"]);
+  assert.equal(refused.state.status, "needs-human-approval");
+  assert.equal(refused.state.stopReason, "round-limit");
+  previous = CHECKED;
+  const blockedRecord = await recordVersion(3);
+  assert.equal(blockedRecord.recorded, false);
+  assert.ok(blockedRecord.issues.includes("script-quality-stopped:needs-human-approval:round-limit"));
+  assert.equal((await runScriptQualityCli(["start", "--work-dir", root, "--generator-context", WRITER, "--channel-config", configPath, "--restart", "--reason", "もう一度"], { stdout: { write() {} }, now })).exitCode, 3);
+
+  // 累計を戻すのは、理由と人の確認（対話端末＋--human-verified）がある明示の操作だけ。
+  await assert.rejects(resetScriptQualityCumulative({ workDir: root, reviewer: "operator", reason: "上限を見直す", humanVerified: true, isInteractive: false, now }), /対話端末/u);
+  const agent = await resetScriptQualityCumulative({ workDir: root, reviewer: "operator", reason: "上限を見直す", agentAttested: true, now });
+  assert.equal(agent.reset, false);
+  assert.deepEqual(agent.issues, ["script-quality-cumulative-reset-not-counted:agent-self-attested"]);
+  await assert.rejects(resetScriptQualityCumulative({ workDir: root, reviewer: "operator", reason: "", humanVerified: true, isInteractive: true, now }), /--reason/u);
+  const reset = await resetScriptQualityCumulative({ workDir: root, reviewer: "operator", reason: "拍の表を人が作り直したので数え直す", humanVerified: true, isInteractive: true, now });
+  assert.equal(reset.reset, true);
+  assert.equal(reset.before.rounds, 3);
+  assert.equal(reset.after.rounds, 0);
+  const again = await start(root, { channelConfig: configPath, restart: true, restartReason: "人が累計を戻した" });
+  assert.equal(again.started, true);
+  assert.deepEqual(again.issues, []);
+  assert.equal(again.state.status, "active");
+  assert.deepEqual(again.state.carriedOver, { loops: 0, rounds: 0, cost: 0, elapsedMs: 0, unpricedCount: 0 });
+  assert.equal(again.state.script.cumulativeResets.length, 1);
+  assert.equal(again.state.script.cumulativeResets[0].attestedBy, "human-verified");
+  assert.equal(again.state.script.cumulativeResets[0].before.rounds, 3);
+  assert.equal(again.state.script.history.length, 4, "始め直しても前のループは全部残る");
+});
+
+test("持ち越しの記録が無い前の版の状態でも、history に残したループを累計に数える", async (t) => {
+  const root = await workspace(t);
+  await start(root);
+  await writeFile(join(root, "drafts/draft.md"), DRAFT);
+  await record(root, {
+    scriptPath: "drafts/draft.md", versionLabel: "v1", stage: "draft", blockingCondition: "人が拍の表を決める",
+    reviewPath: await writeReview(root, "r1", review({ context: "ctx-eval-1", script: DRAFT, rubricScores: scores({ "duration-fit": 30 }) })),
+  });
+  await start(root, { restart: true, restartReason: "拍の表を作り直した" });
+  // 前の版のコードが書いた状態（carriedOver が無い）を作る。
+  const statePath = scriptQualityPaths(root).statePath;
+  const legacy = JSON.parse(await readFile(statePath, "utf8"));
+  delete legacy.carriedOver;
+  await writeFile(statePath, JSON.stringify(legacy));
+  const status = await scriptQualityStatus({ workDir: root });
+  assert.equal(status.check.cumulative.rounds, 1);
+  assert.equal(status.check.cumulative.loops, 2);
+});
+
+test("費用の分からない外部モデルの呼び出しは0円として数えず不明の件数に残し、同じ呼び出しを二重に数えない", async (t) => {
+  const root = await workspace(t);
+  const configPath = join(root, "script-quality.json");
+  await writeFile(configPath, JSON.stringify({ version: SCRIPT_QUALITY_CHANNEL_CONFIG_VERSION, limits: { maximumCostUnits: 5 } }));
+  await start(root, { channelConfig: configPath });
+  await writeFile(join(root, "drafts/in.md"), DRAFT);
+  await writeFile(join(root, "drafts/rewrite.md"), REWRITE);
+  const call = await recordExternalCall({
+    ledgerPath: scriptQualityPaths(root).externalCallLedgerPath, host: "antigravity", model: "synthetic-model-high",
+    purpose: "台本の語り口の手直し", inputPath: join(root, "drafts/in.md"), outputPath: join(root, "drafts/rewrite.md"),
+    callerHost: "claude-code", callerSession: WRITER, now,
+  });
+  const unpriced = await record(root, {
+    scriptPath: "drafts/rewrite.md", versionLabel: "v1", stage: "external-rewrite", externalCallIds: [call.id],
+    reviewPath: await writeReview(root, "r1", review({ context: "ctx-eval-1", script: REWRITE, rubricScores: scores({ "narration-voice": 50 }) })),
+  });
+  assert.equal(unpriced.round.cost, 0);
+  assert.equal(unpriced.round.costAccounting.unpricedCount, 1);
+  assert.equal((await scriptQualityStatus({ workDir: root })).check.cumulative.unpricedCount, 1);
+  // 同じ呼び出しを次の版でも参照しても、二重には数えない。費用を書いた回はその値で数える。
+  await writeFile(join(root, "drafts/checked.md"), CHECKED);
+  const priced = await record(root, {
+    scriptPath: "drafts/checked.md", versionLabel: "v2", stage: "meaning-check", externalCallIds: [call.id], cost: 3,
+    revisionDelta: "語り口を戻した", blockingCondition: "人が語り口を決める",
+    reviewPath: await writeReview(root, "r2", review({ context: "ctx-eval-2", script: CHECKED, base: REWRITE, rubricScores: scores({ "narration-voice": 50 }) })),
+  });
+  assert.equal(priced.round.cost, 3);
+  assert.equal(priced.round.costAccounting.unpricedCount, 0);
+  assert.equal(priced.round.costAccounting.newJobCount, 0, "前の回で数えた呼び出しは数えない");
+  const status = await scriptQualityStatus({ workDir: root });
+  assert.equal(status.check.cumulative.cost, 3);
+  assert.equal(status.check.cumulative.unpricedCount, 1);
+  assert.equal(status.check.cumulative.costIncomplete, true);
+  // 費用も累計で判定する: 始め直した後の 3 を足すと上限 5 を越える。
+  await start(root, { channelConfig: configPath, restart: true, restartReason: "語り口の方針を人が決めた" });
+  await writeFile(join(root, "drafts/v3.md"), `${CHECKED}足した行。\n`);
+  const third = await record(root, {
+    scriptPath: "drafts/v3.md", versionLabel: "v3", stage: "draft", cost: 3,
+    reviewPath: await writeReview(root, "r3", review({ context: "ctx-eval-3", script: `${CHECKED}足した行。\n`, rubricScores: scores({ "narration-voice": 50 }) })),
+  });
+  assert.equal(third.state.stopReason, "cost-limit");
+  assert.equal(third.state.carriedOver.unpricedCount, 1);
 });
 
 test("続いているループは始め直せず、Pack の設定が変わったら同じループとして続けない", async (t) => {

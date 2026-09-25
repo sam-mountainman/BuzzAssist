@@ -310,6 +310,21 @@ test("評価者を宣言した契約では、欠けた回は平均と下限を�
   );
 });
 
+test("前のループから持ち越した回数・費用・時間を、止まる条件の判定に足す（持ち越しが無ければ今までと同じ）", () => {
+  const low = scores({ "voice-performance": 50 });
+  const first = (carriedOver) => round(createQualityLoopState({
+    contract, generatorId: "gen", generatorContextId: "generator-context", startedAt: "2026-09-24T00:00:00Z", ...(carriedOver ? { carriedOver } : {}),
+  }), { reviewScores: low });
+  assert.equal(first(null).status, "active", "持ち越しが無ければ1回目で止まらない");
+  assert.equal(first(null).carriedOver, undefined);
+  // 漫画の既定は2回まで。前のループの1回を足すと、この1回で回数の上限に届く。
+  const rounds = first({ rounds: 1, cost: 0, elapsedMs: 0, loops: 1 });
+  assert.equal(rounds.stopReason, "round-limit");
+  assert.deepEqual(rounds.carriedOver, { loops: 1, rounds: 1, cost: 0, elapsedMs: 0, unpricedCount: 0 });
+  assert.equal(first({ rounds: 0, cost: 100, elapsedMs: 0, loops: 1 }).stopReason, "cost-limit");
+  assert.equal(first({ rounds: 0, cost: 0, elapsedMs: contract.limits.maximumElapsedMs, loops: 1 }).stopReason, "time-limit");
+});
+
 test("each-evaluator は宣言した評価者それぞれの総合点と項目の下限を見て、平均だけ目標を越える回を合格にしない", () => {
   const each = { ...contract, acceptance: { mode: "each-evaluator", evaluators: ["eval-a", "eval-b"] } };
   const average = { ...contract, acceptance: { mode: "average", evaluators: ["eval-a", "eval-b"] } };
