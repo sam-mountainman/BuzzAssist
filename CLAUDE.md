@@ -19,6 +19,10 @@ equivalent `run_video_harness` MCP tool), require a signed Channel Pack, and kee
 plan-only behavior unless paid execution was explicitly confirmed. Claude Code and Codex must
 use the same Harness declaration, Skill SHA, Channel Pack fingerprint, quality gates, RunReceipt,
 and BuzzAssist Canvas projection; a globally installed plugin or skill is not an implicit fallback.
+The plugin's Stop hook (`scripts/harness-stop-hook.mjs`) sends a stop back when the last reply claims the video is
+finished while the Job this conversation handled is not settled as pass (`completed`, RunReceipt `pass`, empty
+`knownRemainingIssues`). Report the Job's actual state instead; `awaiting-human-review` is a legitimate stop, so say it is waiting for review.
+Codex runs plugin hooks only after they are trusted in `/hooks`.
 
 # 並列実行 — 両ハーネス共通ルート
 

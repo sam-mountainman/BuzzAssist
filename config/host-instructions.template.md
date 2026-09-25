@@ -19,6 +19,12 @@ equivalent `run_video_harness` MCP tool), require a signed Channel Pack, and kee
 plan-only behavior unless paid execution was explicitly confirmed. Claude Code and Codex must
 use the same Harness declaration, Skill SHA, Channel Pack fingerprint, quality gates, RunReceipt,
 and BuzzAssist Canvas projection; a globally installed plugin or skill is not an implicit fallback.
+{{#hosts claude codex}}
+The plugin's Stop hook (`scripts/harness-stop-hook.mjs`) sends a stop back when the last reply claims the video is
+finished while the Job this conversation handled is not settled as pass (`completed`, RunReceipt `pass`, empty
+`knownRemainingIssues`). Report the Job's actual state instead; `awaiting-human-review` is a legitimate stop, so say it is waiting for review.
+Codex runs plugin hooks only after they are trusted in `/hooks`.
+{{/hosts}}
 
 # 並列実行 — 両ハーネス共通ルート
 
@@ -59,6 +65,19 @@ node scripts/harness-learn.mjs capture --kind <correction|constraint|preference|
 dry-run、正本への反映には reviewer 名が要る。自動で正本を書き換える作りに
 していないのは、それが「自分で自分に合格を出す」構造になるため。
 
+{{#hosts antigravity}}
+# 完成と言う前に Job の状態を自分で確かめる
+
+Claude Code と Codex では、Job が合格で決着していないのに「完成しました」と言って止まると、
+Stop フック（`scripts/harness-stop-hook.mjs`）が差し戻す。**Antigravity にはフックが無い**ので、
+完成・完了・納品できると書く前に、自分で
+`node scripts/run-video-harness.mjs status --job-id <Job ID> --project-dir <プロジェクト>` を打ち、
+`status` が `completed`、`blockers` と `knownRemainingIssues` が空、Job の RunReceipt
+（`canvas/harness-runs/<Job ID>/run-receipt.json`）の `outcome` が `pass` であることを確かめる。
+どれかが欠けていれば完成と書かず、今の状態と残りの項目を報告する。`awaiting-human-review` は
+正当な停止なので、確認待ちであることと、誰が何を確認すれば進むかを報告する。
+
+{{/hosts}}
 {{#hosts claude codex}}
 # 外部モデル呼び出しの記録 — 呼んだ側が残す
 

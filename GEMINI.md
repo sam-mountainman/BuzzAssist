@@ -57,6 +57,17 @@ node scripts/harness-learn.mjs capture --kind <correction|constraint|preference|
 dry-run、正本への反映には reviewer 名が要る。自動で正本を書き換える作りに
 していないのは、それが「自分で自分に合格を出す」構造になるため。
 
+# 完成と言う前に Job の状態を自分で確かめる
+
+Claude Code と Codex では、Job が合格で決着していないのに「完成しました」と言って止まると、
+Stop フック（`scripts/harness-stop-hook.mjs`）が差し戻す。**Antigravity にはフックが無い**ので、
+完成・完了・納品できると書く前に、自分で
+`node scripts/run-video-harness.mjs status --job-id <Job ID> --project-dir <プロジェクト>` を打ち、
+`status` が `completed`、`blockers` と `knownRemainingIssues` が空、Job の RunReceipt
+（`canvas/harness-runs/<Job ID>/run-receipt.json`）の `outcome` が `pass` であることを確かめる。
+どれかが欠けていれば完成と書かず、今の状態と残りの項目を報告する。`awaiting-human-review` は
+正当な停止なので、確認待ちであることと、誰が何を確認すれば進むかを報告する。
+
 # 外部モデルの呼び出しの記録
 
 外部モデルの呼び出しは、**呼び出し元のホストが**
