@@ -302,6 +302,14 @@ test("final: 使い回し・完成画・人の確認の結び付け・品質ル�
   // Job の結び付け: 無い・動画違い・未完了。
   const unbound = await auditThumbnailPlan({ rules, plan: finalPlan({ jobBinding: undefined }), projectDir, assetQualityGate: gate });
   assert.ok(unbound.failures.some((line) => line.startsWith("thumbnail-job-binding-required")));
+  // 下書きの空の結び付けは「まだ結び付けていない」と同じ（final では要る、preflight では警告だけ）。
+  const blank = { jobId: "", episodeId: "", videoSha256: "" };
+  const blankFinal = await auditThumbnailPlan({ rules, plan: finalPlan({ jobBinding: blank }), projectDir, assetQualityGate: gate });
+  assert.ok(blankFinal.failures.some((line) => line.startsWith("thumbnail-job-binding-required")));
+  assert.ok(!blankFinal.failures.some((line) => line.startsWith("thumbnail-job-binding-job-id-invalid")));
+  const blankPreflight = await auditThumbnailPlan({ rules, plan: preflightPlan({ jobBinding: blank }), projectDir });
+  assert.equal(blankPreflight.pass, true, blankPreflight.failures.join("\n"));
+  assert.ok(blankPreflight.warnings.some((line) => line.startsWith("thumbnail-job-binding-required-at-final")));
   const wrongVideo = await auditThumbnailPlan({ rules, plan: finalPlan({ jobBinding: { jobId, episodeId: "ep-7", videoSha256: "d".repeat(64) } }), projectDir, assetQualityGate: gate });
   assert.ok(wrongVideo.failures.some((line) => line.startsWith("thumbnail-job-binding-video-mismatch")));
 
