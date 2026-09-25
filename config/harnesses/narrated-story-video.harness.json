@@ -1,6 +1,6 @@
 {
   "id": "narrated-story-video",
-  "version": "1.11.0",
+  "version": "1.12.0",
   "displayName": "ナレーション物語動画（実写素材＋カメラワーク）",
   "note": "クライアント名・チャンネル名はここに書かない。ここは『何が作れるか』の宣言であって、誰のためのものかの記録ではない。",
   "produces": {
@@ -28,6 +28,16 @@
     {
       "id": "presenter-video",
       "what": "感想パートの人物素材。Channel Pack の bookends.review.presenter で、チャンネル共通の素材（video）か、回ごとに運営者が後から渡す映像（episodeVideo: true。Job の運営者の動画の取り込みの枠 review-presenter）を宣言する。必須と宣言して無ければ有料生成の前に止める（代用の絵で埋めない）。TV の配置で任意の映像が無ければ人物の枠は空のまま",
+      "blocking": false
+    },
+    {
+      "id": "review-tv-video",
+      "what": "感想パートの TV 枠の中に流す短い動画。Channel Pack の bookends.review.layout.tv.content が operator-video のとき、運営者の動画の取り込みの記録（buzzassist-operator-video-manifest-v1、枠 review-tv）を Job の options.operatorVideoManifestPath で渡す。無ければ有料生成の前に止める。記録の行には工程 video-clip の品質ループの assetLoop を書く。音は使わず、区間より短ければ頭から繰り返す。still（既定）・scene-motion（本編の場面の画を本編のカメラの型で動かす）では要らない",
+      "blocking": false
+    },
+    {
+      "id": "overlay-images",
+      "what": "固定の重ね物（告知の枠など）の画像。Channel Pack の overlays.items に、Pack の中の PNG（透過つき可、8 bit）・重ねる部（story / review）・区間・位置を書き、重ねる部ごとに人の顔が出うる範囲（overlays.faceRegions）を宣言する。Core に既定の画像も位置も無い（実在のブランドのロゴなどを重ねる運用を想定した既定値は置かない）。字幕・感想の配置の枠・顔の範囲と重なる置き場所、顔の範囲の宣言が無い部、不透明な画素の無い画像は有料生成の前に止める",
       "blocking": false
     },
     {
@@ -185,7 +195,7 @@
     },
     {
       "id": "review-layout",
-      "what": "Channel Pack が感想パートの配置（bookends.review.layout）を宣言したら、区間ごとに始まり・中ほど・終わりのフレームで、背景と TV 枠・人物の枠の線が宣言の色、TV の中が本編の場面の画、人物の枠の中がその時刻の人物の映像（無ければ空の枠のまま。代わりの人物を描かない）、plain の区間の全面の人物の映像を測る。宣言が無ければ配置の区間を作っていないことを確かめる",
+      "what": "Channel Pack が感想パートの配置（bookends.review.layout）を宣言したら、区間ごとに始まり・中ほど・終わりのフレームで、背景と TV 枠・人物の枠の線が宣言の色、TV の中が宣言の中身（tv.content: still は本編の場面の画、scene-motion は本編でその場面に当てたカメラの型で区間の長さに計画し直した動きのそのフレーム、operator-video は取り込んだ動画の感想パートの時刻のフレーム）、人物の枠の中がその時刻の人物の映像（無ければ空の枠のまま。代わりの人物を描かない）、plain の区間の全面の人物の映像を測る。TV の中が動く型では、区間の始まりと終わりの TV の中の変わり方が期待の変わり方の半分に満たなければ落とす（止まった画で代用しない）。宣言が無ければ配置の区間を作っていないことを確かめる",
       "evidenceAuditIds": [
         "reviewLayoutMeasured"
       ],
@@ -216,6 +226,22 @@
         "scriptQualityAccepted"
       ],
       "inForceSince": "buzzassist-narrated-story-audit-v8"
+    },
+    {
+      "id": "scene-transition-declared",
+      "what": "本編の場面の切り替えは、Channel Pack が sceneTransition で crossfade と秒数を宣言したときだけ混ぜ、宣言が無ければ cut のまま描く。尺は足し引きしない（出る側を後ろへ、入る側を前へ伸ばして重ね、字幕と声の時刻は切り替えの位置のまま）。完成 MP4 の輝度で、crossfade は重なりの全フレームで2つの場面の混ざり具合が計画（k/F）どおりで前後の画の混ぜ合わせで説明できること、cut（宣言していなければ全部の切り替え）は直前・直後に混ざったフレームが無いことを測る。短い場面の隣で縮めた・cut のままにした切り替えは計画に残す。前後の画がほとんど同じで読めない切り替えは数として残し、描いた graph の検査（sceneTransitionOwnedByParent）が宣言外の転換の有無を別に見る",
+      "evidenceAuditIds": [
+        "sceneTransitionMeasured"
+      ],
+      "inForceSince": "buzzassist-narrated-story-audit-v9"
+    },
+    {
+      "id": "fixed-overlays-declared",
+      "what": "Channel Pack の overlays に置いた画像（PNG）を、宣言の部（本編・感想パート）の宣言の区間に、宣言の位置で重ねる（OP と境目の転換には重ねない）。置き場所は有料生成の前に、字幕の範囲・感想の配置の TV 枠と人物の枠・Pack が宣言した顔の範囲と重ならないことを検査する。完成 MP4 の輝度で、区間の始まり・中ほど・終わりのフレームに重ね物の不透明な画素が宣言の位置に出ていて、区間の直前・直後のフレームには出ていないことを測る。宣言が無ければ組み立ての graph に重ね物の段が無いことを確かめる",
+      "evidenceAuditIds": [
+        "fixedOverlaysMeasured"
+      ],
+      "inForceSince": "buzzassist-narrated-story-audit-v9"
     }
   ],
   "entrypoint": "node scripts/run-video-harness.mjs",
