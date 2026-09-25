@@ -10,6 +10,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { loadChannelRegistry } from "../lib/channelRegistry.mjs";
 import { CHANNEL_LEARNING_STORE_ERROR, promotionMarker, resolveChannelLearningStore } from "../scripts/harness-learn.mjs";
 
 const SOURCE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -80,11 +81,12 @@ function stageRepo(root, { channelLearning } = {}) {
   return repo;
 }
 
-function runLearn(repo, args) {
+function runLearn(repo, args, extraEnv = {}) {
   const env = { ...process.env };
-  for (const key of PACK_ENV_KEYS) delete env[key];
+  for (const key of [...PACK_ENV_KEYS, "BUZZASSIST_CHANNEL_REGISTRY"]) delete env[key];
   // 念のため、状態の置き場も一時ディレクトリへ向ける（本物の ~/.buzzassist を触らない）。
   env.BUZZASSIST_LEARNING_DIR = path.join(path.dirname(repo), "operator-learning-state");
+  Object.assign(env, extraEnv);
   const result = spawnSync(process.execPath, [path.join(repo, "scripts", "harness-learn.mjs"), ...args], {
     cwd: repo, env, encoding: "utf8", input: "", timeout: 60_000,
   });
@@ -209,6 +211,49 @@ test("解決器: 宣言の重複・未完成の root は止める。宣言の無
   assert.equal(resolveChannelLearningStore(TARGET, legacy, { repoRoot: repo, deploymentRootFor: () => "." }), null);
   const outside = path.join(root, "separate-deployment");
   assert.deepEqual(resolveChannelLearningStore(TARGET, legacy, { repoRoot: repo, deploymentRootFor: () => outside }), { root: outside, source: "deployment" });
+});
+
+test("台帳を別のファイル（BUZZASSIST_CHANNEL_REGISTRY）にした端末では、チャンネルの無い Job の保存先も同じファイルから読む", (t) => {
+  const root = tempRoot(t);
+  const fromConfig = path.join(root, "from-config");
+  const fromRegistry = path.join(root, "from-registry");
+  const repo = stageRepo(root, { channelLearning: [{ target: TARGET, root: fromConfig }] });
+  const registryFile = write(path.join(root, "registry.json"), JSON.stringify({ channelLearning: [{ target: TARGET, root: fromRegistry }] }));
+  const env = { BUZZASSIST_CHANNEL_REGISTRY: registryFile };
+  // 解決器: 台帳のファイルを指せばその宣言、指さなければ配置表の宣言。
+  assert.deepEqual(resolveChannelLearningStore(TARGET, TARGETS[TARGET], { repoRoot: repo, env }), { root: fromRegistry, source: "operator-project" });
+  assert.deepEqual(resolveChannelLearningStore(TARGET, TARGETS[TARGET], { repoRoot: repo, env: {} }), { root: fromConfig, source: "operator-project" });
+  // 指した台帳のファイルが無ければ、配置表へ落とさずに止める（台帳の読み込みと同じ）。
+  assert.throws(
+    () => resolveChannelLearningStore(TARGET, TARGETS[TARGET], { repoRoot: repo, env: { BUZZASSIST_CHANNEL_REGISTRY: path.join(root, "missing.json") } }),
+    (error) => error.code === CHANNEL_LEARNING_STORE_ERROR && /台帳のファイルがありません/u.test(error.message),
+  );
+  // CLI の捕捉も同じファイルの宣言へ書く。
+  const captured = runLearn(repo, [
+    "capture", "--kind", "correction", "--target", TARGET, "--text", "合成: 台帳のファイルの宣言へ書く",
+    "--evidence", "合成の根拠", "--session", "registry-file",
+  ], env);
+  assert.equal(captured.status, 0, captured.stderr);
+  assert.equal(readJsonl(path.join(fromRegistry, "docs", "learning", "proposals.jsonl")).length, 1);
+  assert.equal(fs.existsSync(path.join(fromConfig, "docs", "learning", "proposals.jsonl")), false, "配置表の宣言の場所へは書かない");
+
+  // 台帳の読み込みの重なりの検査も、同じファイルの宣言を見る（配置表の宣言は見ない）。
+  const channel = (id) => ({
+    id,
+    projectDir: path.join(root, "channels", id, "project"),
+    channelPack: path.join(root, "channels", id, "pack"),
+    production: { kind: "harness", harnessId: "narrated-story-video" },
+    strategy: { workDir: path.join(root, "channels", id, "strategy"), requireBrief: false },
+  });
+  const target = "channel-pack:narrated-story";
+  fs.writeFileSync(registryFile, JSON.stringify({
+    channels: [channel("alpha"), channel("beta")],
+    channelLearning: [{ target, root: path.join(root, "channels", "alpha", "project", "learning") }],
+  }));
+  assert.throws(
+    () => loadChannelRegistry({ repoRoot: repo, env: { ...env, BUZZASSIST_LEARNING_DIR: path.join(root, "state") } }),
+    (error) => error.issues?.some((issue) => issue.code === `channel-learning-unscoped-store-overlap:${target}:alpha.projectDir`),
+  );
 });
 
 test("本物の宛先: narrated-story のチャンネル宛は配備 root に依らず、共有台帳と別の場所に解決する", async () => {

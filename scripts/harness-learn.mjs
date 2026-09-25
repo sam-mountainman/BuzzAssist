@@ -34,7 +34,12 @@ import {
   resolveChannelPackPath,
   resolveChannelPackSource,
 } from "../lib/channelPackResolver.mjs";
-import { findChannel, loadChannelRegistry } from "../lib/channelRegistry.mjs";
+import {
+  CHANNEL_REGISTRY_PATH_ENV,
+  channelRegistrySourcePath,
+  findChannel,
+  loadChannelRegistry,
+} from "../lib/channelRegistry.mjs";
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
 import { loadHarnessDeployments } from "../lib/harnessDeploymentResolver.mjs";
 import { redactSharedLearningText } from "../lib/harnessFeedbackBundle.mjs";
@@ -179,7 +184,7 @@ function refreshCatalogForSharedLedger(ledgerPath) {
  * こちらが手で pack 側へ移す、を繰り返していた。手で移す運用は、
  * 移す人がいない回に漏れる。
  */
-export function ledgerPathFor(target, kind = "proposals", { channel = null } = {}) {
+export function ledgerPathFor(target, kind = "proposals", { channel = null, env = process.env } = {}) {
   const name = `${kind}.jsonl`;
   const resolvedTarget = resolveTarget(String(target || ""));
   if (resolvedTarget.startsWith("channel-pack:")) {
@@ -188,7 +193,7 @@ export function ledgerPathFor(target, kind = "proposals", { channel = null } = {
     // （resolveChannelLearningStore）。配備 root が "." のとき、以前はここが共有台帳と同じ
     // 場所に解決され、隔離の検査で捕捉そのものが止まっていた。
     // channel（台帳のチャンネル）を渡せば、そのチャンネルの保存先（同じハーネスの別のチャンネルとは別の場所）。
-    const store = resolveChannelLearningStore(resolvedTarget, definition, { channel });
+    const store = resolveChannelLearningStore(resolvedTarget, definition, { channel, env });
     if (store) return path.join(store.root, "docs", "learning", name);
     // ambient BUZZASSIST_CHANNEL_PACK_ID を使うと、narrated-story宛の提案が
     // たまたまactiveなKoya packへ入る。target自身をpack IDとして固定する。
@@ -332,10 +337,23 @@ function samePath(left, right) {
  * とは別の設定。形:
  *   "channelLearning": [{ "target": "channel-pack:<id>", "root": "<私有プロジェクトの dir>" }]
  * root は配置表のあるリポジトリからの相対か絶対。宣言が無ければ null。
+ *
+ * 読むファイルはチャンネルの台帳（lib/channelRegistry.mjs）と同じ（channelRegistrySourcePath）。
+ * BUZZASSIST_CHANNEL_REGISTRY で台帳を別のファイルにした端末では、そのファイルの channelLearning を読む。
+ * 以前はここだけ config/harness-deployments.json を読み、台帳の読み込みの重なりの検査は別のファイルの
+ * 宣言を見ていた（検査した保存先と、実際に書く保存先がずれる）。例のファイルは読まない（従来どおり）。
  */
-function operatorChannelLearningRoot(target, repoRoot = REPO_ROOT) {
-  const operatorMap = path.join(repoRoot, "config", "harness-deployments.json");
-  if (!fs.existsSync(operatorMap)) return null;
+function operatorChannelLearningRoot(target, repoRoot = REPO_ROOT, env = process.env) {
+  const source = channelRegistrySourcePath({ repoRoot, env });
+  if (!source.path) {
+    if (source.required) {
+      throw channelLearningStoreError(target, `チャンネルの台帳のファイルがありません（${CHANNEL_REGISTRY_PATH_ENV}）: ${source.expected}`);
+    }
+    return null;
+  }
+  if (source.example) return null;
+  const operatorMap = source.path;
+  const label = source.source === "env" ? `${CHANNEL_REGISTRY_PATH_ENV} のファイル` : "config/harness-deployments.json";
   let parsed;
   try {
     parsed = JSON.parse(fs.readFileSync(operatorMap, "utf8"));
@@ -344,7 +362,7 @@ function operatorChannelLearningRoot(target, repoRoot = REPO_ROOT) {
   }
   if (parsed?.channelLearning === undefined) return null;
   if (!Array.isArray(parsed.channelLearning)) {
-    throw channelLearningStoreError(target, "config/harness-deployments.json の channelLearning が配列ではありません。");
+    throw channelLearningStoreError(target, `${label} の channelLearning が配列ではありません。`);
   }
   // チャンネル単位の行（{ target, channel, root }）はそのチャンネルの保存先で、チャンネルの無い Job の保存先ではない。
   const rows = parsed.channelLearning.filter((row) => row?.channel === undefined && resolveTarget(String(row?.target || "")) === target);
@@ -369,6 +387,8 @@ export function resolveChannelLearningStore(target, definition = {}, {
   repoRoot = REPO_ROOT,
   deploymentRootFor = undefined,
   channel = null,
+  // チャンネルの台帳（BUZZASSIST_CHANNEL_REGISTRY）と学習の置き場（BUZZASSIST_LEARNING_DIR）を読む環境。
+  env = process.env,
 } = {}) {
   if (!isChannelPackTarget(target)) return null;
   const sharedLedgerDir = path.join(repoRoot, "docs", "learning");
@@ -381,12 +401,12 @@ export function resolveChannelLearningStore(target, definition = {}, {
     }
     return { root, source };
   };
-  const scope = channelLearningScopeOf(channel, { repoRoot });
+  const scope = channelLearningScopeOf(channel, { repoRoot, env });
   if (scope) {
     const store = channelScopeStore(scope, resolveTarget(target));
     return { ...checked(store.root, "channel"), channelId: scope.channelId };
   }
-  const declared = operatorChannelLearningRoot(target, repoRoot);
+  const declared = operatorChannelLearningRoot(target, repoRoot, env);
   if (declared) return checked(declared, "operator-project");
   if (definition?.relativeToDeployment) {
     const deployment = (deploymentRootFor ?? ((id) => resolveDeploymentRoot(id, repoRoot)))(definition.relativeToDeployment);
@@ -1887,9 +1907,8 @@ export function captureLearningProposal(input, {
   // 配布された写しでの最初の書き込みの前に、古い写しの台帳を取り込む（1回だけ）。
   // 先に書くと「状態の置き場が空ではない」になり、古い台帳を取り込む機会が無くなる。
   if (ledgerPathResolver === ledgerPathFor) ensureLearningStateReady({ env });
-  const ledgerPath = scope
-    ? ledgerPathResolver(entry.target, "proposals", { channel: scope })
-    : ledgerPathResolver(entry.target, "proposals");
+  // 台帳（チャンネルの保存先・チャンネルの無い Job の保存先の宣言）は、捕捉と同じ env で読む。
+  const ledgerPath = ledgerPathResolver(entry.target, "proposals", { ...(scope ? { channel: scope } : {}), env });
   assertCaptureLedgerIsolation(entry.target, ledgerPath, ledgerPathResolver);
   return lock(ledgerPath, () => {
     const duplicate = read(ledgerPath).some((row) => {
