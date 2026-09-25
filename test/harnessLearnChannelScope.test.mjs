@@ -79,11 +79,11 @@ function syntheticChannel(root, id) {
   };
 }
 
-function deploymentMap(root, { channelLearning = [] } = {}) {
+function deploymentMap(root, { channelLearning = [], channelIds = ["alpha", "beta"] } = {}) {
   return {
     deployments: [{ harnessId: "narrated-story-video", root: ".", entrypoint: "node scripts/sample-entry.mjs" }],
     channelLearning,
-    channels: [syntheticChannel(root, "alpha"), syntheticChannel(root, "beta")],
+    channels: channelIds.map((id) => syntheticChannel(root, id)),
   };
 }
 
@@ -294,6 +294,28 @@ test("チャンネルの宣言: { target, channel, root } の私有プロジェ�
   const refused = capture(inherit, inheritRoot, "合成: 引き継ぎの宣言を拒む", "inherit-alpha", ["--channel", "alpha"]);
   assert.notEqual(refused.status, 0);
   assert.match(refused.stderr, /channel-learning-store-unscoped-overlap:alpha/u);
+});
+
+test("引き継ぎ: 既存の Channel Pack の台帳を持つチャンネルを1つ目として登録し、root をその Pack にすれば従来の学習を読み続ける", (t) => {
+  const root = tempRoot(t);
+  // 登録する前（チャンネルの無い従来の捕捉）。台帳は Channel Pack の既定の置き場に積まれる。
+  const repo = stageRepo(root, { channelIds: [] });
+  const legacyId = capturedId(capture(repo, root, "合成: 登録の前に拾った指摘", "inherit-before"));
+  const packLedger = path.join(repo, "channel-packs", "narrated-story", "docs", "learning", "proposals.jsonl");
+  assert.deepEqual(readJsonl(packLedger).map((row) => row.id), [legacyId]);
+
+  // 1つ目のチャンネルとして登録し、root を従来の Pack のフォルダにする（docs の書き方と同じ）。
+  fs.writeFileSync(path.join(repo, "config", "harness-deployments.json"), `${JSON.stringify(deploymentMap(root, {
+    channelIds: ["alpha"],
+    channelLearning: [{ target: TARGET, channel: "alpha", root: "channel-packs/narrated-story" }],
+  }), null, 2)}\n`);
+  const afterId = capturedId(capture(repo, root, "合成: 登録の後に拾った指摘", "inherit-after", ["--channel", "alpha"]));
+  // 同じ台帳のファイルに、印の無い従来の行と、印のある新しい行が並ぶ。
+  assert.deepEqual(readJsonl(packLedger).map((row) => [row.id, row.channel]), [[legacyId, undefined], [afterId, "alpha"]]);
+  const status = runLearn(repo, root, ["status", "--channel", "alpha"]);
+  assert.equal(status.status, 0, status.stderr);
+  assert.ok(status.stdout.includes(legacyId) && status.stdout.includes(afterId), `従来の行も読む:\n${status.stdout}`);
+  assert.equal(fs.existsSync(channelStore(root, "alpha")), false, "既定の保存先は使わない");
 });
 
 test("Job の確定時の自動の捕捉: metadata.channel の Job はそのチャンネルの保存先へ、無い Job は従来の宛先へ", async (t) => {

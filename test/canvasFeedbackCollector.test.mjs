@@ -14,7 +14,7 @@ import {
 } from "../lib/canvasFeedbackCollector.mjs";
 import { writeJsonAtomic } from "../lib/canvasScene.mjs";
 import { projectVideoHarnessJob } from "../lib/videoHarnessCanvasAdapter.mjs";
-import { buildProposal, captureLearningProposal } from "../scripts/harness-learn.mjs";
+import { buildProposal, captureLearningProposal, ledgerPathFor } from "../scripts/harness-learn.mjs";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const FEEDBACK_FIELDS = [
@@ -557,4 +557,101 @@ test("注入らしい言い回しのコメントは投影を止めず、blocked 
   } finally {
     await rm(fixture.projectDir, { recursive: true, force: true });
   }
+});
+
+test("collector: チャンネルで作った Job の channel-pack 宛の提案はそのチャンネルの保存先へ積み、一般化の提案にはチャンネルを付けない", async (t) => {
+  // 台帳・学習の置き場は一時ディレクトリだけ（本物の配置表と ~/.buzzassist を読まない・書かない）。チャンネルの名前は合成。
+  const projectDir = await mkdtemp(join(tmpdir(), "canvas-feedback-channel-"));
+  const outside = await mkdtemp(join(tmpdir(), "canvas-feedback-channel-state-"));
+  t.after(async () => {
+    await rm(projectDir, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  });
+  const scriptPath = join(projectDir, "script.txt");
+  await writeFile(scriptPath, "第一幕。十分に長いテスト用の日本語台本本文です。主人公は駅へ向かいます。");
+  const job = {
+    ...fixtureJob(projectDir, scriptPath, { harnessId: "narrated-story-video", channelPackId: "sample-story" }),
+    metadata: { channel: { id: "alpha", selectedBy: "explicit" } },
+  };
+  await projectVideoHarnessJob(job);
+  const canvasFile = join(projectDir, "canvas", "excalidraw-canvas.json");
+  const channel = (id, dir) => ({
+    id,
+    projectDir: dir,
+    channelPack: join(outside, id, "pack"),
+    production: { kind: "harness", harnessId: "narrated-story-video" },
+    strategy: { workDir: join(outside, id, "strategy"), requireBrief: false },
+  });
+  const registryFile = join(outside, "registry.json");
+  await writeFile(registryFile, JSON.stringify({ channels: [channel("alpha", projectDir), channel("beta", join(outside, "beta", "project"))] }));
+  const learningDir = join(outside, "learning-state");
+  const env = { BUZZASSIST_CHANNEL_REGISTRY: registryFile, BUZZASSIST_LEARNING_DIR: learningDir };
+  const resolverCalls = [];
+  const ledgerResolver = (target, kind, options = {}) => {
+    resolverCalls.push({ target, options });
+    return ledgerPathFor(target, kind, { ...options, env });
+  };
+  const captureCalls = [];
+  const proposalCapture = (input, options = {}) => {
+    captureCalls.push(structuredClone({ target: input.target, options }));
+    return captureLearningProposal(input, { ...options, env, signals: { terms: [], castIds: [] }, privateVocabulary: null, homeRoot: "" });
+  };
+
+  await updateEntityFeedback(canvasFile, {
+    buzzassistDecision: "採択",
+    buzzassistComment: "画像生成工程では、この明るい構図の方針を維持する。",
+    buzzassistFeedbackRevision: 1,
+  });
+  const first = await collectCanvasFeedback({ projectDir, job, ledgerResolver, proposalCapture, now: () => "2026-09-26T01:00:00.000Z" });
+  assert.equal(first.captured, 1);
+  assert.deepEqual(captureCalls, [{ target: "channel-pack:narrated-story", options: { channelId: "alpha" } }]);
+  assert.ok(resolverCalls.some((call) => call.options.channel === "alpha"), "隔離の検査もチャンネルの保存先で見る");
+  const alphaLedger = join(learningDir, "channels", "alpha", "docs", "learning", "proposals.jsonl");
+  const rows = (await readFile(alphaLedger, "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  assert.deepEqual(rows.map((row) => [row.id, row.target, row.channel]), [[first.proposalIds[0], "channel-pack:narrated-story", "alpha"]]);
+  await assert.rejects(readFile(join(learningDir, "channels", "beta", "docs", "learning", "proposals.jsonl")), { code: "ENOENT" });
+
+  // 一般化（genre 宛）は人が明示したときだけで、チャンネルを付けない（共有層へチャンネルの保存先の印を運ばない）。
+  const generalized = [];
+  await updateEntityFeedback(canvasFile, {
+    buzzassistDecision: "reject",
+    buzzassistComment: "ナレーション物語では、場面転換の前に一拍おく。",
+    buzzassistFeedbackRevision: 2,
+    buzzassistFeedbackTarget: "genre:narrated-story-video",
+    buzzassistFeedbackGeneralize: true,
+  });
+  const second = await collectCanvasFeedback({
+    projectDir,
+    job,
+    ledgerResolver,
+    proposalCapture: async (input, options) => {
+      generalized.push({ target: input.target, options });
+      return { entry: buildProposal(input) };
+    },
+    now: () => "2026-09-26T02:00:00.000Z",
+  });
+  assert.equal(second.captured, 1);
+  assert.deepEqual(generalized, [{ target: "genre:narrated-story-video", options: undefined }]);
+
+  // 台帳に無いチャンネルの Job は、チャンネルの無い保存先へ落とさずに止める（何も積まない）。
+  await updateEntityFeedback(canvasFile, {
+    buzzassistDecision: "採択",
+    buzzassistComment: "この構図の方針を維持する。",
+    buzzassistFeedbackRevision: 3,
+  });
+  const ghostCalls = [];
+  await assert.rejects(
+    collectCanvasFeedback({
+      projectDir,
+      job: { ...job, metadata: { channel: { id: "ghost" } } },
+      ledgerResolver,
+      proposalCapture: async (input, options) => {
+        ghostCalls.push(options);
+        return { entry: buildProposal(input) };
+      },
+      now: () => "2026-09-26T03:00:00.000Z",
+    }),
+    (error) => error instanceof CanvasFeedbackValidationError && error.code === "CANVAS_FEEDBACK_LEDGER_NOT_ISOLATED",
+  );
+  assert.deepEqual(ghostCalls, []);
 });
