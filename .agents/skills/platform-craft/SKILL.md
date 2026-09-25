@@ -88,6 +88,18 @@ const job = await broker.start({
 既存の 429 の扱いを変えないこと。ジャンル側が 429 で **park**（残枠を焼かない
 ために実行を止める）している箇所がある。そこを再送に変えると意図が壊れる。
 
+**端末全体の枠。** 有料の音声・画像の送信は、端末全体の枠（`lib/machineSlots.mjs`。既定は
+paid-speech 4・paid-image 16、`BUZZASSIST_MACHINE_SLOTS_PAID_SPEECH` / `BUZZASSIST_MACHINE_SLOTS_PAID_IMAGE`
+で端末ごとに変える）の中で行う。broker が送信の直前に枠を取るので、Claude Code と Codex の別の
+セッションが同時に投げても端末全体の同時数は上限を越えない。枠を待って失敗しても送信前なので
+未課金（Media Job は reserved のまま）。
+
+**課金APIの外で作った画・動画。** 運営者の web 画面・ローカルモデル・撮影などで作った素材を公式経路へ
+入れるときは、画は `lib/operatorImageImport.mjs`、動画は `lib/operatorVideoImport.mjs` を使う。来歴
+（sha256・経路・プロンプトの sha256・生成した時刻、画は承認済みの参照も）を有料の処理の前に検査してから
+取り込み、会話の URL などの本文は私有の Job フォルダにだけ残す（公開面は sha256 だけ）。費用は Media Job に
+数えず `operator-external-contract` として記録する。2つ目の取り込み口を作らない。
+
 ## どの入口を使わせるか
 
 `lib/harnessRouting.mjs`。ジャンルごとに、ガバナンスを通る入口は1つだけで、
@@ -100,6 +112,27 @@ const job = await broker.start({
 - 過去成果物の再現は `benchmarkMigration: true` を明示したときだけ通し、
   迂回したことを戻り値に残す
 - **判定を各ハンドラに散らさない**。散らすと後から増えた1つが素通りする
+- 依頼文からハーネスを選ぶ判定は `lib/videoHarnessJob.mjs` の `decideVideoHarness` の1か所で、start と
+  plan-request が同じ判定を使う。依頼文の否定の節（〜は使わず・〜ではなく・〜なし・not / without）の語は
+  減点する。否定の語だけ、または上位2つの点差が2未満（同点を含む）なら1つに決めず、
+  `video-harness-choice-required` で候補と1問を返す
+
+### 依頼からハーネスを選ぶ（plan-request）
+
+運営者が作りたい動画を言ったら、start の前に
+`node scripts/run-video-harness.mjs plan-request --request "<依頼文>" [--script-path FILE] [--channel-pack BUNDLE]`
+（MCP は `plan_video_request`、本体 `lib/videoRequestPlan.mjs`）を呼ぶ。返るのは候補の順位と理由（一致した
+語・否定された語・入力要件・前提・実績・Channel Pack の向き先）と、決めきれないときの1問。モデルも有料 API
+も呼ばず、Job も作らない。判断はホストがする。
+
+- `decision.status` が `selected` でなければ、`question` をホストの質問 UI でそのまま1回だけ聞き、
+  答えのハーネス ID で plan-request を呼び直す。推測で1つに決めない
+- `decision.blockers` が残っている間は start しない。実績は RunReceipt と skill evals の記録から読み、
+  無ければ「実績なし」と出る。「実績なし」を「問題なし」と言い換えない
+- ハーネスを足したら、宣言（`config/harnesses/<id>.harness.json`）の隣に能力カード
+  `<id>.capabilities.json` を置く（本体 `lib/harnessCapabilities.mjs`）。保証・運営者に要る素材・実績は
+  カードに書かない（保証と素材は宣言から自動で作り、実績は記録から読む）。説明をカードに分けるのは、
+  文を直しただけで宣言の SHA（Job の識別子に入る）が変わらないようにするため
 
 ## 実行の記録（RunReceipt）
 
@@ -121,6 +154,52 @@ const job = await broker.start({
 保証の裏づけが全部消えた場合は pass ではなく `skip`。契約が縮んで保証が黙って
 無効になるのが、この種の穴の入口。
 
+共通の Receipt（`lib/videoHarnessReceipt.mjs`）は「その Job に効いている契約の版の必須監査」で測る。
+制作契約を Job に固定したハーネス（漫画）は、確定の直前に読み直した固定契約の `requiredAudits`。
+それ以外は audit-report の版を、宣言の保証の `inForceSince` で測る（`declaredAuditIdsInForce`）。今の宣言で
+計画された Job は、宣言の版（`inForceSince` の最新）より古い版を名乗れない。**監査契約の版を上げるときは、
+足す監査を新しい保証として `inForceSince` つきで宣言する**——既存の保証に監査を足すと、版から過去の契約を
+導けず、確定待ちの古い Job が当時無かった監査で落ちる。
+
+### どのホストから動かしたかを残す
+
+Job を作った呼び出しは `job.metadata.invocation.createdBy`、再開は `resumedBy[]` に分けて残り、共通
+RunReceipt の `invocation` 欄へ digest つきで写る。判定は `lib/harnessHostProvenance.mjs` の1か所
+（MCP は initialize の `clientInfo`、CLI は環境変数の**名前**で判定し、値は残さない）。入口ごとに2つ目の
+判定を書かない。
+
+- ホストは Job の同一性にも inputDigests にも入れない。Claude Code で始めた Job を Codex で再開しても同じ Job
+- モデル ID は推測で埋めない。自分のモデル ID が分かるときだけ MCP の `hostModel` / CLI の `--host-model`
+  に渡す（記録は caller-declared。分からなければ unknown のまま）
+- 記録の系列名 `harness-run-receipt-v1` は変えない（Canvas 投影・学習の索引・Stop フックが完全一致で読む）。
+  欄の増減は `schemaRevision` で表す（2 = invocation と timing、3 = `timing.stages`）。上げたら、上げる前の
+  版の実例を `test/fixtures/run-receipt-past-schema-revisions.json` に足す
+- 同じ品質かは `node scripts/harness-receipts.mjs rollup --by host` で見る。ホストの記録が無い・判定できない・
+  作ったホストと再開したホストが混ざった組は比べない
+
+### 完成と言う前に（Stop フック）
+
+Claude Code と Codex のプラグインは Stop フック（`scripts/harness-stop-hook.mjs`）を持つ。最後の発言が
+完成・完了・納品できる・done を主張し、この会話で扱った Job が合格で決着していない（completed でない、
+RunReceipt が pass で確かめられない、blockers・`knownRemainingIssues` が残る、工程が pass でない）とき、
+止まるのを差し戻し、reason に Job の状態と残りの項目を返す。
+
+- 差し戻されたら、完成と言い直さずに今の状態と残りを報告するか、次の工程を進める。有料の実行・再開は
+  運営者の明示の確認があるときだけ
+- `awaiting-human-review` は正当な停止。作業を進めず、確認待ちであることと、誰が何を確認すれば進むかを報告する
+- フックは同じ会話・同じ Job で2回までしか差し戻さず、`stop_hook_active` のときは何もしない。
+  **差し戻されなかったことは合格の証拠ではない**——合格の根拠は Job と RunReceipt だけ
+- Codex は `/hooks` でフックを信頼するまで動かさない。Antigravity にはフックが無いので、
+  `node scripts/run-video-harness.mjs status` で自分で Job を確かめてから報告する
+
+## Canvas への投影
+
+Canvas への投影の家は3つだけ。Run の状態は `lib/canvasRunProjection.mjs`、決着した成果物は
+`lib/canvasRunMediaProjection.mjs`、制作の途中は `lib/canvasRunProgressProjection.mjs`（ジャンルは
+snapshot の読み取り側だけを書く。漫画は `lib/koyaMangaProgressSnapshot.mjs`）。4つ目の投影器を作らない。
+途中の投影の失敗は Job の状態遷移（completed への確定を含む）を止めず、戻り値の
+`progressProjection.ok=false` として残す。
+
 ## 品質ループ（作って、測って、直す）
 
 `lib/qualityLoop.mjs`。ジャンルに依らない品質ループの中核で、漫画もナレーション物語もここを
@@ -135,6 +214,31 @@ const job = await broker.start({
 - 止まる条件を複数持つ: 目標到達、人の判断が要る状態、費用、時間、回数、改善の停滞
 - 合格しなかった回には失敗指紋を付け、次の回は「どの失敗を、どう直したか」を必須にする。
   修正内容が無いときは例外で落とさず、人待ちで止める
+- 時計はループの中で観測した最も早い時刻から最も遅い時刻までで数える。レビューの署名が監査より先でも
+  例外にしない（読めない時刻だけ拒否する）
+- 費用は有料生成の記録（Media Job の受領記録）から `summarizePaidMediaCost` で回ごとに集計して渡す。
+  数えた Media Job は状態の `costedKeys` に残し、二重に数えない。単位は提供元が申告した通貨で、混ざったら
+  合計せず人待ちにする。契約の `maximumCostUnits` はその通貨の単位で書く
+- 直前の回と同じ所見の評価は `quality-feedback-not-updated` で拒否し、新しい評価を求める
+- 合格せずに止まったら、最高点の回を成果物 SHA つきで `bestRound` に残す。合格扱いにはしない
+
+### 途中の成果物の品質ループ
+
+人物の設定画・背景・本編の画・サムネ・声のテイクも、使う前に同じ中核でループを回す。入口は
+`node scripts/asset-quality-loop.mjs`（start / sheet / record / verify / status）、実装は
+`lib/assetQualityLoop.mjs`。
+
+- 人物の同一性と、公開面に出る画の手指の安全は、対話端末＋`--human-verified` の人の確認が無いと
+  合格にならない。人の確認は対象ごと（batch では記録できない）
+- 評価者に渡すシート（`sheet`）には合格点・下限・重み・前の回の点数を載せない
+- 同じ工程の対象が多いとき（長い動画の声のテイク・本編の画）は `sheet --batch` / `record --batch` で
+  1つの評価文脈がまとめて採点する（1回 50 件まで）。保証は1件ずつと同じ: 対象ごとに作った文脈と別の
+  評価者の採点と所見、1つの不合格は他の合格を消さない、再評価は不合格の対象だけ。同じ所見の写しを
+  複数の対象に貼った採点は記録されない
+- 使う前の照合は `lib/assetQualityUseGate.mjs` の1か所だけに置く。ジャンルは効力の判定だけを足す
+  （漫画は契約の版で効力を決めてからここを呼ぶ）
+- 状態 → 理由コードの対応は `lib/assetQualityLoop.mjs` の `assetQualityReasonCode` の1か所
+  （before-use / loop-state の語彙）。照合する側はループの issues や状態名を読まない
 
 ## 独立レビューの署名（reviewer attestation）
 
@@ -177,108 +281,6 @@ Job binding・契約digest・review notes SHA、narrated は signoff 本文 SHA�
 - 秘密鍵は **file から読む**（`--reviewer-key-path`）。argv・環境変数・MCP 引数・Job
   options・Channel Pack・signoff 本文に鍵素材を載せない
 
-信頼リストの形（`koya-reviewer-trust-v1`。名前に koya が残るのは履歴で、両ハーネス共通）:
-
-```json
-{
-  "version": "koya-reviewer-trust-v1",
-  "reviewers": [
-    {
-      "keyId": "ed25519:<公開鍵fingerprint 24桁hex>",
-      "publicKeyPem": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n",
-      "label": "independent-reviewer-1",
-      "status": "active"
-    },
-    {
-      "keyId": "ed25519:<別鍵のfingerprint>",
-      "publicKeyPem": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n",
-      "label": "retired-reviewer",
-      "status": "revoked",
-      "revokedAt": "2026-09-01T00:00:00.000Z",
-      "reason": "端末交換により旧鍵を失効"
-    }
-  ]
-}
-```
-
-`keyId` は `publicKeyPem` から導いた fingerprint と一致しなければ読み込み自体が失敗する
-（alias を許すと別鍵の entry に既知の keyId を書いて差し替えられる）。`status` は
-`active` / `revoked` のみ。`revoked` には `revokedAt` と `reason` が必須。重複 keyId は拒否。
-
-鍵の作成（両ハーネス共通。`narrated-story-video.mjs reviewer-key-create` も同じ実装）:
-
-```bash
-node scripts/koya-manga-video.mjs reviewer-key-create \
-  --reviewer-key-path /secure/outside-repo/reviewer-ed25519.pem \
-  --reviewer-label independent-reviewer-1
-```
-
-秘密鍵は mode 0600 で書き、既存 file は上書きしない。repo 内・`--project-dir` 内・git 作業木内の
-path は拒否する。標準出力には `keyId` と信頼リストへ貼る `trustEntry`（公開鍵だけ）が出る。
-秘密鍵は印字されない。
-
-**入口の対応表（CLI = MCP。どのhostからも同じ処理へ届く）:**
-
-| 工程 | CLI | MCP（`lib/videoHarnessMcp.mjs` / `lib/koyaMcpAdapter.mjs`） |
-|---|---|---|
-| production Job の start / resume（照合用 path） | `run-video-harness.mjs start\|resume [--reviewer-trust-path JSON]` | `run_video_harness` / `resume_video_harness_job` の `reviewerTrustPath` |
-| reviewer 鍵の作成 | `koya-manga-video.mjs reviewer-key-create` / `narrated-story-video.mjs reviewer-key-create` | `create_video_harness_reviewer_key`（`reviewerKeyPath`, 任意 `reviewerPublicKeyPath` / `reviewerLabel`, `confirmed: true`） |
-| Koya Job の signoff | `koya-manga-video.mjs signoff --reviewer-key-path PEM [--reviewer-trust-path JSON]` | `run_koya_manga_pipeline action=signoff`（`reviewerKeyPath`, `reviewerContextId`, 任意 `reviewerTrustPath`） |
-| narrated Job の signoff | `narrated-story-video.mjs signoff --reviewer-key-path PEM --review-path REVIEW.json --pass\|--fail [--reviewer-trust-path JSON]` | `signoff_video_harness_job`（同じ引数名に `reviewPath`・`pass: true\|false`。Koya Job を渡すと拒否） |
-
-上位 `run-video-harness.mjs` の `--reviewer-trust-path`（MCP `reviewerTrustPath`）は Job identity に
-入らず `job.json` にも保存されない実行時引数。env と一致した path だけを service がジャンル子 CLI
-（`koya-manga-video.mjs full` / `narrated-story-video.mjs full`）へ同じ値で渡し、両層が同じ信頼リストで
-再検証する。MCP の reviewer 系引数は path だけを受け、鍵の中身らしい引数名（`*Pem`, `*PrivateKey`,
-`*Secret`, `*Token`, `*Key` 単独）や PEM 文字列・信頼リスト本文を含む値は黙って捨てずに拒否する
-（黙って捨てると「渡したのに効かない」と見え、鍵本体を argv に載せる回避策を誘発する）。
-reviewer 系 MCP tool はいずれも `confirmed: true` が必須で、有料 API は呼ばない。
-
-**MCP host へ信頼リストを届ける（R6-F2）。** CLI（`run-video-harness.mjs` 等）は実行したシェルの
-env をそのまま読む。MCP サーバーは host（Claude Code / Codex）が起動する子 process で、**どの env が
-子へ届くかは host ごとに違う**（2026-09-06 実測、Claude Code 2.1.260 / Codex 0.153.1、`ps -Eww` で
-MCP 子 process の env キー数を計測）:
-
-| host | MCP 子 process に届く env | 帰結 |
-|---|---|---|
-| Claude Code | host 自身の process env を全部継承（親 40 キー → 子 47 キー） | host を起動したシェル / launcher の env に値を置けば届く |
-| Codex | 最小 env のみ（親 48 キー → 子 10 キー: `EXCALIDRAW_*` と `HOME` / `PATH` / `SHELL` 等）。サーバー定義の `env_vars` に**名前**を挙げた変数だけを親 env から転送 | 名前が `env_vars` に無い変数は届かない。値はやはり host を起動した env に置く |
-
-setup（`scripts/setup-agents.mjs`）はこれに合わせ、MCP サーバー定義（`~/plugins/buzzassist/plugin/.mcp.json`
-の `buzzassist_mcp`、および Claude Desktop / Cursor / Antigravity の `mcpServers` 登録）へ
-`env_vars: ["BUZZASSIST_REVIEWER_TRUST", "BUZZASSIST_REVIEWER_TRUST_JSON", "BUZZASSIST_KOYA_REVIEWER_TRUST",
-"BUZZASSIST_KOYA_REVIEWER_TRUST_JSON"]` を**自動で**付ける（`withReviewerTrustEnvPassthrough`。option では
-なく常時）。設定 file に載るのは **env の名前だけ**で、値は載らない。
-
-owner がすること:
-
-- 値 `BUZZASSIST_REVIEWER_TRUST=<信頼リスト JSON の絶対 path>` は、**Codex / Claude Code を起動する
-  シェルまたは launcher の環境**に置く（ログインシェルの profile、macOS launchd の
-  `EnvironmentVariables`、Windows のユーザー環境変数など）。**GUI から起動した host は、setup を実行した
-  シェルの `export` を見ない**
-- **設定 file（`.mcp.json` / host の `mcpServers`）の `env` に `BUZZASSIST_REVIEWER_TRUST` を書かない。**
-  setup と auto-update は `withReviewerTrustEnvPassthrough` でその key を `reviewer-trust-in-config` として
-  fail-closed に拒否する。仮に手で足しても、サーバー定義は setup / auto-update のたびに新しい object で
-  作り直されるので黙って消え、`reviewer-trust-unconfigured` が再発して原因が見えなくなる。拒否する理由:
-  設定 file は plugin cache へコピーされ生成側が読み書きできる場所にあり、そこへ path を書けば
-  要求側の入力で信頼アンカーが立つ（自己承認へ退化）
-- `BUZZASSIST_REVIEWER_TRUST_JSON`（本文 inline）も設定 file へ書かない。host env には path を使い、
-  信頼リスト file 自身は owner だけが書ける場所（repo 外・`canvas/` 外）に置く。path が生成側から
-  書ける file を指すなら、env をアンカーにした意味が無い
-- 新旧名（`BUZZASSIST_KOYA_REVIEWER_TRUST`）を両方置かない。内容一致でも片方を消すまで
-  `env-ambiguous` で止まる
-- 値を置いた後は **host を完全に再起動**して MCP サーバーを起こし直す（env は起動時にしか読まれない）
-- setup summary の読み方: `BUZZASSIST_REVIEWER_TRUST_PASSTHROUGH=env-name-only` と
-  `BUZZASSIST_REVIEWER_TRUST_ENV_VARS=<名前の一覧>` は「設定 file に名前だけを書いた」ことの報告。
-  `BUZZASSIST_REVIEWER_TRUST_CONFIGURED=yes|no|ambiguous` は **setup を実行したシェル**での判定で
-  （`BUZZASSIST_REVIEWER_TRUST_SCOPE=setup-shell-environment`）、`yes` でも GUI host に届いている
-  保証にはならない。最終確認は MCP 経由で行う——確定待ち Job があれば `resume_video_harness_job`
-  （`confirmed: true`）で Receipt 確定だけが通ること。`get_video_harness_job` は env を読まないので
-  確認にならない
-- Codex で plugin `.mcp.json` の `env_vars` が転送されなかった場合の fallback（**未実測**）:
-  `~/.codex/config.toml` の `[mcp_servers.buzzassist_mcp]` に `env_vars = [...]`（名前のみ）を置く。
-  ここにも値は書かない
-
 **運用モデル（これを崩すと自己承認へ退化する）:**
 
 - **信頼リストは、生成を行う端末・エージェントとは別の主体（owner）だけが設定する。**
@@ -296,23 +298,11 @@ owner がすること:
 - generator と reviewer の context（Codex task ID / Claude session ID）は別でなければ
   ならず、鍵が信頼済みでも同一 context の signoff は不合格
 
-**runbook（owner が行うこと / 生成側・reviewer が行うこと）:**
-
-| 主体 | すること | しないこと |
-|---|---|---|
-| owner | 信頼リスト JSON を管理し、監査・Receipt を実行する端末の env `BUZZASSIST_REVIEWER_TRUST` に配る（MCP 経由なら host を起動するシェル / launcher の env）。失効・追加を配り直す | bundle・Channel Pack・Job options・MCP 引数で信頼リストを渡す |
-| reviewer | 生成 context と別の context で `reviewer-key-create` → trustEntry（公開鍵）だけを owner へ渡す → `signoff --reviewer-key-path` | 秘密鍵を repo 内・canvas・argv・MCP 引数へ置く。信頼リストを自分で書く |
-| 生成側（Claude/Codex） | 監査・Receipt で env の信頼リストを読む。`--reviewer-trust-path` を付けるなら env と同じ内容の照合用として | env 未設定の端末で `--reviewer-trust-path` だけで通そうとする。options に `reviewerTrustPath` / `reviewerPrivateKeyPem` を書く |
-
-**失敗コードと復旧（Job 層）:**
-
-| コード | 意味 | 復旧 |
-|---|---|---|
-| `reviewer-trust-unconfigured` | 実行側 env に信頼リストが無い（明示 path があっても同じ） | owner が env を設定してから `resume`。MCP 経由なら host を起動する env に置き、host を再起動してから（設定 file の `env` へ書いても拒否・消去される） |
-| `reviewer-trust-invalid:env-ambiguous:<path\|json>` | 新旧 env 名の両方が設定され内容が違う | env をどちらか1つにしてから `resume` |
-| `reviewer-trust-conflict` | 明示 `--reviewer-trust-path` の内容が env の信頼リストと一致しない | 明示 path を外す（または env と同じ内容を指す）。env は書き換えない |
-| `reviewer-key-untrusted` / `reviewer-key-revoked` | 署名鍵が信頼リストに無い／失効済み | owner が登録した active な鍵で reviewer が signoff をやり直す |
-| `reviewer-attestation-unsupported-harness` | harness 宣言に `reviewAttestation.subject` が無い／未知 | **宣言を直したうえで新しい Job を作る**（resume では直らない。宣言は Job identity の一部） |
+信頼リストの形、鍵の作成、CLI と MCP の入口の対応表、MCP host（Claude Code / Codex）へ信頼リストを
+届ける方法（env の名前だけを設定 file に書き、値は host を起動する環境に置く）、owner・reviewer・生成側の
+runbook、失敗コードと復旧は `references/reviewer-attestation-ja.md` にある。署名・信頼リスト・signoff・
+reviewer 鍵を扱うコードや手順を触るとき、Receipt の確定が reviewer 系の理由で止まったときは、先にそれを
+最後まで読む。
 
 有料生成を終えた後に上の設定・証跡側の失敗で RunReceipt が確定できない場合、Job は
 `failed` にならず **`awaiting-human-review` に `pendingReceiptFinalization` を持って止まる**。
@@ -333,6 +323,19 @@ Koya の subject は `koya-review-attestation-v1`、narrated は
 
 `writeJsonAtomic`（`lib/canvasScene.mjs`）。途中で落ちた成果物が
 「完成した成果物」に見えないように、必ず temp → rename で書く。
+
+複数のファイルを1つの確定として書く（完成 MP4・監査の報告・Receipt・状態ファイルなど）ときは
+`lib/fileTransaction.mjs`（redo journal）を使う。新しい中身を全部置き場へ書き、journal を原子的に
+書いた時点を確定の点にしてから順に入れ替える。状態を読む前に `recoverFileTransactions` を呼ぶ。
+1つずつ rename すると、途中で落ちたとき「報告だけ pass・状態は古い」が残る。
+
+## 共有の部品（2つ目を作らない）
+
+- 字幕の組版に要るフォントの寸法（字の有無・送り幅）は `lib/fontMetrics.mjs`
+- 長い filter graph は `lib/ffmpegFilterArgs.mjs` でファイルに書いて渡す（Linux は1引数 128KiB、Windows は
+  コマンド行全体で 32,767 字の上限がある。FFmpeg 7 以降は `-/filter_complex`、それより前は
+  `-filter_complex_script`）
+- 運営者の画・動画の取り込みは上の `lib/operatorImageImport.mjs` / `lib/operatorVideoImport.mjs`
 
 ## UI を触ったら、起動して確かめる
 
@@ -393,9 +396,12 @@ Skillを、正式ハーネスが依存していると説明しない。inventory
 <!-- buzzassist-learning:d04c21b9b8d8 -->
 skill-creatorは育成・正本改善のために保持し、不要物として削除しない。本番動画Jobのhot pathからだけ除外する。
 
-BuzzAssist正本は`.agents/skills`に置き、Claude Code/Codex側は同じ正本を指す薄い
-adapterにする。host名やCLI名を一括置換して別内容を作らない。正本更新時は
-`skill-creator`、eval、inventoryのversion/content SHA、両host adapter検査をまとめて行う。
+BuzzAssist正本は`.agents/skills`に置く。Claude Code は `.claude/skills` の薄い adapter から正本を読む
+（Claude Code は `.agents/skills` を読まない）。Codex はリポジトリの `.agents/skills` を直接読むので、
+`.codex/skills` の adapter は同じ Skill を一覧に2回出すだけになる（2026-09-25 実測）。今ある
+`.codex/skills` は `docs/skill-inventory-profiles-ja.md` の手順でまとめて外す予定で、外すまでは正本参照
+だけに保ち、手順を足さない。host名やCLI名を一括置換して別内容を作らない。正本更新時は
+`skill-creator`、eval、inventoryのversion/content SHA、adapter検査をまとめて行う。
 
 ## 複数セッションを監査する
 
@@ -434,6 +440,8 @@ workflow synthesisが欠けている、といった状態を検査で見える�
   並列処理で変数が混ざり、転換が砂嵐になる
 - **閾値は、基準版と、わざと壊した版を同じ測定にかけてから決める。** 基準版だけで決めると、
   壊れた版も通る値を置いてしまう
+- **字幕のように画素で測る監査は、MP4 の輝度（Y）の面で測る。** RGB へ戻してから輝度を計算すると、
+  4:2:0 の色の間引きで原色の背景の色が白い字の画素へにじみ、RGB が飽和して読める字を読めないと取り違える
 
 ## やってはいけないこと
 
@@ -444,3 +452,7 @@ workflow synthesisが欠けている、といった状態を検査で見える�
 - `src/` を触ったのに、起動して確かめずに終える（テストは緑でも動くとは限らない）
 - 「あとで紐づける」と書いて宣言に穴を残す。**書けない理由を宣言に書き、
   テストで見えるようにする**（`receiptAdapter: { status: "pending", reason, requiredWork }`）
+- CLAUDE.md / AGENTS.md / GEMINI.md を手で直す。`config/host-instructions.template.md` を直して
+  `node scripts/generate-host-instructions.mjs` で作る（CI が `npm run instructions:check` で照合する）
+- 4つ目の Canvas 投影器、2つ目の取り込み口・品質ループの照合・ホストの判定を作る
+- Stop フックに差し戻されなかったことを、合格の根拠として報告する

@@ -73,6 +73,26 @@
         "ジャンルが決めるのは評価項目・機械ゲート・上限だけにする",
         "評価項目ごとの下限と、2回目以降の修正内容を必須にする"
       ]
+    },
+    {
+      "id": "plan-request-before-start",
+      "prompt": "この台本で、漫画じゃなくてナレーションの感動系の動画を作って。",
+      "shouldTrigger": true,
+      "invariants": [
+        "start の前に run-video-harness.mjs plan-request（MCP は plan_video_request）で候補を確かめる",
+        "decision.status が selected でなければ question をそのまま1回だけ聞き、推測で1つに決めない",
+        "decision.blockers が残っている間は start しない"
+      ]
+    },
+    {
+      "id": "stop-hook-not-evidence",
+      "prompt": "完成しましたと報告しようとしたら Stop フックに差し戻された。Job は awaiting-human-review。どう報告する？",
+      "shouldTrigger": true,
+      "invariants": [
+        "完成と言い直さず、Job の今の状態と残りの項目を報告する",
+        "awaiting-human-review は正当な停止として、誰が何を確認すれば進むかを伝える",
+        "差し戻されなかったことを合格の根拠にしない（根拠は Job と RunReceipt だけ）"
+      ]
     }
   ]
 }

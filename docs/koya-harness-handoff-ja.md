@@ -99,7 +99,7 @@ MCPからは`run_koya_manga_pipeline`へ`action: "handoff-export" | "handoff-ver
   `mcpServers`登録へ`env_vars`（信頼リストenvの**名前だけ**）を自動で付けます。**値はCodex / Claude Codeを
   起動するシェル・launcherのenvにownerが置き**、設定fileの`env`へは書きません（書くとsetupが
   `reviewer-trust-in-config`で拒否し、再生成で消えます）。置いた後はhostを再起動します。手順の正本は
-  `.agents/skills/platform-craft/SKILL.md`の「MCP host へ信頼リストを届ける」
+  `.agents/skills/platform-craft/references/reviewer-attestation-ja.md`の「MCP host へ信頼リストを届ける」
 - 失効はownerが`status: "revoked"`＋`revokedAt`＋`reason`に変えて配り直します。
   失効鍵の署名は署名日時に関係なく拒否されます
 - 信頼リスト未設定の環境ではsignoffは不合格になります（fail-closed）。「設定が無いので
