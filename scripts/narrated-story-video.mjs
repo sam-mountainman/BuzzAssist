@@ -42,7 +42,9 @@ function usage() {
   return [
     "Usage: node scripts/narrated-story-video.mjs <command> [options]",
     "",
-    "full --script-path FILE --channel-pack-dir DIR --job-id ID --upstream-job-path JOB.json --upstream-job-id ID --upstream-job-revision N --upstream-execution-binding SHA256 [--project-dir DIR] [--reviewer-trust-path JSON] [--job-identity-digest SHA256]",
+    "full --script-path FILE --channel-pack-dir DIR --job-id ID --upstream-job-path JOB.json --upstream-job-id ID --upstream-job-revision N --upstream-execution-binding SHA256 [--project-dir DIR] [--reviewer-trust-path JSON] [--job-identity-digest SHA256] [--retry-failed-images]",
+    "  --script-path accepts a raw Japanese script, a script package (script-package.json, format buzzassist-narrated-script-package-v1: story / review / speakers / readings / musicSection / sceneIntent), or a Markdown script whose story and review headings the Channel Pack declares in scriptIntake.markdown. Headings are never voiced.",
+    "  --retry-failed-images rebuilds image Media Jobs that ended failed after they may have been charged (uncharged failures and recovery-required jobs are settled automatically without it); the outcome records how many were rebuilt.",
     "  Paid production runner, launched only by the outer scripts/run-video-harness.mjs start/resume (or the run_video_harness MCP tool). Without the complete outer Job binding it stops with NARRATED_OUTER_JOB_REQUIRED before any paid generation, the same way scripts/koya-manga-video.mjs full does; a partial binding is refused too.",
     `  Before the pipeline touches disk or a Media Job it checks the reviewer trust anchor: the trust list comes only from the operator's ${REVIEWER_TRUST_ENV_GUIDANCE} and must hold at least one active key (reviewer-trust-unconfigured / reviewer-trust-invalid:env-ambiguous / reviewer-trust-invalid:no-active-reviewers otherwise); --reviewer-trust-path is a cross-check that must match it (reviewer-trust-conflict) and cannot stand alone. The finalizer re-verifies the signoff's Ed25519 reviewer attestation against the same list and never passes an unsigned or untrusted signoff. The Job identityDigest is taken from the bound upstream Job.`,
     "",
@@ -139,6 +141,7 @@ export async function main(argv = process.argv.slice(2)) {
     upstreamExecutionBinding: args.upstreamExecutionBinding,
     jobIdentityDigest: typeof args.jobIdentityDigest === "string" ? args.jobIdentityDigest : "",
     reviewerTrustPath: typeof args.reviewerTrustPath === "string" ? resolve(args.reviewerTrustPath) : "",
+    retryFailedImages: args.retryFailedImages === true,
   });
   process.stdout.write(`${JSON.stringify(outcome, null, 2)}\n`);
   process.exitCode = outcome.status === "final-audited" ? 0 : 3;
