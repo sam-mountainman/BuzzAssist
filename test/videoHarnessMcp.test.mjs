@@ -61,9 +61,11 @@ test("generic MCP definitions expose plan/run, get/list/cancel/resume without se
     TOOL_CREATE_VIDEO_HARNESS_REVIEWER_KEY,
   ]);
   const run = definitions.find((definition) => definition.name === TOOL_RUN_VIDEO_HARNESS);
-  assert.deepEqual(run.inputSchema.required, ["scriptPath", "channelPackPath"]);
+  // channelPackPath は channelId が無いときに service が要求する（チャンネルなら台帳が決める）。
+  assert.deepEqual(run.inputSchema.required, ["scriptPath"]);
   assert.equal(run.inputSchema.properties.confirmed.default, false);
   assert.deepEqual(Object.keys(run.inputSchema.properties).sort(), [
+    "channelId",
     "channelPackPath",
     "confirmed",
     "harnessId",
@@ -72,6 +74,7 @@ test("generic MCP definitions expose plan/run, get/list/cancel/resume without se
     "projectDir",
     "reviewerTrustPath",
     "scriptPath",
+    "strategyBriefPath",
     "want",
   ]);
   const resume = definitions.find((definition) => definition.name === TOOL_RESUME_VIDEO_HARNESS_JOB);
@@ -403,7 +406,7 @@ test("plan_video_request は読むだけの道具で、Job 系と同じ path の
   const planTool = definitions.find((definition) => definition.name === TOOL_PLAN_VIDEO_REQUEST);
   assert.deepEqual(planTool.inputSchema.required, ["request"]);
   assert.deepEqual(Object.keys(planTool.inputSchema.properties).sort(), [
-    "channelPackPath", "checkPrerequisites", "harnessId", "options", "projectDir", "request", "scriptPath",
+    "channelId", "channelPackPath", "checkPrerequisites", "harnessId", "options", "projectDir", "request", "requestKind", "scriptPath", "strategyBriefPath",
   ]);
   assert.equal(planTool.inputSchema.properties.checkPrerequisites.default, false);
   assert.equal(planTool.annotations.readOnlyHint, true);
