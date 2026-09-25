@@ -108,6 +108,34 @@ test("actual distribution audit fails closed when a packaged narrated runner fil
   assert.deepEqual(report.findings, [{ type: "missing-required-path", path: "lib/narratedStoryVideo.mjs" }]);
 });
 
+test("配布物の監査は、setup-agents と自動更新が tgz から入れるのに要るものを全部必須にする", () => {
+  // 自動更新は検査済みの tgz から入れる。npm pack は package-lock.json を入れず、Canvas は
+  // ビルド済みのものしか入らない（src/ は配らない）ので、それらが欠けた tgz は監査で落とす。
+  for (const path of [
+    "release/package-lock.json",
+    "dist/index.html",
+    "dist-widget/index.html",
+    ".mcp.json",
+    ".codex-plugin/plugin.json",
+    ".claude-plugin/plugin.json",
+    "hooks/claude-hooks.json",
+    "hooks/codex-hooks.json",
+    "mcp/server.mjs",
+    "scripts/setup-agents.mjs",
+    "scripts/start-mcp.mjs",
+    "scripts/update-current.mjs",
+    "scripts/verify-plugin-runtime.mjs",
+    "scripts/test-setup-distribution.mjs",
+    "lib/releasePackage.mjs",
+    "lib/narratedStoryBookends.mjs",
+    ".agents/skills/platform-craft/SKILL.md",
+    ".agents/skills/manga-video-production/SKILL.md",
+    ".agents/skills/narrated-story-video/SKILL.md",
+    ".agents/skills/harness-parallel-execution/SKILL.md",
+    ".agents/skills/harness-self-improvement/SKILL.md",
+  ]) assert.ok(PACKAGE_RUNTIME_REQUIRED_PATHS.includes(path), `${path} が必須一覧に無い`);
+});
+
 test("配布物は公開catalogを必須にし、本文つきlearning ledgerを禁止pathとして落とす", () => {
   assert.ok(PACKAGE_RUNTIME_REQUIRED_PATHS.includes("docs/learning/proposals.public.jsonl"));
   assert.equal(PACKAGE_RUNTIME_REQUIRED_PATHS.includes("docs/learning/proposals.jsonl"), false);

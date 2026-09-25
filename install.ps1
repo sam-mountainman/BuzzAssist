@@ -202,6 +202,10 @@ function Install-Release([string]$AppRoot, [string]$Ver, [string]$NodeExe) {
     if ($LASTEXITCODE -ne 0) { Stop-Install "Release の展開に失敗しました。" }
     $package = Join-Path $tmp "package"
     if (-not (Test-Path -LiteralPath (Join-Path $package "scripts\setup-agents.mjs"))) { Stop-Install "Release の中身に scripts\setup-agents.mjs がありません。" }
+    # npm pack は package-lock.json を入れないので、同梱の lockfile を戻して依存を固定する（自動更新と同じ）。
+    $packagedLock = Join-Path $package "release\package-lock.json"
+    $lockFile = Join-Path $package "package-lock.json"
+    if ((-not (Test-Path -LiteralPath $lockFile)) -and (Test-Path -LiteralPath $packagedLock)) { Copy-Item -LiteralPath $packagedLock -Destination $lockFile }
     if (Test-Path -LiteralPath $app) { Remove-Item -LiteralPath $app -Recurse -Force }
     Move-Item -LiteralPath $package -Destination $app
     Set-Content -LiteralPath (Join-Path $AppRoot "current.txt") -Value $app -Encoding UTF8

@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
 import {
   access,
   cp,
@@ -32,6 +31,12 @@ import {
   updaterPaths,
 } from "../lib/pluginAutoUpdate.mjs";
 import { envWithNodeOnPath, resolveNpmInvocation } from "../lib/npmInvocation.mjs";
+import {
+  RELEASE_PACKAGE_NAME,
+  downloadVerifiedReleasePackage,
+  fetchReleasePackageChecksum,
+  selectReleasePackageAssets,
+} from "../lib/releasePackage.mjs";
 import { resolveHostCommandForPlatform } from "../lib/setupAgents.mjs";
 
 const argv = process.argv.slice(2);
@@ -198,50 +203,10 @@ async function fetchLatestRelease(repository) {
   return release;
 }
 
-async function downloadReleaseArchive(release, targetPath) {
-  const response = await fetch(release.zipball_url, {
-    headers: githubHeaders(),
-    redirect: "follow",
-    signal: AbortSignal.timeout(120_000),
-  });
-  if (!response.ok) throw new Error(`GitHub Release download failed (${response.status}).`);
-  const finalUrl = new URL(response.url);
-  if (!["api.github.com", "github.com", "codeload.github.com", "objects.githubusercontent.com"].includes(finalUrl.hostname)) {
-    throw new Error(`Release download redirected to an untrusted host: ${finalUrl.hostname}`);
-  }
-  const buffer = Buffer.from(await response.arrayBuffer());
-  if (buffer.length < 1024) throw new Error("Downloaded Release archive is unexpectedly small.");
-  await writeFile(targetPath, buffer);
-  return createHash("sha256").update(buffer).digest("hex");
-}
-
-async function extractZip(archivePath, targetDir) {
-  await mkdir(targetDir, { recursive: true });
-  if (process.platform === "darwin") {
-    await run("/usr/bin/ditto", ["-x", "-k", archivePath, targetDir]);
-    return;
-  }
-  if (process.platform === "win32") {
-    const command = `Expand-Archive -LiteralPath '${archivePath.replaceAll("'", "''")}' -DestinationPath '${targetDir.replaceAll("'", "''")}' -Force`;
-    const encoded = Buffer.from(command, "utf16le").toString("base64");
-    await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded]);
-    return;
-  }
-  await run("unzip", ["-q", archivePath, "-d", targetDir]);
-}
-
-async function findReleaseSource(extractDir) {
-  const direct = join(extractDir, "package.json");
-  if (await pathExists(direct)) return extractDir;
-  const entries = await readdir(extractDir, { withFileTypes: true });
-  const candidates = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const candidate = join(extractDir, entry.name);
-    if (await pathExists(join(candidate, "package.json"))) candidates.push(candidate);
-  }
-  if (candidates.length !== 1) throw new Error("Release archive must contain exactly one BuzzAssist source directory.");
-  return candidates[0];
+// 配布物（tgz と .sha256）の取得には GitHub の token を付けない。公開 Release の asset は
+// token 無しで取れ、転送先（objects / release-assets.githubusercontent.com）へ token を渡さない。
+function downloadHeaders() {
+  return { "User-Agent": "BuzzAssist-safe-updater", Accept: "application/octet-stream" };
 }
 
 async function validateReleaseSource(sourceDir, expectedVersion) {
@@ -254,39 +219,61 @@ async function validateReleaseSource(sourceDir, expectedVersion) {
       throw new Error(`${label} manifest version ${manifest?.version || "missing"} does not match Release ${expectedVersion}.`);
     }
   }
-  for (const required of ["scripts/setup-agents.mjs", "scripts/update-current.mjs", "scripts/verify-plugin-runtime.mjs", "mcp/server.mjs", "package-lock.json"]) {
+  // 配布物（tgz）にはビルド済みの Canvas と widget が入っている（src/ は配らないので作り直せない）。
+  // 固定した依存で入れるための lockfile も要る（npm pack は入れないので prepack が同梱し、展開時に戻す）。
+  for (const required of [
+    "scripts/setup-agents.mjs", "scripts/update-current.mjs", "scripts/verify-plugin-runtime.mjs", "mcp/server.mjs",
+    "package-lock.json", "dist/index.html", "dist-widget/index.html",
+  ]) {
     if (!(await pathExists(join(sourceDir, required)))) throw new Error(`Release is missing required file: ${required}`);
   }
   return packageManifest;
 }
 
+/**
+ * Release の検査済み配布物（package:audit を通した tgz）を、同じ Release の .sha256 と照合して
+ * から展開する。以前はソースの ZIP（zipball_url）を取って手元でビルドしていたので、公開前に
+ * 検査した中身と端末へ入る中身が別物だった。tgz か .sha256 が無い Release（古い版・公開の途中）は
+ * 取らない（ZIP には落ちない）。照合できなければ何も変えずに止まる（fail-closed）。
+ */
 async function prepareReleaseSource(release, version) {
   const finalSource = join(paths.releasesDir, safeReleaseDirectoryName(version), "source");
+  const checksum = await fetchReleasePackageChecksum({
+    release,
+    version,
+    packageName: RELEASE_PACKAGE_NAME,
+    headers: downloadHeaders(),
+  });
+  // 展開済みの版は、同じ .sha256 で照合した配布物から作ったものだけを使い回す
+  // （ZIP から作った旧い展開や、別の配布物から作った展開は使わない）。
+  const prepared = await readJson(join(dirname(finalSource), "release.json"), null);
   if (
+    prepared?.packageSha256 === checksum.expectedSha256 &&
     await pathExists(join(finalSource, "dist", "index.html")) &&
     await pathExists(join(finalSource, "node_modules", "@modelcontextprotocol", "sdk", "package.json"))
   ) {
     await validateReleaseSource(finalSource, version);
-    return { sourceDir: finalSource, archiveSha256: null, reused: true };
+    return { sourceDir: finalSource, packageSha256: checksum.expectedSha256, reused: true };
   }
 
   await mkdir(paths.releasesDir, { recursive: true });
   const stagingDir = join(paths.releasesDir, `.staging-${safeReleaseDirectoryName(version)}-${process.pid}-${Date.now()}`);
-  const archivePath = join(stagingDir, "release.zip");
-  const extractDir = join(stagingDir, "extract");
   await mkdir(stagingDir, { recursive: true });
   try {
-    log(`Downloading ${release.tag_name} from GitHub Releases.`);
-    const archiveSha256 = await downloadReleaseArchive(release, archivePath);
-    await extractZip(archivePath, extractDir);
-    const extractedSource = await findReleaseSource(extractDir);
+    log(`Downloading the audited package ${checksum.fileName} of ${release.tag_name} and verifying it against ${checksum.fileName}.sha256.`);
+    const downloaded = await downloadVerifiedReleasePackage({
+      release,
+      version,
+      packageName: RELEASE_PACKAGE_NAME,
+      stagingDir,
+      headers: downloadHeaders(),
+      expectedSha256: checksum.expectedSha256,
+    });
+    const extractedSource = downloaded.sourceDir;
     await validateReleaseSource(extractedSource, version);
 
-    log("Installing Release dependencies.");
+    log("Installing Release dependencies pinned by the packaged lockfile.");
     await runNpm(["ci"], { cwd: extractedSource, timeoutMs: 10 * 60 * 1000 });
-    log("Building canvas and widget bundles.");
-    await runNpm(["run", "build"], { cwd: extractedSource, timeoutMs: 10 * 60 * 1000 });
-    await runNpm(["run", "build:widget"], { cwd: extractedSource, timeoutMs: 10 * 60 * 1000 });
     if (!skipValidationTests) {
       log("Running cross-host distribution validation.");
       await runNpm(["run", "test:setup"], {
@@ -305,10 +292,11 @@ async function prepareReleaseSource(release, version) {
       version,
       tagName: release.tag_name,
       publishedAt: release.published_at,
-      archiveSha256,
+      packageFile: downloaded.fileName,
+      packageSha256: downloaded.packageSha256,
       preparedAt: timestamp(),
     });
-    return { sourceDir: finalSource, archiveSha256, reused: false };
+    return { sourceDir: finalSource, packageSha256: downloaded.packageSha256, reused: false };
   } finally {
     await rm(stagingDir, { recursive: true, force: true });
   }
@@ -601,6 +589,21 @@ async function main() {
     await updateState({ status: "up-to-date", lastCompletedCheckAt: timestamp() });
     return;
   }
+  // 検査済みの配布物（tgz と .sha256）が無い Release は入れられない。ZIP には落ちない。
+  try {
+    selectReleasePackageAssets(release, { version: latestVersion, packageName: RELEASE_PACKAGE_NAME });
+  } catch (error) {
+    log(`Release ${latestVersion} cannot be installed: ${error.message}`);
+    console.log("BUZZASSIST_UPDATE=release-unverifiable");
+    await updateState({
+      status: "release-unverifiable",
+      lastCompletedCheckAt: timestamp(),
+      lastError: error.message,
+    });
+    // 定刻の起動では失敗扱いにしない（次の Release を待つだけ）。手動では気づけるよう非0。
+    process.exitCode = scheduled ? 0 : 1;
+    return;
+  }
   if (checkOnly) {
     log(`Update ${currentVersion} -> ${latestVersion} is available.`);
     console.log("BUZZASSIST_UPDATE=available");
@@ -620,7 +623,7 @@ async function main() {
     lastCheckedAt: timestamp(),
     lastCompletedCheckAt: timestamp(),
     lastError: "",
-    archiveSha256: prepared.archiveSha256 || undefined,
+    packageSha256: prepared.packageSha256 || undefined,
     backupDir: backupDir || undefined,
     restartRequired: true,
     ...installStatePatch(report),

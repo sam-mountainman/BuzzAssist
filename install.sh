@@ -162,6 +162,10 @@ install_release() {
   fi
   tar -xzf "${tmp}/${name}" -C "$tmp" || { rm -rf "$tmp"; fail "Release の展開に失敗しました。"; }
   [ -f "${tmp}/package/scripts/setup-agents.mjs" ] || { rm -rf "$tmp"; fail "Release の中身に scripts/setup-agents.mjs がありません。"; }
+  # npm pack は package-lock.json を入れないので、同梱の lockfile を戻して依存を固定する（自動更新と同じ）。
+  if [ ! -f "${tmp}/package/package-lock.json" ] && [ -f "${tmp}/package/release/package-lock.json" ]; then
+    cp "${tmp}/package/release/package-lock.json" "${tmp}/package/package-lock.json"
+  fi
   rm -rf "$APP"
   mv "${tmp}/package" "$APP"
   rm -rf "$tmp"

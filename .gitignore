@@ -118,3 +118,6 @@ qa/
 # 検査語彙の鍵。既定の置き場は ~/.buzzassist/ だが、手でリポジトリへ置かれても
 # 公開されないようにする（鍵が漏れると digest から語彙を総当たりで戻せる）。
 **/sensitive-vocabulary.key
+
+# prepack（scripts/stage-release-lock.mjs）が配布物へ同梱するために写す lockfile。正本は package-lock.json。
+/release/

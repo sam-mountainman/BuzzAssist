@@ -38,6 +38,7 @@ import {
   VocabularyKeyMissingError,
 } from "../lib/packageTarballAudit.mjs";
 import { collectSensitiveSignals, readAllowlist } from "./audit-public-surface.mjs";
+import { stageReleaseLockfile } from "./stage-release-lock.mjs";
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
 
 const REPO_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -83,6 +84,8 @@ export function npmInvocation(args, { env = process.env, platform = process.plat
 }
 
 function createTarball(projectDir) {
+  // --ignore-scripts で pack するので prepack が走らない。prepack と同じく lockfile を同梱物へ写す。
+  stageReleaseLockfile(projectDir);
   const destination = mkdtempSync(join(tmpdir(), "buzzassist-package-audit-"));
   try {
     const npm = npmInvocation(["pack", "--json", "--ignore-scripts", "--pack-destination", destination]);
