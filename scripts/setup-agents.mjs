@@ -521,6 +521,8 @@ const NEVER_DISTRIBUTE = new Set([
   "proposals.jsonl", "applied.jsonl",
   // 自己改善の退避記録（curate --archive）。reviewer 名を含む運用記録で、配布物の中身ではない。
   "archived.jsonl",
+  // 差分の承認キュー（harness-learn pending）。正本の書き換え案（Channel Pack 宛なら台帳の本文）を含む。
+  "changes.jsonl",
 ]);
 
 // Node 20 の fs.cp は、Windows で filter に "\\?\D:\..." 形式（名前空間つき）のパスを渡す。
@@ -883,8 +885,10 @@ async function rewriteSkillRelativeDepth(skillDir) {
 // 運営者の端末の学習は、プラグインの写し（~/plugins/buzzassist/plugin と各ホストの版別キャッシュ）の
 // 外に置く（lib/harnessLearningState.mjs）。setup はその写しを丸ごと置き換えるので:
 //   1. 置き換える前に、古い写しに残った台帳を状態の置き場へ取り込む（1回だけ・元は消さない）
-//   2. ホストの設定が済んだあと、状態の置き場にあるこの端末の overlay 区画を、ホストが読む
-//      全部の写しの references/learned-auto.md へ届け直す（同梱の項目には触らない）
+//   2. ホストの設定が済んだあと、状態の置き場の台帳からこの端末の overlay 区画を作り直す
+//      （harness-learn sync と同じ本体。検査語彙を照合できなければ書かずに理由だけ残す）
+//   3. 状態の置き場にあるこの端末の overlay 区画を、ホストが読む全部の写しの
+//      references/learned-auto.md へ届け直す（同梱の項目には触らない）
 function operatorLearningState() {
   return resolveLearningState({ codeRoot: managedPluginRoot, env: process.env, homeDir, developmentCheckout: false });
 }
@@ -897,6 +901,30 @@ function migrateOperatorLearningBeforeRefresh({ state = operatorLearningState(),
     const { proposals = 0, applied = 0, archived = 0, receipts = 0 } = result.byKind || {};
     console.log(`  古い写しの学習の台帳を${dry ? "取り込む予定" : "取り込みました"}: 提案 ${proposals} / 反映 ${applied} / 退避 ${archived} / Receipt ${receipts}（元のファイルは消していません）`);
   }
+  return result;
+}
+
+/**
+ * setup のたびの自動 sync。台帳は状態の置き場（~/.buzzassist/learning/）、配る設定と同梱の overlay は
+ * 置き換えたばかりの写し（~/plugins/buzzassist/plugin）、検査語彙はこの setup のソース（配布された写しには
+ * 入らない）から読む。語彙を照合できない端末では今どおり overlay を書かず、理由だけを
+ * auto-sync.jsonl に残して setup を続ける。BUZZASSIST_LEARNING_AUTO_SYNC=0 で止まる。
+ */
+async function autoSyncOperatorLearning({ state = operatorLearningState(), dry = dryRun } = {}) {
+  if (dry) {
+    console.log("BUZZASSIST_LEARNING_AUTO_SYNC=skipped (dry-run)");
+    return null;
+  }
+  const { autoSyncLearningOverlays } = await import("./harness-learn.mjs");
+  const result = autoSyncLearningOverlays({
+    trigger: "setup",
+    state,
+    repoRoot: managedPluginRoot,
+    vocabularyRoot: repoRoot,
+    homeDir,
+    env: process.env,
+  });
+  console.log(`BUZZASSIST_LEARNING_AUTO_SYNC=${result.status}${result.reason ? ` (${result.reason})` : ""}`);
   return result;
 }
 
@@ -1545,6 +1573,12 @@ export async function runSetupAgents() {
     results[agent] = await setupAgent(agent, pluginDir);
   }
   const autoUpdateStatus = await configureAutoUpdate(pluginDir, results);
+  // 状態の置き場の台帳から、この端末の overlay 区画を作り直す（自動 sync。止まっても setup は続ける）。
+  try {
+    await autoSyncOperatorLearning();
+  } catch (error) {
+    console.log(`BUZZASSIST_LEARNING_AUTO_SYNC=failed (${String(error?.code || "error").slice(0, 60)})`);
+  }
   // 置き換えた写しと、ホストが読む写しへ、この端末の overlay 区画を届け直す。
   try {
     deliverOperatorLearningOverlays();

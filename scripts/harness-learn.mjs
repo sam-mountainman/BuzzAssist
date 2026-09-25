@@ -75,8 +75,10 @@ import {
   channelLedgerDir,
   deliverLearningOverlays,
   learningOverlayCopies,
+  appendJsonlRows,
   migrateLegacyLearningState,
   resolveLearningState,
+  sameIgnoringOverlayTimestamp,
   sharedLedgerPath,
   stripLocalOverlayBlock,
   withLearningFileLock,
@@ -435,6 +437,9 @@ export const OVERLAY_VOCABULARY_MISSING_NOTE =
  * 明示の `allowMissingVocabulary` でだけ通し、その場合は返り値に印を付けて
  * overlay ヘッダへ刻む。
  */
+/** 検査語彙を照合できない（一覧か鍵が無い）ときの失敗コード。 */
+export const OVERLAY_VOCABULARY_UNAVAILABLE = "overlay-vocabulary-unavailable";
+
 export function overlayRedactionContext({
   projectDir = REPO_ROOT,
   homeRoot = homedir(),
@@ -446,12 +451,16 @@ export function overlayRedactionContext({
   const vocabulary = loaded.vocabulary;
   if (vocabulary === null) {
     if (allowMissingVocabulary !== true) {
-      throw new Error(
+      const error = new Error(
         `digest 語彙を照合できないので overlay を生成しない: ${SENSITIVE_VOCABULARY_DIGEST_PATH}（${loaded.reason}）\n`
         + "語彙無しの overlay は私的語の残存を検出できない（tarball 監査と同じ理由）。\n"
         + "  node scripts/audit-package-tarball.mjs build-vocabulary で語彙を作るか、\n"
         + "  開発用途に限り --allow-missing-vocabulary を付ける（overlay ヘッダに「語彙照合なし」が刻まれる）。",
       );
+      // 自動 sync は理由だけを記録して止まる（パスを含む本文ではなく、この印で理由を分ける）。
+      error.code = OVERLAY_VOCABULARY_UNAVAILABLE;
+      error.vocabularyState = loaded.state;
+      throw error;
     }
     return { terms: signals.terms, castIds: signals.castIds, homeRoot, vocabulary: null, vocabularyMissing: true };
   }
@@ -825,7 +834,8 @@ export function renderArchive(entries, now, context = null) {
 
 function writeMachineOwnedFile(full, text) {
   const before = fs.existsSync(full) ? fs.readFileSync(full, "utf8") : null;
-  if (before === text) return false;
+  // 項目が同じで最終更新の行だけが違うなら書き直さない（sync のたびに差分を作らない）。
+  if (sameIgnoringOverlayTimestamp(before, text)) return false;
   fs.mkdirSync(path.dirname(full), { recursive: true });
   // 一時ファイル＋rename。書き込み途中で落ちた overlay を
   // 次のセッションが指示として読むことがないように。
@@ -915,6 +925,127 @@ export function syncOverlaysForState(plan, {
     delivered: { copies: delivery.copies, filesWritten: delivery.written.length, skills: delivery.skillsWithLocalBlock },
   });
   return { mode: state.mode, written, delivery };
+}
+
+/**
+ * 状態の置き場の台帳（共有台帳と、Channel Pack の既定の置き場）を読む関数。setup のように、
+ * 動いているスクリプトの写しとは別の写し（~/plugins/buzzassist/plugin）の状態を sync するときに使う。
+ */
+export function stateLedgerReader(state, targets) {
+  return (kind) => {
+    const files = new Set([sharedLedgerPath(state, kind)]);
+    for (const [target, definition] of Object.entries(targets || {})) {
+      if (definition?.scope !== "channel-pack") continue;
+      try {
+        files.add(path.join(channelLedgerDir(state, packIdForTarget(target, definition)), `${kind}.jsonl`));
+      } catch {
+        // pack id が置き場の名前として使えない宛先は読まない（捕捉も同じ理由で止まる）。
+      }
+    }
+    return [...files].flatMap(readJsonl);
+  };
+}
+
+/**
+ * sync の本体（CLI の sync と自動 sync が同じものを使う）。台帳を読み、overlay の計画を立て、
+ * 機械が所有する overlay だけを書き直す。人が書く正本には触らない。
+ * redaction は呼び出し側が作る（語彙を照合できなければ、作る時点で止まる）。
+ */
+export function runOverlaySync({
+  state = learningState(),
+  repoRoot = REPO_ROOT,
+  targets = undefined,
+  readLedger = undefined,
+  redaction,
+  now = new Date().toISOString(),
+  homeDir = homedir(),
+} = {}) {
+  const targetMap = targets ?? loadTargetsFor(repoRoot);
+  const read = readLedger
+    ?? (path.resolve(repoRoot) === REPO_ROOT ? (kind) => learningLedgerPaths(kind).flatMap(readJsonl) : stateLedgerReader(state, targetMap));
+  const { readCanonical, hashCanonical } = createCanonicalReaders({ repoRoot, targets: targetMap });
+  const summary = summarizeProposals(read("proposals"), read("applied"), readCanonical, hashCanonical);
+  const plan = planOverlaySync(summary, targetMap, { homeRoot: homeDir, archivedRecords: read("archived") });
+  const synced = syncOverlaysForState(plan, { now, redaction, state, repoRoot, homeDir });
+  return { plan, synced };
+}
+
+/** 自動 sync を止める環境変数（"0" / "off" で止める）。既定は有効。 */
+export const AUTO_SYNC_ENV = "BUZZASSIST_LEARNING_AUTO_SYNC";
+export const AUTO_SYNC_LOG_VERSION = "buzzassist-learning-auto-sync-v1";
+
+export function autoSyncDisabled(env = process.env) {
+  const value = String(env?.[AUTO_SYNC_ENV] ?? "").trim().toLowerCase();
+  return value === "0" || value === "off" || value === "false";
+}
+
+/**
+ * 自動 sync（Job の決着時と setup のたび）。手動の sync と同じ本体（runOverlaySync）を通す。
+ *
+ * - 例外を外へ出さない。Job の結果も setup も止めない
+ * - 検査語彙を照合できない端末では、今どおり overlay を書かない（fail-closed）。そのときは
+ *   理由（vocabulary-missing-file / vocabulary-missing-key など）だけを学習の置き場の
+ *   auto-sync.jsonl に残す。--allow-missing-vocabulary 相当の抜け道は無い
+ * - 子エージェントの環境と BUZZASSIST_LEARNING_AUTO_SYNC=0 では何もしない
+ *
+ * @param vocabularyRoot 検査語彙（docs/learning/sensitive-vocabulary.digest.json）と Channel Pack の語を
+ *   読む root。既定は repoRoot。setup は自分のソースの root を渡す（配布された写しに語彙は入らない）
+ */
+export function autoSyncLearningOverlays({
+  trigger = "manual",
+  env = process.env,
+  now = () => new Date().toISOString(),
+  state = undefined,
+  repoRoot = REPO_ROOT,
+  vocabularyRoot = undefined,
+  targets = undefined,
+  readLedger = undefined,
+  homeDir = homedir(),
+} = {}) {
+  const at = String(typeof now === "function" ? now() : now);
+  const label = /^[a-z][a-z0-9-]{0,40}$/u.test(String(trigger)) ? String(trigger) : "manual";
+  if (learningWritesForbidden(env)) return { status: "skipped", reason: "child-agent", trigger: label };
+  if (autoSyncDisabled(env)) return { status: "skipped", reason: "disabled", trigger: label };
+  let resolvedState;
+  try {
+    resolvedState = state ?? resolveLearningState({ codeRoot: repoRoot, env, homeDir });
+  } catch {
+    return { status: "failed", reason: "state-unresolved", trigger: label };
+  }
+  const log = (result) => {
+    try {
+      appendJsonlRows(resolvedState.autoSyncLogPath, [{ version: AUTO_SYNC_LOG_VERSION, at, mode: resolvedState.mode, ...result }]);
+    } catch {
+      // 記録できなくても Job と setup は止めない。
+    }
+    return result;
+  };
+  let redaction;
+  try {
+    redaction = overlayRedactionContext({ projectDir: vocabularyRoot ?? repoRoot, homeRoot: homeDir, allowMissingVocabulary: false });
+  } catch (error) {
+    const reason = error?.code === OVERLAY_VOCABULARY_UNAVAILABLE
+      ? `vocabulary-${/^[a-z-]{1,40}$/u.test(String(error.vocabularyState)) ? error.vocabularyState : "unavailable"}`
+      : "vocabulary-invalid";
+    return log({ status: "skipped", reason, trigger: label });
+  }
+  try {
+    const { plan, synced } = withLearningFileLock(resolvedState.autoSyncLogPath, () => runOverlaySync({
+      state: resolvedState, repoRoot, targets, readLedger, redaction, now: at, homeDir,
+    }), { timeoutMs: 5000 });
+    return log({
+      status: "synced",
+      trigger: label,
+      written: synced.written.length,
+      delivered: synced.delivery?.written.length ?? 0,
+      held: plan.held.length,
+      blocked: plan.blocked.length,
+    });
+  } catch (error) {
+    // 本文やパスは残さない（コードだけ）。
+    const code = /^[A-Za-z][A-Za-z0-9_-]{0,60}$/u.test(String(error?.code || "")) ? String(error.code) : "error";
+    return log({ status: "failed", reason: "sync-error", code, trigger: label });
+  }
 }
 
 function overlayRedactionContextForCli(args) {
@@ -1706,6 +1837,9 @@ function printHelp() {
             （語彙無しでは私的語の残存を検出できない）
     --allow-missing-vocabulary  開発用途のみ。語彙無しで生成し、overlay ヘッダに
                                 「語彙照合なし」を刻む
+            同じ sync は Job の決着時（Receipt からの自動捕捉のあと）と setup のたびにも自動で走る。
+            語彙を照合できない端末では今どおり書かず、理由だけを学習の置き場の auto-sync.jsonl に残す
+            （Job も setup も止めない）。${AUTO_SYNC_ENV}=0 で自動 sync を止める
 
   curate    長く再発していない overlay 項目を、退避の**候補として列挙するだけ**（既定 dry-run）。
             見るのは「最後に再発・再捕捉された日」と「関連するゲートが直近の RunReceipt に
@@ -1952,12 +2086,13 @@ async function main() {
       // 人が書く正本（canonical）には一切触らない。
       // review-only の宛先は、そこが承認と監査の記録そのものなので
       // 自動反映しない——機械がゲート基準を緩められる余地を作らない。
-      const plan = planOverlaySync(summary, loadTargets(), { archivedRecords: archived });
       // redaction の材料は1回だけ集める（Channel Pack の走査と digest 語彙の読み込み）。
       // digest 語彙が無ければここで止まる（fail-closed）。--allow-missing-vocabulary
       // でだけ通し、その overlay にはヘッダで印が付く。
       const redaction = overlayRedactionContextForCli(args);
-      const synced = syncOverlaysForState(plan, { now, redaction, state });
+      // 本体は自動 sync（Job の決着時・setup）と同じ runOverlaySync。
+      const ledgers = { proposals, applied, archived };
+      const { plan, synced } = runOverlaySync({ state, redaction, now, readLedger: (kind) => ledgers[kind] ?? [] });
       reportOverlaySync(plan, synced.written, { mode: synced.mode, delivery: synced.delivery, stateDir: state.stateDir });
       break;
     }
