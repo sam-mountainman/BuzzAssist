@@ -1,0 +1,1585 @@
+{
+  "audit:preflight-pending": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "bfb896210b092aa4145b251c2e96c96559f7fbd0cc7601a8c0771968d27b71d8",
+      "pendingTokens": [
+        "PENDING_HUMAN_APPROVAL",
+        "PENDING_HUMAN_APPROVAL"
+      ],
+      "artwork": [],
+      "videoFrames": [],
+      "assetQuality": [],
+      "failures": [
+        "Thumbnail brand tokens are pending: PENDING_HUMAN_APPROVAL, PENDING_HUMAN_APPROVAL."
+      ],
+      "warnings": []
+    }
+  },
+  "audit:preflight-half-pending": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "bfb896210b092aa4145b251c2e96c96559f7fbd0cc7601a8c0771968d27b71d8",
+      "pendingTokens": [
+        "PENDING_HUMAN_APPROVAL"
+      ],
+      "artwork": [],
+      "videoFrames": [],
+      "assetQuality": [],
+      "failures": [
+        "Thumbnail brand tokens are pending: PENDING_HUMAN_APPROVAL."
+      ],
+      "warnings": []
+    }
+  },
+  "audit:preflight-approved": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": true,
+      "readyForGeneration": true,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "bfb896210b092aa4145b251c2e96c96559f7fbd0cc7601a8c0771968d27b71d8",
+      "pendingTokens": [],
+      "artwork": [],
+      "videoFrames": [],
+      "assetQuality": [],
+      "failures": [],
+      "warnings": []
+    }
+  },
+  "audit:preflight-no-plan": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "06b85ae512c5fc99db4f52b02f92dd1de6217b98c871fe16e0ca2995ba6b9b91",
+      "pendingTokens": [],
+      "artwork": [],
+      "videoFrames": [],
+      "assetQuality": [],
+      "failures": [
+        "Thumbnail plan version must be koya-thumbnail-plan-v1.",
+        "Thumbnail plan stage must be preflight or final.",
+        "Thumbnail layout must be twoPanel or threePanel.",
+        "Band copy requires exactly 2 lines.",
+        "Exact thumbnail text requires human approval.",
+        "Thumbnail text approval requires approvedBy and a valid ISO-8601 approvedAt.",
+        "Thumbnail text approval is stale or does not match the exact copy."
+      ],
+      "warnings": []
+    }
+  },
+  "audit:preflight-string-plan": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "06b85ae512c5fc99db4f52b02f92dd1de6217b98c871fe16e0ca2995ba6b9b91",
+      "pendingTokens": [],
+      "artwork": [],
+      "videoFrames": [],
+      "assetQuality": [],
+      "failures": [
+        "Thumbnail plan version must be koya-thumbnail-plan-v1.",
+        "Thumbnail plan stage must be preflight or final.",
+        "Thumbnail layout must be twoPanel or threePanel.",
+        "Band copy requires exactly 2 lines.",
+        "Exact thumbnail text requires human approval.",
+        "Thumbnail text approval requires approvedBy and a valid ISO-8601 approvedAt.",
+        "Thumbnail text approval is stale or does not match the exact copy."
+      ],
+      "warnings": []
+    }
+  },
+  "audit:wrong-version": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "bfb896210b092aa4145b251c2e96c96559f7fbd0cc7601a8c0771968d27b71d8",
+      "pendingTokens": [],
+      "artwork": [],
+      "videoFrames": [],
+      "assetQuality": [],
+      "failures": [
+        "Thumbnail plan version must be koya-thumbnail-plan-v1."
+      ],
+      "warnings": []
+    }
+  },
+  "audit:wrong-stage": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "bfb896210b092aa4145b251c2e96c96559f7fbd0cc7601a8c0771968d27b71d8",
+      "pendingTokens": [],
+      "artwork": [],
+      "videoFrames": [],
+      "assetQuality": [],
+      "failures": [
+        "Thumbnail plan stage must be preflight or final."
+      ],
+      "warnings": []
+    }
+  },
+  "audit:wrong-layout": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "a8a3ecbfc053e10d40b101bac037ff37a38170b8f2d9901522012c1a0bf0e8cf",
+      "pendingTokens": [],
+      "artwork": [],
+      "videoFrames": [],
+      "assetQuality": [],
+      "failures": [
+        "Thumbnail layout must be twoPanel or threePanel."
+      ],
+      "warnings": []
+    }
+  },
+  "audit:three-panel-no-reason": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "e601bec22d3c9f231420acb66595fc3177bc07dda9b9c86c863d86c97d34c6f3",
+      "pendingTokens": [],
+      "artwork": [],
+      "videoFrames": [],
+      "assetQuality": [],
+      "failures": [
+        "threePanel requires a concrete thirdBeatReason."
+      ],
+      "warnings": []
+    }
+  },
+  "audit:three-panel-reason": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": true,
+      "readyForGeneration": true,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "683594888e91959a25103e98a62a766881debbb5772853b1662c90225ebf8881",
+      "pendingTokens": [],
+      "artwork": [],
+      "videoFrames": [],
+      "assetQuality": [],
+      "failures": [],
+      "warnings": []
+    }
+  },
+  "audit:band-one-line": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "880b53d4e24e36150a6e657224c74ac2ccf57d9f0f0082860347ce9b1fe963e2",
+      "pendingTokens": [],
+      "artwork": [],
+      "videoFrames": [],
+      "assetQuality": [],
+      "failures": [
+        "Band copy requires exactly 2 lines."
+      ],
+      "warnings": []
+    }
+  },
+  "audit:band-three-lines": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "c56db892ddfe1b5fe12fa447f67965df7d62b1a56d0e325baf781a31991609fa",
+      "pendingTokens": [],
+      "artwork": [],
+      "videoFrames": [],
+      "assetQuality": [],
+      "failures": [
+        "Band copy requires exactly 2 lines."
+      ],
+      "warnings": []
+    }
+  },
+  "audit:band-empty-line": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "f24d5237504011f50c74ae78dcf6133a356c2af498d057ec0f0860bd1a4a856d",
+      "pendingTokens": [],
+      "artwork": [],
+      "videoFrames": [],
+      "assetQuality": [],
+      "failures": [
+        "Band copy line 1 is empty."
+      ],
+      "warnings": []
+    }
+  },
+  "audit:band-too-long": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "c0bf610c9174eff4921cd4c023a55698b10a578335cf4e308dfcdee1d7cb1e1a",
+      "pendingTokens": [],
+      "artwork": [],
+      "videoFrames": [],
+      "assetQuality": [],
+      "failures": [
+        "Band copy line 1 exceeds 15 characters."
+      ],
+      "warnings": []
+    }
+  },
+  "audit:band-spaces-not-counted": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": true,
+      "readyForGeneration": true,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "2114122c9c0fb10ef20ea89a23120af7a5c0e35ffdb27921ea18fc8fa6ba28f7",
+      "pendingTokens": [],
+      "artwork": [],
+      "videoFrames": [],
+      "assetQuality": [],
+      "failures": [],
+      "warnings": []
+    }
+  },
+  "audit:band-missing": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "f8deb47534cf2fbbaf820f3ab890310146eb5808989a1de15c0b89c8ca3a5192",
+      "pendingTokens": [],
+      "artwork": [],
+      "videoFrames": [],
+      "assetQuality": [],
+      "failures": [
+        "Band copy requires exactly 2 lines."
+      ],
+      "warnings": []
+    }
+  },
+  "audit:band-string": {
+    "ok": false,
+    "error": "(plan.bandLines || []).map is not a function"
+  },
+  "audit:forbidden-hooks": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "39c8f7d17dbbb1cb8606d3a311349e0cdc1eb7e8d37e2f6067b6d659d14194c4",
+      "pendingTokens": [],
+      "artwork": [],
+      "videoFrames": [],
+      "assetQuality": [],
+      "failures": [
+        "Forbidden abstract hook '見本' appears in thumbnail copy.",
+        "Forbidden abstract hook '試験' appears in thumbnail copy.",
+        "Forbidden abstract hook '仮設' appears in thumbnail copy.",
+        "Forbidden abstract hook '架空1' appears in thumbnail copy."
+      ],
+      "warnings": []
+    }
+  },
+  "audit:bubbles-mixed": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "1b3fc04f69cb1e0c04504cf8172f1e2477257fea1de57c9fdd4e94d8a7e52800",
+      "pendingTokens": [],
+      "artwork": [],
+      "videoFrames": [],
+      "assetQuality": [],
+      "failures": [
+        "Every speech bubble requires panelId.",
+        "Speech bubble right requires one or two lines.",
+        "Speech bubble mid requires one or two lines.",
+        "Speech bubble long line 1 exceeds 8 characters.",
+        "Every speech bubble requires panelId.",
+        "Speech bubble none requires one or two lines."
+      ],
+      "warnings": [
+        "Panel left has more than one speech bubble; bubble count per panel is pending client decision."
+      ]
+    }
+  },
+  "audit:bubbles-string-lines": {
+    "ok": false,
+    "error": "(entry.lines || []).map is not a function"
+  },
+  "audit:telops-mixed": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "87bca02caa4426072af0e244dcc408fa034c48541fb8c09335588b8d2516843b",
+      "pendingTokens": [],
+      "artwork": [],
+      "videoFrames": [],
+      "assetQuality": [],
+      "failures": [
+        "Telop '一' must be 2-4 characters.",
+        "Telop '一二三四五' must be 2-4 characters.",
+        "Telop '合成語' requires concrete-noun human review.",
+        "Telop '' must be 2-4 characters."
+      ],
+      "warnings": []
+    }
+  },
+  "audit:not-approved": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "bfb896210b092aa4145b251c2e96c96559f7fbd0cc7601a8c0771968d27b71d8",
+      "pendingTokens": [],
+      "artwork": [],
+      "videoFrames": [],
+      "assetQuality": [],
+      "failures": [
+        "Exact thumbnail text requires human approval.",
+        "Thumbnail text approval requires approvedBy and a valid ISO-8601 approvedAt.",
+        "Thumbnail text approval is stale or does not match the exact copy."
+      ],
+      "warnings": []
+    }
+  },
+  "audit:approval-invalid-date": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "bfb896210b092aa4145b251c2e96c96559f7fbd0cc7601a8c0771968d27b71d8",
+      "pendingTokens": [],
+      "artwork": [],
+      "videoFrames": [],
+      "assetQuality": [],
+      "failures": [
+        "Thumbnail text approval requires approvedBy and a valid ISO-8601 approvedAt."
+      ],
+      "warnings": []
+    }
+  },
+  "audit:approval-stale": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "bfb896210b092aa4145b251c2e96c96559f7fbd0cc7601a8c0771968d27b71d8",
+      "pendingTokens": [],
+      "artwork": [],
+      "videoFrames": [],
+      "assetQuality": [],
+      "failures": [
+        "Thumbnail text approval is stale or does not match the exact copy."
+      ],
+      "warnings": []
+    }
+  },
+  "audit:preflight-with-artwork": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": true,
+      "readyForGeneration": true,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "bfb896210b092aa4145b251c2e96c96559f7fbd0cc7601a8c0771968d27b71d8",
+      "pendingTokens": [],
+      "artwork": [],
+      "videoFrames": [],
+      "assetQuality": [],
+      "failures": [],
+      "warnings": [
+        "Preflight ignores artwork files; use stage=final after dedicated artwork is generated."
+      ]
+    }
+  },
+  "audit:final-legacy-pass": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": true,
+      "readyForGeneration": false,
+      "readyForPublish": true,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "bfb896210b092aa4145b251c2e96c96559f7fbd0cc7601a8c0771968d27b71d8",
+      "pendingTokens": [],
+      "artwork": [
+        {
+          "path": "<project>/canvas/thumbs/idea-a-v1.png",
+          "sha256": "a968e638205358fc665e99a6b5b323bb319652deed0cd5204432f6f26d885479",
+          "normalizedGray32Sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        },
+        {
+          "path": "<project>/canvas/thumbs/idea-b-v1.png",
+          "sha256": "fba8ab400baa2c215287d8290b00385ae95104d1c532ab9ea44bea452709a4ec",
+          "normalizedGray32Sha256": "cce47054f709b0f9796357e2aa8c7973327a539cdaaf3b5d619b5aa496eca564",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "videoFrames": [
+        {
+          "path": "<project>/canvas/thumbs/frame-other.png",
+          "sha256": "9b6cc91b5b73cae575867930336025a735f38561149f8849750ba47e1cdb765f",
+          "normalizedGray32Sha256": "38d11a62d69bd1a91e2e480f7ab3a408f873033f094dca698b15b456d267f780",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "assetQuality": [],
+      "failures": [],
+      "warnings": []
+    }
+  },
+  "audit:final-no-frames": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "bfb896210b092aa4145b251c2e96c96559f7fbd0cc7601a8c0771968d27b71d8",
+      "pendingTokens": [],
+      "artwork": [
+        {
+          "path": "<project>/canvas/thumbs/idea-a-v1.png",
+          "sha256": "a968e638205358fc665e99a6b5b323bb319652deed0cd5204432f6f26d885479",
+          "normalizedGray32Sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        },
+        {
+          "path": "<project>/canvas/thumbs/idea-b-v1.png",
+          "sha256": "fba8ab400baa2c215287d8290b00385ae95104d1c532ab9ea44bea452709a4ec",
+          "normalizedGray32Sha256": "cce47054f709b0f9796357e2aa8c7973327a539cdaaf3b5d619b5aa496eca564",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "videoFrames": [],
+      "assetQuality": [],
+      "failures": [
+        "Final thumbnail audit requires mainVideoFramePaths to prove non-reuse."
+      ],
+      "warnings": []
+    }
+  },
+  "audit:final-sha-reuse": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "bfb896210b092aa4145b251c2e96c96559f7fbd0cc7601a8c0771968d27b71d8",
+      "pendingTokens": [],
+      "artwork": [
+        {
+          "path": "<project>/canvas/thumbs/idea-a-v1.png",
+          "sha256": "a968e638205358fc665e99a6b5b323bb319652deed0cd5204432f6f26d885479",
+          "normalizedGray32Sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        },
+        {
+          "path": "<project>/canvas/thumbs/idea-b-v1.png",
+          "sha256": "fba8ab400baa2c215287d8290b00385ae95104d1c532ab9ea44bea452709a4ec",
+          "normalizedGray32Sha256": "cce47054f709b0f9796357e2aa8c7973327a539cdaaf3b5d619b5aa496eca564",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "videoFrames": [
+        {
+          "path": "<project>/canvas/thumbs/frame-same.png",
+          "sha256": "a968e638205358fc665e99a6b5b323bb319652deed0cd5204432f6f26d885479",
+          "normalizedGray32Sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "assetQuality": [],
+      "failures": [
+        "Dedicated thumbnail artwork reuses a main-video frame: <project>/canvas/thumbs/idea-a-v1.png",
+        "Dedicated thumbnail artwork is perceptually the same as a main-video frame/source image (distance=0.0000): <project>/canvas/thumbs/idea-a-v1.png"
+      ],
+      "warnings": []
+    }
+  },
+  "audit:final-perceptual-reuse": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "bfb896210b092aa4145b251c2e96c96559f7fbd0cc7601a8c0771968d27b71d8",
+      "pendingTokens": [],
+      "artwork": [
+        {
+          "path": "<project>/canvas/thumbs/idea-a-v1.png",
+          "sha256": "a968e638205358fc665e99a6b5b323bb319652deed0cd5204432f6f26d885479",
+          "normalizedGray32Sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        },
+        {
+          "path": "<project>/canvas/thumbs/idea-b-v1.png",
+          "sha256": "fba8ab400baa2c215287d8290b00385ae95104d1c532ab9ea44bea452709a4ec",
+          "normalizedGray32Sha256": "cce47054f709b0f9796357e2aa8c7973327a539cdaaf3b5d619b5aa496eca564",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "videoFrames": [
+        {
+          "path": "<project>/canvas/thumbs/frame-near.png",
+          "sha256": "1266165147f06f90a73aa71551e354f913fdcb389ab7e6a3ea3ea7f64079d444",
+          "normalizedGray32Sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+          "dimensions": {
+            "width": 640,
+            "height": 360
+          }
+        }
+      ],
+      "assetQuality": [],
+      "failures": [
+        "Dedicated thumbnail artwork is perceptually the same as a main-video frame/source image (distance=0.0000): <project>/canvas/thumbs/idea-a-v1.png"
+      ],
+      "warnings": []
+    }
+  },
+  "audit:final-wide-reuse-distance": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "bfb896210b092aa4145b251c2e96c96559f7fbd0cc7601a8c0771968d27b71d8",
+      "pendingTokens": [],
+      "artwork": [
+        {
+          "path": "<project>/canvas/thumbs/idea-a-v1.png",
+          "sha256": "a968e638205358fc665e99a6b5b323bb319652deed0cd5204432f6f26d885479",
+          "normalizedGray32Sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        },
+        {
+          "path": "<project>/canvas/thumbs/idea-b-v1.png",
+          "sha256": "fba8ab400baa2c215287d8290b00385ae95104d1c532ab9ea44bea452709a4ec",
+          "normalizedGray32Sha256": "cce47054f709b0f9796357e2aa8c7973327a539cdaaf3b5d619b5aa496eca564",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "videoFrames": [
+        {
+          "path": "<project>/canvas/thumbs/frame-other.png",
+          "sha256": "9b6cc91b5b73cae575867930336025a735f38561149f8849750ba47e1cdb765f",
+          "normalizedGray32Sha256": "38d11a62d69bd1a91e2e480f7ab3a408f873033f094dca698b15b456d267f780",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "assetQuality": [],
+      "failures": [
+        "Dedicated thumbnail artwork is perceptually the same as a main-video frame/source image (distance=0.4806): <project>/canvas/thumbs/idea-a-v1.png",
+        "Dedicated thumbnail artwork is perceptually the same as a main-video frame/source image (distance=0.0819): <project>/canvas/thumbs/idea-b-v1.png"
+      ],
+      "warnings": []
+    }
+  },
+  "audit:final-missing-artwork": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "bfb896210b092aa4145b251c2e96c96559f7fbd0cc7601a8c0771968d27b71d8",
+      "pendingTokens": [],
+      "artwork": [
+        {
+          "path": "<project>/canvas/thumbs/idea-a-v1.png",
+          "sha256": "a968e638205358fc665e99a6b5b323bb319652deed0cd5204432f6f26d885479",
+          "normalizedGray32Sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "videoFrames": [
+        {
+          "path": "<project>/canvas/thumbs/frame-other.png",
+          "sha256": "9b6cc91b5b73cae575867930336025a735f38561149f8849750ba47e1cdb765f",
+          "normalizedGray32Sha256": "38d11a62d69bd1a91e2e480f7ab3a408f873033f094dca698b15b456d267f780",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "assetQuality": [],
+      "failures": [
+        "Thumbnail artwork is missing: <project>/canvas/thumbs/missing.png"
+      ],
+      "warnings": []
+    }
+  },
+  "audit:final-outside-artwork": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "bfb896210b092aa4145b251c2e96c96559f7fbd0cc7601a8c0771968d27b71d8",
+      "pendingTokens": [],
+      "artwork": [
+        {
+          "path": "<project>/canvas/thumbs/idea-a-v1.png",
+          "sha256": "a968e638205358fc665e99a6b5b323bb319652deed0cd5204432f6f26d885479",
+          "normalizedGray32Sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        },
+        {
+          "path": "<outside>/outside.png",
+          "sha256": "fba8ab400baa2c215287d8290b00385ae95104d1c532ab9ea44bea452709a4ec",
+          "normalizedGray32Sha256": "cce47054f709b0f9796357e2aa8c7973327a539cdaaf3b5d619b5aa496eca564",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "videoFrames": [
+        {
+          "path": "<project>/canvas/thumbs/frame-other.png",
+          "sha256": "9b6cc91b5b73cae575867930336025a735f38561149f8849750ba47e1cdb765f",
+          "normalizedGray32Sha256": "38d11a62d69bd1a91e2e480f7ab3a408f873033f094dca698b15b456d267f780",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "assetQuality": [],
+      "failures": [
+        "Thumbnail artwork must stay inside the project: <outside>/outside.png"
+      ],
+      "warnings": []
+    }
+  },
+  "audit:final-three-panel-two-art": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "8283c381035254a090a3b8c33f82441d163444a13fac55f769e373d85bb16186",
+      "pendingTokens": [],
+      "artwork": [
+        {
+          "path": "<project>/canvas/thumbs/idea-a-v1.png",
+          "sha256": "a968e638205358fc665e99a6b5b323bb319652deed0cd5204432f6f26d885479",
+          "normalizedGray32Sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        },
+        {
+          "path": "<project>/canvas/thumbs/idea-b-v1.png",
+          "sha256": "fba8ab400baa2c215287d8290b00385ae95104d1c532ab9ea44bea452709a4ec",
+          "normalizedGray32Sha256": "cce47054f709b0f9796357e2aa8c7973327a539cdaaf3b5d619b5aa496eca564",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "videoFrames": [
+        {
+          "path": "<project>/canvas/thumbs/frame-other.png",
+          "sha256": "9b6cc91b5b73cae575867930336025a735f38561149f8849750ba47e1cdb765f",
+          "normalizedGray32Sha256": "38d11a62d69bd1a91e2e480f7ab3a408f873033f094dca698b15b456d267f780",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "assetQuality": [],
+      "failures": [
+        "threePanel final audit requires 3 dedicated artwork files."
+      ],
+      "warnings": []
+    }
+  },
+  "audit:final-three-panel-three-art": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "8283c381035254a090a3b8c33f82441d163444a13fac55f769e373d85bb16186",
+      "pendingTokens": [],
+      "artwork": [
+        {
+          "path": "<project>/canvas/thumbs/idea-a-v1.png",
+          "sha256": "a968e638205358fc665e99a6b5b323bb319652deed0cd5204432f6f26d885479",
+          "normalizedGray32Sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        },
+        {
+          "path": "<project>/canvas/thumbs/idea-b-v1.png",
+          "sha256": "fba8ab400baa2c215287d8290b00385ae95104d1c532ab9ea44bea452709a4ec",
+          "normalizedGray32Sha256": "cce47054f709b0f9796357e2aa8c7973327a539cdaaf3b5d619b5aa496eca564",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        },
+        {
+          "path": "<project>/canvas/thumbs/合成の案-v1.png",
+          "sha256": "9b6cc91b5b73cae575867930336025a735f38561149f8849750ba47e1cdb765f",
+          "normalizedGray32Sha256": "38d11a62d69bd1a91e2e480f7ab3a408f873033f094dca698b15b456d267f780",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "videoFrames": [
+        {
+          "path": "<project>/canvas/thumbs/frame-other.png",
+          "sha256": "9b6cc91b5b73cae575867930336025a735f38561149f8849750ba47e1cdb765f",
+          "normalizedGray32Sha256": "38d11a62d69bd1a91e2e480f7ab3a408f873033f094dca698b15b456d267f780",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "assetQuality": [],
+      "failures": [
+        "Dedicated thumbnail artwork reuses a main-video frame: <project>/canvas/thumbs/合成の案-v1.png",
+        "Dedicated thumbnail artwork is perceptually the same as a main-video frame/source image (distance=0.0000): <project>/canvas/thumbs/合成の案-v1.png"
+      ],
+      "warnings": []
+    }
+  },
+  "audit:final-unknown-layout": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "fc18a837c826d0bcab97098072ffa1216a02aabd0cb02fae4fd54b12e669e425",
+      "pendingTokens": [],
+      "artwork": [
+        {
+          "path": "<project>/canvas/thumbs/idea-a-v1.png",
+          "sha256": "a968e638205358fc665e99a6b5b323bb319652deed0cd5204432f6f26d885479",
+          "normalizedGray32Sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        },
+        {
+          "path": "<project>/canvas/thumbs/idea-b-v1.png",
+          "sha256": "fba8ab400baa2c215287d8290b00385ae95104d1c532ab9ea44bea452709a4ec",
+          "normalizedGray32Sha256": "cce47054f709b0f9796357e2aa8c7973327a539cdaaf3b5d619b5aa496eca564",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "videoFrames": [
+        {
+          "path": "<project>/canvas/thumbs/frame-other.png",
+          "sha256": "9b6cc91b5b73cae575867930336025a735f38561149f8849750ba47e1cdb765f",
+          "normalizedGray32Sha256": "38d11a62d69bd1a91e2e480f7ab3a408f873033f094dca698b15b456d267f780",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "assetQuality": [],
+      "failures": [
+        "Thumbnail layout must be twoPanel or threePanel."
+      ],
+      "warnings": []
+    }
+  },
+  "audit:final-checks-partial": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "bfb896210b092aa4145b251c2e96c96559f7fbd0cc7601a8c0771968d27b71d8",
+      "pendingTokens": [],
+      "artwork": [
+        {
+          "path": "<project>/canvas/thumbs/idea-a-v1.png",
+          "sha256": "a968e638205358fc665e99a6b5b323bb319652deed0cd5204432f6f26d885479",
+          "normalizedGray32Sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        },
+        {
+          "path": "<project>/canvas/thumbs/idea-b-v1.png",
+          "sha256": "fba8ab400baa2c215287d8290b00385ae95104d1c532ab9ea44bea452709a4ec",
+          "normalizedGray32Sha256": "cce47054f709b0f9796357e2aa8c7973327a539cdaaf3b5d619b5aa496eca564",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "videoFrames": [
+        {
+          "path": "<project>/canvas/thumbs/frame-other.png",
+          "sha256": "9b6cc91b5b73cae575867930336025a735f38561149f8849750ba47e1cdb765f",
+          "normalizedGray32Sha256": "38d11a62d69bd1a91e2e480f7ab3a408f873033f094dca698b15b456d267f780",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "assetQuality": [],
+      "failures": [
+        "Final thumbnail audit requires all checks: original1280x720, mobile320x180, textCropZero, faceCropZero, primaryEmotionReadable, approvedCharacterReferencesOnly, realLogoZero."
+      ],
+      "warnings": []
+    }
+  },
+  "audit:final-checks-missing": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "bfb896210b092aa4145b251c2e96c96559f7fbd0cc7601a8c0771968d27b71d8",
+      "pendingTokens": [],
+      "artwork": [
+        {
+          "path": "<project>/canvas/thumbs/idea-a-v1.png",
+          "sha256": "a968e638205358fc665e99a6b5b323bb319652deed0cd5204432f6f26d885479",
+          "normalizedGray32Sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        },
+        {
+          "path": "<project>/canvas/thumbs/idea-b-v1.png",
+          "sha256": "fba8ab400baa2c215287d8290b00385ae95104d1c532ab9ea44bea452709a4ec",
+          "normalizedGray32Sha256": "cce47054f709b0f9796357e2aa8c7973327a539cdaaf3b5d619b5aa496eca564",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "videoFrames": [
+        {
+          "path": "<project>/canvas/thumbs/frame-other.png",
+          "sha256": "9b6cc91b5b73cae575867930336025a735f38561149f8849750ba47e1cdb765f",
+          "normalizedGray32Sha256": "38d11a62d69bd1a91e2e480f7ab3a408f873033f094dca698b15b456d267f780",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "assetQuality": [],
+      "failures": [
+        "Final thumbnail audit requires all checks: original1280x720, mobile320x180, textCropZero, faceCropZero, primaryEmotionReadable, approvedCharacterReferencesOnly, realLogoZero."
+      ],
+      "warnings": []
+    }
+  },
+  "audit:final-artwork-not-array": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "bfb896210b092aa4145b251c2e96c96559f7fbd0cc7601a8c0771968d27b71d8",
+      "pendingTokens": [],
+      "artwork": [],
+      "videoFrames": [
+        {
+          "path": "<project>/canvas/thumbs/frame-other.png",
+          "sha256": "9b6cc91b5b73cae575867930336025a735f38561149f8849750ba47e1cdb765f",
+          "normalizedGray32Sha256": "38d11a62d69bd1a91e2e480f7ab3a408f873033f094dca698b15b456d267f780",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "assetQuality": [],
+      "failures": [
+        "twoPanel final audit requires 2 dedicated artwork files."
+      ],
+      "warnings": []
+    }
+  },
+  "audit:final-pending-tokens": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "bfb896210b092aa4145b251c2e96c96559f7fbd0cc7601a8c0771968d27b71d8",
+      "pendingTokens": [
+        "PENDING_HUMAN_APPROVAL",
+        "PENDING_HUMAN_APPROVAL"
+      ],
+      "artwork": [
+        {
+          "path": "<project>/canvas/thumbs/idea-a-v1.png",
+          "sha256": "a968e638205358fc665e99a6b5b323bb319652deed0cd5204432f6f26d885479",
+          "normalizedGray32Sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        },
+        {
+          "path": "<project>/canvas/thumbs/idea-b-v1.png",
+          "sha256": "fba8ab400baa2c215287d8290b00385ae95104d1c532ab9ea44bea452709a4ec",
+          "normalizedGray32Sha256": "cce47054f709b0f9796357e2aa8c7973327a539cdaaf3b5d619b5aa496eca564",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "videoFrames": [
+        {
+          "path": "<project>/canvas/thumbs/frame-other.png",
+          "sha256": "9b6cc91b5b73cae575867930336025a735f38561149f8849750ba47e1cdb765f",
+          "normalizedGray32Sha256": "38d11a62d69bd1a91e2e480f7ab3a408f873033f094dca698b15b456d267f780",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "assetQuality": [],
+      "failures": [
+        "Thumbnail brand tokens are pending: PENDING_HUMAN_APPROVAL, PENDING_HUMAN_APPROVAL."
+      ],
+      "warnings": []
+    }
+  },
+  "audit:final-v54-loop-not-started": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "bfb896210b092aa4145b251c2e96c96559f7fbd0cc7601a8c0771968d27b71d8",
+      "pendingTokens": [],
+      "artwork": [
+        {
+          "path": "<project>/canvas/thumbs/idea-a-v1.png",
+          "sha256": "a968e638205358fc665e99a6b5b323bb319652deed0cd5204432f6f26d885479",
+          "normalizedGray32Sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        },
+        {
+          "path": "<project>/canvas/thumbs/idea-b-v1.png",
+          "sha256": "fba8ab400baa2c215287d8290b00385ae95104d1c532ab9ea44bea452709a4ec",
+          "normalizedGray32Sha256": "cce47054f709b0f9796357e2aa8c7973327a539cdaaf3b5d619b5aa496eca564",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "videoFrames": [
+        {
+          "path": "<project>/canvas/thumbs/frame-other.png",
+          "sha256": "9b6cc91b5b73cae575867930336025a735f38561149f8849750ba47e1cdb765f",
+          "normalizedGray32Sha256": "38d11a62d69bd1a91e2e480f7ab3a408f873033f094dca698b15b456d267f780",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "assetQuality": [
+        {
+          "stage": "thumbnail",
+          "subjectId": "synthetic-parity-a",
+          "assetPath": "<project>/canvas/thumbs/idea-a-v1.png",
+          "pass": false,
+          "reason": "loop-not-started",
+          "code": "asset-quality-required:thumbnail:synthetic-parity-a:loop-not-started"
+        },
+        {
+          "stage": "thumbnail",
+          "subjectId": "thumbnail.idea-b-v1",
+          "assetPath": "<project>/canvas/thumbs/idea-b-v1.png",
+          "pass": false,
+          "reason": "loop-not-started",
+          "code": "asset-quality-required:thumbnail:thumbnail.idea-b-v1:loop-not-started"
+        }
+      ],
+      "failures": [
+        "asset-quality-required:thumbnail:synthetic-parity-a:loop-not-started（品質ループが始まっていない（node scripts/asset-quality-loop.mjs start --work-dir <canvas> --harness koya-manga-video --stage thumbnail --subject synthetic-parity-a から回す））",
+        "asset-quality-required:thumbnail:thumbnail.idea-b-v1:loop-not-started（品質ループが始まっていない（node scripts/asset-quality-loop.mjs start --work-dir <canvas> --harness koya-manga-video --stage thumbnail --subject thumbnail.idea-b-v1 から回す））"
+      ],
+      "warnings": []
+    }
+  },
+  "audit:final-v54-outside-artwork": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "bfb896210b092aa4145b251c2e96c96559f7fbd0cc7601a8c0771968d27b71d8",
+      "pendingTokens": [],
+      "artwork": [
+        {
+          "path": "<project>/canvas/thumbs/idea-a-v1.png",
+          "sha256": "a968e638205358fc665e99a6b5b323bb319652deed0cd5204432f6f26d885479",
+          "normalizedGray32Sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        },
+        {
+          "path": "<outside>/outside.png",
+          "sha256": "fba8ab400baa2c215287d8290b00385ae95104d1c532ab9ea44bea452709a4ec",
+          "normalizedGray32Sha256": "cce47054f709b0f9796357e2aa8c7973327a539cdaaf3b5d619b5aa496eca564",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "videoFrames": [
+        {
+          "path": "<project>/canvas/thumbs/frame-other.png",
+          "sha256": "9b6cc91b5b73cae575867930336025a735f38561149f8849750ba47e1cdb765f",
+          "normalizedGray32Sha256": "38d11a62d69bd1a91e2e480f7ab3a408f873033f094dca698b15b456d267f780",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "assetQuality": [
+        {
+          "stage": "thumbnail",
+          "subjectId": "thumbnail.idea-a-v1",
+          "assetPath": "<project>/canvas/thumbs/idea-a-v1.png",
+          "pass": false,
+          "reason": "loop-not-started",
+          "code": "asset-quality-required:thumbnail:thumbnail.idea-a-v1:loop-not-started"
+        },
+        {
+          "stage": "thumbnail",
+          "subjectId": "thumbnail.outside",
+          "assetPath": "<outside>/outside.png",
+          "pass": false,
+          "reason": "outside-work-dir",
+          "code": "asset-quality-required:thumbnail:thumbnail.outside:outside-work-dir"
+        }
+      ],
+      "failures": [
+        "Thumbnail artwork must stay inside the project: <outside>/outside.png",
+        "asset-quality-required:thumbnail:thumbnail.idea-a-v1:loop-not-started（品質ループが始まっていない（node scripts/asset-quality-loop.mjs start --work-dir <canvas> --harness koya-manga-video --stage thumbnail --subject thumbnail.idea-a-v1 から回す））",
+        "asset-quality-required:thumbnail:thumbnail.outside:outside-work-dir（成果物は品質ループの作業フォルダ（<project>/canvas）の中に置いてから、ループを回す）"
+      ],
+      "warnings": []
+    }
+  },
+  "audit:final-v54-missing-artwork": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "bfb896210b092aa4145b251c2e96c96559f7fbd0cc7601a8c0771968d27b71d8",
+      "pendingTokens": [],
+      "artwork": [
+        {
+          "path": "<project>/canvas/thumbs/idea-a-v1.png",
+          "sha256": "a968e638205358fc665e99a6b5b323bb319652deed0cd5204432f6f26d885479",
+          "normalizedGray32Sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "videoFrames": [
+        {
+          "path": "<project>/canvas/thumbs/frame-other.png",
+          "sha256": "9b6cc91b5b73cae575867930336025a735f38561149f8849750ba47e1cdb765f",
+          "normalizedGray32Sha256": "38d11a62d69bd1a91e2e480f7ab3a408f873033f094dca698b15b456d267f780",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "assetQuality": [
+        {
+          "stage": "thumbnail",
+          "subjectId": "thumbnail.idea-a-v1",
+          "assetPath": "<project>/canvas/thumbs/idea-a-v1.png",
+          "pass": false,
+          "reason": "loop-not-started",
+          "code": "asset-quality-required:thumbnail:thumbnail.idea-a-v1:loop-not-started"
+        },
+        {
+          "stage": "thumbnail",
+          "subjectId": "thumbnail.missing",
+          "assetPath": "<project>/canvas/thumbs/missing.png",
+          "pass": false,
+          "reason": "loop-not-started",
+          "code": "asset-quality-required:thumbnail:thumbnail.missing:loop-not-started"
+        }
+      ],
+      "failures": [
+        "Thumbnail artwork is missing: <project>/canvas/thumbs/missing.png",
+        "asset-quality-required:thumbnail:thumbnail.idea-a-v1:loop-not-started（品質ループが始まっていない（node scripts/asset-quality-loop.mjs start --work-dir <canvas> --harness koya-manga-video --stage thumbnail --subject thumbnail.idea-a-v1 から回す））",
+        "asset-quality-required:thumbnail:thumbnail.missing:loop-not-started（品質ループが始まっていない（node scripts/asset-quality-loop.mjs start --work-dir <canvas> --harness koya-manga-video --stage thumbnail --subject thumbnail.missing から回す））"
+      ],
+      "warnings": []
+    }
+  },
+  "audit:final-v54-one-passed": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-audit-v1",
+      "pass": false,
+      "readyForGeneration": false,
+      "readyForPublish": false,
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "copySha256": "bfb896210b092aa4145b251c2e96c96559f7fbd0cc7601a8c0771968d27b71d8",
+      "pendingTokens": [],
+      "artwork": [
+        {
+          "path": "<project>/canvas/thumbs/idea-a-v1.png",
+          "sha256": "a968e638205358fc665e99a6b5b323bb319652deed0cd5204432f6f26d885479",
+          "normalizedGray32Sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        },
+        {
+          "path": "<project>/canvas/thumbs/idea-b-v1.png",
+          "sha256": "fba8ab400baa2c215287d8290b00385ae95104d1c532ab9ea44bea452709a4ec",
+          "normalizedGray32Sha256": "cce47054f709b0f9796357e2aa8c7973327a539cdaaf3b5d619b5aa496eca564",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "videoFrames": [
+        {
+          "path": "<project>/canvas/thumbs/frame-other.png",
+          "sha256": "9b6cc91b5b73cae575867930336025a735f38561149f8849750ba47e1cdb765f",
+          "normalizedGray32Sha256": "38d11a62d69bd1a91e2e480f7ab3a408f873033f094dca698b15b456d267f780",
+          "dimensions": {
+            "width": 1280,
+            "height": 720
+          }
+        }
+      ],
+      "assetQuality": [
+        {
+          "stage": "thumbnail",
+          "subjectId": "synthetic-parity-loop-a",
+          "assetPath": "<project>/canvas/thumbs/idea-a-v1.png",
+          "pass": true,
+          "reason": "passed",
+          "code": ""
+        },
+        {
+          "stage": "thumbnail",
+          "subjectId": "synthetic-parity-loop-b",
+          "assetPath": "<project>/canvas/thumbs/idea-b-v1.png",
+          "pass": false,
+          "reason": "not-passed",
+          "code": "asset-quality-required:thumbnail:synthetic-parity-loop-b:not-passed"
+        }
+      ],
+      "failures": [
+        "asset-quality-required:thumbnail:synthetic-parity-loop-b:not-passed（評価者の採点は通った。人の確認（hand-safety）が要る。確認した人が自分の端末から verify --check <欄> --pass --reviewer <名前> --note \"何を見たか\" --human-verified を打つ（機械は人の確認を記録できない）: asset-quality-human-verification-required:hand-safety）"
+      ],
+      "warnings": []
+    }
+  },
+  "audit:broken-contract-canvas": {
+    "ok": false,
+    "error": "Koya thumbnail canvas must be 1280x720."
+  },
+  "draft:broken-contract-canvas": {
+    "ok": false,
+    "error": "Koya thumbnail canvas must be 1280x720."
+  },
+  "audit:broken-contract-band": {
+    "ok": false,
+    "error": "Koya thumbnail band must remain two lines of at most 15 characters each."
+  },
+  "draft:broken-contract-band": {
+    "ok": false,
+    "error": "Koya thumbnail band must remain two lines of at most 15 characters each."
+  },
+  "audit:broken-contract-version": {
+    "ok": false,
+    "error": "Thumbnail contract version must be koya-thumbnail-contract-v1."
+  },
+  "draft:broken-contract-version": {
+    "ok": false,
+    "error": "Thumbnail contract version must be koya-thumbnail-contract-v1."
+  },
+  "draft:pending-default": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-plan-v1",
+      "stage": "preflight",
+      "layout": "twoPanel",
+      "bandLines": [
+        "",
+        ""
+      ],
+      "speechBubbles": [],
+      "telops": [],
+      "exactTextApproved": false,
+      "textApproval": {
+        "approvedBy": "",
+        "approvedAt": "",
+        "copySha256": ""
+      },
+      "artworkPaths": [],
+      "mainVideoFramePaths": [],
+      "checks": {
+        "original1280x720": false,
+        "mobile320x180": false,
+        "textCropZero": false,
+        "faceCropZero": false,
+        "primaryEmotionReadable": false,
+        "approvedCharacterReferencesOnly": false,
+        "realLogoZero": false
+      },
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "brandTokens": {
+        "bandColorToken": "PENDING_HUMAN_APPROVAL",
+        "bandFontToken": "PENDING_HUMAN_APPROVAL"
+      },
+      "instructions": "Approve exact copy and record koyaThumbnailCopySha256(plan) only after band/font tokens are human-approved. Change stage to final and add dedicated artwork plus main-video source images for reuse audit."
+    }
+  },
+  "draft:approved-two": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-plan-v1",
+      "stage": "preflight",
+      "layout": "twoPanel",
+      "bandLines": [
+        "",
+        ""
+      ],
+      "speechBubbles": [],
+      "telops": [],
+      "exactTextApproved": false,
+      "textApproval": {
+        "approvedBy": "",
+        "approvedAt": "",
+        "copySha256": ""
+      },
+      "artworkPaths": [],
+      "mainVideoFramePaths": [],
+      "checks": {
+        "original1280x720": false,
+        "mobile320x180": false,
+        "textCropZero": false,
+        "faceCropZero": false,
+        "primaryEmotionReadable": false,
+        "approvedCharacterReferencesOnly": false,
+        "realLogoZero": false
+      },
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "brandTokens": {
+        "bandColorToken": "band-synthetic-v1",
+        "bandFontToken": "font-synthetic-v1"
+      },
+      "instructions": "Approve exact copy and record koyaThumbnailCopySha256(plan) only after band/font tokens are human-approved. Change stage to final and add dedicated artwork plus main-video source images for reuse audit."
+    }
+  },
+  "draft:approved-three": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-plan-v1",
+      "stage": "preflight",
+      "layout": "threePanel",
+      "thirdBeatReason": "",
+      "bandLines": [
+        "",
+        ""
+      ],
+      "speechBubbles": [],
+      "telops": [],
+      "exactTextApproved": false,
+      "textApproval": {
+        "approvedBy": "",
+        "approvedAt": "",
+        "copySha256": ""
+      },
+      "artworkPaths": [],
+      "mainVideoFramePaths": [],
+      "checks": {
+        "original1280x720": false,
+        "mobile320x180": false,
+        "textCropZero": false,
+        "faceCropZero": false,
+        "primaryEmotionReadable": false,
+        "approvedCharacterReferencesOnly": false,
+        "realLogoZero": false
+      },
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "brandTokens": {
+        "bandColorToken": "band-synthetic-v1",
+        "bandFontToken": "font-synthetic-v1"
+      },
+      "instructions": "Approve exact copy and record koyaThumbnailCopySha256(plan) only after band/font tokens are human-approved. Change stage to final and add dedicated artwork plus main-video source images for reuse audit."
+    }
+  },
+  "draft:approved-unknown": {
+    "ok": true,
+    "value": {
+      "version": "koya-thumbnail-plan-v1",
+      "stage": "preflight",
+      "layout": "twoPanel",
+      "bandLines": [
+        "",
+        ""
+      ],
+      "speechBubbles": [],
+      "telops": [],
+      "exactTextApproved": false,
+      "textApproval": {
+        "approvedBy": "",
+        "approvedAt": "",
+        "copySha256": ""
+      },
+      "artworkPaths": [],
+      "mainVideoFramePaths": [],
+      "checks": {
+        "original1280x720": false,
+        "mobile320x180": false,
+        "textCropZero": false,
+        "faceCropZero": false,
+        "primaryEmotionReadable": false,
+        "approvedCharacterReferencesOnly": false,
+        "realLogoZero": false
+      },
+      "contractStatus": "draft-awaiting-brand-token-approval",
+      "brandTokens": {
+        "bandColorToken": "band-synthetic-v1",
+        "bandFontToken": "font-synthetic-v1"
+      },
+      "instructions": "Approve exact copy and record koyaThumbnailCopySha256(plan) only after band/font tokens are human-approved. Change stage to final and add dedicated artwork plus main-video source images for reuse audit."
+    }
+  },
+  "copySha256:base": {
+    "ok": true,
+    "value": "bfb896210b092aa4145b251c2e96c96559f7fbd0cc7601a8c0771968d27b71d8"
+  },
+  "copySha256:three": {
+    "ok": true,
+    "value": "68c368e0140e7d9db0acdf20b5d26cbdf1db9dd6e8785787a2808825f5a00831"
+  },
+  "copySha256:empty": {
+    "ok": true,
+    "value": "06b85ae512c5fc99db4f52b02f92dd1de6217b98c871fe16e0ca2995ba6b9b91"
+  },
+  "copySha256:telop-flags": {
+    "ok": true,
+    "value": "4ff2c38906f38d012cd81d06ed1645970040c75a326e0634e7b9236b8526c0f9"
+  },
+  "subjectId:explicit": {
+    "ok": true,
+    "value": "synthetic-thumb-a"
+  },
+  "subjectId:explicit-blank": {
+    "ok": true,
+    "value": "thumbnail.idea-a-v1"
+  },
+  "subjectId:basename": {
+    "ok": true,
+    "value": "thumbnail.idea-b-v1"
+  },
+  "subjectId:non-ascii": {
+    "ok": true,
+    "value": "thumbnail.v1-a556edb5"
+  },
+  "subjectId:empty": {
+    "ok": true,
+    "value": "thumbnail"
+  }
+}
