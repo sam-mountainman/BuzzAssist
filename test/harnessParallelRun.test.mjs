@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import fsSync from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import {
@@ -15,6 +17,22 @@ import {
 } from "../scripts/harness-parallel-run.mjs";
 
 const trueJob = (id, extra = {}) => ({ id, command: "true", ...extra });
+
+// ロックの鍵は「計画の cwd で解決したパス」で、端末全体（os.tmpdir() の下）で共有される。
+// リポジトリ直下や /tmp を cwd にすると、同じ試験を別のプロセス（並列の試験・別の worktree）が
+// 同時に走らせたときに同じ鍵を取り合い、「ロックが違えば重なる」が重ならずに落ちた。
+// 試験ごとに作った空のフォルダを cwd にして、鍵をその試験だけのものにする。
+function isolatedLockBase(t) {
+  const base = fsSync.mkdtempSync(path.join(os.tmpdir(), "harness-parallel-lock-base-"));
+  t.after(() => fsSync.rmSync(base, { recursive: true, force: true }));
+  return base;
+}
+
+/** 2 本の区間が重なっていないこと（片方が終わってからもう片方が始まった）。 */
+function spansDisjoint(jobs) {
+  const [a, b] = jobs;
+  return a.endedAtMs <= b.startedAtMs || b.endedAtMs <= a.startedAtMs;
+}
 
 test("並列数はCPU数から決まり、上限で頭打ちになる", () => {
   assert.equal(defaultConcurrency(8), 6);
@@ -93,9 +111,10 @@ test("独立したジョブは同時に走る", async () => {
   assert.ok(latestStart < earliestEnd, `並列になっていない: ${JSON.stringify(jobs)}`);
 });
 
-test("同じロックを宣言したジョブは重ならない", async () => {
+test("同じロックを宣言したジョブは重ならない", async (t) => {
   const plan = {
     planId: "locks",
+    defaults: { cwd: isolatedLockBase(t) },
     jobs: [
       { id: "w1", command: "sleep", args: ["1"], locks: ["state.json"] },
       { id: "w2", command: "sleep", args: ["1"], locks: ["state.json"] },
@@ -106,13 +125,15 @@ test("同じロックを宣言したジョブは重ならない", async () => {
     logDir: `/tmp/harness-parallel-test-${process.pid}-locks`,
   });
   assert.equal(summary.counts.passed, 2);
-  // 排他が効いていれば直列になり、2秒以上かかる。
-  assert.ok(summary.totalDurationMs >= 1900, `排他が効いていない: ${summary.totalDurationMs}ms`);
+  // 排他が効いていれば、片方が終わってからもう片方が始まる。総時間（2秒以上かかるか）で見ると、
+  // 負荷の高い端末では重なっていても 2 秒を超えるので、壊れた排他も通してしまう。区間そのものを見る。
+  assert.ok(spansDisjoint(summary.jobs), `排他が効いていない: ${JSON.stringify(summary.jobs.map((job) => [job.id, job.startedAtMs, job.endedAtMs]))}`);
 });
 
-test("ロックが違えば同時に走る", async () => {
+test("ロックが違えば同時に走る", async (t) => {
   const plan = {
     planId: "distinct-locks",
+    defaults: { cwd: isolatedLockBase(t) },
     jobs: [
       // 3秒にしている: Windows の CI ではプロセスの起動そのものが1秒以上かかることがあり、
       // 1秒のジョブでは2つ目を起動する前に1つ目が終わって、重なりを測れなかった。
@@ -292,10 +313,10 @@ test("同じファイルを指す別表記のロックは同じ鍵に畳む", ()
   assert.notEqual(normalizeLockKey("state.json", "/repo"), normalizeLockKey("state.json", "/other"));
 });
 
-test("別表記で同じファイルを宣言したジョブは重ならない", async () => {
+test("別表記で同じファイルを宣言したジョブは重ならない", async (t) => {
   const plan = {
     planId: "lock-alias",
-    defaults: { cwd: "/tmp" },
+    defaults: { cwd: isolatedLockBase(t) },
     jobs: [
       { id: "w1", command: "sleep", args: ["1"], locks: ["state.json"] },
       { id: "w2", command: "sleep", args: ["1"], locks: ["./state.json"] },
@@ -306,7 +327,7 @@ test("別表記で同じファイルを宣言したジョブは重ならない",
     logDir: `/tmp/harness-parallel-test-${process.pid}-alias`,
   });
   assert.equal(summary.counts.passed, 2);
-  assert.ok(summary.totalDurationMs >= 1900, `別表記が同じロックに畳まれていない: ${summary.totalDurationMs}ms`);
+  assert.ok(spansDisjoint(summary.jobs), `別表記が同じロックに畳まれていない: ${JSON.stringify(summary.jobs.map((job) => [job.id, job.startedAtMs, job.endedAtMs]))}`);
 });
 
 test("ログのファイル名にできない id は実行前に落とす", () => {
@@ -396,9 +417,10 @@ test("expand は継承プロパティやオブジェクト値を差し込ませ�
   assert.equal(ok.jobs[0].id, "a3");
 });
 
-test("レポートは引数の境界と依存・ロックを構造のまま残す", async () => {
+test("レポートは引数の境界と依存・ロックを構造のまま残す", async (t) => {
   const plan = {
     planId: "evidence2",
+    defaults: { cwd: isolatedLockBase(t) },
     jobs: [{
       id: "j", command: "sh", args: ["-c", "echo 'a b'"],
       locks: ["x.json"], timeoutMs: 60_000, env: { FOO: "1" },
