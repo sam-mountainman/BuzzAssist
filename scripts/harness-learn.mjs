@@ -34,6 +34,7 @@ import {
   resolveChannelPackPath,
   resolveChannelPackSource,
 } from "../lib/channelPackResolver.mjs";
+import { findChannel, loadChannelRegistry } from "../lib/channelRegistry.mjs";
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
 import { loadHarnessDeployments } from "../lib/harnessDeploymentResolver.mjs";
 import { redactSharedLearningText } from "../lib/harnessFeedbackBundle.mjs";
@@ -178,7 +179,7 @@ function refreshCatalogForSharedLedger(ledgerPath) {
  * こちらが手で pack 側へ移す、を繰り返していた。手で移す運用は、
  * 移す人がいない回に漏れる。
  */
-export function ledgerPathFor(target, kind = "proposals") {
+export function ledgerPathFor(target, kind = "proposals", { channel = null } = {}) {
   const name = `${kind}.jsonl`;
   const resolvedTarget = resolveTarget(String(target || ""));
   if (resolvedTarget.startsWith("channel-pack:")) {
@@ -186,7 +187,8 @@ export function ledgerPathFor(target, kind = "proposals") {
     // チャンネルの学習の保存先は、制作プログラムの配備 root とは別の設定で決める
     // （resolveChannelLearningStore）。配備 root が "." のとき、以前はここが共有台帳と同じ
     // 場所に解決され、隔離の検査で捕捉そのものが止まっていた。
-    const store = resolveChannelLearningStore(resolvedTarget, definition);
+    // channel（台帳のチャンネル）を渡せば、そのチャンネルの保存先（同じハーネスの別のチャンネルとは別の場所）。
+    const store = resolveChannelLearningStore(resolvedTarget, definition, { channel });
     if (store) return path.join(store.root, "docs", "learning", name);
     // ambient BUZZASSIST_CHANNEL_PACK_ID を使うと、narrated-story宛の提案が
     // たまたまactiveなKoya packへ入る。target自身をpack IDとして固定する。
@@ -198,9 +200,20 @@ export function ledgerPathFor(target, kind = "proposals") {
   return sharedLedgerFile(kind);
 }
 
-/** 共有台帳と、設定済みの各Channel Pack台帳を重複なく列挙する。 */
-export function learningLedgerPaths(kind = "proposals") {
+/**
+ * 共有台帳と、設定済みの各Channel Pack台帳を重複なく列挙する。
+ *
+ * channel（台帳のチャンネル）を渡せば、共有台帳とそのチャンネルの保存先の台帳だけ。チャンネルの保存先は
+ * channel を渡さない一覧には入らない——チャンネルで作った Job の学習が、チャンネルの無い一覧（従来の
+ * status・pending・overlay の材料）や別のチャンネルの一覧に出ないようにするため。
+ */
+export function learningLedgerPaths(kind = "proposals", { channel = null } = {}) {
   const paths = new Set([sharedLedgerFile(kind)]);
+  const scope = channelLearningScopeOf(channel);
+  if (scope) {
+    for (const target of scope.stores.keys()) paths.add(ledgerPathFor(target, kind, { channel: scope }));
+    return [...paths];
+  }
   for (const [target, definition] of Object.entries(loadTargets())) {
     if (definition.scope !== "channel-pack") continue;
     try {
@@ -214,8 +227,87 @@ export function learningLedgerPaths(kind = "proposals") {
   return [...paths];
 }
 
+/**
+ * チャンネルの範囲に入る行か。保存先のファイルには、従来の台帳を引き継いだ保存先（その宛先を使うチャンネルが
+ * 1つのとき）の古い行や、同じ置き場を使う別の宛先の行が入りうる。範囲の宛先でない行と、別のチャンネルの印の
+ * ある行は読まない（印の無い行は、そのチャンネルが引き継いだ従来の行として読む）。
+ */
+export function rowInChannelScope(row, scope) {
+  const recorded = typeof row?.channel === "string" ? row.channel : "";
+  if (recorded && recorded !== scope.channelId) return false;
+  return scope.stores.has(resolveTarget(String(row?.target || "")));
+}
+
+/**
+ * 台帳の行を読む。channel を渡さなければ従来どおり（共有台帳と各 Channel Pack の既定の台帳）。渡せば、
+ * 共有台帳の行と、そのチャンネルの保存先の範囲の行だけ（rowInChannelScope）。
+ */
+export function readLearningLedgerRows(kind = "proposals", { channel = null } = {}) {
+  const scope = channelLearningScopeOf(channel);
+  if (!scope) return learningLedgerPaths(kind).flatMap(readJsonl);
+  const shared = sharedLedgerFile(kind);
+  return learningLedgerPaths(kind, { channel: scope }).flatMap((file) => {
+    const rows = readJsonl(file);
+    return samePath(file, shared) ? rows : rows.filter((row) => rowInChannelScope(row, scope));
+  });
+}
+
 /** チャンネルの学習の保存先が決められない・共有台帳と重なるときの失敗コード。 */
 export const CHANNEL_LEARNING_STORE_ERROR = "channel-learning-store-invalid";
+/** チャンネル（台帳の channels の id）の学習の範囲を決められないときの失敗コード。 */
+export const CHANNEL_LEARNING_SCOPE_ERROR = "channel-learning-scope-invalid";
+/** 共有層（genre: / platform:）の宛先にチャンネルを付けたときの失敗コード。 */
+export const CHANNEL_SCOPE_SHARED_TARGET_ERROR = "channel-scope-shared-target";
+
+function channelScopeError(code, message) {
+  const error = new Error(`${code}: ${message}`);
+  error.code = code;
+  return error;
+}
+
+/**
+ * チャンネル（台帳の channels の id）の学習の範囲。保存先は台帳（lib/channelRegistry.mjs）が決めた
+ * チャンネルごとの root（channelLearning の { target, channel, root } か、学習の置き場の channels/<id>）で、
+ * 台帳の読み込みが重なり（別のチャンネル・チャンネルの無い Job の保存先）を拒んでいる。
+ * 台帳に無いチャンネル・壊れた台帳は理由つきで止める（チャンネルの無い保存先へ黙って落とさない）。
+ */
+export function resolveChannelLearningScope(channelId, { repoRoot = REPO_ROOT, env = process.env, registry = undefined } = {}) {
+  const id = String(channelId ?? "").trim();
+  if (!id) return null;
+  let channel;
+  try {
+    channel = findChannel(registry ?? loadChannelRegistry({ repoRoot, env }), id);
+  } catch (error) {
+    throw channelScopeError(
+      CHANNEL_LEARNING_SCOPE_ERROR,
+      `チャンネル ${id} の学習の保存先を決められません（${String(error?.message || error).slice(0, 400)}）。`
+        + "チャンネルの無い保存先へは書きません。",
+    );
+  }
+  const stores = new Map();
+  for (const entry of channel.learning || []) {
+    if (entry?.store?.root) stores.set(entry.target, { root: entry.store.root, source: entry.store.source });
+  }
+  return Object.freeze({ channelId: channel.id, stores });
+}
+
+/** チャンネルの id か resolveChannelLearningScope の結果を、学習の範囲にする。どちらでもなければ null。 */
+export function channelLearningScopeOf(value, options = {}) {
+  if (!value) return null;
+  if (typeof value === "object" && value.stores instanceof Map && typeof value.channelId === "string") return value;
+  if (typeof value !== "string") throw channelScopeError(CHANNEL_LEARNING_SCOPE_ERROR, "channel はチャンネルの id にしてください。");
+  return resolveChannelLearningScope(value, options);
+}
+
+function channelScopeStore(scope, target) {
+  const store = scope.stores.get(target);
+  if (store) return store;
+  throw channelScopeError(
+    CHANNEL_LEARNING_SCOPE_ERROR,
+    `チャンネル ${scope.channelId} は ${target} を学習の宛先に持ちません`
+      + `（台帳の制作のハーネスと台本のジャンルから決まる宛先: ${[...scope.stores.keys()].join(", ") || "無し"}）。`,
+  );
+}
 
 function channelLearningStoreError(target, reason) {
   const error = new Error(
@@ -254,7 +346,8 @@ function operatorChannelLearningRoot(target, repoRoot = REPO_ROOT) {
   if (!Array.isArray(parsed.channelLearning)) {
     throw channelLearningStoreError(target, "config/harness-deployments.json の channelLearning が配列ではありません。");
   }
-  const rows = parsed.channelLearning.filter((row) => resolveTarget(String(row?.target || "")) === target);
+  // チャンネル単位の行（{ target, channel, root }）はそのチャンネルの保存先で、チャンネルの無い Job の保存先ではない。
+  const rows = parsed.channelLearning.filter((row) => row?.channel === undefined && resolveTarget(String(row?.target || "")) === target);
   if (rows.length === 0) return null;
   if (rows.length > 1) throw channelLearningStoreError(target, "channelLearning に同じ target が2回あります（どちらが効くか決められない）。");
   const value = typeof rows[0]?.root === "string" ? rows[0].root.trim() : "";
@@ -264,14 +357,18 @@ function operatorChannelLearningRoot(target, repoRoot = REPO_ROOT) {
 
 /**
  * channel-pack 宛の学習の保存先（正本の台帳・提案台帳・反映記録を置く root）。
- *   1. 運営者の配置表の channelLearning（私有プロジェクト）
+ *   0. channel（台帳のチャンネルの id か resolveChannelLearningScope の結果）を渡せば、そのチャンネルの保存先
+ *      （source "channel"）。チャンネルで作った Job の学習はここ。下の 1〜3 へは落とさない
+ *   1. 運営者の配置表の channelLearning の宛先単位の行（私有プロジェクト）
  *   2. 配置先相対の宛先（relativeToDeployment）で、配備 root がリポジトリの外にあるもの（従来の配置）
  *   3. どちらも無ければ null（Channel Pack: channel-packs/<packId>、正本は pack-first）
+ * 1〜3 はチャンネルの無い Job（従来）の保存先。
  * 共有台帳と同じ場所・リポジトリの作業木の直下に解決されたら、黙って使わず理由つきで止める（fail-closed）。
  */
 export function resolveChannelLearningStore(target, definition = {}, {
   repoRoot = REPO_ROOT,
   deploymentRootFor = undefined,
+  channel = null,
 } = {}) {
   if (!isChannelPackTarget(target)) return null;
   const sharedLedgerDir = path.join(repoRoot, "docs", "learning");
@@ -284,6 +381,11 @@ export function resolveChannelLearningStore(target, definition = {}, {
     }
     return { root, source };
   };
+  const scope = channelLearningScopeOf(channel, { repoRoot });
+  if (scope) {
+    const store = channelScopeStore(scope, resolveTarget(target));
+    return { ...checked(store.root, "channel"), channelId: scope.channelId };
+  }
   const declared = operatorChannelLearningRoot(target, repoRoot);
   if (declared) return checked(declared, "operator-project");
   if (definition?.relativeToDeployment) {
@@ -1165,6 +1267,7 @@ export const CANONICAL_SOURCE_LABELS = Object.freeze({
   "channel-pack-env": "Channel Pack（BUZZASSIST_CHANNEL_PACK）",
   deployment: "配置先（config/harness-deployments.json）",
   "operator-project": "運営者の私有プロジェクト（config/harness-deployments.json の channelLearning）",
+  channel: "チャンネルの学習の保存先（台帳の channels と channelLearning の channel ごとの宣言）",
   repository: "リポジトリ",
 });
 
@@ -1231,6 +1334,7 @@ export function resolveCanonicalTarget(rawTarget, {
   repoRoot = REPO_ROOT,
   targets = undefined,
   deploymentRootFor = undefined,
+  channel = null,
 } = {}) {
   const target = resolveTarget(rawTarget);
   const targetMap = targets ?? loadTargetsFor(repoRoot);
@@ -1243,12 +1347,20 @@ export function resolveCanonicalTarget(rawTarget, {
   }
   let rel = def.canonical;
   if (isChannelPackTarget(target)) {
-    // 運営者の私有プロジェクト（channelLearning）か、リポジトリの外の配備。共有台帳と重なる設定は止める。
-    const store = resolveChannelLearningStore(target, def, { repoRoot, deploymentRootFor });
-    if (store?.source === "operator-project") {
+    // チャンネルの保存先、運営者の私有プロジェクト（channelLearning）か、リポジトリの外の配備。共有台帳と重なる設定は止める。
+    const store = resolveChannelLearningStore(target, def, { repoRoot, deploymentRootFor, channel });
+    if (store?.source === "operator-project" || store?.source === "channel") {
       // 記録には保存先の中の相対 path だけを残す（端末の絶対 path を記録に持ち込まない）。
       const full = path.resolve(store.root, rel);
-      return { target, rel, full, missing: !fs.existsSync(full), source: "operator-project", storeRoot: store.root };
+      return {
+        target,
+        rel,
+        full,
+        missing: !fs.existsSync(full),
+        source: store.source,
+        storeRoot: store.root,
+        ...(store.channelId ? { channelId: store.channelId } : {}),
+      };
     }
     if (store?.source === "deployment") {
       const root = path.relative(repoRoot, store.root);
@@ -1311,6 +1423,7 @@ export function requireWritableTarget(rawTarget, options = {}) {
 export function resolveRecordedCanonical(record, {
   repoRoot = REPO_ROOT,
   targets = undefined,
+  channel = null,
 } = {}) {
   const rel = record?.targetPath;
   if (typeof rel !== "string" || rel === "") return null;
@@ -1322,15 +1435,15 @@ export function resolveRecordedCanonical(record, {
   const def = (targets ?? loadTargetsFor(repoRoot))[target] ?? {};
   let store = null;
   try {
-    store = resolveChannelLearningStore(target, def, { repoRoot });
+    store = resolveChannelLearningStore(target, def, { repoRoot, channel });
   } catch (error) {
-    if (error?.code !== CHANNEL_LEARNING_STORE_ERROR) throw error;
-    return { full: null, source: "operator-project", missing: true };
+    if (error?.code !== CHANNEL_LEARNING_STORE_ERROR && error?.code !== CHANNEL_LEARNING_SCOPE_ERROR) throw error;
+    return { full: null, source: channel ? "channel" : "operator-project", missing: true };
   }
-  if (store?.source === "operator-project") {
-    // 私有プロジェクトへの記録は、保存先の中の相対 path で残っている。
+  if (store?.source === "operator-project" || store?.source === "channel") {
+    // 私有プロジェクト・チャンネルの保存先への記録は、保存先の中の相対 path で残っている。
     const full = path.resolve(store.root, rel);
-    return { full, source: "operator-project", missing: !fs.existsSync(full) };
+    return { full, source: store.source, missing: !fs.existsSync(full) };
   }
   if (store?.source === "deployment") {
     // 記録の targetPath は配置先を含む形で残っている。配置先がそのチャンネルの置き場。
@@ -1344,14 +1457,20 @@ export function resolveRecordedCanonical(record, {
  * summarizeProposals / isActuallyApplied へ渡す読み手。readCanonical(rel, record) の
  * 第2引数で記録の target を受け取り、channel-pack 宛なら pack を先に読む。
  */
-export function createCanonicalReaders({ repoRoot = REPO_ROOT, targets = undefined } = {}) {
+export function createCanonicalReaders({ repoRoot = REPO_ROOT, targets = undefined, channel = null } = {}) {
   // targets.json は記録ごとに読み直さない。共有層宛しか無ければ読みもしない。
   let targetMap = targets;
+  // チャンネルの範囲で読むなら、channel-pack 宛の記録はそのチャンネルの保存先の正本と照合する。
+  const scope = channelLearningScopeOf(channel, { repoRoot });
   const locate = (rel, record = null) => {
     const target = String(record?.target || "");
     const packTarget = isChannelPackTarget(resolveTarget(target));
     if (packTarget) targetMap ??= loadTargetsFor(repoRoot);
-    return resolveRecordedCanonical({ target, targetPath: rel }, { repoRoot, targets: packTarget ? targetMap : {} });
+    return resolveRecordedCanonical({ target, targetPath: rel }, {
+      repoRoot,
+      targets: packTarget ? targetMap : {},
+      channel: packTarget ? scope : null,
+    });
   };
   return {
     locate,
@@ -1396,6 +1515,38 @@ export function describeCanonicalResolution(resolved, { repoRoot = REPO_ROOT, in
     lines.push(`${indent}  Channel Pack（${displayCanonicalPath(resolved.packRootWithoutCanonical, repoRoot)}）に正本が無いので、リポジトリ側を使います`);
   }
   return lines;
+}
+
+/**
+ * status（--channel なし）の末尾に出す、チャンネルごとの保存先の未反映の件数。中身は混ぜずに件数だけを出す。
+ * 台帳を読めなくても status 自体は止めない（理由のコードだけを出す）。
+ */
+export function channelStoreStatusLines({ repoRoot = REPO_ROOT, env = process.env } = {}) {
+  let registry;
+  try {
+    registry = loadChannelRegistry({ repoRoot, env });
+  } catch (error) {
+    return ["", `チャンネル単位の台帳は数えていません（台帳を読めない: ${String(error?.code || "error")}）`];
+  }
+  const lines = [];
+  for (const channel of registry.channels || []) {
+    if ((channel.learning || []).length === 0) continue;
+    try {
+      const scope = resolveChannelLearningScope(channel.id, { repoRoot, env, registry });
+      const readers = createCanonicalReaders({ repoRoot, channel: scope });
+      const pending = summarizeProposals(
+        readLearningLedgerRows("proposals", { channel: scope }),
+        readLearningLedgerRows("applied", { channel: scope }),
+        readers.readCanonical,
+        readers.hashCanonical,
+      ).filter((entry) => !entry.applied && isChannelPackTarget(resolveTarget(entry.target))).length;
+      lines.push(`  ${channel.id}: 未反映 ${pending} 件`);
+    } catch (error) {
+      lines.push(`  ${channel.id}: 読めません（${String(error?.code || "error")}）`);
+    }
+  }
+  if (lines.length === 0) return [];
+  return ["", "チャンネル単位の台帳（チャンネルで作った Job の学習。上の一覧には含めない。見るときは --channel <id>）", ...lines];
 }
 
 /** promote / apply の失敗文に添える「実際に読んだファイル」。共有層宛は従来の文面のまま。 */
@@ -1692,6 +1843,11 @@ export function buildProposal({ kind, target, text, evidence, session, now, meta
 /**
  * capture CLI と外部collectorが共有する、proposal台帳への唯一の追記経路。
  * 正本・overlay・applied台帳には触れない。
+ *
+ * channelId（台帳のチャンネルの id）か channelScope（resolveChannelLearningScope の結果）を渡せば、
+ * そのチャンネルの保存先へ書き、行に channel を残す。チャンネルを付けられるのは channel-pack 宛だけで、
+ * 共有層（genre: / platform:）宛に付けると止める——チャンネル固有の事実を共有層へ上げないため。一般化するなら、
+ * チャンネルを外し、一般的な言い方で別の提案として capture する（共有層の語の検査はそちらで効く）。
  */
 export function captureLearningProposal(input, {
   append = appendJsonl,
@@ -1703,11 +1859,23 @@ export function captureLearningProposal(input, {
   privateVocabulary = undefined,
   homeRoot = homedir(),
   env = process.env,
+  channelId = "",
+  channelScope = null,
 } = {}) {
   // 子エージェントの印があれば、台帳へ書く前に止める（Canvas feedback や Receipt の
   // 自動捕捉もこの関数を通るので、CLI だけでなくここでも見る）。
   assertLearningWriteAllowed(env, "capture");
-  const built = buildProposal(input);
+  const proposal = buildProposal(input);
+  const scope = channelLearningScopeOf(channelScope ?? (String(channelId || "").trim() || null), { env });
+  if (scope && !isChannelPackTarget(resolveTarget(proposal.target))) {
+    throw channelScopeError(
+      CHANNEL_SCOPE_SHARED_TARGET_ERROR,
+      `共有層の宛先（${proposal.target}）にチャンネル（${scope.channelId}）は付けません。チャンネル固有の事実を共有層へ上げないためです。`
+        + "一般化するなら、チャンネルを外して一般的な言い方で別の提案として capture してください。",
+    );
+  }
+  // 行に残すチャンネルの印（ID には入れない。同じ観測は同じ提案として数える）。
+  const built = scope ? { ...proposal, channel: scope.channelId } : proposal;
   const verdict = channelTermsInSharedEntry(built, signals);
   if (!verdict.ok) throw new Error(verdict.message);
   const vocabulary = privateVocabulary === undefined ? defaultPrivateVocabulary() : privateVocabulary;
@@ -1719,7 +1887,9 @@ export function captureLearningProposal(input, {
   // 配布された写しでの最初の書き込みの前に、古い写しの台帳を取り込む（1回だけ）。
   // 先に書くと「状態の置き場が空ではない」になり、古い台帳を取り込む機会が無くなる。
   if (ledgerPathResolver === ledgerPathFor) ensureLearningStateReady({ env });
-  const ledgerPath = ledgerPathResolver(entry.target, "proposals");
+  const ledgerPath = scope
+    ? ledgerPathResolver(entry.target, "proposals", { channel: scope })
+    : ledgerPathResolver(entry.target, "proposals");
   assertCaptureLedgerIsolation(entry.target, ledgerPath, ledgerPathResolver);
   return lock(ledgerPath, () => {
     const duplicate = read(ledgerPath).some((row) => {
@@ -1842,6 +2012,7 @@ function printHelp() {
     --text "指摘の内容を、次に読む人が判断できる粒度で"
     --evidence "根拠（ファイル:行、実測値、ユーザーの発言など）"
     --session "セッションIDなど（必須。同一セッションの重複をまとめる）"
+    --channel <id>  台帳のチャンネルの保存先へ書く（channel-pack 宛だけ。下の「チャンネル単位の保存先」）
             書く前に検査する: 検査語彙（HMAC digest）に当たる語は拒否。プロンプト注入らしい
             言い回し・隠し HTML コメント・不可視 Unicode・資格情報らしい文字列・端末の絶対パスは
             捨てずに blocked として残す（資格情報とパスは置き換えて記録。overlay には載らない）
@@ -1954,6 +2125,19 @@ function printHelp() {
   channel-packs/<id>/）を先に読み、pack 側に無いときだけリポジトリ直下を読む。
   どれを読んだかは status / review / promote / apply の出力に出る。
 
+  チャンネル単位の保存先（--channel <id>。capture / status / review / promote / apply / pending / approve /
+  reject / rollback で使える。sync と curate では使わない）:
+    台帳（config/harness-deployments.json の channels）のチャンネルで作った Job の学習は、ハーネス単位の
+    Channel Pack の台帳ではなく、そのチャンネルの保存先に積む（Job の確定時の自動の捕捉と Canvas feedback も同じ）。
+    保存先は channelLearning の { "target": "channel-pack:<id>", "channel": "<チャンネルの id>", "root": "<dir>" }、
+    宣言が無ければ学習の置き場（${LEARNING_DIR_ENV} か ~/.buzzassist/learning）の channels/<チャンネルの id>。
+    提案と反映記録は <root>/docs/learning/、宛先の正本（要求台帳）は <root>/<正本の相対 path>。
+    --channel を付けると、共有台帳とそのチャンネルの保存先だけを読み書きし、別のチャンネル・チャンネルの無い
+    保存先の提案・反映記録・承認待ちの変更は出さない。--channel なしの status は末尾にチャンネルごとの件数だけを出す。
+    共有層（genre: / platform:）宛に --channel は付けられない（チャンネル固有の事実を共有層へ上げない。
+    一般化するなら、チャンネルを外して一般的な言い方で別の提案として capture する）。
+    チャンネルの無い Job（従来）の学習は、今までどおりハーネス単位の Channel Pack の台帳へ積む。
+
   なぜこの形か: 捕捉は書き換えない、review と curate は既定 dry-run、promote と退避には人の確認が要る。
   正本はエージェントも pending → approve で直せるが、変更前後の sha256・元の提案・時刻・当てた者を残し、
   1件ずつ rollback できる。正本スキルを人が確かめるのは、運営者へ配る版（Release）を出すときの1回
@@ -1982,25 +2166,36 @@ async function main() {
   const state = learningState();
   process.stdout.write(describeMigration(ensureLearningStateReady({ state })));
 
+  // --channel <id>: 台帳のチャンネルの保存先だけを読み書きする（共有台帳は共通なので読む）。
+  // チャンネルの無い保存先や別のチャンネルの保存先の提案・反映記録・承認待ちの変更は出さない。
+  if (args.channel === true) throw new Error("--channel にはチャンネルの id を渡してください（config/harness-deployments.json の channels）");
+  const scope = typeof args.channel === "string" ? resolveChannelLearningScope(args.channel) : null;
+  if (scope && ["sync", "curate"].includes(args.action)) {
+    throw new Error(
+      `--channel は ${args.action} では使いません。overlay は共有層（genre: / platform:）だけを書き、`
+        + "チャンネルの台帳（channel-pack:）は review-only で overlay に載りません。",
+    );
+  }
+
   // 差分の承認キュー（lib/harnessLearningChanges.mjs）。正本の書き換えはここだけが行う。
   if (["pending", "approve", "reject", "rollback"].includes(args.action)) {
-    await runLearningChangeCli(args, now);
+    await runLearningChangeCli(args, now, scope);
     return;
   }
 
-  const proposals = learningLedgerPaths("proposals").flatMap(readJsonl);
-  const applied = learningLedgerPaths("applied").flatMap(readJsonl);
-  const archived = learningLedgerPaths("archived").flatMap(readJsonl);
+  const proposals = readLearningLedgerRows("proposals", { channel: scope });
+  const applied = readLearningLedgerRows("applied", { channel: scope });
+  const archived = readLearningLedgerRows("archived", { channel: scope });
   // 正本を実際に読んで反映を確かめる。記録を信じない。
-  // channel-pack 宛は promote / apply と同じく pack を先に読む（ops-7）。
-  const { readCanonical, hashCanonical } = createCanonicalReaders();
+  // channel-pack 宛は promote / apply と同じく pack を先に読む（ops-7）。チャンネルの範囲ならその保存先を読む。
+  const { readCanonical, hashCanonical } = createCanonicalReaders({ channel: scope });
   const summary = summarizeProposals(proposals, applied, readCanonical, hashCanonical);
   // channel-pack 宛の正本をどこから読んだかを出す。共有層宛の出力は変えない。
   // 記録に残った古い target（定義から消えたもの）で表示が落ちないようにする。
   const resolutionLinesFor = (id, indent = "  ") => {
     if (!isChannelPackTarget(resolveTarget(id))) return [];
     try {
-      return describeCanonicalResolution(resolveCanonicalTarget(id), { indent });
+      return describeCanonicalResolution(resolveCanonicalTarget(id, { channel: scope }), { indent });
     } catch {
       return [`${indent}正本: 未知の target（${resolveTarget(id)}）`];
     }
@@ -2019,9 +2214,9 @@ async function main() {
         evidence: args.evidence,
         session: args.session,
         now,
-      });
+      }, scope ? { channelScope: scope } : {});
       const repeats = proposals.filter((p) => (p.id ?? proposalId(p)) === entry.id).length;
-      process.stdout.write(`記録しました: ${entry.id}\n`);
+      process.stdout.write(`記録しました: ${entry.id}${scope ? `（チャンネル ${scope.channelId} の保存先）` : ""}\n`);
       // 回数で起動する振り返り（UserPromptSubmit フック）の数を、この会話（--session）で0に戻す。
       if (resetReflectionCounter(args.session, { now: () => now })) {
         process.stdout.write("  この会話の振り返りの数を0に戻しました\n");
@@ -2061,10 +2256,19 @@ async function main() {
         if (resolution.length === 0) return;
         process.stdout.write(`\n正本の読み先（channel-pack 宛は Channel Pack を先に見る）\n${resolution.join("\n")}\n`);
       };
+      // チャンネルの範囲で見ているなら、それを冒頭に出す。見ていないなら、チャンネルごとの保存先の件数だけを末尾に出す
+      // （中身は混ぜない。見るときは --channel <id>）。
+      if (scope) process.stdout.write(`チャンネル ${scope.channelId} の保存先と共有台帳だけを読んでいます\n\n`);
+      const writeChannelStores = () => {
+        if (scope) return;
+        const lines = channelStoreStatusLines();
+        if (lines.length > 0) process.stdout.write(`${lines.join("\n")}\n`);
+      };
       if (pending.length === 0) {
         process.stdout.write("未反映の提案はありません\n");
         writeBlocked();
         writeResolution();
+        writeChannelStores();
         break;
       }
       process.stdout.write(`未反映 ${pending.length} 件（繰り返し回数順）\n\n`);
@@ -2077,6 +2281,7 @@ async function main() {
       }
       writeBlocked();
       writeResolution();
+      writeChannelStores();
       break;
     }
 
@@ -2106,7 +2311,7 @@ async function main() {
         "反映するときは、ここに出た提案を **1件ずつ追記するのではなく**、\n"
         + "その target の既存の節へ吸収するか、クラスレベルの1節にまとめて書く。\n"
         + "個別事象を並べた文書は読まれなくなり、学習として機能しない。\n"
-        + "書いたあと apply --id <id> --reviewer <名前> --note \"どう書いたか\" を実行する。\n",
+        + `書いたあと apply --id <id> --reviewer <名前> --note "どう書いたか"${scope ? ` --channel ${scope.channelId}` : ""} を実行する。\n`,
       );
       break;
     }
@@ -2198,7 +2403,7 @@ async function main() {
       if (!entry) throw new Error(`提案が見つかりません: ${args.id}`);
       if (entry.applied) throw new Error(`${args.id} は既に昇格済みです`);
       assertPromotableProposal(entry, args.note);
-      const resolvedTarget = requireWritableTarget(entry.target);
+      const resolvedTarget = requireWritableTarget(entry.target, { channel: scope });
       const { rel, full } = resolvedTarget;
       // overlay に載っているのは sync の当然の結果なので、それを拒否の
       // 条件にすると promote が永久に通らなくなる（実際そうなっていた）。
@@ -2217,9 +2422,10 @@ async function main() {
           + "--note にその本文を完全一致で渡してください。",
         );
       }
-      appendJsonl(ledgerPathFor(entry.target, "applied"), {
+      appendJsonl(ledgerPathFor(entry.target, "applied", { channel: scope }), {
         id: entry.id,
         target: entry.target,
+        ...(scope && isChannelPackTarget(resolveTarget(entry.target)) ? { channel: scope.channelId } : {}),
         targetPath: rel,
         targetSha256: createHash("sha256").update(canonicalBytes).digest("hex"),
         targetSource: recordedCanonicalSource(resolvedTarget),
@@ -2262,7 +2468,7 @@ async function main() {
       if (!entry) throw new Error(`提案が見つかりません: ${args.id}`);
       if (entry.applied) throw new Error(`${args.id} は既に反映済みです`);
       assertPromotableProposal(entry, args.note);
-      const resolvedTarget = requireWritableTarget(entry.target);
+      const resolvedTarget = requireWritableTarget(entry.target, { channel: scope });
       const { rel, full } = resolvedTarget;
       // apply も promote と同じ検証を通す。緩い経路を1つでも残すと、
       // そちらから素通りできてしまう。
@@ -2279,9 +2485,10 @@ async function main() {
           + "--note にその本文を完全一致で渡してください。",
         );
       }
-      appendJsonl(ledgerPathFor(entry.target, "applied"), {
+      appendJsonl(ledgerPathFor(entry.target, "applied", { channel: scope }), {
         id: entry.id,
         target: entry.target,
+        ...(scope && isChannelPackTarget(resolveTarget(entry.target)) ? { channel: scope.channelId } : {}),
         targetPath: rel,
         targetSha256: createHash("sha256").update(applyBytes).digest("hex"),
         targetSource: recordedCanonicalSource(resolvedTarget),
@@ -2333,9 +2540,11 @@ function actorLabel(record) {
 }
 
 /** pending / approve / reject / rollback。本体は lib/harnessLearningChanges.mjs。 */
-async function runLearningChangeCli(args, now) {
+async function runLearningChangeCli(args, now, scope = null) {
   const changes = await import("../lib/harnessLearningChanges.mjs");
-  const common = { repoRoot: REPO_ROOT, now: () => now };
+  // --channel があれば、そのチャンネルの保存先のキュー・提案・正本だけを扱う。
+  const common = { repoRoot: REPO_ROOT, now: () => now, ...(scope ? { channel: scope } : {}) };
+  const channelFlag = scope ? ` --channel ${scope.channelId}` : "";
   switch (args.action) {
     case "pending": {
       if (typeof args.proposed === "string") {
@@ -2353,8 +2562,8 @@ async function runLearningChangeCli(args, now) {
           + `  base ${shortSha(change.baseSha256)} → 変更後 ${shortSha(change.afterSha256)}`
           + `（${change.stats.hunks} hunk、+${change.stats.added} -${change.stats.removed}）/ 提案 ${change.proposalIds.join(", ")}\n`
           + "  正本はまだ書き換えていません。差分を読んでから当てます:\n"
-          + `    node scripts/harness-learn.mjs pending --show ${change.changeId}\n`
-          + `    node scripts/harness-learn.mjs approve --change ${change.changeId}`
+          + `    node scripts/harness-learn.mjs pending --show ${change.changeId}${channelFlag}\n`
+          + `    node scripts/harness-learn.mjs approve --change ${change.changeId}${channelFlag}`
           + "（エージェントが当てる。人が当てるなら自分の端末から --reviewer <名前> --human-verified を足す）\n",
         );
         return;
@@ -2379,7 +2588,7 @@ async function runLearningChangeCli(args, now) {
         process.stdout.write(`      提案 ${entry.proposalIds.join(", ")} / base ${shortSha(entry.baseSha256)} → ${shortSha(entry.afterSha256)}`
           + `${entry.stats ? `（+${entry.stats.added} -${entry.stats.removed}）` : ""}\n`);
       }
-      process.stdout.write("\n差分: node scripts/harness-learn.mjs pending --show <変更ID>\n");
+      process.stdout.write(`\n差分: node scripts/harness-learn.mjs pending --show <変更ID>${channelFlag}\n`);
       return;
     }
     case "approve": {
@@ -2394,7 +2603,7 @@ async function runLearningChangeCli(args, now) {
       process.stdout.write(
         `${result.record.changeId} を ${result.targetRel} へ当てました（${shortSha(result.record.beforeSha256)} → ${shortSha(result.record.afterSha256)}、`
         + `${actorLabel(result.record)}）。提案 ${result.record.proposalIds.join(", ")} は反映済みとして数えます。\n`
-        + `  巻き戻すとき: node scripts/harness-learn.mjs rollback --change ${result.record.changeId} --reason "..."\n`,
+        + `  巻き戻すとき: node scripts/harness-learn.mjs rollback --change ${result.record.changeId}${channelFlag} --reason "..."\n`,
       );
       if (result.canonicalSkill) {
         process.stdout.write(
