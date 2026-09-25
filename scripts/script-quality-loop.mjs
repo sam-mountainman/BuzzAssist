@@ -13,7 +13,7 @@
 // 版ごとに、その版を作った文脈とは別の評価文脈の採点を1回として記録する。実装の正本は
 // lib/scriptQualityLoop.mjs（中核は lib/qualityLoop.mjs）。状態は作業フォルダの quality/ に書く。
 //
-// 終了コード: 0 = 済んだ / 3 = 人待ち・直しが要る（記録していない）/ 4 = --require-pass で未合格 / 2 = 入力の誤り
+// 終了コード: 0 = 済んだ / 3 = 人待ち・直しが要る（記録していない）/ 4 = --require-pass・verdict で未合格 / 2 = 入力の誤り
 
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
 import { captureScriptRoundLearning } from "../lib/scriptQualityLearning.mjs";
@@ -139,7 +139,7 @@ export function scriptQualityHelp() {
                                   確認した人が自分の対話端末から打つ。--agent-attested は数えず何も変えない。
                                   戻す前の累計は cumulativeResets に残る
 
-  終了コード: 0 済んだ / 3 人待ち・直しが要る（記録していない）/ 4 --require-pass で未合格 / 2 入力の誤り
+  終了コード: 0 済んだ / 3 人待ち・直しが要る（記録していない）/ 4 --require-pass・verdict で未合格 / 2 入力の誤り
 `;
 }
 

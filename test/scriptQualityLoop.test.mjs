@@ -380,6 +380,7 @@ test("--restart しても同じ作業フォルダの回数・時間を持ち越�
   const third = await recordVersion(2);
   assert.equal(third.state.rounds.length, 1, "新しいループの回は1から数える");
   assert.equal(third.state.stopReason, "round-limit", "停止条件は累計で判定する");
+  assert.equal(third.state.bestRound.artifactSha256, sha(CHECKED), "止まったときの最高点の回に、採点した台本の SHA が残る");
   const status = await scriptQualityStatus({ workDir: root });
   assert.equal(status.check.cumulative.rounds, 3);
   assert.equal(status.check.cumulative.loops, 2);
@@ -580,6 +581,44 @@ test("運営者が自分で書いた台本は、人の確認つきの受け入�
   assert.equal((await runScriptQualityCli(["accept-human", "--work-dir", root, "--script", "operator-script.md", "--reviewer", "operator", "--reason", "書き足した版も確かめた", "--human-verified"], { stdout, now, isInteractive: true })).exitCode, 0);
   assert.equal((await runScriptQualityCli(["verdict", "--work-dir", root, "--script", "operator-script.md", "--json"], { stdout })).exitCode, 0);
   assert.equal((await runScriptQualityCli(["accept-human", "--work-dir", root, "--script", "operator-script.md", "--reviewer", "operator", "--reason", "機械の申告", "--agent-attested"], { stdout, now })).exitCode, 3);
+});
+
+test("OS の区切り文字で渡したパスも、状態には作業フォルダからの / 区切りの相対パスで残る（Windows でも同じ）", async (t) => {
+  const root = await workspace(t);
+  await start(root);
+  await writeFile(join(root, "drafts", "draft.md"), DRAFT);
+  const reviewRel = await writeReview(root, "r1", {
+    ...review({ context: "ctx-eval-1", script: DRAFT, rubricScores: scores({ "narration-voice": 40 }) }), findings: ["合成の指摘"],
+  });
+  const first = await record(root, {
+    scriptPath: join("drafts", "draft.md"), versionLabel: "v1", stage: "draft", reviewPath: join(...reviewRel.split("/")),
+  });
+  assert.equal(first.version.scriptPath, "drafts/draft.md");
+  assert.equal(first.version.reviewPath, "quality/reviews/r1.json");
+  assert.deepEqual(first.round.evidence.slice(0, 2).map((row) => row.path), ["drafts/draft.md", "quality/reviews/r1.json"]);
+  assert.equal((await readFile(scriptQualityPaths(root).statePath, "utf8")).includes("\\\\"), false, "状態の JSON に区切りの \\ が入らない");
+  // 採否のファイルも OS の区切り文字で渡せる。作業フォルダの外は受けない。
+  await writeFile(join(root, "quality", "dispositions.json"), JSON.stringify([{ findingId: "r1-f1", decision: "adopted", reason: "合成の直し" }]));
+  await writeFile(join(root, "drafts", "v2.md"), REWRITE);
+  const second = await record(root, {
+    scriptPath: join("drafts", "v2.md"), versionLabel: "v2", stage: "revision", revisionDelta: "語り口を直した",
+    findingDispositionsPath: join("quality", "dispositions.json"),
+    reviewPath: await writeReview(root, "r2", review({ context: "ctx-eval-2", script: REWRITE, base: DRAFT })),
+  });
+  assert.equal(second.recorded, true);
+  assert.deepEqual(second.version.findingDispositions.map((row) => row.findingId), ["r1-f1"]);
+  await assert.rejects(record(root, {
+    scriptPath: join("drafts", "v2.md"), versionLabel: "v3", stage: "revision", findingDispositionsPath: join("..", "outside.json"), reviewPath: reviewRel,
+  }), /作業フォルダの中/u);
+  // 制作側の問い合わせは、絶対パスでも作業フォルダからの相対パスでも同じ答え。
+  const absolute = await scriptQualityVerdict({ workDir: root, scriptPath: join(root, "drafts", "v2.md") });
+  const relativePath = await scriptQualityVerdict({ workDir: root, scriptPath: join("drafts", "v2.md") });
+  assert.equal(absolute.reasonCode, "script-quality-passed");
+  assert.deepEqual(relativePath, absolute);
+  const accepted = await acceptScriptAsHumanVerified({
+    workDir: root, scriptPath: join(root, "drafts", "draft.md"), reviewer: "operator", reason: "合成の受け入れ", humanVerified: true, isInteractive: true, now,
+  });
+  assert.equal(accepted.acceptance.scriptPath, "drafts/draft.md");
 });
 
 test("持ち越しの記録が無い前の版の状態でも、history に残したループを累計に数える", async (t) => {
