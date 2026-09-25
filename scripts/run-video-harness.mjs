@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Claude Code / Codex 共通の上位入口。
 //
-//   node scripts/run-video-harness.mjs plan-request --request "依頼文" [--script-path FILE] [--channel-pack BUNDLE]
-//   node scripts/run-video-harness.mjs start --harness ID --script-path FILE --channel-pack BUNDLE
+//   node scripts/run-video-harness.mjs plan-request --request "依頼文" [--script-path FILE] [--channel-pack BUNDLE] [--strategy-brief FILE]
+//   node scripts/run-video-harness.mjs start --harness ID --script-path FILE --channel-pack BUNDLE [--strategy-brief FILE]
 //   node scripts/run-video-harness.mjs resume --job-id ID --confirmed
 //   node scripts/run-video-harness.mjs status --job-id ID
 //   node scripts/run-video-harness.mjs cancel --job-id ID
@@ -36,11 +36,16 @@ function usage() {
   return [
     "BuzzAssist video harness (Claude Code / Codex common entry)",
     "",
-    "plan-request --request TEXT [--project-dir DIR] [--harness ID] [--script-path FILE] [--channel-pack BUNDLE] [--options-json FILE] [--doctor]",
+    "plan-request --request TEXT [--project-dir DIR] [--harness ID] [--script-path FILE] [--channel-pack BUNDLE] [--strategy-brief FILE] [--options-json FILE] [--doctor]",
     "  依頼に合うハーネスの候補・理由（一致した語・否定された語・入力要件・前提・実績・Channel Pack の向き先）と、",
     "  決めきれないときの1問を JSON で返す。モデルも有料 API も呼ばず、Job も作らない。MCP の plan_video_request と同じ結果。",
     "  --doctor で候補ごとに harness-doctor を走らせる（既定では走らせない）。start と同じ Koya の引数（--episode-id など）も受ける。",
-    "start  --harness ID --script-path FILE --channel-pack BUNDLE [--confirmed] [--reviewer-trust-path JSON] [--host-model ID]",
+    "start  --harness ID --script-path FILE --channel-pack BUNDLE [--strategy-brief FILE] [--confirmed] [--reviewer-trust-path JSON] [--host-model ID]",
+    "",
+    "--strategy-brief FILE（plan-request / start。任意）: 企画ブリーフ（buzzassist-strategy-brief-v1）。plan-request は",
+    "  node scripts/strategy-brief.mjs verdict の合否と根拠の状態を理由に出し、start はブリーフの SHA-256 を",
+    "  options.strategyBriefSha256 に残す（Job の識別子に入る。MCP では options.strategyBriefSha256 を渡す）。",
+    "  今は必須ではなく、合否で止めない（未合格・根拠の取り直しが要ることは結果の strategyBrief に出る）。",
     "resume --job-id ID --project-dir DIR --confirmed [--reviewer-trust-path JSON] [--retry-failed-images] [--host-model ID]",
     "status --job-id ID --project-dir DIR",
     "cancel --job-id ID --project-dir DIR",
@@ -122,6 +127,21 @@ function reviewerTrustPathFrom(args) {
   return resolve(args.reviewerTrustPath);
 }
 
+/**
+ * --strategy-brief のブリーフを読み、SHA-256 を options.strategyBriefSha256 に入れる（Job の識別子に入る）。
+ * 合否では止めない（必須にするかはチャンネルの設定で後から選ぶ）。ブリーフとして読めないものだけ止める。
+ */
+export async function strategyBriefStartOptions(args, options = {}) {
+  if (args.strategyBrief === undefined) return { options, strategyBrief: null };
+  if (typeof args.strategyBrief !== "string") throw new Error("--strategy-brief には企画ブリーフのファイルの path が要る。");
+  const { strategyBriefHandoff } = await import("../lib/strategyBriefQualityLoop.mjs");
+  const strategyBrief = await strategyBriefHandoff({ briefPath: resolve(args.strategyBrief) });
+  if (options.strategyBriefSha256 !== undefined && options.strategyBriefSha256 !== strategyBrief.briefSha256) {
+    throw new Error("--options-json の strategyBriefSha256 が --strategy-brief のブリーフの SHA-256 と違う。");
+  }
+  return { options: { ...options, strategyBriefSha256: strategyBrief.briefSha256 }, strategyBrief };
+}
+
 // この CLI を呼んだホスト。どのホストの印も無い素の端末なら "cli"。モデルは宣言されたときだけ。
 export function cliHostInvocation(args, env = process.env) {
   if (args.hostModel === true) throw new Error("--host-model にはモデル ID が要る。分からなければ付けない。");
@@ -138,6 +158,7 @@ async function main() {
       process.stdout.write(`${usage()}\n`);
       return;
     case "plan-request": {
+      if (args.strategyBrief === true) throw new Error("--strategy-brief には企画ブリーフのファイルの path が要る。");
       const { planVideoRequest } = await import("../lib/videoRequestPlan.mjs");
       print(await planVideoRequest({
         request: typeof args.request === "string" ? args.request : "",
@@ -145,6 +166,7 @@ async function main() {
         projectDir,
         scriptPath: typeof args.scriptPath === "string" ? resolve(args.scriptPath) : "",
         channelPackPath: typeof args.channelPack === "string" ? resolve(args.channelPack) : "",
+        strategyBriefPath: typeof args.strategyBrief === "string" ? resolve(args.strategyBrief) : "",
         options: await optionsFrom(args),
         checkPrerequisites: args.doctor === true,
       }));
@@ -153,18 +175,19 @@ async function main() {
     case "start": {
       if (!args.scriptPath) throw new Error("start には --script-path が要る。");
       if (!args.channelPack) throw new Error("本番上位Jobには署名済み --channel-pack が要る。");
+      const { options, strategyBrief } = await strategyBriefStartOptions(args, await optionsFrom(args));
       const result = await videoHarnessService.start({
         projectDir,
         scriptPath: resolve(args.scriptPath),
         harnessId: typeof args.harness === "string" ? args.harness : "",
         want: typeof args.want === "string" ? args.want : "",
         channelPackPath: typeof args.channelPack === "string" ? resolve(args.channelPack) : "",
-        options: await optionsFrom(args),
+        options,
         confirmed: args.confirmed === true,
         reviewerTrustPath: reviewerTrustPathFrom(args),
         invocation: cliHostInvocation(args),
       });
-      print(result);
+      print(strategyBrief ? { ...result, strategyBrief } : result);
       if (result.execution.started && result.status !== "completed") {
         process.exitCode = result.status === "awaiting-human-review" ? 3 : 2;
       }
