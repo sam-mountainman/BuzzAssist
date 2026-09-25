@@ -3916,6 +3916,8 @@ async function handleToolCall(params, progress = () => {}) {
 
   if (params?.name === TOOL_APPROVE_CHARACTER_CANDIDATE) {
     const args = params.arguments ?? {};
+    // Koya の公式経路の対象のプロジェクトでは、途中の成果物の品質ループを通る character-approve へ案内して止める。
+    assertCanonicalRouting({ toolName: TOOL_APPROVE_CHARACTER_CANDIDATE, projectDir: resolveProjectDir(args) });
     const approvalReason = nonEmptyString(args.approvalReason);
     if (approvalReason.length < 4) {
       throw new Error("approvalReason must explain why this candidate won (at least 4 characters).");
@@ -4047,6 +4049,8 @@ async function handleToolCall(params, progress = () => {}) {
 
   if (params?.name === TOOL_REGISTER_CHARACTER_IDENTITY) {
     const args = params.arguments ?? {};
+    // Koya の公式経路の対象のプロジェクトでは、各シートの品質ループの合格を要る character-register へ案内して止める。
+    assertCanonicalRouting({ toolName: TOOL_REGISTER_CHARACTER_IDENTITY, projectDir: resolveProjectDir(args) });
     const finalized = await finalizeApprovedCharacter({
       ...args,
       identityReviewPath: args.identityReviewPath,

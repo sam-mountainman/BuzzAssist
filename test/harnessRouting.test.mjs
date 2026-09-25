@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -100,4 +100,57 @@ test("表に無いジャンルは通さない", () => {
 test("ナレーション物語の正規入口は通る", () => {
   const verdict = checkCanonicalRouting({ genre: "narrated-story-video", toolName: "run_video_harness" });
   assert.equal(verdict.allowed, true);
+});
+
+test("Koya の公式経路の対象のプロジェクトでは、ゲートを迂回する汎用の人物登録・画像の道具を公式の action へ案内して止める", async () => {
+  // 汎用の approve_character_candidate / register_character_identity は finalizeApprovedCharacter を直接呼び、
+  // 汎用の画像スクリプトは本編の画の台帳を公式経路と同じ置き場へ書く。どちらも契約 v54 の
+  // 途中の成果物の品質ループを通らないので、Koya の Channel Pack の下では使わせない。
+  const governed = await mkdtemp(join(tmpdir(), "harness-governed-"));
+  await mkdir(join(governed, "channel-packs", "synthetic-pack", "config"), { recursive: true });
+  await writeFile(join(governed, "channel-packs", "synthetic-pack", "config", "koya-show-bible.json"), "{}\n");
+  const { governedProjectPresent } = await import("../lib/harnessRouting.mjs");
+  assert.equal(governedProjectPresent({ projectDir: governed }), true);
+
+  for (const [toolName, action] of [
+    ["approve_character_candidate", "character-approve"],
+    ["register_character_identity", "character-register"],
+    ["scripts/generate-manga-script-images.mjs", "images"],
+  ]) {
+    const verdict = checkCanonicalRouting({ toolName, projectDir: governed });
+    assert.equal(verdict.allowed, false, `${toolName} は止まること`);
+    assert.equal(verdict.canonicalAction, action);
+    assert.match(verdict.message, /run_koya_manga_pipeline/u);
+    assert.match(verdict.message, new RegExp(`"${action}"`, "u"));
+    assert.match(verdict.message, /品質ループ/u, "何を迂回することになるのかを述べること");
+    assert.throws(() => assertCanonicalRouting({ toolName, projectDir: governed }), /公式経路の対象/u);
+  }
+  // 人物の登録はベンチマーク移行でも通さない。画像スクリプトだけ、旧入口と同じく明言したときに通す。
+  assert.equal(checkCanonicalRouting({ toolName: "register_character_identity", projectDir: governed, acknowledgedBenchmarkMigration: true }).allowed, false);
+  const migrated = checkCanonicalRouting({ toolName: "scripts/generate-manga-script-images.mjs", projectDir: governed, acknowledgedBenchmarkMigration: true });
+  assert.deepEqual([migrated.allowed, migrated.benchmarkMigration], [true, true]);
+
+  // 従来レイアウト（handoff-restore が書く <project>/config/）も対象。
+  const restored = await mkdtemp(join(tmpdir(), "harness-restored-"));
+  await mkdir(join(restored, "config"), { recursive: true });
+  await writeFile(join(restored, "config", "koya-show-bible.json"), "{}\n");
+  assert.equal(checkCanonicalRouting({ toolName: "register_character_identity", projectDir: restored }).allowed, false);
+
+  await rm(governed, { recursive: true, force: true });
+  await rm(restored, { recursive: true, force: true });
+});
+
+test("Koya の公式経路の対象でないプロジェクトでは、汎用の人物登録・画像の道具は従来どおり通る", async () => {
+  const bare = await mkdtemp(join(tmpdir(), "harness-generic-"));
+  // 別ジャンルの pack（Koya の正本を持たない）と、合成の fixture は対象に数えない。
+  await mkdir(join(bare, "channel-packs", "other-pack", "config"), { recursive: true });
+  await writeFile(join(bare, "channel-packs", "other-pack", "config", "other.json"), "{}\n");
+  await mkdir(join(bare, "test", "fixtures", "channel-pack", "config"), { recursive: true });
+  await writeFile(join(bare, "test", "fixtures", "channel-pack", "config", "koya-show-bible.json"), "{}\n");
+  for (const toolName of ["approve_character_candidate", "register_character_identity", "scripts/generate-manga-script-images.mjs"]) {
+    const verdict = checkCanonicalRouting({ toolName, projectDir: bare });
+    assert.equal(verdict.allowed, true, `${toolName} は汎用の使い方では通ること`);
+    assert.equal(verdict.governedProject, false);
+  }
+  await rm(bare, { recursive: true, force: true });
 });
