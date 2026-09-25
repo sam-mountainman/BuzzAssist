@@ -10,6 +10,7 @@ import test from "node:test";
 import { strategyBriefHandoff, recordStrategyBriefRound, startStrategyBriefLoop } from "../lib/strategyBriefQualityLoop.mjs";
 import { STRATEGY_BRIEF_OPTION_INVALID_CODE, createVideoHarnessJob, readVideoHarnessJob } from "../lib/videoHarnessJob.mjs";
 import { createVideoHarnessService } from "../lib/videoHarnessService.mjs";
+import { withScriptQualityWorkDirDefault } from "../lib/scriptQualityUseGate.mjs";
 import { planVideoRequest } from "../lib/videoRequestPlan.mjs";
 import { strategyBriefStartOptions } from "../scripts/run-video-harness.mjs";
 import { evidenceRow, jsonBytes, metricsOutput, sampleBrief, sha, writeJson } from "./helpers/strategyBriefFixture.mjs";
@@ -109,11 +110,14 @@ test("start: ブリーフの SHA-256 を Job の options に残し、Job の識�
   const { briefPath, sha256 } = await passedBrief(root);
   const input = { projectDir: root, scriptPath: path.join(root, "script.txt"), channelPackPath: path.join(root, "pack.bundle"), harnessId: HARNESS, repoRoot: root };
 
-  const { options, strategyBrief } = await strategyBriefStartOptions({ strategyBrief: briefPath }, {});
-  assert.deepEqual(options, { strategyBriefSha256: sha256 });
+  const { options: briefOptions, strategyBrief } = await strategyBriefStartOptions({ strategyBrief: briefPath }, {});
+  assert.deepEqual(briefOptions, { strategyBriefSha256: sha256 });
   assert.equal(strategyBrief.pass, true);
+  // start は台本の作業フォルダも Job の識別子に入れる。直接作る Job にも同じ値を持たせる。
+  const workDirDefault = (value) => withScriptQualityWorkDirDefault({ harnessId: HARNESS, options: value, scriptPath: input.scriptPath, baseDir: root });
+  const options = workDirDefault(briefOptions);
 
-  const plain = await createVideoHarnessJob(input);
+  const plain = await createVideoHarnessJob({ ...input, options: workDirDefault({}) });
   const withBrief = await createVideoHarnessJob({ ...input, options });
   assert.equal(withBrief.job.options.strategyBriefSha256, sha256);
   assert.notEqual(withBrief.job.id, plain.job.id, "ブリーフは Job の識別子に入る（別のブリーフなら別の Job）");
@@ -134,7 +138,7 @@ test("start: ブリーフの SHA-256 を Job の options に残し、Job の識�
     preflightReviewerTrust: async () => ({ ok: true, code: "", activeReviewers: 1, source: "fixture" }),
     captureRunLearning: null,
   });
-  const started = await service.start({ ...input, options, confirmed: false });
+  const started = await service.start({ ...input, options: briefOptions, confirmed: false });
   const job = await readVideoHarnessJob({ projectDir: root, jobId: started.jobId });
   assert.equal(job.options.strategyBriefSha256, sha256);
   assert.equal(started.jobId, withBrief.job.id);

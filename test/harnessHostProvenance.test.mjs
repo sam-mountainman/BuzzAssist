@@ -29,6 +29,7 @@ import {
   runVideoHarnessJob,
 } from "../lib/videoHarnessJob.mjs";
 import { createVideoHarnessService } from "../lib/videoHarnessService.mjs";
+import { withScriptQualityWorkDirDefault } from "../lib/scriptQualityUseGate.mjs";
 import { cliHostInvocation } from "../scripts/run-video-harness.mjs";
 
 // Job の仕組みを実際の宣言とスキルの上で確かめる（test/videoHarnessJob.test.mjs と同じ理由で、
@@ -226,12 +227,15 @@ test("MCP で作った Job に作ったホストが残り、別ホストの再�
 
 test("入口が記録を渡さなかった Job は、作ったホストを推測せず not-provided として残す", async (t) => {
   const root = jobFixture(t);
+  // start は台本の関門を持つハーネスの Job に台本の作業フォルダを入れる（識別子に入る）。
+  // 直接作る Job も同じ値を持たせて、start が同じ Job へ付くようにする。
   const { job } = await createVideoHarnessJob({
     projectDir: root,
     scriptPath: path.join(root, "script.txt"),
     channelPackPath: path.join(root, "pack.bundle"),
     harnessId: HARNESS,
     repoRoot: root,
+    options: withScriptQualityWorkDirDefault({ harnessId: HARNESS, options: {}, scriptPath: path.join(root, "script.txt"), baseDir: root }),
   });
   assert.equal(job.metadata.invocation.createdBy, null);
   const service = fixtureService(root, []);
