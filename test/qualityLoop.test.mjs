@@ -10,6 +10,7 @@ import {
   createQualityLoopState,
   deriveFailureFingerprint,
   findStaleQualityFeedback,
+  normalizeQualityAcceptance,
   normalizeQualityRubric,
   recordQualityRound,
   rubricFloorFailures,
@@ -253,4 +254,57 @@ test("最終監査は、2回目以降の修正内容が無ければ例外では�
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+const panelReview = (context, evaluator, extra = {}) => ({
+  evaluatorId: evaluator, evaluatorContextId: context, scores: scores(), notes: `全尺を見て所見を書いた（${context}）`, evidence: EVIDENCE, ...extra,
+});
+const panelBase = (target) => ({
+  hardGateReport: { pass: true, failedGateIds: [], contractDigest: target.digest }, evidence: EVIDENCE, observedAt: "2026-09-24T01:00:00Z",
+});
+const declaredState = (target) => createQualityLoopState({ contract: target, generatorId: "gen", generatorContextId: "generator-context", startedAt: "2026-09-24T00:00:00Z" });
+
+test("1つの回の中の評価は別々の評価文脈で同じ成果物を採点したものに限る", () => {
+  // 同じ文脈の2件を2人分に数えない。
+  assert.throws(() => recordQualityRound({
+    ...panelBase(contract), contract, state: freshState(), reviews: [panelReview("ctx-a", "eval-a"), panelReview("ctx-a", "eval-b")],
+  }), /own evaluator context/u);
+  // 別の版の点を混ぜない。
+  assert.throws(() => recordQualityRound({
+    ...panelBase(contract), contract, state: freshState(), artifactSha256: "1".repeat(64),
+    reviews: [panelReview("ctx-a", "eval-a", { artifactSha256: "1".repeat(64) }), panelReview("ctx-b", "eval-b", { artifactSha256: "2".repeat(64) })],
+  }), /same artifact/u);
+  const two = recordQualityRound({
+    ...panelBase(contract), contract, state: freshState(), artifactSha256: "1".repeat(64),
+    reviews: [panelReview("ctx-a", "eval-a", { artifactSha256: "1".repeat(64) }), panelReview("ctx-b", "eval-b")],
+  });
+  assert.equal(two.status, "passed");
+  assert.equal(two.rounds[0].reviews.length, 2);
+  assert.equal(two.rounds[0].acceptance, undefined, "受け入れ方を宣言していない契約の回の形は変えない");
+});
+
+test("評価者を宣言した契約では、欠けた回は平均と下限を満たしても合格にせず、宣言に無い評価者と2件目は回に入れない", () => {
+  const declared = { ...contract, acceptance: { evaluators: ["eval-a", "eval-b"] } };
+  const start = declaredState(declared);
+  const partial = recordQualityRound({ ...panelBase(declared), contract: declared, state: start, reviews: [panelReview("ctx-a", "eval-a")] });
+  assert.notEqual(partial.status, "passed");
+  assert.deepEqual(partial.rounds[0].acceptance.missingEvaluators, ["eval-b"]);
+  assert.deepEqual(partial.rounds[0].acceptance.failures, ["evaluator-missing:eval-b"]);
+  assert.match(partial.rounds[0].failureFingerprint, /^quality-failure:/u);
+  assert.throws(() => recordQualityRound({ ...panelBase(declared), contract: declared, state: start, reviews: [panelReview("ctx-z", "eval-z")] }), /undeclared evaluator/u);
+  assert.throws(() => recordQualityRound({
+    ...panelBase(declared), contract: declared, state: start, reviews: [panelReview("ctx-a", "eval-a"), panelReview("ctx-b", "eval-a")],
+  }), /only once/u);
+  const full = recordQualityRound({
+    ...panelBase(declared), contract: declared, state: start, reviews: [panelReview("ctx-a", "eval-a"), panelReview("ctx-b", "eval-b")],
+  });
+  assert.equal(full.status, "passed");
+  assert.throws(() => normalizeQualityAcceptance({ mode: "no-such-mode" }), /Unknown quality acceptance mode/u);
+  assert.throws(() => normalizeQualityAcceptance({ evaluators: ["a", "a"] }), /must not repeat/u);
+  assert.equal(normalizeQualityAcceptance(undefined).mode, "average");
+  // 受け入れ方の失敗が無い回の失敗指紋は、今までと同じ値。
+  assert.equal(
+    deriveFailureFingerprint({ floorFailures: ["x"], acceptanceFailures: [] }),
+    deriveFailureFingerprint({ floorFailures: ["x"] }),
+  );
 });

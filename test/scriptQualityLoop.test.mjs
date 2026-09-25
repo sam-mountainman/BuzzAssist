@@ -405,6 +405,85 @@ test("署名済み Channel Pack の script-quality.json を、信頼した公開
   assert.equal(recorded.state.status, "passed");
 });
 
+test("受け入れ方を宣言しない契約の digest は今までと同じ値（進行中のループを契約の変更で止めない）", () => {
+  assert.equal(DEFAULT_CONTRACT.digest, "0f641861c34e3e9bcb0e9c63464a8f3d8e755d493823944e1d83741e6afde6d0");
+  assert.equal(Object.hasOwn(DEFAULT_CONTRACT, "acceptance"), false);
+});
+
+async function startPanel(t, acceptance) {
+  const root = await workspace(t);
+  const configPath = join(root, "script-quality.json");
+  await writeFile(configPath, JSON.stringify({ version: SCRIPT_QUALITY_CHANNEL_CONFIG_VERSION, acceptance }));
+  const started = await start(root, { channelConfig: configPath });
+  assert.equal(started.started, true);
+  return { root, contract: started.state.script.contract };
+}
+
+test("評価者を宣言した組は全員そろった時点で1回として閉じ、欠員・別の版・作った文脈・同じ文脈の再利用・宣言外・2件目は組に入れない", async (t) => {
+  const { root, contract } = await startPanel(t, { evaluators: ["eval-a", "eval-b"] });
+  assert.deepEqual(contract.acceptance, { mode: "average", evaluators: ["eval-a", "eval-b"] });
+  await writeFile(join(root, "drafts/draft.md"), DRAFT);
+  const panelReview = (name, body) => writeReview(root, name, body);
+  const reviewOf = (context, evaluatorId, script = DRAFT, extra = {}) => ({
+    ...review({ context, script, evaluatorId, rubricScores: scores({}, contract) }), ...extra,
+  });
+  // 宣言に無い評価者では組を開かない。
+  const undeclaredOpen = await record(root, { scriptPath: "drafts/draft.md", versionLabel: "v1", stage: "draft", reviewPath: await panelReview("z0", reviewOf("ctx-z0", "eval-z")) });
+  assert.deepEqual(undeclaredOpen.issues, ["script-quality-panel-evaluator-undeclared:eval-z"]);
+  const first = await record(root, { scriptPath: "drafts/draft.md", versionLabel: "v1", stage: "draft", reviewPath: await panelReview("a1", reviewOf("ctx-a1", "eval-a")) });
+  assert.equal(first.recorded, false);
+  assert.equal(first.panelAccepted, true);
+  assert.deepEqual(first.issues, ["script-quality-panel-waiting:eval-b"]);
+  assert.equal(first.state.rounds.length, 0, "欠員の組は回として数えない");
+  assert.deepEqual(first.check.pendingPanel.missing, ["eval-b"]);
+  // 同じ採点の再実行は二重に入れない。
+  assert.equal((await record(root, { reviewPath: "quality/reviews/a1.json" })).alreadyRecorded, true);
+  // 別の版の採点は組に入れない（採点の SHA でも、渡した台本の SHA でも）。
+  assert.deepEqual((await record(root, { reviewPath: await panelReview("b-other", reviewOf("ctx-b1", "eval-b", REWRITE)) })).issues, ["script-quality-panel-version-mismatch"]);
+  await writeFile(join(root, "drafts/other.md"), REWRITE);
+  assert.deepEqual((await record(root, { scriptPath: "drafts/other.md", reviewPath: await panelReview("b-other2", reviewOf("ctx-b1", "eval-b")) })).issues, ["script-quality-panel-version-mismatch"]);
+  // 同じ評価者の2件目・宣言に無い評価者・組の中の同じ文脈・作った文脈・組の中の写しの所見。
+  assert.deepEqual((await record(root, { reviewPath: await panelReview("a2", reviewOf("ctx-a2", "eval-a")) })).issues, ["script-quality-panel-evaluator-duplicate:eval-a"]);
+  assert.deepEqual((await record(root, { reviewPath: await panelReview("z1", reviewOf("ctx-z1", "eval-z")) })).issues, ["script-quality-panel-evaluator-undeclared:eval-z"]);
+  assert.deepEqual((await record(root, { reviewPath: await panelReview("b-same", reviewOf("ctx-a1", "eval-b")) })).issues, ["script-quality-panel-context-reused"]);
+  assert.deepEqual((await record(root, { reviewPath: await panelReview("b-writer", reviewOf(WRITER, "eval-b")) })).issues, ["script-quality-evaluator-not-independent"]);
+  const copied = reviewOf("ctx-b1", "eval-b", DRAFT, { notes: `全行を読み、前の版と1行ずつ比べた所見（ctx-a1）` });
+  assert.deepEqual((await record(root, { reviewPath: await panelReview("b-copy", copied) })).issues, ["script-quality-panel-notes-duplicated"]);
+  const stateBefore = JSON.parse(await readFile(scriptQualityPaths(root).statePath, "utf8"));
+  assert.equal(stateBefore.script.pendingPanel.reviews.length, 1);
+
+  const closed = await record(root, { reviewPath: await panelReview("b1", reviewOf("ctx-b1", "eval-b", DRAFT, { rubricScores: scores({ "narration-voice": 55 }, contract) })) });
+  assert.equal(closed.recorded, true);
+  assert.equal(closed.state.status, "active");
+  assert.deepEqual(closed.round.floorFailures, ["narration-voice"]);
+  assert.equal(closed.round.reviews.length, 2);
+  assert.deepEqual(closed.version.reviews.map((row) => row.evaluatorId), ["eval-a", "eval-b"]);
+  assert.equal(closed.state.script.pendingPanel, undefined);
+  assert.equal(closed.round.acceptance.mode, "average");
+  assert.deepEqual(closed.round.acceptance.missingEvaluators, []);
+  // 平均で判定する（評価者ごとの点は回に残る）。
+  const perEvaluator = closed.round.acceptance.evaluators.map((row) => row.score);
+  assert.equal(closed.round.score, Number(((perEvaluator[0] + perEvaluator[1]) / 2).toFixed(3)));
+  // 閉じた後は同じ版を採点し直さない。前の回の文脈は次の版でも使えない。
+  await writeFile(join(root, "drafts/v2.md"), REWRITE);
+  const reused = await record(root, {
+    scriptPath: "drafts/v2.md", versionLabel: "v2", stage: "revision", revisionDelta: "語り口を直した",
+    reviewPath: await panelReview("a3", reviewOf("ctx-a1", "eval-a", REWRITE, { baseScriptSha256: sha(DRAFT) })),
+  });
+  assert.deepEqual(reused.issues, ["script-quality-fresh-review-required"]);
+  assert.deepEqual((await record(root, { scriptPath: "drafts/draft.md", versionLabel: "v1b", stage: "revision", revisionDelta: "直していない", reviewPath: await panelReview("a4", reviewOf("ctx-a4", "eval-a", DRAFT, { baseScriptSha256: sha(DRAFT) })) })).issues, ["script-quality-script-unchanged:v1"]);
+});
+
+test("組の宣言が壊れた Pack は blocker で止め、黙って1人の組へ戻さない", () => {
+  const blocked = (acceptance) => normalizeScriptChannelConfig({ version: SCRIPT_QUALITY_CHANNEL_CONFIG_VERSION, acceptance }).blockers;
+  assert.deepEqual(blocked({ evaluators: ["a", "a"] }), ["script-quality.acceptance.evaluators.a-duplicated"]);
+  assert.deepEqual(blocked({ evaluators: ["script-writer"] }), ["script-quality.acceptance.evaluators.id"]);
+  assert.deepEqual(blocked({ mode: "median" }), ["script-quality.acceptance.mode", "script-quality.acceptance"]);
+  assert.deepEqual(blocked({ evaluators: "a" }), ["script-quality.acceptance.evaluators"]);
+  assert.deepEqual(blocked({ quorum: 1 }), ["script-quality.acceptance.quorum-unknown"]);
+  assert.deepEqual(blocked([]), ["script-quality.acceptance"]);
+});
+
 test("CLI は人待ちを終了コード 3、未合格の --require-pass を 4 で返し、--help では何も書かない", async (t) => {
   const root = await workspace(t);
   const out = [];

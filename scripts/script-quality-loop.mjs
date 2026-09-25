@@ -93,6 +93,10 @@ export function scriptQualityHelp() {
                                   （quality/script-revision-delta.json に書いてもよい）
     [--blocking-condition "..."]  人の判断が要るなら書く（ループは blocked で止まる）
     [--cost <n>] [--ledger <file>]
+            Pack の script-quality.json が acceptance.evaluators で評価者を宣言していれば、採点は
+            「評価の組」に入り、宣言した評価者が全員そろった時点で1回として閉じる。組が開いている間は
+            record --work-dir <dir> --review <採点ファイル> だけでよい（版・工程・台本は組を開いた記録を使う）。
+            別の版の採点・作った文脈・前の回や組の中で使った文脈・宣言外の評価者・2件目は組に入れない
 
   status    今の状態。deliverable は合格して、その版の台本が今も同じバイト列のときだけ
     --work-dir <dir> [--require-pass]   未合格なら終了コード 4
@@ -192,7 +196,7 @@ export async function runScriptQualityCli(argv = process.argv.slice(2), {
           ? `学習候補は積んでいません（${result.learning.skippedReason}）\n`
           : `学習候補 ${result.learning.captured} 件を ${result.learning.target} へ積みました（既にあったもの ${result.learning.duplicates} 件）\n`);
       }
-      return { exitCode: result.recorded || result.alreadyRecorded ? 0 : 3, result };
+      return { exitCode: result.recorded || result.alreadyRecorded || result.panelAccepted ? 0 : 3, result };
     }
     case "status": {
       const result = await scriptQualityStatus({ workDir: args.workDir });
