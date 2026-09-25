@@ -100,6 +100,7 @@ test("スキーマの欄と検査の欄が一致する", async () => {
   assert.deepEqual(keys(schema.$defs.evidence.properties.collected), [...STRATEGY_BRIEF_FIELDS.collected].sort());
   assert.deepEqual(keys(schema.$defs.evidence.properties.collected.properties.premise), [...STRATEGY_BRIEF_FIELDS.collectedPremise].sort());
   assert.deepEqual(keys(schema.$defs.evidence.properties.verification), [...STRATEGY_BRIEF_FIELDS.verification].sort());
+  assert.deepEqual(keys(schema.$defs.evidence.properties.applicability), [...STRATEGY_BRIEF_FIELDS.applicability].sort());
   assert.deepEqual(keys(schema.properties.changes), [...STRATEGY_BRIEF_FIELDS.changes].sort());
   assert.deepEqual(keys(schema.properties.changes.properties.previous.oneOf[1]), [...STRATEGY_BRIEF_FIELDS.previous].sort());
   assert.deepEqual(keys(schema.$defs.changePoint), [...STRATEGY_BRIEF_FIELDS.changePoint].sort());

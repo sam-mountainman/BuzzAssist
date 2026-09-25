@@ -99,7 +99,7 @@ test("数字あり: 期待の数値と照らして残す点・変える点の候
   const finished = { ...draft, provenance: { ...draft.provenance, contextId: "ctx-planner-2" } };
   assert.equal(validateStrategyBrief(finished).ok, true);
 
-  // 下書きのまま問いを変えると、前の前提で集めた根拠（調査メモ）は古くなる。実測の数字は古くならない。
+  // 下書きのまま問いを変えると、前の前提で集めた根拠（調査メモ）は当てはまりの確認待ちになる。実測の数字はならない。
   const changed = evidencePremiseStaleness({ ...finished, question: "合成の別の問いに変えた" });
   assert.deepEqual(changed.stale.map((row) => row.id), ["e-notes"]);
 });

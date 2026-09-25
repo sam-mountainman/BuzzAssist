@@ -37,7 +37,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["promises"],
-      "description": "入口（タイトル・サムネイル・冒頭）で約束すること。前提の欄",
+      "description": "入口（タイトル・サムネイル・冒頭）で約束すること。前提には入れない（表現を変えただけでは根拠を古くしない）",
       "properties": {
         "promises": {
           "type": "array",
@@ -104,7 +104,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["format", "conditions"],
-      "description": "制作条件",
+      "description": "制作条件。形式・条件・尺は前提の欄（harnessId は経路なので前提に入れない）",
       "properties": {
         "harnessId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
         "format": { "enum": ["long", "short", "live"] },
@@ -254,10 +254,12 @@
               "type": "object",
               "additionalProperties": false,
               "required": ["digest"],
+              "description": "集めたときの前提（問い・見る人・制作条件）の digest。entryPromises は前の記録を読むためだけに受け、比べない（入口の表現だけの変更では根拠を古くしない）",
               "properties": {
                 "digest": { "$ref": "#/$defs/sha256" },
                 "question": { "$ref": "#/$defs/sha256" },
                 "audience": { "$ref": "#/$defs/sha256" },
+                "production": { "$ref": "#/$defs/sha256" },
                 "entryPromises": { "$ref": "#/$defs/sha256" }
               }
             }
@@ -278,11 +280,24 @@
           "description": "既定 true。false にするのは前提に依らない根拠（公開済みの動画の実測など）で、premiseIndependenceReason が要る"
         },
         "premiseIndependenceReason": { "type": "string", "minLength": 4, "maxLength": 300 },
+        "applicability": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["premiseDigest", "applies", "reason"],
+          "description": "前提（問い・見る人・制作条件）を変えた後、この根拠が今の前提に当てはまるかの判定。premiseDigest が今の前提の digest と違えば判定は無いものとして扱う。node scripts/strategy-brief.mjs applicability で書く",
+          "properties": {
+            "premiseDigest": { "$ref": "#/$defs/sha256" },
+            "applies": { "type": "boolean", "description": "true なら再利用、false ならこの根拠だけ取り直す" },
+            "reason": { "type": "string", "minLength": 4, "maxLength": 300 },
+            "decidedBy": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$" },
+            "decidedAt": { "type": "string", "minLength": 10 }
+          }
+        },
         "note": { "type": "string", "minLength": 1, "maxLength": 300 }
       },
       "allOf": [
         { "if": { "properties": { "state": { "const": "verified" } } }, "then": { "required": ["verification"] } },
-        { "if": { "properties": { "premiseBound": { "const": false } }, "required": ["premiseBound"] }, "then": { "required": ["premiseIndependenceReason"] } }
+        { "if": { "properties": { "premiseBound": { "const": false } }, "required": ["premiseBound"] }, "then": { "required": ["premiseIndependenceReason"], "not": { "required": ["applicability"] } } }
       ]
     },
     "metric": {

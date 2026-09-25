@@ -10,6 +10,8 @@
 //   node scripts/strategy-brief.mjs verdict --brief <ブリーフ> [--work-dir <dir>] [--require-pass]
 //   node scripts/strategy-brief.mjs next --from <前のブリーフ> --metrics <指標の集計 JSON> [--referrals <JSON>] \
 //        [--audience-run <4分析の run フォルダ>] [--work-dir <dir>] [--out <下書き>]
+//   node scripts/strategy-brief.mjs applicability --brief <ブリーフ> [--evidence <id> --applies yes|no --reason "..."] \
+//        [--context <判定した会話ID>] [--work-dir <dir>] [--out <書き出し先>]
 //
 // 企画の判断はホストのエージェントと運営者がする。ここは形の検査・根拠の照合・版ごとの採点の記録だけで、
 // モデルを呼ばない。実装の正本は lib/strategyBrief.mjs と lib/strategyBriefQualityLoop.mjs（中核は lib/qualityLoop.mjs）。
@@ -26,16 +28,19 @@ import { draftNextStrategyBrief } from "../lib/strategyBriefNext.mjs";
 import {
   STRATEGY_BRIEF_QUALITY_STATE_FILE,
   recordStrategyBriefRound,
+  recordStrategyEvidenceApplicability,
   startStrategyBriefLoop,
   strategyBriefReviewTemplate,
   strategyBriefStatus,
   strategyBriefVerdict,
+  strategyEvidenceApplicabilityStatus,
 } from "../lib/strategyBriefQualityLoop.mjs";
 
 const VALUE_OPTIONS = new Set([
   "--work-dir", "--generator-context", "--generator-host", "--reason", "--brief", "--review",
   "--revision-delta", "--blocking-condition", "--skill-dir",
   "--from", "--metrics", "--referrals", "--audience-run", "--out",
+  "--evidence", "--applies", "--context",
 ]);
 const REPEATABLE_OPTIONS = new Set(["--producer-context"]);
 const FLAG_OPTIONS = new Set(["--json", "--restart", "--require-pass", "--help", "-h"]);
@@ -99,8 +104,9 @@ export function strategyBriefHelp() {
     [--work-dir <dir> | --brief <file>] [--require-pass]   未合格なら終了コード 4
 
   verdict      制作へ渡す前の判定。合格した版と同じ SHA か、根拠のファイルが揃い 4分析の run が現行か、
-               前提（問い・見る人・入口の約束）を変えて古くなった根拠が無いかを理由コードつきで返す。
-               古い根拠があれば strategy-evidence-refresh-required（日数では決めない）。採点した版から
+               前提（問い・見る人・制作条件）を変えた後の根拠に当てはまりの判定があるかを理由コードつきで返す。
+               判定が無ければ strategy-evidence-applicability-review-required:<id>、当てはまらないと判定した
+               根拠は strategy-evidence-refresh-required:<id>（日数では決めない。入口の表現だけの変更は数えない）。採点した版から
                根拠の確かさを上げた書き換えは strategy-brief-evidence-upgraded-without-review:<id>。
                制作を止める未確認事項（openQuestions の blocksProduction: true で open）が残れば
                strategy-brief-open-question-blocks-production:<id>。採点した版から未確認を確認済みにした・
@@ -116,6 +122,15 @@ export function strategyBriefHelp() {
     [--referrals <関連元の集計 JSON（schema 1.0）>] [--audience-run <run フォルダ>]
     [--work-dir <dir>]             既定は前のブリーフのフォルダ。数字のファイルはこの中に置く
     [--out <file>]                 下書きのブリーフだけをこのファイルに書く（既存のファイルは上書きしない）
+
+  applicability 前提（問い・見る人・制作条件）を変えた後、前の前提で集めた根拠が今の前提に当てはまるかを
+               根拠ごとに記録する。判定は上位の AI が根拠を開いてする（ここは記録と照合だけ）。入口の約束（表現）を
+               変えただけなら判定は要らない。当てはまるなら再利用、当てはまらないならその根拠だけ取り直す
+               （verdict の strategy-evidence-refresh-required:<id>）。日数では決めない
+    --brief <file> [--work-dir <dir>]              --evidence を付けなければ、判定が要る根拠の一覧を出す（何も書かない）
+    [--evidence <id> --applies yes|no --reason "..."]  1件の判定を書く（ブリーフの SHA が変わる）
+    [--context <id>]               判定した会話・タスクの ID
+    [--out <file>]                 ブリーフを書き換えず、判定を足したブリーフをこのファイルに書く（既存は上書きしない）
 
   --work-dir を省くと、--brief のあるフォルダを作業フォルダにする。根拠のパスは作業フォルダからの相対。
 
@@ -259,8 +274,40 @@ export async function runStrategyBriefCli(argv = process.argv.slice(2), {
       stdout.write(`${JSON.stringify(result, null, 2)}\n`);
       return { exitCode: 0, result };
     }
+    case "applicability": {
+      const briefPath = requireBrief(args);
+      const workDir = strategyWorkDir(args);
+      if (args.evidence === undefined) {
+        const result = await strategyEvidenceApplicabilityStatus({ workDir, briefPath });
+        stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return { exitCode: 0, result };
+      }
+      const applies = args.applies === "yes" ? true : args.applies === "no" ? false : null;
+      if (applies === null) throw new Error("--applies は yes か no にする。");
+      try {
+        const result = await recordStrategyEvidenceApplicability({
+          workDir,
+          briefPath,
+          evidenceId: args.evidence,
+          applies,
+          reason: args.reason,
+          decidedBy: args.context,
+          outPath: typeof args.out === "string" ? resolve(args.out) : "",
+          ...injected,
+        });
+        stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return { exitCode: 0, result };
+      } catch (error) {
+        if (error?.code === "strategy-evidence-applicability-not-required" || error?.code === "strategy-evidence-applicability-unknown-evidence") {
+          const result = { recorded: false, issues: [`${error.code}:${args.evidence}`], detail: error.message };
+          print(stdout, result, args.json);
+          return { exitCode: 3, result };
+        }
+        throw error;
+      }
+    }
     default:
-      throw new Error(`不明なアクション: ${args.action}（validate / fingerprint / start / sheet / record / status / verdict / next）`);
+      throw new Error(`不明なアクション: ${args.action}（validate / fingerprint / start / sheet / record / status / verdict / next / applicability）`);
   }
 }
 
