@@ -1495,18 +1495,26 @@ test("効力のある契約の必須監査が欠ければ、過去の版の Job 
   });
 });
 
-test("漫画: Job に固定した制作契約（v53 でも v54 でも）の必須監査で測り、v53→v54 で確定待ちの Job を落とさない", async (t) => {
+test("漫画: Job に固定した制作契約（v53・v54・v55）の必須監査で測り、版を上げても確定待ちの Job を落とさない", async (t) => {
   const current = JSON.parse(await readFile(join(process.cwd(), "config/koya-manga-production-contract.json"), "utf8"));
-  assert.equal(current.version, "koya-manga-production-v54", "この試験は v54 の契約を前提にしている（上げたら v54 を過去の版として足す）");
+  assert.equal(current.version, "koya-manga-production-v55", "この試験は v55 の契約を前提にしている（上げたら v55 を過去の版として足す）");
   const past = JSON.parse(await readFile(fileURLToPath(new URL("./fixtures/koya-past-contract-audits.json", import.meta.url)), "utf8"));
   // v53 の契約: 途中の成果物の品質ループの節（v54 から）が無く、必須監査は当時の一覧（asset-quality-loops が無い）。
   const v53 = structuredClone(current);
   v53.version = "koya-manga-production-v53";
   delete v53.assetQualityGate;
+  delete v53.videoClipQualityGate;
   v53.requiredAudits = [...past.contracts.find((entry) => entry.version === "koya-manga-production-v53").requiredAudits];
   assert.equal(v53.requiredAudits.includes("asset-quality-loops"), false);
   assert.equal(current.requiredAudits.includes("asset-quality-loops"), true, "v54 は途中の成果物の品質ループの監査を足した");
-  for (const [name, contract, notInForce] of [["v53", v53, ["asset-quality-loops"]], ["v54", current, []]]) {
+  // v54 の契約: 動画クリップの品質ループの節（v55 から）が無い。必須監査の一覧は v55 と同じ（v55 は既存の
+  // asset-quality-loops の中で差し替えのクリップも照らし直すので、監査も保証も足していない）。
+  const v54 = structuredClone(current);
+  v54.version = "koya-manga-production-v54";
+  delete v54.videoClipQualityGate;
+  v54.requiredAudits = [...past.contracts.find((entry) => entry.version === "koya-manga-production-v54").requiredAudits];
+  assert.deepEqual(v54.requiredAudits, current.requiredAudits);
+  for (const [name, contract, notInForce] of [["v53", v53, ["asset-quality-loops"]], ["v54", v54, []], ["v55", current, []]]) {
     await t.test(`${name} の契約に固定した Job は合格する`, async () => {
       const root = await mkdtemp(join(tmpdir(), `video-koya-contract-${name}-`));
       try {

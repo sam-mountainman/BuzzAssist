@@ -18,10 +18,10 @@ import {
   registerApprovedKoyaLocation,
 } from "../lib/koyaChannelGovernance.mjs";
 import { writeKoyaApprovedReferences } from "../lib/koyaAssetQualityGate.mjs";
-import { KOYA_ASSET_QUALITY_GATE_IN_FORCE_SINCE, KOYA_ASSET_QUALITY_REQUIRED_CODE } from "../lib/koyaAssetQualityGatePolicy.mjs";
+import { KOYA_ASSET_QUALITY_REQUIRED_CODE } from "../lib/koyaAssetQualityGatePolicy.mjs";
 import { koyaIdentityPackAssetQualitySubjects, registerKoyaCharacterIdentity } from "../lib/koyaMangaProduction.mjs";
 import { renderEditorialPlatePng } from "../lib/mangaScriptImagePipeline.mjs";
-import { legacyKoyaContract, passKoyaAssetQualityLoop } from "./helpers/koyaAssetQualityFixture.mjs";
+import { currentKoyaContract, legacyKoyaContract, passKoyaAssetQualityLoop } from "./helpers/koyaAssetQualityFixture.mjs";
 import { importAndRegisterSyntheticLocation, installSyntheticKoyaAuthority } from "./helpers/koyaLocationFixture.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -135,7 +135,8 @@ test("場所: 登録は4枚のボードそれぞれの location 工程のルー�
     projectDir, authority, locationId: "sample-cafe", sourceDir: join(base, "downloads-cafe"),
   });
   const approval = other.registered.location.approval;
-  assert.equal(approval.assetQuality.contractVersion, KOYA_ASSET_QUALITY_GATE_IN_FORCE_SINCE);
+  // 登録の時点の契約の版（今の契約）を残す。
+  assert.equal(approval.assetQuality.contractVersion, (await currentKoyaContract(root)).version);
   assert.deepEqual(approval.assetQuality.rows.map((row) => row.assetSha256), other.registered.location.referenceAssets.map((row) => row.sha256));
   const approved = JSON.parse(await readFile(other.registered.approvedReferences.path, "utf8"));
   assert.equal(approved.version, APPROVED_REFERENCES_VERSION);

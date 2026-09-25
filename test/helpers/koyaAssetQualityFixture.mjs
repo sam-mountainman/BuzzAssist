@@ -12,6 +12,7 @@ import {
   requiredHumanChecks,
   startAssetQualityLoop,
 } from "../../lib/assetQualityLoop.mjs";
+import { VIDEO_CLIP_DECLARATION_VERSION, writeVideoClipMeasurement } from "../../lib/videoClipMeasurement.mjs";
 import { reviewFor } from "../fixtures/assetQualityFixtures.mjs";
 
 const sha = (value) => createHash("sha256").update(value).digest("hex");
@@ -66,6 +67,23 @@ export async function passKoyaAssetQualityLoop({
     await writeFile(approved, JSON.stringify({ version: APPROVED_REFERENCES_VERSION, references: refShas.map((value) => ({ sha256: value, kind: "fixture" })) }));
   }
   let measurement = measurementPath;
+  if (spec.media === "video" && !measurement) {
+    // 動画クリップ: 合成の宣言は広い範囲にする（尺・fps・解像度の決まりは使う側の試験が別に見る）。
+    measurement = path.join(workDir, "quality", "fixture", `measure-${tag}.json`);
+    await mkdir(path.dirname(measurement), { recursive: true });
+    await writeVideoClipMeasurement({
+      assetPath: assetFile,
+      outputPath: measurement,
+      declaration: {
+        version: VIDEO_CLIP_DECLARATION_VERSION,
+        durationSeconds: { min: 0.04, max: 3600 },
+        frameRate: { min: 1, max: 240 },
+        width: { min: 16 },
+        height: { min: 16 },
+        audio: "optional",
+      },
+    });
+  }
   if (spec.media === "audio" && !measurement) {
     measurement = path.join(workDir, "quality", "fixture", `measure-${tag}.json`);
     await mkdir(path.dirname(measurement), { recursive: true });
@@ -94,7 +112,7 @@ export async function passKoyaAssetQualityLoop({
     reviewPath,
     producerContexts: [`ctx-synthetic-maker-${tag}`],
     producerHost: "claude-code",
-    generationRoute: spec.media === "audio" ? "broker" : "codex",
+    generationRoute: spec.media === "audio" ? "broker" : spec.media === "video" ? "media-generation" : "codex",
     references,
     referenceExemptReason: refShas.length === 0 && spec.referencePolicy === "required-or-exempt" ? "人物が写らない合成の画" : "",
     approvedReferencesPath: approved,
@@ -127,6 +145,18 @@ export async function legacyKoyaContract(root) {
   const contract = JSON.parse(await readFile(path.join(root, "config/koya-manga-production-contract.json"), "utf8"));
   contract.version = "koya-manga-production-v53";
   delete contract.assetQualityGate;
+  delete contract.videoClipQualityGate;
+  return contract;
+}
+
+/**
+ * v54 の契約（途中の成果物のゲートは効くが、動画クリップのゲート〔v55 から〕は効力の外）。今の契約の写しから
+ * 版を戻し、動画クリップの節を外す。
+ */
+export async function v54KoyaContract(root) {
+  const contract = JSON.parse(await readFile(path.join(root, "config/koya-manga-production-contract.json"), "utf8"));
+  contract.version = "koya-manga-production-v54";
+  delete contract.videoClipQualityGate;
   return contract;
 }
 

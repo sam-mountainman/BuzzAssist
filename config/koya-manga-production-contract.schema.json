@@ -325,6 +325,25 @@
         "stopWithoutPaidRegeneration": { "const": true }
       }
     },
+    "videoClipQualityGate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version", "inForceSince", "harnessId", "workDir", "stage", "approvedReferencesPath", "requirePassBeforeRender",
+        "requireReviewedVersionSha256", "stopWithoutPaidRegeneration"
+      ],
+      "properties": {
+        "version": { "const": "koya-video-clip-quality-gate-v1" },
+        "inForceSince": { "const": "koya-manga-production-v55" },
+        "harnessId": { "const": "koya-manga-video" },
+        "workDir": { "const": "canvas" },
+        "stage": { "const": "video-clip" },
+        "approvedReferencesPath": { "const": "canvas/quality/approved-references.json" },
+        "requirePassBeforeRender": { "const": true },
+        "requireReviewedVersionSha256": { "const": true },
+        "stopWithoutPaidRegeneration": { "const": true }
+      }
+    },
     "editorial": {
       "type": "object",
       "additionalProperties": false,

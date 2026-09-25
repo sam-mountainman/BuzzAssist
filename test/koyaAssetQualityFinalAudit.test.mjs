@@ -289,7 +289,7 @@ test("画と声: 使った画（分割ページの各コマ）と採用テイク
   await passAllLoops(fixture);
   const passed = await audit(fixture, contract);
   assert.equal(passed.pass, true, JSON.stringify(passed.failures, null, 2));
-  assert.deepEqual(passed.counts, { sceneImages: 3, voiceTakes: 2, registryEntries: 2, outOfForce: 1, unregisteredLocations: 0, thumbnailIncluded: false });
+  assert.deepEqual(passed.counts, { sceneImages: 3, voiceTakes: 2, videoClips: 0, registryEntries: 2, outOfForce: 1, unregisteredLocations: 0, thumbnailIncluded: false });
   assert.deepEqual(passed.outOfForce, [{ kind: "location", id: STREET, reason: "registered-before-gate" }], "記録の無い旧登録は落とさず表に出す");
   assert.equal(passed.registry.find((row) => row.id === HERO).pass, true);
   assert.match(passed.detail, /^passed（画 3・声 2・人物\/場所 2、効力の外の旧登録 1）$/u);

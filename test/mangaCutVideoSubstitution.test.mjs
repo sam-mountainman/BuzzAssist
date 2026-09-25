@@ -22,10 +22,13 @@ import {
   assertCutVideoSubstitutionsReadyForRender,
   auditCutVideoSubstitutions,
   auditSubstitutedCutReviewCoverage,
+  cutVideoClipDeclaration,
   cutVideoSubstitutionPaths,
   runCutVideoSubstitutions,
   verifyCutVideoSubstitutionBindings,
 } from "../lib/mangaCutVideoSubstitution.mjs";
+import { auditKoyaEpisodeAssetQuality } from "../lib/koyaAssetQualityFinalAudit.mjs";
+import { passKoyaAssetQualityLoop } from "./helpers/koyaAssetQualityFixture.mjs";
 import {
   appliedCutVideoBinding,
   buildCutVideoSubstitutionPrompt,
@@ -50,7 +53,20 @@ import { imageToVideoDurationOptions } from "../lib/mediaGeneration.mjs";
 
 const execFile = promisify(execFileCallback);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const contractPath = join(root, "config/koya-manga-production-contract.json");
+// この試験は差し替えの工程そのもの（課金・台帳・結び付け・レンダーの前の照合・実 MP4 の監査）を見る。
+// 結び付けたクリップに動画クリップの品質ループの合格を求めるのは契約 v55 から（lib/koyaAssetQualityGatePolicy.mjs）
+// なので、ここでは今の契約から版を v54 に戻し、その節を外した契約で測る（古い契約の Job が従来どおり動くことも
+// 確かめる）。v55 の必須化は test/mangaCutVideoSubstitutionAssetQuality.test.mjs が見る。
+const currentContractPath = join(root, "config/koya-manga-production-contract.json");
+const contractPath = await (async () => {
+  const contract = JSON.parse(await readFile(currentContractPath, "utf8"));
+  contract.version = "koya-manga-production-v54";
+  delete contract.videoClipQualityGate;
+  const dir = await mkdtemp(join(tmpdir(), "cut-video-v54-contract-"));
+  const file = join(dir, "koya-manga-production-contract.json");
+  await writeFile(file, `${JSON.stringify(contract, null, 2)}\n`);
+  return file;
+})();
 
 function toolWorks(command, args) {
   const result = spawnSync(command, args, { encoding: "utf8" });
@@ -718,7 +734,7 @@ async function bindEpisodeToDirectTestJob(episode) {
     // The direct test preflight stamps checkedAt into its identity; pin it.
     now: () => Date.parse("2026-09-16T00:00:00.000Z"),
   };
-  const preflight = await assertKoyaFullPreflight({ projectDir: episode.projectDir, episodeId: "synthetic-ep" }, runtime);
+  const preflight = await assertKoyaFullPreflight({ projectDir: episode.projectDir, episodeId: "synthetic-ep", contractPath }, runtime);
   const manifest = JSON.parse(await readFile(episode.manifestPath, "utf8"));
   manifest.production = {
     ...manifest.production,
@@ -906,4 +922,128 @@ test("official CLI advertises the opt-in stage and its paid confirmation", () =>
 
 test("validateCutVideoSubstitutionContract reports a missing section", () => {
   assert.deepEqual(validateCutVideoSubstitutionContract({}).map((row) => row.path), ["videoSubstitution"]);
+});
+
+// ---------------------------------------------------------------------------
+// 契約 v55: 結び付けたクリップは、途中の成果物の品質ループの工程 video-clip で合格していなければレンダーしない。
+// 合格は別文脈の評価者の採点・要る人の確認（元の画を参照にする版は同一性と手指）・使うファイルの sha256 が
+// 合格した版と同じこと。評価者・人の確認は合成（test/helpers/koyaAssetQualityFixture.mjs）。
+
+async function currentMarkedContract() {
+  const contract = JSON.parse(await readFile(currentContractPath, "utf8"));
+  contract.videoSubstitution.model = "kling-v2-6";
+  contract.videoSubstitution.cuts = [{ cutId: "cut-01", motionPrompt: "slow drifting light over the scene", reason: "opening beat" }];
+  return contract;
+}
+
+test("契約 v55: クリップは品質ループの合格まで止まり（測定を書き、結び付けは残す）、合格すると作り直さずにレンダーへ進める", { skip: mediaSkip }, async () => {
+  const episode = await buildEpisode();
+  const contract = await currentMarkedContract();
+  const calls = [];
+  const generateVideo = mockGenerator({ calls });
+  const run = () => runCutVideoSubstitutions({ manifestPath: episode.manifestPath, canvasDir: episode.canvasDir, contract, generateVideo, confirmPaidGeneration: true });
+  const first = await run();
+  assert.equal(first.status, "blocked");
+  assert.deepEqual(first.blocked.map((row) => [row.cutId, row.reason]), [["cut-01", "video-clip-asset-quality-required"]]);
+  const quality = first.rows[0].assetQuality;
+  assert.equal(quality.subjectId, "synthetic-ep.video.cut-01");
+  assert.equal(quality.reason, "loop-not-started");
+  assert.equal(quality.code, "asset-quality-required:video-clip:synthetic-ep.video.cut-01:loop-not-started");
+  // 測定は作業フォルダ（canvas/）の中のカットの置き場に書き、宣言の範囲に収まる。
+  assert.match(quality.measurementPath, /^manga-videos\/synthetic-ep\/video-substitution\/cut-01\/measurement-[a-f0-9]{16}\.json$/u);
+  assert.equal(quality.measurementGatesPass, true, JSON.stringify(quality.measurementProblems));
+  const measurement = JSON.parse(await readFile(join(episode.canvasDir, ...quality.measurementPath.split("/")), "utf8"));
+  assert.equal(measurement.assetSha256, quality.clipSha256);
+  assert.match(first.blocked[0].next, /--stage video-clip --subject synthetic-ep\.video\.cut-01/u);
+  assert.equal(calls.length, 1);
+  // 結び付けは残る（合格した後の再開でクリップを作り直さない）。
+  const bound = JSON.parse(await readFile(episode.manifestPath, "utf8"));
+  const binding = bound.cuts[0].videoSubstitution;
+  assert.equal(binding.status, "applied");
+  assert.equal(binding.clipSha256, quality.clipSha256);
+  // レンダーの前の照合も止める。最終監査の video-substitution（実 MP4 の測定）はループを見ない。
+  await assert.rejects(
+    assertCutVideoSubstitutionsReadyForRender({ manifest: bound, manifestPath: episode.manifestPath, contract, canvasDir: episode.canvasDir }),
+    (error) => error instanceof CutVideoSubstitutionBlockedError
+      && error.blocked.some((row) => row.reason === "video-clip-asset-quality-required" && /loop-not-started/u.test(row.detail)),
+  );
+  assert.equal((await verifyCutVideoSubstitutionBindings({ manifest: bound, manifestPath: episode.manifestPath, contract })).pass, true);
+  const audited = await auditKoyaEpisodeAssetQuality({ contract, manifest: bound, manifestPath: episode.manifestPath });
+  assert.deepEqual(audited.videoClips.map((row) => [row.cutId, row.pass, row.reason]), [["cut-01", false, "loop-not-started"]]);
+  assert.ok(audited.failures.some((row) => row.code === "asset-quality-required:video-clip:synthetic-ep.video.cut-01:loop-not-started"));
+
+  // 評価者の採点は合格でも、人の確認（同一性・手指）が無ければまだ使えない。
+  const reviewed = await passKoyaAssetQualityLoop({
+    workDir: episode.canvasDir, stage: "video-clip", subjectId: quality.subjectId, assetPath: binding.clipPath,
+    references: [episode.stills[0]], measurementPath: join(episode.canvasDir, ...quality.measurementPath.split("/")), stopBefore: "human",
+  });
+  assert.deepEqual(reviewed.recorded.round.failedGateIds, [], "差し替えのクリップは測定の機械ゲートを全部通る");
+  const awaitingHuman = await run();
+  assert.equal(awaitingHuman.rows[0].assetQuality.reason, "not-passed");
+  assert.equal(calls.length, 1, "人待ちで有料の再生成をしない");
+  const { recordAssetHumanVerification } = await import("../lib/assetQualityLoop.mjs");
+  await recordAssetHumanVerification({
+    workDir: episode.canvasDir, stage: "video-clip", subjectId: quality.subjectId, assetPath: binding.clipPath, checks: ["identity", "hand-safety"],
+    verdict: "pass", reviewer: "synthetic-reviewer", note: "始まり・中ほど・終わりのフレームを元の画と並べた（合成）", humanVerified: true, isInteractive: true,
+  });
+  const ready = await run();
+  assert.equal(ready.status, "ready", JSON.stringify(ready.blocked));
+  assert.equal(ready.rows[0].reused, true);
+  assert.equal(ready.rows[0].assetQuality.pass, true);
+  assert.equal(calls.length, 1, "合格したクリップを作り直さない");
+  const manifest = JSON.parse(await readFile(episode.manifestPath, "utf8"));
+  const verified = await assertCutVideoSubstitutionsReadyForRender({ manifest, manifestPath: episode.manifestPath, contract, canvasDir: episode.canvasDir });
+  assert.equal(verified.rows[0].assetQuality.pass, true);
+  const passedAudit = await auditKoyaEpisodeAssetQuality({ contract, manifest, manifestPath: episode.manifestPath });
+  assert.deepEqual(passedAudit.videoClips.map((row) => [row.cutId, row.pass]), [["cut-01", true]]);
+  assert.equal(passedAudit.failures.some((row) => row.stage === "video-clip"), false);
+  assert.equal(passedAudit.counts.videoClips, 1);
+});
+
+test("契約 v55: ループが合格した版と結び付けたクリップの SHA が違えば止まる", { skip: mediaSkip }, async () => {
+  const episode = await buildEpisode();
+  const contract = await currentMarkedContract();
+  const calls = [];
+  const run = () => runCutVideoSubstitutions({
+    manifestPath: episode.manifestPath, canvasDir: episode.canvasDir, contract, generateVideo: mockGenerator({ calls }), confirmPaidGeneration: true,
+  });
+  const first = await run();
+  const subjectId = first.rows[0].assetQuality.subjectId;
+  // 別のクリップ（前の試行や、手で書き出し直したもの）でループを合格させる。
+  const other = join(episode.episodeDir, "video-substitution", "cut-01", "other-version.mp4");
+  await ff(["-f", "lavfi", "-i", "color=c=0x335577:s=854x480:r=24:d=5", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", other]);
+  await passKoyaAssetQualityLoop({ workDir: episode.canvasDir, stage: "video-clip", subjectId, assetPath: other, references: [episode.stills[0]] });
+  const mismatch = await run();
+  assert.equal(mismatch.status, "blocked");
+  assert.equal(mismatch.rows[0].assetQuality.reason, "asset-sha-mismatch");
+  assert.equal(mismatch.blocked[0].reason, "video-clip-asset-quality-required");
+  const manifest = JSON.parse(await readFile(episode.manifestPath, "utf8"));
+  await assert.rejects(
+    assertCutVideoSubstitutionsReadyForRender({ manifest, manifestPath: episode.manifestPath, contract, canvasDir: episode.canvasDir }),
+    (error) => error.blocked.some((row) => /asset-sha-mismatch/u.test(row.detail)),
+  );
+  assert.equal(calls.length, 1, "SHA 違いで有料の再生成をしない");
+});
+
+test("古い契約（v54）の回は、動画クリップの品質ループを求めず、測定も書かない", { skip: mediaSkip }, async () => {
+  const episode = await buildEpisode();
+  const contract = await markedContract();
+  assert.equal(contract.version, "koya-manga-production-v54");
+  const result = await runCutVideoSubstitutions({ manifestPath: episode.manifestPath, canvasDir: episode.canvasDir, contract, generateVideo: mockGenerator(), confirmPaidGeneration: true });
+  assert.equal(result.status, "ready", JSON.stringify(result.blocked));
+  assert.equal(result.rows[0].assetQuality, undefined);
+  assert.equal(existsSync(join(episode.episodeDir, "video-substitution", "cut-01", `measurement-${result.rows[0].clipSha256.slice(0, 16)}.json`)), false);
+  const manifest = JSON.parse(await readFile(episode.manifestPath, "utf8"));
+  assert.equal((await assertCutVideoSubstitutionsReadyForRender({ manifest, manifestPath: episode.manifestPath, contract, canvasDir: episode.canvasDir })).pass, true);
+  const audited = await auditKoyaEpisodeAssetQuality({ contract, manifest, manifestPath: episode.manifestPath });
+  assert.deepEqual(audited.videoClips, [], "v54 の回のクリップは asset-quality-loops の対象外");
+});
+
+test("差し替えのクリップの宣言は、カットを覆う尺・回の縦横比・高さ 480 以上で、音声トラックの有無は問わない", () => {
+  const plan = { fps: 30, width: 1920, height: 1080, policy: { maximumClipShortfallFrames: 1 } };
+  const declaration = cutVideoClipDeclaration({ plan, row: { frameCount: 150, requestDurationSeconds: 6 } });
+  assert.deepEqual(declaration.durationSeconds, { min: 4.967, max: 7 });
+  assert.deepEqual(declaration.height, { min: 480 });
+  assert.deepEqual(declaration.aspectRatio, { width: 1920, height: 1080, tolerance: 0.02 });
+  assert.equal(declaration.audio, "optional", "レンダーはクリップの映像だけを使う（音は承認済みの台詞だけ）");
 });

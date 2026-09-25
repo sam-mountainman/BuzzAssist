@@ -12,14 +12,18 @@ import { APPROVED_REFERENCES_VERSION } from "../lib/assetQualityLoop.mjs";
 import { koyaApprovedReferencesPath, writeKoyaApprovedReferences } from "../lib/koyaAssetQualityGate.mjs";
 import {
   KOYA_ASSET_QUALITY_GATE_IN_FORCE_SINCE,
+  KOYA_VIDEO_CLIP_GATE_IN_FORCE_SINCE,
   koyaAssetQualityGateInForce,
   koyaAssetQualitySubjectId,
   koyaSceneImageAssetQualitySubjectId,
+  koyaVideoClipAssetQualitySubjectId,
+  koyaVideoClipGateInForce,
   koyaVoiceTakeAssetQualitySubjectId,
   validateKoyaAssetQualityGateContract,
+  validateKoyaVideoClipQualityGateContract,
 } from "../lib/koyaAssetQualityGatePolicy.mjs";
 import { validateKoyaMangaProductionContract } from "../lib/koyaMangaProductionContract.mjs";
-import { currentKoyaContract, legacyKoyaContract } from "./helpers/koyaAssetQualityFixture.mjs";
+import { currentKoyaContract, legacyKoyaContract, v54KoyaContract } from "./helpers/koyaAssetQualityFixture.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const sha = (value) => createHash("sha256").update(value).digest("hex");
@@ -32,8 +36,8 @@ async function tempRoot(t, prefix) {
 
 test("契約: v54 から節が必須、v53 は節なしで通り節ありは落ちる。効力は版で決める", async () => {
   const current = await currentKoyaContract(root);
-  assert.equal(current.version, KOYA_ASSET_QUALITY_GATE_IN_FORCE_SINCE);
-  assert.equal(validateKoyaMangaProductionContract(current).pass, true);
+  assert.equal(current.assetQualityGate.inForceSince, KOYA_ASSET_QUALITY_GATE_IN_FORCE_SINCE);
+  assert.equal(validateKoyaMangaProductionContract(current).pass, true, JSON.stringify(validateKoyaMangaProductionContract(current).failures));
   assert.equal(koyaAssetQualityGateInForce(current), true);
 
   const dropped = structuredClone(current);
@@ -51,6 +55,34 @@ test("契約: v54 から節が必須、v53 は節なしで通り節ありは落�
   const legacyWithSection = { ...structuredClone(legacy), assetQualityGate: structuredClone(current.assetQualityGate) };
   assert.ok(validateKoyaAssetQualityGateContract(legacyWithSection).some((row) => row.path === "assetQualityGate.inForceSince"));
   assert.equal(koyaAssetQualityGateInForce({ audio: {} }), false, "版の無い部分的な契約は効力の外");
+});
+
+test("契約: 動画クリップのゲートは v55 から節が必須、v54 は節なしで通り節ありは落ちる。効力は版で決める", async () => {
+  const current = await currentKoyaContract(root);
+  assert.equal(current.version, KOYA_VIDEO_CLIP_GATE_IN_FORCE_SINCE, "今の契約は動画クリップのゲートが入った版");
+  assert.equal(current.videoClipQualityGate.inForceSince, KOYA_VIDEO_CLIP_GATE_IN_FORCE_SINCE);
+  assert.equal(koyaVideoClipGateInForce(current), true);
+  assert.deepEqual(validateKoyaVideoClipQualityGateContract(current), []);
+
+  const dropped = structuredClone(current);
+  delete dropped.videoClipQualityGate;
+  assert.equal(koyaVideoClipGateInForce(dropped), true, "節を消しても v55 なら効力は消えない");
+  assert.deepEqual(validateKoyaVideoClipQualityGateContract(dropped).map((row) => row.path), ["videoClipQualityGate"]);
+  assert.equal(validateKoyaMangaProductionContract(dropped).pass, false);
+
+  const loosened = structuredClone(current);
+  loosened.videoClipQualityGate.requirePassBeforeRender = false;
+  assert.ok(validateKoyaVideoClipQualityGateContract(loosened).some((row) => row.path === "videoClipQualityGate.requirePassBeforeRender"));
+  assert.equal(validateKoyaMangaProductionContract(loosened).pass, false, "スキーマでも閉じている");
+
+  const v54 = await v54KoyaContract(root);
+  assert.equal(koyaVideoClipGateInForce(v54), false);
+  assert.equal(koyaAssetQualityGateInForce(v54), true, "v54 は途中の成果物のゲートだけが効く");
+  assert.equal(validateKoyaMangaProductionContract(v54).pass, true, JSON.stringify(validateKoyaMangaProductionContract(v54).failures));
+  const v54WithSection = { ...structuredClone(v54), videoClipQualityGate: structuredClone(current.videoClipQualityGate) };
+  assert.ok(validateKoyaVideoClipQualityGateContract(v54WithSection).some((row) => row.path === "videoClipQualityGate.inForceSince"));
+  assert.equal(koyaVideoClipGateInForce({ audio: {} }), false, "版の無い部分的な契約は効力の外");
+  assert.equal(koyaVideoClipAssetQualitySubjectId("synthetic-ep", "cut-03"), "synthetic-ep.video.cut-03");
 });
 
 test("対象 id: 英数字はそのまま、それ以外は指紋つきで潰れず、64文字に収まる", () => {

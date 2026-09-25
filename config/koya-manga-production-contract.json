@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "koya-manga-production-v54",
+  "version": "koya-manga-production-v55",
   "channelId": "koya-manga",
   "description": "Fail-closed production contract for Koya-channel manga videos.",
   "sourceOfTruth": {
@@ -172,6 +172,17 @@
     "workDir": "canvas",
     "approvedReferencesPath": "canvas/quality/approved-references.json",
     "requirePassBeforeUse": ["character", "location", "scene-image", "thumbnail", "voice-take"],
+    "requireReviewedVersionSha256": true,
+    "stopWithoutPaidRegeneration": true
+  },
+  "videoClipQualityGate": {
+    "version": "koya-video-clip-quality-gate-v1",
+    "inForceSince": "koya-manga-production-v55",
+    "harnessId": "koya-manga-video",
+    "workDir": "canvas",
+    "stage": "video-clip",
+    "approvedReferencesPath": "canvas/quality/approved-references.json",
+    "requirePassBeforeRender": true,
     "requireReviewedVersionSha256": true,
     "stopWithoutPaidRegeneration": true
   },
