@@ -5,8 +5,15 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { prepareKoyaQualityRound } from "../lib/koyaMangaFinalAudit.mjs";
-import { createMangaQualityContract } from "../lib/mangaQualityHarness.mjs";
-import { createQualityLoopState, deriveFailureFingerprint, normalizeQualityRubric, recordQualityRound, rubricFloorFailures } from "../lib/qualityLoop.mjs";
+import { createMangaFinalQualityDecision, createMangaQualityContract } from "../lib/mangaQualityHarness.mjs";
+import {
+  createQualityLoopState,
+  deriveFailureFingerprint,
+  findStaleQualityFeedback,
+  normalizeQualityRubric,
+  recordQualityRound,
+  rubricFloorFailures,
+} from "../lib/qualityLoop.mjs";
 
 const EVIDENCE = [{ path: "audits/signoff.json", sha256: "a".repeat(64), note: "署名済みの全尺レビュー" }];
 const contract = createMangaQualityContract({ manifest: { id: "synthetic-episode" } });
@@ -21,7 +28,8 @@ function round(state, { context = "review-context-1", evaluator = "evaluator", r
     contract,
     state,
     hardGateReport: { pass: failedGateIds.length === 0, failedGateIds, contractDigest: contract.digest },
-    reviews: [{ evaluatorId: evaluator, evaluatorContextId: context, scores: reviewScores, notes: "全尺を見て所見を書いた", evidence: EVIDENCE }],
+    // 所見は文脈ごとに違う（前の回の所見の写しは採点に使わない）。
+    reviews: [{ evaluatorId: evaluator, evaluatorContextId: context, scores: reviewScores, notes: `全尺を見て所見を書いた（${context}）`, evidence: EVIDENCE }],
     evidence: EVIDENCE,
     observedAt: "2026-09-24T01:00:00Z",
     ...extra,
@@ -101,6 +109,114 @@ test("回の時刻がループの開始や前の回より早くても例外に�
 
   // 時刻として読めない値は、理由つきで拒否する（順序を正せない）。
   assert.throws(() => round(freshState(), { extra: { observedAt: "not-a-time" } }), /observedAt/u);
+});
+
+test("直前の回と同じ所見（正規化後）の評価は採点に使わず、理由コードつきで新しい評価を求める", () => {
+  const first = round(freshState(), { reviewScores: scores({ "voice-performance": 50 }) });
+  const retry = {
+    previousFailureFingerprint: first.rounds[0].failureFingerprint,
+    revisionDelta: "声を契約の声に差し替えた",
+  };
+  // 文脈は新しいが、所見の本文は前回の写し（空白と全角・半角だけ違う）。
+  const copied = "  全尺を見て 所見を書いた（review－context－1） ";
+  let caught = null;
+  try {
+    recordQualityRound({
+      contract,
+      state: first,
+      hardGateReport: { pass: true, failedGateIds: [], contractDigest: contract.digest },
+      reviews: [{ evaluatorId: "evaluator", evaluatorContextId: "review-context-2", scores: scores(), notes: copied, evidence: EVIDENCE }],
+      evidence: EVIDENCE,
+      observedAt: "2026-09-24T02:00:00Z",
+      ...retry,
+    });
+  } catch (error) {
+    caught = error;
+  }
+  assert.ok(caught, "前回と同じ所見で満点が付いても回として受け取らない");
+  assert.equal(caught.code, "quality-feedback-not-updated");
+  assert.equal(
+    findStaleQualityFeedback({ state: first, reviews: [{ notes: copied, evaluatorContextId: "review-context-2" }] })?.reasonCode,
+    "quality-feedback-not-updated",
+  );
+  // 所見が更新されていれば回として受け取る。
+  const second = round(first, { context: "review-context-2", extra: { ...retry, observedAt: "2026-09-24T02:00:00Z" } });
+  assert.equal(second.rounds.length, 2);
+  assert.equal(findStaleQualityFeedback({ state: first, reviews: [{ notes: "声の差し替えを確認した" }] }), null);
+});
+
+test("合格せずに止まったら、最高点の回を成果物 SHA つきで bestRound に残す（合格扱いにはしない）", () => {
+  const limited = createMangaQualityContract({ manifest: { id: "synthetic-episode" }, overrides: { maximumReviewRounds: 2, minimumImprovement: 0 } });
+  const start = createQualityLoopState({ contract: limited, generatorId: "gen", generatorContextId: "generator-context", startedAt: "2026-09-24T00:00:00Z" });
+  const review = (context, value, notes) => ({ evaluatorId: "evaluator", evaluatorContextId: context, scores: Object.fromEntries(limited.rubric.map((criterion) => [criterion.id, value])), notes, evidence: EVIDENCE });
+  const first = recordQualityRound({
+    contract: limited,
+    state: start,
+    hardGateReport: { pass: true, failedGateIds: [], contractDigest: limited.digest },
+    reviews: [review("review-context-1", 88, "全体に良いが声の間が詰まっている")],
+    evidence: EVIDENCE,
+    artifactSha256: "1".repeat(64),
+    observedAt: "2026-09-24T01:00:00Z",
+  });
+  assert.equal(first.status, "active");
+  assert.equal(first.bestRound, undefined, "走っている間は置かない");
+  const second = recordQualityRound({
+    contract: limited,
+    state: first,
+    hardGateReport: { pass: true, failedGateIds: [], contractDigest: limited.digest },
+    reviews: [review("review-context-2", 80, "声の間を直したら背景の破綻が目立った")],
+    evidence: EVIDENCE,
+    artifactSha256: "2".repeat(64),
+    observedAt: "2026-09-24T02:00:00Z",
+    previousFailureFingerprint: first.rounds[0].failureFingerprint,
+    revisionDelta: "声の間を広げた",
+  });
+  assert.equal(second.stopReason, "round-limit");
+  assert.notEqual(second.status, "passed");
+  assert.equal(second.bestRound.index, 1, "最高点は1回目");
+  assert.equal(second.bestRound.artifactSha256, "1".repeat(64));
+  assert.equal(second.bestRound.score, 88);
+  assert.equal(second.bestRound.passed, false, "最高点の回は合格ではない");
+
+  // 最終判定には納品判断の材料として載るが、合格にはならない。
+  const decision = createMangaFinalQualityDecision({
+    episodeId: "synthetic-episode",
+    contractDigest: "3".repeat(64),
+    videoSha256: "2".repeat(64),
+    requiredAuditIds: ["full-decode"],
+    auditSteps: [{ id: "full-decode", pass: true, evidencePath: "audits/media.json", evidenceSha256: "4".repeat(64) }],
+    qualityLoopState: second,
+  });
+  assert.equal(decision.pass, false);
+  assert.equal(decision.qualityLoopBestRound.artifactSha256, "1".repeat(64));
+});
+
+test("最終監査は、前の回と同じ所見の署名では回を記録せず、理由コードつきで新しい評価を求める", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "quality-round-stale-"));
+  try {
+    const first = round(freshState(), { reviewScores: scores({ "semantic-scene-fit": 40 }) });
+    const signoff = { reviewerProvenance: { id: "reviewer", contextId: "review-context-2" } };
+    const stale = await prepareKoyaQualityRound({
+      state: first,
+      signoff,
+      outputDir: dir,
+      revisionDelta: "背景を差し替えた",
+      reviewNotes: { summary: "全尺を見て所見を書いた（review-context-1）" },
+    });
+    assert.equal(stale.ready, false);
+    assert.equal(stale.step.id, "quality-loop-feedback-not-updated");
+    assert.match(stale.step.detail, /quality-feedback-not-updated/u);
+    const fresh = await prepareKoyaQualityRound({
+      state: first,
+      signoff,
+      outputDir: dir,
+      revisionDelta: "背景を差し替えた",
+      reviewNotes: { summary: "差し替えた背景を全尺で確かめた" },
+    });
+    assert.equal(fresh.ready, true);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("最終監査は、2回目以降の修正内容が無ければ例外ではなく人待ちの理由を返す", async () => {

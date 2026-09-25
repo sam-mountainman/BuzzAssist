@@ -183,7 +183,8 @@ test("品質ループの record は、合格しなかった回でだけ学習の
   await writeFile(join(root, "draft2.md"), revised);
   await writeFile(join(root, "quality", "reviews", "r2.json"), JSON.stringify({
     evaluatorId: "evaluator", evaluatorContextId: "ctx-eval-2", scriptSha256: sha(revised), baseScriptSha256: sha(SCRIPT_TEXT),
-    rubricScores: scores({}), notes: NOTES,
+    // 直した版を読んだ新しい所見（前の回の所見の写しは品質ループが採点に使わない）。
+    rubricScores: scores({}), notes: "合成の所見: 読みを直した版を全行読み直した",
   }));
   let called = false;
   const passed = await recordScriptQualityRound({

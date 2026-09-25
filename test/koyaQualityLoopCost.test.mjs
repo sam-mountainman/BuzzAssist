@@ -42,7 +42,7 @@ function roundInput(loopContract, state, { context, jobs, score = 70, retry = nu
       reviewNotesContentSha256: SHA("b"),
       reviewedAt: "2026-09-24T01:00:00.000Z",
     },
-    reviewNotes: { rubricScores: scores(score, loopContract), summary: "全尺を見て所見を書いた" },
+    reviewNotes: { rubricScores: scores(score, loopContract), summary: `全尺を見て所見を書いた（${context}）` },
     auditSteps: [{ id: "full-decode", pass: true }],
     roundEvidence: EVIDENCE,
     evidenceMerkleRoot: SHA("c"),

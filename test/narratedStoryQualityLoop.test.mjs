@@ -36,7 +36,8 @@ function signoffFor(context, rubricScores, { approved = true, contractDigest = c
     approved,
     findings: approved ? [] : ["5場面目の顔を設定画に合わせる"],
     knownRemainingIssues: [],
-    qualityReview: { contractDigest, evaluatorContextId: context, rubricScores, notes: "全尺を通して見た所見" },
+    // 所見は評価ごとに違う（前の回の所見の写しは品質ループが採点に使わない）。
+    qualityReview: { contractDigest, evaluatorContextId: context, rubricScores, notes: `全尺を通して見た所見（${context}）` },
   };
 }
 

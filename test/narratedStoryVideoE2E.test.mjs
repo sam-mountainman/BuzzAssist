@@ -870,7 +870,8 @@ test("bookends: OP → story → review is rendered as a real MP4, its boundarie
         reviewerPrivateKeyPem: reviewer.privateKeyPem,
         env,
         force: true,
-        review: { rubricScores: reviewScores(outcome, overrides), notes: "全尺を通して見て、境目と語りを確かめた", findings },
+        // 所見は評価ごとに違う（前の回の所見の写しは品質ループが採点に使わない）。
+        review: { rubricScores: reviewScores(outcome, overrides), notes: `全尺を通して見て、境目と語りを確かめた（${reviewerContextId}）`, findings },
         ...(verdict === "pass" ? { pass: true } : { fail: true }),
       });
       const resume = () => runNarratedStoryVideo({

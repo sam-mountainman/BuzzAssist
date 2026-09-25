@@ -62,7 +62,8 @@ function review({ context, script, base = undefined, rubricScores = scores(), ev
     scriptSha256: sha(script),
     ...(base === undefined ? {} : { baseScriptSha256: sha(base) }),
     rubricScores,
-    notes: "全行を読み、前の版と1行ずつ比べた所見",
+    // 所見は評価ごとに違う（前の回の所見の写しは品質ループが採点に使わない）。
+    notes: `全行を読み、前の版と1行ずつ比べた所見（${context}）`,
     findings: [],
   };
 }
