@@ -155,8 +155,33 @@ test("Koya のカードの start 引数は、Job を作る前に止める表（K
     card.inputs.startOptions.map(({ key, cliFlag }) => ({ key, cliFlag })),
     KOYA_REQUIRED_JOB_OPTIONS.map(({ key, cliFlag }) => ({ key, cliFlag })),
   );
+  // ナレーション物語の start 引数は Pack の宣言しだいで要るものだけ（条件つき）。CLI と同じ名前であること。
   const narrated = harnesses.find((harness) => harness.id === "narrated-story-video");
-  assert.deepEqual((await loadHarnessCapabilityCard(narrated)).card.inputs.startOptions, []);
+  const narratedOptions = (await loadHarnessCapabilityCard(narrated)).card.inputs.startOptions;
+  assert.ok(narratedOptions.every((entry) => typeof entry.requiredWhen === "string" && entry.requiredWhen.length > 0));
+  assert.deepEqual(narratedOptions.map(({ key, cliFlag }) => ({ key, cliFlag })), [
+    { key: "operatorImageManifestPath", cliFlag: "--operator-image-manifest" },
+  ]);
+  const cli = await readFile(join(root, "scripts", "run-video-harness.mjs"), "utf8");
+  for (const entry of [...card.inputs.startOptions, ...narratedOptions]) {
+    assert.ok(cli.includes(entry.cliFlag.slice(2)), `${entry.cliFlag} が run-video-harness に無い`);
+    assert.ok(cli.includes(`"${entry.key}"`), `${entry.key} が run-video-harness の options に無い`);
+  }
+});
+
+test("条件つきの start 引数は、足りなくても blockers にせず条件として見せる", async () => {
+  const narrated = harnesses.find((harness) => harness.id === "narrated-story-video");
+  const view = harnessCapabilityView(narrated, await loadHarnessCapabilityCard(narrated));
+  const pack = { provided: true, status: "readable", targetHarnessId: "narrated-story-video", knownHarness: true, signature: "verified" };
+  const script = { provided: true, status: "readable", format: "raw-text" };
+  const without = checkHarnessInputs(view, { script, channelPack: pack });
+  assert.equal(without.status, "ok");
+  assert.deepEqual(without.startOptions.required, []);
+  assert.deepEqual(without.startOptions.conditional.map((entry) => [entry.key, entry.provided]), [["operatorImageManifestPath", false]]);
+  const withManifest = checkHarnessInputs(view, { script, channelPack: pack, options: { operatorImageManifestPath: "/fixture/manifest.json" } });
+  assert.equal(withManifest.startOptions.conditional[0].provided, true);
+  const bad = minimalCard({ inputs: { scriptFormats: [{ id: "raw-text", what: "x" }], startOptions: [{ key: "x", cliFlag: "--x", what: "x", requiredWhen: " " }] } });
+  assert.ok(validateHarnessCapabilityCard(bad, fixtureHarness).some((error) => /requiredWhen/u.test(error)));
 });
 
 function deterministicDoctorRuntime(homeDir) {

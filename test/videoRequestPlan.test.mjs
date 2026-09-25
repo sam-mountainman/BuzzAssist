@@ -123,6 +123,9 @@ test("ナレーション物語の典型の依頼: 決まり、台本・Pack が�
   assert.equal(chosen.channelPackTarget, true);
   assert.ok(chosen.reasons.some((line) => /この Channel Pack は narrated-story-video 向け（署名確認済み）/u.test(line)), chosen.reasons.join("\n"));
   assert.ok(chosen.capability.suitedFor.length > 0 && chosen.capability.notSuitedFor.length > 0);
+  // Pack の宣言しだいで要る引数は、始められるかを左右させずに条件として見せる。
+  assert.ok(chosen.reasons.some((line) => /条件つきの引数: --operator-image-manifest（Channel Pack の image\.source が operator-file のとき）/u.test(line)));
+  assert.doesNotMatch(result.nextStep.cli, /--operator-image-manifest/u, "渡されていない条件つきの引数は start の例に載せない");
   assert.equal(chosen.capability.estimates.cost.status, "unknown");
   assert.equal(result.nextStep.action, "start-plan-only");
   assert.match(result.nextStep.cli, /run-video-harness\.mjs start --harness narrated-story-video --script-path /u);

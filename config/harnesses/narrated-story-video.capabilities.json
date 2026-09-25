@@ -18,7 +18,14 @@
         "what": "台本パッケージ（script-package.json）。本編・感想・話者・読み・BGM の区分・場面の意図を機械が読める形で持つ、台本スキルの正式な出力"
       }
     ],
-    "startOptions": []
+    "startOptions": [
+      {
+        "key": "operatorImageManifestPath",
+        "cliFlag": "--operator-image-manifest",
+        "requiredWhen": "Channel Pack の image.source が operator-file のとき",
+        "what": "運営者が用意した本編の画の取り込みの記録（buzzassist-operator-image-manifest-v1）"
+      }
+    ]
   },
   "outputs": [
     { "id": "video", "what": "16:9 の完成 MP4（シーン画像のカメラワーク・語り・字幕・BGM）" },
@@ -30,7 +37,8 @@
     "日本語の台本を語り（ナレーション）で読み上げる物語動画",
     "実話・感動系など、語りと字幕と BGM で進む話",
     "シーン画像にカメラワークを当てて見せる構成",
-    "本編のあとに感想パート（人物素材）を付ける構成"
+    "本編のあとに感想パート（人物素材）を付ける構成",
+    "運営者が用意した本編の画を取り込んで作る構成"
   ],
   "notSuitedFor": [
     "吹き出しとコマで見せる漫画動画（漫画動画のハーネスを使う）",
