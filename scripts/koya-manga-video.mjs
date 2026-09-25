@@ -81,6 +81,7 @@ import {
   generateKoyaLocationBoards,
   importKoyaLocationBoards,
   readKoyaChannelAuthority,
+  refreshKoyaApprovedReferences,
   registerApprovedKoyaLocation,
   resolveKoyaValidationCanary,
 } from "../lib/koyaChannelGovernance.mjs";
@@ -136,7 +137,7 @@ function usage() {
     "Koya manga video production (fail-closed)",
     "",
     "node scripts/koya-manga-video.mjs <action> [options]",
-    "actions: contract, channel-contract, wardrobe-readiness, character-bootstrap-status, character-registration-reconcile, character-roster-review-draft, character-roster-audit, cast-readiness, story-review-draft, story-audit, location-plan, location-generate, location-import, location-anchor-review-draft, location-anchor-audit, location-review-draft, location-register, thumbnail-plan-draft, thumbnail-audit, handoff-export, handoff-verify, handoff-restore, voice-audition, voice-approve, plan, images, character-review-refresh, character-candidate-migrate-blind, character-candidate-import, character-style-generate, character-style-import, character-style-review-refresh, character-style-record-failure, character-style-compose, character-style-select, character-attribute-gate, character-approve, character-identity-refresh, character-identity-repair, character-identity-repack, character-register, prepare, speech, video-substitute, adjust-gap, standard-cut, repair-onset, repair-tail, sync-contract, refresh-bubbles, render, audit, reviewer-key-create, signoff, full, status",
+    "actions: contract, channel-contract, wardrobe-readiness, character-bootstrap-status, character-registration-reconcile, character-roster-review-draft, character-roster-audit, cast-readiness, story-review-draft, story-audit, location-plan, location-generate, location-import, location-anchor-review-draft, location-anchor-audit, location-review-draft, location-register, asset-quality-references, thumbnail-plan-draft, thumbnail-audit, handoff-export, handoff-verify, handoff-restore, voice-audition, voice-approve, plan, images, character-review-refresh, character-candidate-migrate-blind, character-candidate-import, character-style-generate, character-style-import, character-style-review-refresh, character-style-record-failure, character-style-compose, character-style-select, character-attribute-gate, character-approve, character-identity-refresh, character-identity-repair, character-identity-repack, character-register, prepare, speech, video-substitute, adjust-gap, standard-cut, repair-onset, repair-tail, sync-contract, refresh-bubbles, render, audit, reviewer-key-create, signoff, full, status",
     "common: --project-dir DIR --episode-id ID --script-path FILE --title TITLE --protagonist-speaker-id ID_OR_EXACT_NAME --character-bible-path JSON [--story-review-path JSON] [--source-face-review-path JSON] [--generator-host codex|claude|legacy-migration] [--generator-id ID] [--generator-context-id TASK_OR_SESSION_ID] [--retry-failed] [--image-concurrency N|auto] [--qa-concurrency N] [--speech-concurrency N|auto] [--image-fallback-model MODEL] [--qa-fallback-provider grok]",
     "wardrobe-readiness: --episode-id ID [--script-path FILE] [--wardrobe-review-path JSON] (free script-driven outfit gate; writes canvas/assets/<episode-id>/wardrobe-readiness.json. exit 0 = every checked character has an outfit for every scene, exit 2 = pending slots. images/full refuse to start without a passing report for the exact script)",
     "audit: [--video-path MP4] [--revision-delta TEXT] (final audit; from the 2nd quality-loop round on, pass what was fixed for the previous failure, or write audits/koya-final/revision-delta.json; without it the audit stops for a human instead of recording the round)",
@@ -153,7 +154,8 @@ function usage() {
     "location-anchor-review-draft: --location-id ID [--output-dir DIR] (read-only; hashes the generated anchor and leaves perceptual checks false)",
     "location-anchor-audit: --location-id ID --location-anchor-review-path JSON (read-only; verifies the anchor review before continuity generation)",
     "location-review-draft: --location-id ID [--output-dir DIR] [--location-anchor-review-path JSON] (read-only; hashes current planned files and leaves perceptual checks false; imported boards bind the passed anchor review as anchorApproval)",
-    "location-register: --location-id ID --location-review-path JSON (requires four SHA-bound original-scale independent reviews)",
+    "location-register: --location-id ID --location-review-path JSON (requires four SHA-bound original-scale independent reviews; from contract v54 also a passed location asset quality loop per board)",
+    "asset-quality-references: writes canvas/quality/approved-references.json (buzzassist-approved-references-v1: SHA-256 of approved registry references, human-selected faces, and approved location anchors) for asset-quality-loop record --approved-references",
     "thumbnail-audit: --thumbnail-plan-path JSON (read-only; blocks pending brand tokens, copy violations, and final artwork reuse)",
     "thumbnail-plan-draft: [--layout twoPanel|threePanel] (read-only; prints a fail-closed plan template)",
     "source region fallback: inspect the exact source image and pass a koya-source-region-review-v2 JSON whose annotations bind normalized face/hand/prop/evidence/text bounds to the source SHA-256 (legacy koya-source-face-review-v1 remains accepted)",
@@ -557,6 +559,7 @@ switch (args.action) {
       projectDir,
       locationId: args.locationId,
       reviewPath: args.locationReviewPath ? resolve(args.locationReviewPath) : "",
+      contractPath: common.contractPath,
     });
     print({ location: result.location, registryRevision: result.registryRevision, reviewPass: result.audit.pass });
     break;
@@ -565,9 +568,13 @@ switch (args.action) {
     if (!args.thumbnailPlanPath) throw new Error("--thumbnail-plan-path is required for thumbnail-audit.");
     const authority = await readKoyaChannelAuthority({ projectDir });
     const plan = JSON.parse(await readFile(resolve(args.thumbnailPlanPath), "utf8"));
-    const result = await auditKoyaThumbnailPlan({ projectDir, thumbnailContract: authority.thumbnailContract, plan });
+    const result = await auditKoyaThumbnailPlan({ projectDir, thumbnailContract: authority.thumbnailContract, plan, contractPath: common.contractPath });
     print(result);
     if (!result.pass) exitCode = 2;
+    break;
+  }
+  case "asset-quality-references": {
+    print(await refreshKoyaApprovedReferences({ projectDir }));
     break;
   }
   case "thumbnail-plan-draft": {
@@ -788,7 +795,7 @@ switch (args.action) {
       candidateReviewPath: args.candidateReviewPath ? resolve(args.candidateReviewPath) : "",
       generatorContextId: args.generatorContextId,
     });
-    print({ episodeId: result.episodeId, workflowId: result.workflowId, castId: result.castId, candidateLabel: result.candidateLabel, candidateSetId: result.candidateSetId, verdictPath: result.verdictPath, resumed: result.resumed, generationCheckpointPath: result.generationCheckpointPath, identityReviewDraftPath: result.staged.identityReviewDraftPath, state: result.state });
+    print({ episodeId: result.episodeId, workflowId: result.workflowId, castId: result.castId, candidateLabel: result.candidateLabel, candidateSetId: result.candidateSetId, verdictPath: result.verdictPath, resumed: result.resumed, generationCheckpointPath: result.generationCheckpointPath, identityReviewDraftPath: result.staged.identityReviewDraftPath, ...(result.assetQuality ? { assetQuality: result.assetQuality } : {}), state: result.state });
     break;
   }
   case "character-register": {

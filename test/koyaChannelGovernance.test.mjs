@@ -22,6 +22,7 @@ import {
   createKoyaStoryReviewDraft,
   createKoyaThumbnailPlanDraft,
   generateKoyaLocationBoards,
+  koyaLocationAssetQualitySubjectId,
   readKoyaChannelAuthority,
   registerApprovedKoyaLocation,
   resolveKoyaValidationCanary,
@@ -32,6 +33,7 @@ import {
 import { renderEditorialPlatePng } from "../lib/mangaScriptImagePipeline.mjs";
 import { parseMangaScript } from "../lib/mangaVideoPipeline.mjs";
 import { auditKoyaCharacterRosterReview, createKoyaCharacterRosterReviewDraft } from "../lib/koyaCharacterRosterReview.mjs";
+import { passKoyaAssetQualityLoop } from "./helpers/koyaAssetQualityFixture.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const hash = (value) => createHash("sha256").update(value).digest("hex");
@@ -772,6 +774,14 @@ test("Koya location registration requires four SHA-bound, independently reviewed
   const rejected = await auditKoyaLocationReview({ projectDir, locationBible: authority.locationBible, showBible: authority.showBible, locationId: "yamatani", review: selfReviewed });
   assert.equal(rejected.pass, false);
   assert.match(rejected.failures.join("\n"), /different from its generator/u);
+  // 契約 v54 から、4枚のボードは場所の品質ループの合格が無いと登録しない。
+  await assert.rejects(
+    () => registerApprovedKoyaLocation({ projectDir, locationId: "yamatani", reviewPath }),
+    /asset-quality-required:location:.+:loop-not-started/u,
+  );
+  for (const row of audit.rows) {
+    await passKoyaAssetQualityLoop({ workDir: join(projectDir, "canvas"), stage: "location", subjectId: koyaLocationAssetQualitySubjectId("yamatani", row.boardId), assetPath: row.path });
+  }
   const registered = await registerApprovedKoyaLocation({ projectDir, locationId: "yamatani", reviewPath });
   assert.equal(registered.location.kind, "location");
   assert.equal(registered.location.status, "approved");

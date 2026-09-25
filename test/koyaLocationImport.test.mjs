@@ -31,6 +31,7 @@ import {
   installSyntheticKoyaAuthority,
   passAnchorChecks,
   passBoardChecks,
+  passSyntheticLocationLoops,
   readJson,
   sha256,
   syntheticLocationBible,
@@ -180,6 +181,7 @@ test("imported boards pass the full official route: anchor review, final review,
 
     const reviewPath = join(reviewsDir, "street-final.json");
     await writeFile(reviewPath, `${JSON.stringify(review, null, 2)}\n`);
+    await passSyntheticLocationLoops({ projectDir, authority, locationId, review });
     const registered = await registerApprovedKoyaLocation({ authority, projectDir, locationId, reviewPath });
     const entry = registered.location;
     assert.equal(entry.kind, "location");
@@ -569,6 +571,7 @@ test("the official paid route still registers natively generated boards, with th
     assert.match((await auditKoyaLocationReview({ ...common, review: selfReviewed })).failures.join("\n"), /different from its generator/u);
     const reviewPath = join(reviewsDir, "cafe-final.json");
     await writeFile(reviewPath, `${JSON.stringify(review, null, 2)}\n`);
+    await passSyntheticLocationLoops({ projectDir, authority, locationId, review });
     const registered = await registerApprovedKoyaLocation({ authority, projectDir, locationId, reviewPath });
     assert.deepEqual(registered.location.aliases, ["喫茶店"]);
     assert.equal(registered.location.negativePrompt, "people, silhouettes, readable text, real logos, real place names, architecture drift");
@@ -624,6 +627,7 @@ test("the location-import CLI action feeds the official draft, audit and registe
     review.reviewedAt = "2026-09-18T02:00:00.000Z";
     const reviewPath = join(reviewsDir, "cafe-final.json");
     await writeFile(reviewPath, `${JSON.stringify(review, null, 2)}\n`);
+    await passSyntheticLocationLoops({ projectDir, authority, locationId, review });
     // 登録は --output-dir を取らない。審査済み manifest の場所でアンカー承認を読み直す。
     const registered = run("location-register", "--location-id", locationId, "--location-review-path", reviewPath);
     assert.equal(registered.status, 0, registered.stderr);

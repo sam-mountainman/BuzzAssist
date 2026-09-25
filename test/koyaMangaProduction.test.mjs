@@ -1673,6 +1673,15 @@ test("character-approve with a full-role import map stages every declared eye-op
     );
     const draft = JSON.parse(await readFile(approved.staged.identityReviewDraftPath, "utf8"));
     assert.deepEqual(draft.extraSheets.map((sheet) => sheet.storyStage), ["open-calm", "open-angry"]);
+    // 契約 v54 から: 人が選んだ顔を承認一覧へ載せ、登録の前に各シートの品質ループが要ることを残作業に出す。
+    assert.deepEqual(
+      approved.assetQuality.subjects.map((subject) => [subject.role, subject.storyStage, subject.reason]),
+      [["turnaround", "", "loop-not-started"], ["expression", "", "loop-not-started"], ["eye-open", "open-calm", "loop-not-started"], ["eye-open", "open-angry", "loop-not-started"]],
+    );
+    const approvedReferences = JSON.parse(await readFile(approved.assetQuality.approvedReferencesPath, "utf8"));
+    assert.ok(approvedReferences.references.some((row) => row.sha256 === pack.selectedFace.sha256 && row.kind === "character:selected-face"));
+    const assetQualityIssue = approved.state.knownRemainingIssues.find((issue) => issue.id === "character-asset-quality");
+    assert.equal(assetQualityIssue.subjects.length, 4);
   } finally {
     if (savedPack === undefined) delete process.env.BUZZASSIST_CHANNEL_PACK;
     else process.env.BUZZASSIST_CHANNEL_PACK = savedPack;

@@ -12,10 +12,12 @@ import {
   createKoyaLocationAnchorReviewDraft,
   createKoyaLocationReviewDraft,
   importKoyaLocationBoards,
+  koyaLocationAssetQualitySubjectId,
   readKoyaChannelAuthority,
   registerApprovedKoyaLocation,
 } from "../../lib/koyaChannelGovernance.mjs";
 import { renderEditorialPlatePng } from "../../lib/mangaScriptImagePipeline.mjs";
+import { passKoyaAssetQualityLoop } from "./koyaAssetQualityFixture.mjs";
 
 const repositoryRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const fixtureConfigDir = join(repositoryRoot, "test", "fixtures", "channel-pack", "config");
@@ -229,10 +231,28 @@ export function passBoardChecks(review) {
 }
 
 /**
+ * 契約 v54 から、登録する4枚のボードはそれぞれ場所（location）工程の品質ループの合格が要る。
+ * 審査済みのボードごとに、合成の評価者でループを合格させる。
+ */
+export async function passSyntheticLocationLoops({ projectDir, authority, locationId, review, outputDir = "" }) {
+  const audit = await auditKoyaLocationReview({ projectDir, locationBible: authority.locationBible, showBible: authority.showBible, locationId, outputDir, review });
+  if (!audit.pass) throw new Error(`synthetic final review failed:\n- ${audit.failures.join("\n- ")}`);
+  for (const row of audit.rows) {
+    await passKoyaAssetQualityLoop({
+      workDir: join(projectDir, "canvas"),
+      stage: "location",
+      subjectId: koyaLocationAssetQualitySubjectId(locationId, row.boardId),
+      assetPath: row.path,
+    });
+  }
+  return audit;
+}
+
+/**
  * 取り込み → アンカー下書き → 独立したアンカー審査 → 本審査の下書き → 独立した本審査 → 登録。
  * 公式 CLI と同じ関数だけを使う。
  */
-export async function importAndRegisterSyntheticLocation({ projectDir, authority, locationId, sourceDir, outputDir = "", mutate = null }) {
+export async function importAndRegisterSyntheticLocation({ projectDir, authority, locationId, sourceDir, outputDir = "", mutate = null, passAssetQuality = true, register = true }) {
   const common = { projectDir, locationBible: authority.locationBible, showBible: authority.showBible, locationId, outputDir };
   const prepared = await writeSyntheticImport({ authority, locationId, sourceDir, outputDir, mutate });
   const imported = await importKoyaLocationBoards({ authority, locationId, importMapPath: prepared.mapPath, outputDir });
@@ -252,8 +272,10 @@ export async function importAndRegisterSyntheticLocation({ projectDir, authority
   await writeFile(reviewPath, `${JSON.stringify(review, null, 2)}\n`);
   const audit = await auditKoyaLocationReview({ ...common, review });
   if (!audit.pass) throw new Error(`synthetic final review failed:\n- ${audit.failures.join("\n- ")}`);
+  if (passAssetQuality) await passSyntheticLocationLoops({ projectDir, authority, locationId, review, outputDir });
+  if (!register) return { prepared, imported, anchorReview, anchorReviewPath, review, reviewPath, audit };
   const registered = await registerApprovedKoyaLocation({ authority, projectDir, locationId, reviewPath });
-  return { prepared, imported, anchorReview, anchorReviewPath, review, reviewPath, registered };
+  return { prepared, imported, anchorReview, anchorReviewPath, review, reviewPath, audit, registered };
 }
 
 export async function readJson(path) {
