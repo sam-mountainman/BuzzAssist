@@ -25,6 +25,9 @@ import { planNarratedCameraShots } from "../lib/narratedStoryCamera.mjs";
 import { narratedSceneSequence, planNarratedSceneJoins } from "../lib/narratedStorySceneTransitions.mjs";
 import { ff, makeTexturedStill } from "./fixtures/narratedVisualFixture.mjs";
 
+const IS_WINDOWS = process.platform === "win32";
+// 基準の版の上限。Windows 以外は1回で描く（上限を越える長さでも起動できる）。Windows は既定の半分で分けた版。
+const BASELINE_BUDGET = IS_WINDOWS ? Math.floor(FFMPEG_COMMAND_LINE_BUDGET / 2) : 10_000_000;
 const execFile = promisify(execFileCallback);
 const toolchain = await resolveFfmpegToolchain();
 const RENDER = { width: 64, height: 36, fps: 12 };
@@ -123,10 +126,17 @@ test("長い台本の場面の列（深いフォルダの画 60 枚、crossfade 
     const plan = planNarratedCameraShots({ segments, camera: CAMERA, fps: RENDER.fps });
     const joins = planNarratedSceneJoins({ shots: plan.shots, transition: { type: "crossfade", frames: 4 } });
     const sequence = narratedSceneSequence({ shots: plan.shots, joins, render: RENDER });
-    const single = await renderVideoSequence({ ffmpeg: toolchain.ffmpeg, units: sequence.units, joins: sequence.joins, fps: RENDER.fps, outputPath: join(dir, "single.mp4"), encode: ENCODE, budget: 10_000_000 });
-    assert.equal(single.assembly, "single");
-    assert.ok(single.maxCommandLength > WINDOWS_COMMAND_LINE_MAX, `1回で描くと ${single.maxCommandLength} 字（上限 ${WINDOWS_COMMAND_LINE_MAX}）`);
+    // 比べる基準: 1回で描いた版。Windows では上限を越える1回の呼び出しは起動できない（ENAMETOOLONG）
+    // ので、塊の切れ目が違う別の分け方で描いた版を基準にする（どちらも上限の中）。
+    const single = await renderVideoSequence({ ffmpeg: toolchain.ffmpeg, units: sequence.units, joins: sequence.joins, fps: RENDER.fps, outputPath: join(dir, "single.mp4"), encode: ENCODE, budget: BASELINE_BUDGET });
+    if (IS_WINDOWS) {
+      assert.equal(single.assembly, "concat-demuxer");
+    } else {
+      assert.equal(single.assembly, "single");
+      assert.ok(single.maxCommandLength > WINDOWS_COMMAND_LINE_MAX, `1回で描くと ${single.maxCommandLength} 字（上限 ${WINDOWS_COMMAND_LINE_MAX}）`);
+    }
     const chunked = await renderVideoSequence({ ffmpeg: toolchain.ffmpeg, units: sequence.units, joins: sequence.joins, fps: RENDER.fps, outputPath: join(dir, "chunked.mp4"), encode: ENCODE });
+    if (IS_WINDOWS) assert.notEqual(chunked.chunks.length, single.chunks.length, "基準と同じ切れ目では比べる意味がない");
     assert.equal(chunked.assembly, "concat-demuxer");
     assert.ok(chunked.chunks.length >= 2, `${chunked.chunks.length} chunks`);
     assert.ok(chunked.maxCommandLength <= FFMPEG_COMMAND_LINE_BUDGET, `最長 ${chunked.maxCommandLength} 字`);
@@ -155,9 +165,10 @@ test("長い台本の声（深いフォルダの声 160 本、44.1kHz と 48kHz 
       paths.push(path);
     }
     const list = Array.from({ length: 160 }, (_, index) => paths[index % 4]);
-    const single = await concatAudioSequence({ ffmpeg: toolchain.ffmpeg, paths: list, outputPath: join(dir, "single.wav"), budget: 10_000_000 });
-    assert.ok(single.maxCommandLength > WINDOWS_COMMAND_LINE_MAX);
+    const single = await concatAudioSequence({ ffmpeg: toolchain.ffmpeg, paths: list, outputPath: join(dir, "single.wav"), budget: BASELINE_BUDGET });
+    if (!IS_WINDOWS) assert.ok(single.maxCommandLength > WINDOWS_COMMAND_LINE_MAX);
     const chunked = await concatAudioSequence({ ffmpeg: toolchain.ffmpeg, paths: list, outputPath: join(dir, "chunked.wav") });
+    if (IS_WINDOWS) assert.notEqual(chunked.chunks.length, single.chunks.length, "基準と同じ切れ目では比べる意味がない");
     assert.ok(chunked.chunks.length >= 2);
     assert.ok(chunked.maxCommandLength <= FFMPEG_COMMAND_LINE_BUDGET);
     assert.equal(chunked.inputCount, 160);
