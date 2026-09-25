@@ -186,13 +186,20 @@ test("Koya cut pool is bounded, returns input-order outcomes, and stops claiming
   let active = 0;
   let maximumActive = 0;
   const settled = [];
+  // 終わる順を入力の順と変えるのに、待ち時間の差（8・6・4・2ms）を使っていた。負荷の高い端末では
+  // 2ms の差がぶれで埋もれ、入力の順に終わって落ちた（同じ試験を 4 本並列で回して1回）。
+  // 1本目は2本目が終わるまで待つ、という事象で順を入れ替える（2本目が1本目より先に決着する）。
+  let secondDone;
+  const secondFinished = new Promise((resolve) => { secondDone = resolve; });
   const ordered = await runKoyaSpeechCutPool([0, 1, 2, 3], {
     concurrency: 2,
     worker: async (item) => {
       active += 1;
       maximumActive = Math.max(maximumActive, active);
-      await new Promise((done) => { setTimeout(done, (4 - item) * 2); });
+      if (item === 0) await secondFinished;
+      else await Promise.resolve();
       active -= 1;
+      if (item === 1) secondDone();
       return `cut-${item}`;
     },
     onSettled: async (outcome) => { settled.push(outcome.value); },

@@ -37,12 +37,20 @@ function plan(root, count = 6) {
   };
 }
 
-/** 生成器・QA の偽物。出力は入力（何枚目か・修正の回か）だけで決まる。 */
-function fakes({ generationMs = 30, qaMs = 30, failFirstQa = new Set(), failGeneration = new Set(), env = null } = {}) {
+/**
+ * 生成器・QA の偽物。出力は入力（何枚目か・修正の回か）だけで決まる。
+ * holdUntilPeak: 生成が同時に何本まで走れるかを、待ち時間の重なりに頼らずに確かめるための門。
+ * 同時に走る生成がその本数に届くまで、最初の波の生成を待たせる（届いたら門は開いたまま）。
+ * 上限より少なくしか走らせない壊れ方なら、待ちの上限（30 秒）で抜けて peak が足りずに落ちる。
+ */
+function fakes({ generationMs = 30, qaMs = 30, failFirstQa = new Set(), failGeneration = new Set(), env = null, holdUntilPeak = 0 } = {}) {
   const counters = { generation: 0, qa: 0, peakGeneration: 0, peakQa: 0, calls: 0 };
   // 偽の外部呼び出しが始まった・終わった順の記録。所要時間を壁時計でなくこの順序から出す（logicalMakespan）。
   const timeline = [];
   let nextCallId = 0;
+  let openGate;
+  const gate = new Promise((resolve) => { openGate = resolve; });
+  if (holdUntilPeak <= 1) openGate();
   const generateImage = async (input) => {
     const run = async () => {
       const id = (nextCallId += 1);
@@ -50,7 +58,9 @@ function fakes({ generationMs = 30, qaMs = 30, failFirstQa = new Set(), failGene
       counters.generation += 1;
       counters.calls += 1;
       counters.peakGeneration = Math.max(counters.peakGeneration, counters.generation);
+      if (counters.generation >= holdUntilPeak) openGate();
       try {
+        await Promise.race([gate, new Promise((done) => { setTimeout(done, 30_000).unref(); })]);
         await sleep(generationMs);
         const index = Number(String(input.fileName).match(/\d+/u)?.[0] || 1);
         if (failGeneration.has(index)) throw new Error(`fixture provider rejected image ${index}`);
@@ -275,7 +285,9 @@ test("generation stays within the smaller of the machine-wide paid-image slots a
     const stateDir = await mkdtemp(path.join(tmpdir(), "buzzassist-two-stage-slots-"));
     const env = { BUZZASSIST_STATE_DIR: stateDir, BUZZASSIST_MACHINE_SLOTS_PAID_IMAGE: String(machineLimit) };
     const root = await mkdtemp(path.join(tmpdir(), "buzzassist-two-stage-slot-run-"));
-    const { generateImage, visualQa, counters } = fakes({ env, generationMs: 25, qaMs: 5 });
+    // 同時数の上限まで走ることを、25ms の生成の重なりに頼らず門で確かめる。以前は負荷の高い端末で、
+    // 3本目が始まる前に1本目が終わり、peak が 2 のまま落ちた（同じ試験を 4 本並列で回して 20 回中 6 回）。
+    const { generateImage, visualQa, counters } = fakes({ env, generationMs: 25, qaMs: 5, holdUntilPeak: expectedPeak });
     const result = await executeMangaScriptImagePlan(plan(root, 8), {
       concurrency: channelLimit,
       qaConcurrency: 2,

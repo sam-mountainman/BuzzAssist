@@ -549,10 +549,18 @@ test("executor respects fixed concurrency, retries only QA failures, and reuses 
     jobs,
   };
   const attempts = new Map();
+  // 並列に走ったこと（peak > 1）を、12ms の待ちの間に2本目が始まることに頼って見ていた。負荷の高い端末では
+  // 2本目が始まる前に1本目の 12ms が過ぎ、peak が 1 のまま落ちた（同じ試験を 4 本並列で回して3回）。
+  // 最初の1本は2本目が始まるまで待つ（事象で重ねる）。executor が1本ずつしか走らせない壊れ方なら、
+  // 待ちの上限（30 秒）で抜けて peak が 1 のまま落ちる。
+  let secondStarted;
+  const overlapGate = new Promise((resolve) => { secondStarted = resolve; });
   const generateImage = async (input) => {
     generated += 1;
     active += 1;
     peak = Math.max(peak, active);
+    if (active >= 2) secondStarted();
+    await Promise.race([overlapGate, new Promise((resolve) => { setTimeout(resolve, 30_000).unref(); })]);
     await new Promise((resolve) => setTimeout(resolve, 12));
     active -= 1;
     return { buffer, fileName: input.fileName, mimeType: "image/png" };
