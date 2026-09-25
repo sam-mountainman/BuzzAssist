@@ -202,6 +202,9 @@ test("実プロセス: 入力が閉じなくても、自分で exit 0 で終わ�
 
 test("両ホストのフック定義は UserPromptSubmit（学習）と Stop（完成前チェック）だけで、plugin.json から参照され、同じスクリプトを起動する", () => {
   const expected = { UserPromptSubmit: /harness-learn-hook\.mjs/u, Stop: /harness-stop-hook\.mjs/u };
+  // 入力の前に走る学習のフックは短く。停止のフックは、混んだ端末で判定の前に打ち切られて「完成」の
+  // 書き間違いを素通りさせないよう、見張り（HARD_TIMEOUT_MS 20 秒）より長い上限を認める。
+  const maxTimeoutSeconds = { UserPromptSubmit: 10, Stop: 30 };
   for (const [manifestPath, hookPath] of Object.entries(PLUGIN_HOOK_MANIFESTS)) {
     const manifest = readJson(manifestPath);
     assert.equal(manifest.hooks, `./${hookPath}`, `${manifestPath} が ${hookPath} を参照していない`);
@@ -211,7 +214,7 @@ test("両ホストのフック定義は UserPromptSubmit（学習）と Stop（�
       for (const hook of hooks.hooks[event].flatMap((group) => group.hooks)) {
         assert.equal(hook.type, "command");
         assert.match(hook.command, script);
-        assert.ok(hook.timeout > 0 && hook.timeout <= 10, "タイムアウトが長すぎる（入力・停止を待たせる）");
+        assert.ok(hook.timeout > 0 && hook.timeout <= maxTimeoutSeconds[event], `${event} のタイムアウトが長すぎる（入力・停止を待たせる）`);
       }
     }
   }
