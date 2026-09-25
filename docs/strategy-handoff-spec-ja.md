@@ -251,9 +251,10 @@ node scripts/strategy-brief.mjs applicability --brief <ブリーフ> --evidence 
 
 ## 7. 制作へ渡すまでの手順
 
-1. `node scripts/run-video-harness.mjs plan-request --request "<依頼文>"` で、どの制作ハーネスで作るかと前提の不足を確かめる
-   （モデルも有料 API も呼ばず、Job も作らない）
-2. HYP の工程を実行する（上位の AI が、依頼と根拠の不足に合わせて必要な工程を選ぶ。有効な既存の分析は再利用する）。
+1. `node scripts/run-video-harness.mjs plan-request --channel <id> --request "<依頼文>"` で、どの制作の仕組みで作るか・
+   前提の不足・次にやる工程を確かめる（モデルも有料 API も呼ばず、Job も作らない）。MCP では `plan_video_request` に
+   `channelId` を渡す。返る `workflow.recommended` が次の工程で、`alternatives` が代案（7.1）
+2. `workflow.recommended` が HYP の工程（`hyp-*`）なら、上位の AI が HYP でその工程を実行する（有効な既存の分析は再利用する）。
    成果物を作業フォルダへ置き、できれば `strategy-handoff.json` を書く
 3. `node scripts/strategy-brief.mjs draft --from-hyp <作業フォルダ> --channel <id> [--previous <前のブリーフ>] --strategy-skill-dir <HYP の採用版> --out <作業フォルダ>/strategy-brief-rN.json`
 4. 上位の AI が `needsAuthoring` の `author` を HYP の成果物から埋め、`confirm` を確かめる。確かめられないことは
@@ -262,10 +263,36 @@ node scripts/strategy-brief.mjs applicability --brief <ブリーフ> --evidence 
 6. 前提を変えたなら `applicability` で根拠ごとに判定を記録する
 7. 企画の品質ループ: `start --work-dir <作業フォルダ> --generator-context <埋めた会話の ID>` → `sheet` → 別の文脈で採点 → `record`
 8. `node scripts/strategy-brief.mjs verdict --brief <ブリーフ> --require-pass`
-9. `node scripts/run-video-harness.mjs plan-request ... --strategy-brief <ブリーフ>` で合否と根拠の状態を確かめ、
-   `start ... --strategy-brief <ブリーフ>` で制作 Job に渡す（ブリーフの SHA が Job の識別子に入る）
+9. `node scripts/run-video-harness.mjs plan-request --channel <id> ... --strategy-brief <ブリーフ>` で合否と根拠の状態を確かめ、
+   `start --channel <id> ... --strategy-brief <ブリーフ>` で制作 Job に渡す（ブリーフの SHA が Job の識別子に入る）
 
 公開後は `node scripts/strategy-brief.mjs next --from <ブリーフ> --metrics <指標の集計>` で数字を照らし、次の版の下書きへ進みます。
+
+### 7.1 チャンネルの台帳と、次の工程の決め方
+
+チャンネルごとの設定は、運営者の端末の `config/harness-deployments.json` の `channels` に書きます（追跡しないファイル。
+書き方は `config/harness-deployments.example.json` の `channelTemplate`）。1チャンネルにつき、作業フォルダ・署名済み
+Channel Pack・制作の仕組み（`{ "kind": "harness", "harnessId": ... }` か、BuzzAssist の外で作る `{ "kind": "external" }`）・
+戦略の作業フォルダ（`strategy.workDir`）・合格したブリーフを制作の条件にするか（`strategy.requireBrief`）・台本の品質ループの
+ジャンルを持ちます。チャンネルどうしで場所が重なる台帳と、公開リポジトリの追跡される場所を指す台帳は読み込みで拒みます。
+
+plan-request は依頼の種類（`requestKind`）とブリーフの状態から次の工程を返します。種類が決めきれないときは `question` を1問
+返すので、答えを `requestKind` に入れて呼び直します。
+
+| 依頼の種類 | 返る工程の例 |
+|---|---|
+| `new-design`（新しく企画を立てる） | `hyp-design` |
+| `next-video`（次の1本） | ブリーフが無ければ `hyp-design`、未合格なら `strategy-brief-review`、根拠の取り直しが要れば `hyp-additional-research`。合格したブリーフがまだ使われていなければ `reuse-brief`、使った後なら `hyp-next-video` |
+| `script-review`（台本を見る） | `hyp-script-review` のあと台本の品質ループ |
+| `produce`（作る） | `requireBrief` のチャンネルで合格したブリーフが無ければ、直す工程（`hyp-design` など）。あれば `produce` |
+| `rerender`（作り直し） | 既存の Job の `resume` だけ（HYP も採点も回さない） |
+| `post-publish`（公開後の数字から次へ） | `hyp-post-publish`（前のブリーフがあれば `next --from`） |
+| `research`（調べる） | `hyp-research` |
+
+HYP の工程について返すのは、工程の名前・作業フォルダ・HYP の採用版の指紋・終わったら作るもの（ブリーフ）・その後のコマンドの順番
+だけで、HYP の文面は持ちません。`requireBrief` のチャンネルでは、合格したブリーフが無いと `start` が Job を作る前に止まります
+（`channel-strategy-brief-required` / `channel-strategy-brief-not-passed`）。`resume` は、start のときのブリーフが書き換わって
+いれば有料の処理の前に止まります（`strategy-brief-changed-since-start`）。
 
 ## 8. HYP の採用版を固定する
 
