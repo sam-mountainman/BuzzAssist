@@ -44,8 +44,7 @@ node scripts/harness-registry.mjs gaps     # 横断で見た抜け
 直接使ってreservation、idempotency、provider job ID、recover、Receiptを迂回しては
 ならない。新しく `fetch` + リトライをproduction entrypointへ書かない。
 
-課金APIでは、再送してよいかの判断を1つ間違えるたびに金が消える。だから
-規則は狭く取ってある。
+課金APIでは、再送してよいかの判断を1つ間違えるたびに金が消える。だから規則は狭く取ってある。
 
 - submit前にrequest identityとreservationをdurable journalへ保存する。同じ
   input/provider/model/voice/paramsは同じrequest keyへ正規化し、同時起動も同一jobへ寄せる
@@ -168,8 +167,7 @@ harness-deployments.json（配布物の `config/harness-deployments.example.json
 
 ## 実行の記録（RunReceipt）
 
-`lib/harnessRunReceipt.mjs`。本番の実行は必ず記録を残す。詳細は
-`harness-self-improvement` スキルにあるが、この層で守る規則は1つ:
+`lib/harnessRunReceipt.mjs`。本番の実行は必ず記録を残す。詳細は `harness-self-improvement` スキルにあるが、この層で守る規則は1つ:
 
 **走っていないゲートを「通った」と書けないこと。**
 
@@ -369,13 +367,11 @@ Koya の subject は `koya-review-attestation-v1`、narrated は `narrated-story
 
 ## 並列制御
 
-`lib/adaptiveConcurrency.mjs`（AIMD）。実測した上限と、並列にしてよい工程・
-直列必須の工程は `harness-parallel-execution` スキルにある。推測で並列化しない。
+`lib/adaptiveConcurrency.mjs`（AIMD）。実測した上限と、並列にしてよい工程・直列必須の工程は `harness-parallel-execution` スキルにある。推測で並列化しない。
 
 ## 原子的書き込み
 
-`writeJsonAtomic`（`lib/canvasScene.mjs`）。途中で落ちた成果物が
-「完成した成果物」に見えないように、必ず temp → rename で書く。
+`writeJsonAtomic`（`lib/canvasScene.mjs`）。途中で落ちた成果物が「完成した成果物」に見えないように、必ず temp → rename で書く。
 
 複数のファイルを1つの確定として書く（完成 MP4・監査の報告・Receipt・状態ファイルなど）ときは
 `lib/fileTransaction.mjs`（redo journal）を使う。新しい中身を全部置き場へ書き、journal を原子的に
@@ -389,7 +385,12 @@ Koya の subject は `koya-review-attestation-v1`、narrated は `narrated-story
   コマンド行全体で 32,767 字の上限がある。FFmpeg 7 以降は `-/filter_complex`、それより前は
   `-filter_complex_script`）。コマンド行の長さは同じファイルの `windowsCommandLineLength` で測る
 - 入力の多い FFmpeg の工程（場面の画・声のファイルを並べる）は `lib/ffmpegSequenceRender.mjs` で描く。
-  `FFMPEG_COMMAND_LINE_BUDGET` を越えない塊に分けて描き、concat demuxer の stream copy でつなぐ。2つ目の分割器を作らない
+  `FFMPEG_COMMAND_LINE_BUDGET` を越えない塊に分けて描き、concat demuxer の stream copy でつなぐ。時刻の決まった音を
+  足し合わせる工程（BGM の区分の曲をつなぐなど）は同じファイルの `mixAudioPieces`。2つ目の分割器を作らない
+- 子プロセスの作業フォルダ（cwd）の長さは `lib/windowsWorkPath.mjs`。Windows で 238 字を越えると子を起動できないので
+  `windows-work-path-too-long` で有料の処理の前に止め、共通の doctor の `windows-work-path` が両ハーネスで測る。子を
+  作業フォルダ指定で起動する工程を足したら、ハーネスの見積もり（`narratedStoryChildWorkDirs` など）にも足す——
+  見積もりに無い作業フォルダは検査されず、Windows で有料の処理の後に落ちる。足し忘れは試験では気付けない
 - 運営者の画・動画の取り込みは上の `lib/operatorImageImport.mjs` / `lib/operatorVideoImport.mjs`
 
 ## UI を触ったら、起動して確かめる
@@ -444,9 +445,8 @@ BuzzAssist正本は`.agents/skills`に置く。Claude Code は `.claude/skills` 
 <!-- buzzassist-learning:c256846f03e5 -->
 複数セッションを統合監査するときは、各セッションの未解決主張を原子単位でID化し、現在実装・レビュー台帳・最終回答への三者クロスウォークを作る。個別リスクを「ハーネス未完成」へ丸めず、解決・未解決・枝差分・検証不能をそれぞれ明記する。
 
-取り込みmanifestは、原文のcontent hash、byte/line数、重複turn/tool ID、各findingの
-割当を持つ。元セッションが後から変わった、findingが0件/複数回割り当てられた、
-workflow synthesisが欠けている、といった状態を検査で見えるようにする。
+取り込みmanifestは、原文のcontent hash、byte/line数、重複turn/tool ID、各findingの割当を持つ。元セッションが
+後から変わった、findingが0件/複数回割り当てられた、workflow synthesisが欠けている、といった状態を検査で見えるようにする。
 
 ## この層で繰り返し見つかった不具合の型
 

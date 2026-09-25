@@ -123,6 +123,16 @@
         "2つ目の分割器やコマンド行の測り方を作らず、windowsCommandLineLength を使う",
         "xfade の前は settb=1/fps に揃え、1回で描いた版と画素が同じかを読み戻して確かめる"
       ]
+    },
+    {
+      "id": "windows-work-path-estimate",
+      "prompt": "ナレーション物語に、Job の run のフォルダの下の新しい作業フォルダで ffmpeg を起動する工程を足したい。",
+      "shouldTrigger": true,
+      "invariants": [
+        "子を作業フォルダ指定で起動するなら、その作業フォルダをハーネスの見積もり（narratedStoryChildWorkDirs など）にも足す",
+        "長さの判定は lib/windowsWorkPath.mjs の1か所を使い、2つ目の判定を作らない",
+        "Windows で 238 字を越えると windows-work-path-too-long で有料の処理の前に止まることを前提に、見積もりに無いと有料の処理の後で落ちると説明する"
+      ]
     }
   ]
 }
