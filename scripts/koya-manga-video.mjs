@@ -658,8 +658,14 @@ switch (args.action) {
       exitCode = paused.exitCode;
       break;
     }
-    print({ episodeId: result.episodeId, status: result.state.status, waiting: result.waiting, paths: result.paths });
-    if (result.waiting || result.failed) exitCode = 3;
+    print({
+      episodeId: result.episodeId,
+      status: result.state.status,
+      waiting: result.waiting,
+      paths: result.paths,
+      ...(result.awaitingAssetQuality ? { assetQualityAwaiting: result.assetQualityAwaiting } : {}),
+    });
+    if (result.waiting || result.failed || result.awaitingAssetQuality) exitCode = 3;
     break;
   }
   case "character-review-refresh": {
