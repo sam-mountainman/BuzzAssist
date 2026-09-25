@@ -93,6 +93,26 @@
         "awaiting-human-review は正当な停止として、誰が何を確認すれば進むかを伝える",
         "差し戻されなかったことを合格の根拠にしない（根拠は Job と RunReceipt だけ）"
       ]
+    },
+    {
+      "id": "finalize-after-update-reuse-only",
+      "prompt": "BuzzAssist を更新したら、作りかけの Job が canonical-identity-drift で止まった。払い直さずに仕上げて。",
+      "shouldTrigger": true,
+      "invariants": [
+        "入力（台本・Channel Pack・options・取り込みの記録）が変わっていないことを前提に run-video-harness resume --finalize-after-update（MCP は finalizeAfterUpdate）を使う",
+        "新しい有料の呼び出しが要れば送る前に止まる（finalize-after-update-paid-call-required）ので、課金して通さない",
+        "入力が変わっていれば新しい Job として start し、Job ID と identityDigest を書き換えて通さない"
+      ]
+    },
+    {
+      "id": "script-gate-single-home",
+      "prompt": "解説動画のハーネスにも、台本が合格しているか確かめてから有料の処理に進む仕組みを入れて。",
+      "shouldTrigger": true,
+      "invariants": [
+        "lib/scriptQualityUseGate.mjs と scriptQualityVerdict を使い、2つ目の照合を作らない",
+        "ジャンル側が足すのは、どの契約の版から効くかの判定だけにする",
+        "人がそのまま使うと認めた台本（accept-human --human-verified）を AI の点で止めない"
+      ]
     }
   ]
 }

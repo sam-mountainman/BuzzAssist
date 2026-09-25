@@ -100,6 +100,22 @@ paid-speech 4・paid-image 16、`BUZZASSIST_MACHINE_SLOTS_PAID_SPEECH` / `BUZZAS
 取り込み、会話の URL などの本文は私有の Job フォルダにだけ残す（公開面は sha256 だけ）。費用は Media Job に
 数えず `operator-external-contract` として記録する。2つ目の取り込み口を作らない。
 
+### 更新をまたいで確定させる
+
+BuzzAssist を更新すると、進行中の Job はコードの同一性が計画時と変わり `canonical-identity-drift` で止まる。
+入力（台本・Channel Pack・options（ブリーフの SHA を含む）・取り込みの記録・漫画の回の例外）が同じなら、
+`node scripts/run-video-harness.mjs resume --finalize-after-update`（MCP は `finalizeAfterUpdate: true`）で、
+作り直さずに確定までやり直す（2026-09-26 運営者決定。本体 `lib/videoHarnessUpdateFinalize.mjs`）。
+
+- 付け替えるのはコードの同一性だけ。計画時の値は `codeIdentityRebind` に残し、Job ID と identityDigest は
+  変えない（reviewer の署名は identityDigest に結ばれているので、変えると済んだレビューまで無効になる）
+- 付け替えた Job は以後、再利用だけで走る。新しい有料の呼び出しは `lib/paidCallGuard.mjs` が送る前に止め
+  （`finalize-after-update-paid-call-required`、課金なし）、確定させない。送り口ごとに2つ目の関所を書かない
+- 監査と確定は Job に固定した契約の版で行う（漫画は固定した制作契約の写し、ナレーション物語は計画時の宣言）。
+  更新後の版の必須監査で測ると、当時無かった監査で落とすことになる
+- 入力が変わっていれば今までどおり止まる（`finalize-after-update-input-changed` など）。新しい Job として
+  start する。`--retry-failed-images` とは一緒に使えない。更新をまたいだ事実は RunReceipt の `codeIdentity` に残る
+
 ## どの入口を使わせるか
 
 `lib/harnessRouting.mjs`。ジャンルごとに、ガバナンスを通る入口は1つだけで、
@@ -133,6 +149,22 @@ paid-speech 4・paid-image 16、`BUZZASSIST_MACHINE_SLOTS_PAID_SPEECH` / `BUZZAS
   `<id>.capabilities.json` を置く（本体 `lib/harnessCapabilities.mjs`）。保証・運営者に要る素材・実績は
   カードに書かない（保証と素材は宣言から自動で作り、実績は記録から読む）。説明をカードに分けるのは、
   文を直しただけで宣言の SHA（Job の識別子に入る）が変わらないようにするため
+
+**チャンネルが決まっている依頼**は `plan-request --channel <id>`（MCP は `channelId`）で呼ぶ。運営者の配置表
+harness-deployments.json（配布物の `config/harness-deployments.example.json` から作る）の `channels` が、作業
+フォルダ・署名済み Channel Pack・制作の仕組み・戦略の作業フォルダ・台本の品質ループの設定を決め、依頼の種類
+（`requestKind`）と次の工程の推奨・代案・理由（`workflow`）が返る（本体 `lib/channelNextStep.mjs`）。Pack や
+作業フォルダが台帳のチャンネルに当たれば、`--channel` が無くても同じ扱いになる。
+
+- 種類を決めきれなければ `question` を1回だけ聞き、答えを `requestKind`（CLI は `--request-kind`）に入れて呼び直す
+- 戦略スキルの工程（`workflow` の owner が strategy-skill のもの）はホストの AI が戦略スキルで実行する。終わったら
+  `workflow.recommended.then` の順（ブリーフの下書き → 欄を埋める → 形の確認 → 当てはまりの記録 → 企画の品質
+  ループ）でブリーフを作ってから plan-request を呼び直す
+- 台帳の `strategy.requireBrief` が true のチャンネルは、合格したブリーフ（`--strategy-brief`）が無いと start が
+  Job を作る前に止まる（`channel-strategy-brief-required` / `channel-strategy-brief-not-passed`）
+- 同じ内容の再レンダーは resume だけ。start のときのブリーフが変わっていれば resume も止まる
+  （`strategy-brief-changed-since-start`）ので、新しい Job として start する。start と resume の関門は
+  `lib/channelStartGate.mjs` の1か所（CLI と MCP が同じ判定になる）
 
 ## 実行の記録（RunReceipt）
 
@@ -238,23 +270,31 @@ snapshot の読み取り側だけを書く。漫画は `lib/koyaMangaProgressSna
 - 直前の回と同じ所見の評価は `quality-feedback-not-updated` で拒否し、新しい評価を求める
 - 合格せずに止まったら、最高点の回を成果物 SHA つきで `bestRound` に残す。合格扱いにはしない
 
-### 途中の成果物の品質ループ
+### 品質ループの種類と入口
 
-人物の設定画・背景・本編の画・サムネ・声のテイクも、使う前に同じ中核でループを回す。入口は
-`node scripts/asset-quality-loop.mjs`（start / sheet / record / verify / status）、実装は
-`lib/assetQualityLoop.mjs`。
+| 対象 | 入口 | 本体 | 使う前の照合 |
+|---|---|---|---|
+| 完成動画 | 各ジャンルの signoff と最終監査 | `lib/mangaQualityHarness.mjs` / `lib/narratedStoryQualityLoop.mjs` | 最終監査・RunReceipt |
+| 途中の成果物（人物の設定画・背景・本編の画・サムネ・声のテイク・動画クリップ） | `node scripts/asset-quality-loop.mjs` | `lib/assetQualityLoop.mjs` | `lib/assetQualityUseGate.mjs` |
+| 台本 | `node scripts/script-quality-loop.mjs` | `lib/scriptQualityLoop.mjs` | `lib/scriptQualityUseGate.mjs` |
+| 企画（戦略ブリーフ） | `node scripts/strategy-brief.mjs` | `lib/strategyBriefQualityLoop.mjs` | `lib/channelStartGate.mjs`（start / resume） |
 
-- 人物の同一性と、公開面に出る画の手指の安全は、対話端末＋`--human-verified` の人の確認が無いと
-  合格にならない。人の確認は対象ごと（batch では記録できない）
-- 評価者に渡すシート（`sheet`）には合格点・下限・重み・前の回の点数を載せない
-- 同じ工程の対象が多いとき（長い動画の声のテイク・本編の画）は `sheet --batch` / `record --batch` で
-  1つの評価文脈がまとめて採点する（1回 50 件まで）。保証は1件ずつと同じ: 対象ごとに作った文脈と別の
-  評価者の採点と所見、1つの不合格は他の合格を消さない、再評価は不合格の対象だけ。同じ所見の写しを
-  複数の対象に貼った採点は記録されない
-- 使う前の照合は `lib/assetQualityUseGate.mjs` の1か所だけに置く。ジャンルは効力の判定だけを足す
-  （漫画は契約の版で効力を決めてからここを呼ぶ）
-- 状態 → 理由コードの対応は `lib/assetQualityLoop.mjs` の `assetQualityReasonCode` の1か所
-  （before-use / loop-state の語彙）。照合する側はループの issues や状態名を読まない
+使う前の照合と「状態 → 理由コード」の対応は、ループの種類ごとに1か所だけに置く。ジャンルが足すのは効力の
+判定（どの契約の版から効くか）だけで、照合する側はループの issues や状態名を読まない。2つ目の照合を作らない。
+
+- 途中の成果物: 人物の同一性と、公開面に出る画の手指の安全は、対話端末＋`--human-verified` の人の確認が
+  無いと合格にならない（対象ごと。batch では記録できない）。評価者に渡すシートには合格点・下限・重み・
+  前の回の点数を載せない。動画クリップは `measure-video` で測ってから記録する
+- 台本: 制作の Job は、有料の処理の前に、使う台本（Job に保存した写しのバイト列の SHA）を
+  `scriptQualityVerdict` に問う。ループが合格した版か、人がそのまま使うと認めた版（`accept-human
+  --human-verified`、確認した人が自分の端末で打つ）でなければ `script-quality-required:<理由>` の人待ちで止まる。
+  運営者・依頼者が書いた台本を AI の点で止めないための道が accept-human
+- 企画: 判断はホストのエージェントと運営者がする。BuzzAssist はブリーフの形と根拠の SHA を検査し、版ごとに
+  別の評価文脈の採点を記録するだけ。`verdict --require-pass` が通るまで制作へ渡さない
+
+対象 id・batch の保証・動画クリップの測定・台本のループの評価者の組と累計と指摘の採否・企画ブリーフの根拠の
+古さと下書きの組み立ては `references/quality-loops-ja.md` にある。ループを回すとき、ループの記録や照合を
+読むコードを触るとき、ブリーフを組み立てるときは、先にそれを最後まで読む。
 
 ## 独立レビューの署名（reviewer attestation）
 
@@ -358,38 +398,17 @@ Koya の subject は `koya-review-attestation-v1`、narrated は
 `src/` の下を変更したら、**ブラウザで実際に起動してコンソールを見る**。
 これは任意の丁寧さではなく、この層で必須の手順。
 
-理由は実測にある。UI のテスト44件は `App.jsx` を**レンダーせず readFile と
-正規表現**で判定しているので、挙動については何も保証しない。実際、
-**44件すべてが緑のまま、起動するとコンソールに40件超のエラーが出ていた**
-（アセットのパスを SVG の dataURL に入れていて、Excalidraw が base64 として
-復号しようとして落ちていた）。誰も気づかないまま残っていた。
+理由は実測にある。UI のテスト44件は `App.jsx` をレンダーせず readFile と正規表現で判定しているので、
+挙動については何も保証しない。実際、**44件すべてが緑のまま、起動するとコンソールに40件超のエラーが
+出ていた**。`npm test` の入口の `vite build` も、import と構文の破壊は落とすが、トップレベルの throw と
+実行時のエラーは落とさない。
 
-Claude Code/Codexの現在のhostが内蔵Browserを持つなら、そのBrowserでCanvas URLを開く。
-CodexデスクトップではBrowser runtimeの`tab.playwright`でDOM操作・console取得・
-screenshotができる。Claude Codeでは利用可能な内蔵BrowserまたはChrome連携を使う。
-固定portを推測せず、setupが出した`BUZZASSIST_CANVAS_URL`または
-`canvas/.server.json`のlive URLを使う。
+- 開く URL は setup が出した `BUZZASSIST_CANVAS_URL` か `canvas/.server.json` の live URL（固定 port を
+  推測しない）。今のホストが内蔵 Browser を持つならそれで開く
+- 見るのは3つ: 新しい読み込み以降のコンソールエラーが0件・画面が描画されている・触った機能が実際に動く
 
-見るのは3つ。
-
-- **コンソールエラーが0件**であること。1件でも出たら原因まで辿る
-- **画面が描画されている**こと。エラー0件は「真っ白」でも成立する
-- 触った機能が**実際に動く**こと（クリックして結果を読む）
-
-注意すべき点が2つある。
-
-**コンソールは前の読み込みぶんも溜まっている。** 直したのに古いエラーが
-見えて混乱する。新しいタブまたはreload境界以降のconsoleだけを判定する。
-
-**初回ハイドレーション中のエラーは、後から計測しても捕まらない。** 原因を
-辿るときは `src/main.jsx`（App より先に走る）へ一時的な計測を入れて再読込する。
-調査が終わったら必ず外す。
-
-## `npm test` では捕まらないもの
-
-入口に `vite build` が入っているので、import と構文の破壊は落ちる。
-だが**トップレベルの throw は落ちない**——構文としては正しく、バンドルも通る。
-実行時のエラーも見えない。そこは上のブラウザ確認が担う。
+開き方の詳細と、古いエラーの見分け方・初回ハイドレーション中のエラーの辿り方は
+`references/ui-verification-ja.md` にある。`src/` を触ったとき、ブラウザで原因を辿るときに読む。
 
 <!-- buzzassist-learning:1a29a7b76bb8 -->
 Codexデスクトップ内蔵Browserはtab.playwrightでCanvasを操作できるため、その用途だけでstandalone Playwrightを追加しない。
@@ -473,7 +492,9 @@ workflow synthesisが欠けている、といった状態を検査で見える�
   テストで見えるようにする**（`receiptAdapter: { status: "pending", reason, requiredWork }`）
 - CLAUDE.md / AGENTS.md / GEMINI.md を手で直す。リポジトリの config/host-instructions.template.md を直して
   `node scripts/generate-host-instructions.mjs` で作る（CI が `npm run instructions:check` で照合する）
-- 4つ目の Canvas 投影器、2つ目の取り込み口・品質ループの照合・ホストの判定を作る
+- 4つ目の Canvas 投影器、2つ目の取り込み口・品質ループの照合・ホストの判定・有料の呼び出しの関所を作る
+- エージェントが人の代わりに `accept-human`・`reset-cumulative` を `--human-verified` で打つ
+  （台本を認めたこと・累計を戻したことは、確認した人の端末でだけ記録する）
 - Stop フックに差し戻されなかったことを、合格の根拠として報告する
 - 承認前の正本スキルで作ったこと（Receipt の `skillApproval`）を伏せて完成を報告する。
   エージェントが `skill-inventory --approve` を打つ・`skills:check:release` の関門を外す
