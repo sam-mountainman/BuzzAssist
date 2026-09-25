@@ -115,6 +115,8 @@
     "skills:check": "node scripts/skill-inventory.mjs",
     "skills:check:release": "node scripts/skill-inventory.mjs --require-approval",
     "skills:evals": "node scripts/skill-evals.mjs",
+    "instructions:generate": "node scripts/generate-host-instructions.mjs",
+    "instructions:check": "node scripts/generate-host-instructions.mjs --check",
     "package:audit": "node scripts/audit-package-tarball.mjs",
     "doctor": "node scripts/harness-doctor.mjs",
     "hooks:install": "git config core.hooksPath .githooks"

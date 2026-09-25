@@ -35,6 +35,7 @@ import {
   updaterPaths,
 } from "../lib/pluginAutoUpdate.mjs";
 import { envWithNodeOnPath, resolveNpmInvocation } from "../lib/npmInvocation.mjs";
+import { MANAGED_BLOCK_MARKER, antigravitySetupBlock, applyManagedBlock } from "../lib/hostInstructionFiles.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const pluginName = "buzzassist";
@@ -1088,34 +1089,9 @@ If the user wants phone/mobile access or the exact same Excalidraw UI outside th
 `;
 }
 
-function antigravityRuleBlock() {
-  return `# BuzzAssist Agent Setup
-
-When the user gives this repository URL and asks to set it up, do the setup end to end for Antigravity only.
-
-1. Clone or open this repository.
-2. Run \`node scripts/setup-agents.mjs --agent antigravity --project-dir <active-user-project-dir>\` from the repository root. If there is no separate active project, use this repository root as the project dir.
-3. The script must configure Antigravity only. Do not configure Codex, Claude Code, or Cursor unless the user explicitly asks for those hosts too.
-4. After the script prints \`BUZZASSIST_CANVAS_URL=...\` and \`BUZZASSIST_CANVAS_CHECK=ok\`, first open that URL in Antigravity's in-app browser. Only if that capability is unavailable, use Chrome/the external-browser fallback.
-5. If the user wants phone/mobile access or says they want the exact same Excalidraw UI outside the machine, use Canvas Tunnel: run setup with \`--tunnel\` or run \`npm run tunnel:start -- --project-dir <active-user-project-dir>\`. The tunnel uses Cloudflare (\`cloudflared\`) by default — no account is needed. If a system copy is not installed, BuzzAssist downloads the pinned official release into the user's \`~/.buzzassist/tools/\` cache, verifies its SHA-256 checksum, and runs it without administrator privileges. Use \`--no-auto-download\` or \`BUZZASSIST_CLOUDFLARED_AUTO_DOWNLOAD=0\` to opt out. Give the printed \`BUZZASSIST_TUNNEL_ACCESS_URL\` for the phone.
-
-Manual fallback:
-
-\`\`\`bash
-node scripts/setup-agents.mjs --agent antigravity --project-dir <active-user-project-dir> --no-launch
-node scripts/serve-canvas.mjs <active-user-project-dir>
-npm run tunnel:start -- --project-dir <active-user-project-dir>
-\`\`\`
-
-Use the live URL from \`canvas/.server.json\` when a requested port is busy.
-`;
-}
-
+// 管理ブロックの差し替えと Antigravity の手順は lib/hostInstructionFiles.mjs に1つだけ置く。
+// このリポジトリの GEMINI.md も同じ関数から作るので、リポジトリで setup を走らせても変わらない。
 async function upsertManagedBlock(path, marker, body) {
-  const start = `<!-- ${marker}:START -->`;
-  const end = `<!-- ${marker}:END -->`;
-  const block = `${start}\n${body.trim()}\n${end}\n`;
-
   if (dryRun) {
     console.log(`Would update ${path}`);
     return;
@@ -1123,16 +1099,7 @@ async function upsertManagedBlock(path, marker, body) {
 
   let current = "";
   if (await pathExists(path)) current = await readFile(path, "utf8");
-
-  const startIndex = current.indexOf(start);
-  const endIndex = current.indexOf(end);
-  let next;
-  if (startIndex >= 0 && endIndex > startIndex) {
-    next = `${current.slice(0, startIndex)}${block}${current.slice(endIndex + end.length).replace(/^\n/, "")}`;
-  } else {
-    const prefix = current.trimEnd();
-    next = `${prefix}${prefix ? "\n\n" : ""}${block}`;
-  }
+  const next = applyManagedBlock(current, marker, body);
 
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, next);
@@ -1169,7 +1136,7 @@ async function setupAntigravity(pluginDir) {
   else await writeJson(configPath, config);
 
   const rulePath = join(projectDir, "GEMINI.md");
-  await upsertManagedBlock(rulePath, "BUZZASSIST", antigravityRuleBlock());
+  await upsertManagedBlock(rulePath, MANAGED_BLOCK_MARKER, antigravitySetupBlock());
 
   return { ok: true, configPath, rulePath };
 }

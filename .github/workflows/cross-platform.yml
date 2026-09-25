@@ -124,6 +124,11 @@ jobs:
       - name: Check skill inventory consistency
         run: npm run skills:check
 
+      # CLAUDE.md / AGENTS.md / GEMINI.md は config/host-instructions.template.md から作る。
+      # 手で1つだけ直すと、ほかのホストが古い規則のまま残る（3つを手で保守していた頃に起きた）。
+      - name: Check host instruction files are generated from the template
+        run: npm run instructions:check
+
       - name: Build canvas
         run: npm run build
       # 検査語彙は鍵つき digest で、鍵は secret でだけ渡す（公開 salt の旧形式は

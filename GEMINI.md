@@ -1,18 +1,24 @@
-<!-- BUZZASSIST:START -->
-# Koya manga video — mandatory route
+# Koya manga video — mandatory Antigravity route
 
-For any request that produces, changes, reviews, repairs, renders, or audits a
-Japanese manga video, read these canonical skills completely first:
+For any request that produces, changes, reviews, repairs, renders, or audits a Japanese manga video, Antigravity must first read these canonical skills completely:
 
 - `.agents/skills/manga-video-production/SKILL.md`
 - `.agents/skills/manga-page-camera/SKILL.md`
 
-Use `node scripts/koya-manga-video.mjs` as the only production entrypoint for new
-episodes. The quality gates documented in that skill (voice quality, character
-attribute gate, blind comparison) are host-agnostic and apply here identically.
-Do not claim completion until the official final audit passes, the MP4-derived
-contact-sheet signoff is valid, `knownRemainingIssues` is empty, and the real
-MP4 fully decodes.
+The operator-facing top-level entrypoint is `node scripts/run-video-harness.mjs`; it owns the durable Job, signed Channel Pack, doctor, resume/cancel, RunReceipt, and Canvas projection. Inside the selected Koya adapter, `node scripts/koya-manga-video.mjs` is the only production runner for a new episode. The historical `scripts/build-manga-video.mjs` and versioned `apply/finalize/generate-manga-v*` scripts are benchmark-only migrations and must not be used for a new episode. The quality gates documented in those skills (voice quality, character attribute gate, blind comparison) are host-agnostic and apply here identically. Do not claim completion until the official final audit passes, the MP4-derived contact-sheet signoff is valid, `knownRemainingIssues` is empty, and the real MP4 fully decodes.
+
+For new episodes, identify the protagonist before paid generation and pass `--protagonist-speaker-id`. Square narration boxes remain visually distinct, but every narration line must use the protagonist's exact approved voice; do not create a dedicated narrator.
+
+# Raw script to finished video — shared route
+
+For any operator request that turns a raw Japanese script into a finished video, first read
+`.agents/skills/platform-craft/SKILL.md` and the selected genre skill completely. For narrated
+story videos that genre skill is `.agents/skills/narrated-story-video/SKILL.md`; manga continues
+to use the two mandatory skills above. Start through `node scripts/run-video-harness.mjs` (or the
+equivalent `run_video_harness` MCP tool), require a signed Channel Pack, and keep the default
+plan-only behavior unless paid execution was explicitly confirmed. Claude Code and Codex must
+use the same Harness declaration, Skill SHA, Channel Pack fingerprint, quality gates, RunReceipt,
+and BuzzAssist Canvas projection; a globally installed plugin or skill is not an implicit fallback.
 
 # 並列実行 — 両ハーネス共通ルート
 
@@ -61,6 +67,7 @@ dry-run、正本への反映には reviewer 名が要る。自動で正本を書
 呼んだときは、Antigravity が呼び出し元として `--caller-host antigravity` で記録する。
 返った id は台本の品質ループ（`node scripts/script-quality-loop.mjs record --external-call <id>`）が参照する。
 
+<!-- BUZZASSIST:START -->
 # BuzzAssist Agent Setup
 
 When the user gives this repository URL and asks to set it up, do the setup end to end for Antigravity only.
@@ -68,8 +75,8 @@ When the user gives this repository URL and asks to set it up, do the setup end 
 1. Clone or open this repository.
 2. Run `node scripts/setup-agents.mjs --agent antigravity --project-dir <active-user-project-dir>` from the repository root. If there is no separate active project, use this repository root as the project dir.
 3. The script must configure Antigravity only. Do not configure Codex, Claude Code, or Cursor unless the user explicitly asks for those hosts too.
-4. After the script prints `BUZZASSIST_CANVAS_URL=...` and `BUZZASSIST_CANVAS_CHECK=ok`, open that URL in Antigravity's in-app browser if available. If browser control is unavailable, report the URL and say that setup still completed because the canvas check passed.
-5. If the user wants phone/mobile access or says they want the exact same Excalidraw UI outside the machine, use Canvas Tunnel: run setup with `--tunnel` or run `npm run tunnel:start -- --project-dir <active-user-project-dir>`. The tunnel uses Cloudflare (`cloudflared`) by default — no account needed for a quick tunnel. If it is not installed, tell the user to install it with `brew install cloudflared` on macOS or `winget install Cloudflare.cloudflared` on Windows. Give the printed `BUZZASSIST_TUNNEL_ACCESS_URL` for the phone.
+4. After the script prints `BUZZASSIST_CANVAS_URL=...` and `BUZZASSIST_CANVAS_CHECK=ok`, first open that URL in Antigravity's in-app browser. Only if that capability is unavailable, use Chrome/the external-browser fallback.
+5. If the user wants phone/mobile access or says they want the exact same Excalidraw UI outside the machine, use Canvas Tunnel: run setup with `--tunnel` or run `npm run tunnel:start -- --project-dir <active-user-project-dir>`. The tunnel uses Cloudflare (`cloudflared`) by default — no account is needed. If a system copy is not installed, BuzzAssist downloads the pinned official release into the user's `~/.buzzassist/tools/` cache, verifies its SHA-256 checksum, and runs it without administrator privileges. Use `--no-auto-download` or `BUZZASSIST_CLOUDFLARED_AUTO_DOWNLOAD=0` to opt out. Give the printed `BUZZASSIST_TUNNEL_ACCESS_URL` for the phone.
 
 Manual fallback:
 
