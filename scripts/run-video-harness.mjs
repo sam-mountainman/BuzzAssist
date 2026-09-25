@@ -2,6 +2,7 @@
 // Claude Code / Codex 共通の上位入口。
 //
 //   node scripts/run-video-harness.mjs plan-request --request "依頼文" [--script-path FILE] [--channel-pack BUNDLE] [--strategy-brief FILE]
+//   node scripts/run-video-harness.mjs plan-request --channel ID --request "依頼文" [--request-kind KIND] [--strategy-brief FILE]
 //   node scripts/run-video-harness.mjs start --harness ID --script-path FILE --channel-pack BUNDLE [--strategy-brief FILE] [--script-quality-work-dir DIR]
 //   node scripts/run-video-harness.mjs resume --job-id ID --confirmed
 //   node scripts/run-video-harness.mjs status --job-id ID
@@ -36,10 +37,14 @@ function usage() {
   return [
     "BuzzAssist video harness (Claude Code / Codex common entry)",
     "",
-    "plan-request --request TEXT [--project-dir DIR] [--harness ID] [--script-path FILE] [--channel-pack BUNDLE] [--strategy-brief FILE] [--options-json FILE] [--doctor]",
+    "plan-request --request TEXT [--channel ID] [--request-kind KIND] [--project-dir DIR] [--harness ID] [--script-path FILE] [--channel-pack BUNDLE] [--strategy-brief FILE] [--options-json FILE] [--doctor]",
     "  依頼に合うハーネスの候補・理由（一致した語・否定された語・入力要件・前提・実績・Channel Pack の向き先）と、",
     "  決めきれないときの1問を JSON で返す。モデルも有料 API も呼ばず、Job も作らない。MCP の plan_video_request と同じ結果。",
     "  --doctor で候補ごとに harness-doctor を走らせる（既定では走らせない）。start と同じ Koya の引数（--episode-id など）も受ける。",
+    "  --channel ID [--request-kind KIND]: チャンネルの台帳（config/harness-deployments.json の channels）から作業フォルダ・",
+    "  署名済み Channel Pack・制作の仕組み・戦略の作業フォルダ・台本の品質ループの設定を決め、依頼の種類（new-design / next-video /",
+    "  script-review / produce / rerender / post-publish / research）と戦略の作業フォルダのブリーフの状態から、次の工程の推奨と",
+    "  代案（workflow）を返す。種類を決めきれなければ1問を返す（答えは --request-kind）。戦略スキルは実行しない。",
     "start  --harness ID --script-path FILE --channel-pack BUNDLE [--strategy-brief FILE] [--script-quality-work-dir DIR] [--confirmed] [--reviewer-trust-path JSON] [--host-model ID]",
     "",
     "--script-quality-work-dir DIR（start。任意）: 台本の品質ループ（node scripts/script-quality-loop.mjs）の作業フォルダ。",
@@ -172,6 +177,8 @@ async function main() {
       print(await planVideoRequest({
         request: typeof args.request === "string" ? args.request : "",
         harnessId: typeof args.harness === "string" ? args.harness : "",
+        channelId: typeof args.channel === "string" ? args.channel : "",
+        requestKind: typeof args.requestKind === "string" ? args.requestKind : "",
         projectDir,
         scriptPath: typeof args.scriptPath === "string" ? resolve(args.scriptPath) : "",
         channelPackPath: typeof args.channelPack === "string" ? resolve(args.channelPack) : "",
