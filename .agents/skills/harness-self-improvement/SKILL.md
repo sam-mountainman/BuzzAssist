@@ -75,8 +75,9 @@ description: ユーザーの指摘・訂正・好みを、その場の修正で�
   ここで作っているのは関門ではなく、**読める証跡**。本当の関門は、この台帳が
   git で追跡されていて、commit を人が読むところにある。新しいゲートを足す
   前に、そのゲートを通さずに同じ効果を得る道が残っていないかを先に探すこと
-  ——`promote`/`apply` は正本を書き換えるのではなく追記するだけなので、
-  正本の直接編集と `applied.jsonl` への直接追記はいまも残っている（未対応。開発側のレビュー台帳に cx-a3 として記録）
+  ——機械が作る正本の変更は、後述の差分の承認キュー（`pending` → 人の `approve`）を通る。
+  ただし正本の直接編集と `applied.jsonl` への直接追記は、物理的には今も残っている
+  （開発側のレビュー台帳に cx-a3 として記録）
 - **消さない**。置き換えたものは記録に残す
 - **1件1スキルにしない**。個別事象を並べた文書は読まれなくなる
 
@@ -123,6 +124,20 @@ node scripts/harness-learn.mjs capture \
 何もしない。フックは捕捉も発言本文の保存もせず、提案ゼロは正常。案内を
 「毎回何か capture せよ」と読まない——書かせる圧をかけると、効かない教訓が溜まる。
 
+**回数で起動する振り返り。** 同じフックが会話ごとにユーザーの発言の回数だけを数え（本文も会話 ID
+そのものも残さない）、既定で10回ごとに「残すものがあれば capture する」と促す。促しに出た
+`--session` の値で capture すると数え直しになる。促しは数えただけで、何かが起きた合図ではない。
+間隔は `BUZZASSIST_LEARNING_REFLECT_EVERY`（0 で数えるのも促すのも止まる）。子エージェントでは数えない
+（本体 `lib/harnessLearningReflection.mjs`）。
+
+**Codex ではフックを信頼してから動く。** Codex は `/hooks` で信頼したフックだけを動かし、信頼を
+`~/.codex/config.toml` の `[hooks.state."buzzassist@buzzassist:hooks/codex-hooks.json:user_prompt_submit:0:0"]`
+のような表と `trusted_hash` に残す。表の無いフックは黙って飛ばされる。BuzzAssist を入れたら、端末の
+`codex` で `/hooks` を開き、UserPromptSubmit フックと Stop フックを確かめて信頼する（デスクトップ版の
+`/hooks` は信頼を書き込まない報告がある）。更新でフックの定義が変わったら信頼し直す。確認は
+`node scripts/harness-doctor.mjs` の advisory 検査 `learning-hook-trust`。フックの記録
+（学習の置き場の `hook-events.jsonl`）には host が残るので、codex の行が無ければ未信頼を疑う。
+
 **子エージェントは学習を書かない。** `harness-parallel-agents` が起動する子には
 `BUZZASSIST_LEARNING_WRITE_FORBIDDEN` が渡り、capture / sync / promote / apply /
 `curate --archive` は拒否される。子は捕捉したい内容を結果本文で親へ返し、親が
@@ -134,6 +149,22 @@ node scripts/harness-learn.mjs capture \
 同じ1つを読む）で新しい宛先へ解決される。status は新しい宛先で数え、「旧名 … で記録」と
 出す。台帳の行は書き換えない（提案 ID が本文と宛先から作られるので、書き換えると
 過去の反映記録と結び付かなくなる）。
+
+## 学習の置き場
+
+置き場は `lib/harnessLearningState.mjs` の1か所で決まる。入口ごとに別の置き場を書かない。
+
+- **開発用チェックアウト**（`.git` と `.claude/skills` と `.codex/skills` がある）: 従来どおり
+  リポジトリの `docs/learning`（台帳は git で追跡され、commit を人が読む）
+- **運営者の端末**: Claude Code と Codex のどの版の写しから動かしても `~/.buzzassist/learning/`
+  （`BUZZASSIST_LEARNING_DIR` で上書き可）。`shared/` に共有層の台帳、`channel-packs/<id>/` に保存先を
+  宣言していないチャンネルの台帳、`receipts/index.jsonl` に Job の決着、`overlays/<skill>/learned-auto.md`
+  にこの端末の項目を置く。**写しの中に台帳を書かない**（setup・自動更新・ホストの版上げで消える）
+- 初回だけ、古い写しに残った台帳を取り込む（提案は ID と session で重複を除く。元は消さない）
+- 運営者の端末の `sync` は同梱の overlay を書き直さず、この端末の項目を印で囲んだ区画として、ホストが
+  読む全部の写しの `references/learned-auto.md` の末尾へ届ける。setup のたびにも届け直す
+- チャンネルの台帳の保存先は `config/harness-deployments.json` の `channelLearning`（運営者の私有
+  プロジェクト）か Channel Pack。配備 root とは別の設定で、共有台帳には決して解決しない
 
 ## 書き込み前の検査
 
@@ -159,6 +190,11 @@ node scripts/harness-learn.mjs sync
 書き換わるのは `references/learned-auto.md` だけで、`SKILL.md` は
 1文字も変わらない。`review-only` の宛先（台帳・ゲート基準）は
 自動反映されず、保留として理由つきで報告される。
+
+sync は Job の決着時と setup のたびにも、同じ本体で自動で走る。語彙を照合できない端末では
+書かず、理由だけを学習の置き場の `auto-sync.jsonl` に残して Job も setup も止めない。自動の sync に
+`--allow-missing-vocabulary` の抜け道は無い。`BUZZASSIST_LEARNING_AUTO_SYNC=0` で止まり、
+子エージェントでは走らない。
 
 **sync は検査語彙を照合できなければ止まる（fail-closed）。** overlay へ書く前に、
 Channel Pack 由来の語と、リポジトリ側にだけ置く検査語彙（`sensitive-vocabulary.digest.json`、
@@ -232,10 +268,48 @@ node scripts/harness-learn.mjs apply --id <提案ID> \
 数えない。誰も確認していない自動反映は証跡にならないので、この仕組みは意図的に
 そこで止まる。
 
+## 正本を書き換えるとき（差分の承認キュー）
+
+機械が正本（SKILL.md・台帳）の書き換え案を作るときは、正本を直接書き換えず、差分と
+「案を作るときに読んだ正本の sha256（base）」をつけてキューに置き、人の `approve` を待つ
+（本体 `lib/harnessLearningChanges.mjs`）。approve の記録が apply を兼ねるので、別に apply は打たない。
+人が skill-creator で正本を直接直したときの記録は、従来どおり上の `apply` を使う。
+
+```bash
+node scripts/harness-learn.mjs pending --id <提案ID> --proposed <書き換え後の全文> --note "規則本文" --base <読んだ版の sha256>
+node scripts/harness-learn.mjs pending                       # 一覧（base が変わったものは base-changed と出る）
+node scripts/harness-learn.mjs pending --show <変更ID> [--out <写しの SKILL.md>]
+node scripts/harness-learn.mjs approve --change <変更ID> --reviewer <名前> --human-verified [--require-evals] [--evals-dir <dir>]
+node scripts/harness-learn.mjs reject --change <変更ID> --reviewer <名前> --reason "..."
+node scripts/harness-learn.mjs rollback --change <変更ID> --reviewer <名前> --reason "..." --human-verified
+```
+
+- 案には提案ごとの印（`<!-- buzzassist-learning:<提案ID> -->`）と、`--note` と完全一致の規則本文が要る
+- approve と rollback は人の確認（対話端末＋`--human-verified`＋reviewer 名）でだけ通り、
+  `--agent-attested` では通らない
+- `base-changed` が出たら、正本を読み直して案を作り直す。正本を base の版へ手で戻して通さない
+- `rollback-conflict`（正本が、その変更を当てた後にさらに変わっている）が出たら、後の変更を先に戻す
+- 正本スキルへの approve は、評価の関門（skill-evals の記録で、変更後の版の contentSha256 に両ホストの
+  結果があり、変更前の版より悪化していないか）を警告として出す。`--require-evals` のときだけ止まる。
+  警告を読んでから承認する（`--out` で書いた写しで evals を流せる）
+- 正本スキルを approve したら、`.agents/skills/inventory.manifest.json` の contentSha256 と版を上げ、
+  `skill-inventory --approve` を人の端末で打ち直す（未承認のままだと本番が止まる）
+
 ## 自動の捕捉経路
 
-エージェントが覚えていなくても走る捕捉は2つある。どちらも**提案を積むまで**で、
-正本への自動昇格ではない。
+エージェントが覚えていなくても走る捕捉がある。どれも**提案を積むまで**で、
+正本への自動昇格ではない。Job の決着時と品質ループの捕捉は、子エージェントと
+`BUZZASSIST_LEARNING_AUTO_CAPTURE=0` では積まず、捕捉に失敗しても元の工程（Job・ループ）の結果は変えない。
+
+### 品質ループの不合格（途中の成果物・台本）
+
+- 途中の成果物の品質ループ（`scripts/asset-quality-loop.mjs`、本体 `lib/assetQualityLearning.mjs`）:
+  合格しなかった回と人の確認の否を、工程・失敗指紋・評価項目 id・機械ゲート id だけで、そのハーネスの
+  Channel Pack 宛の非公開台帳へ積む。件数は evidence 側に置き、対象の id（人物名になりうる）・
+  所見・パスは入れない。同じ版・同じ指紋は二重に積まない
+- 台本の品質ループ（`scripts/script-quality-loop.mjs record`、本体 `lib/scriptQualityLearning.mjs`）:
+  合格しなかった回の、下限割れの評価項目 id・落ちた機械ゲート id・止まった理由のコードを、台本の
+  非公開台帳へ積む
 
 ### Job の決着時（RunReceipt から）
 
@@ -272,58 +346,19 @@ Canvasのコメントが書かれたこと自体は、映像品質ゲートのpa
 
 ## 運営者端末から管理側へ返す
 
-運営者側ではread-only curatorの出力を`harness-feedback.mjs create`で
-Ed25519署名bundleへする。bundleは台本本文、Channel Pack payload、provider応答、
-credentialを含まず、proposal ID・target・版・SHA・実測gateだけを運ぶ。
-管理側endpointとtokenが設定済みなら、作成と同じ操作で耐久uploadまで行う。
+運営者の端末で溜まった学習は、署名つきの bundle にして提供元へ返す。運ぶのはゲートの判定の件数・
+ハーネスの版・ホスト・既知の提案 ID と回数で、台本・Channel Pack の本文・provider の応答・credential は
+入れない。受け取る側も検証済みの bundle を隔離してから、owner の承認後に既知の提案の観測回数へ
+加えるだけで、**正本は一切書き換えない**。
 
-```bash
-BUZZASSIST_FEEDBACK_UPLOAD_TOKEN=... \
-  node scripts/harness-feedback.mjs create \
-  --report /absolute/export-report.json \
-  --output /absolute/feedback-bundles/<bundle>.json \
-  --private-key /absolute/operator-private.pem \
-  --core-version <version> --harness <id> --harness-version <version> \
-  --channel-pack-id <id> --channel-pack-version <version> \
-  --channel-pack-sha <sha256> --source-host <claude-code-or-codex> \
-  --upload --endpoint https://<owner-host>/v1/feedback/bundles
+- Job の決着時の自動の bundle（v3）は、運営者が同意したとき（`harness-feedback.mjs consent --enable`、
+  または対話の setup）だけ作られ、送り先が無いあいだは貯めるだけ。受領証が提供元の鍵で署名されて
+  いなければ届いたと記録しない
+- **エージェントは運営者の代わりに `consent --enable` を打たない。** 同意は運営者本人の決定であり、
+  `--human-verified` と同じく機械では証明できない
 
-# network/5xxで止まったbundleを、同じdigestのままjournalから再送する
-BUZZASSIST_FEEDBACK_UPLOAD_TOKEN=... \
-  node scripts/harness-feedback.mjs sync \
-  --bundle-dir /absolute/feedback-bundles \
-  --endpoint https://<owner-host>/v1/feedback/bundles
-```
-
-upload tokenは環境変数だけから読み、bundleやjournalへ保存しない。remote endpointは
-HTTPSに限り、URL内credential・query・fragmentを拒否する。network、408、425、429、5xx
-だけを上限付きで再送し、4xx、server receiptのbundle digest不一致は恒久失敗として止める。
-配達済みjournalは同じbundleを再送せず、管理側の冪等receiptへ再接続する。
-
-管理側の入口は`harness-feedback-ingest.mjs`だけを使う。
-
-```bash
-# ownerが公開鍵と許可Harnessをローカル登録（この操作はHTTPへ公開しない）
-node scripts/harness-feedback-ingest.mjs enroll \
-  --root var/feedback-ingest --operator <operator-id> \
-  --public-key <operator-public.pem> --harnesses <harness-id> \
-  --approved-by <owner-id>
-
-# upload API。tokenは引数へ書かず環境変数で渡す
-BUZZASSIST_FEEDBACK_UPLOAD_TOKEN=... \
-  node scripts/harness-feedback-ingest.mjs serve --root var/feedback-ingest
-
-# ownerがverified quarantineを確認してからcurator観測へ昇格
-node scripts/harness-feedback-ingest.mjs approve \
-  --root var/feedback-ingest --bundle-digest <sha256> \
-  --approved-by <owner-id> --reason "確認内容"
-```
-
-受付はBearer tokenと登録済みoperator署名を両方検証する。同じbundle digestは冪等に
-再接続し、同じsigner/source reportが別内容で来たらreplay conflictとして隔離する。
-未登録・不正bundleはraw bytesを保存せず失敗metadataだけを残す。検証済みbundleも
-即時反映せず`verified-quarantine`へ置き、owner承認後のimportも既知proposal IDの
-観測回数にだけ加える。未知IDから規則本文を捏造せず、**正本は一切書き換えない**。
+bundle の中身・同意の範囲・送り先の設定・手動の bundle（v2）と再送・管理側の受け取り（ingest）の
+手順は `references/feedback-return-ja.md` にある。feedback bundle・送信・受け取りを触るときに読む。
 
 このため「自動学習」は、捕捉・署名upload・重複排除・集計までを自動化する意味で
 あり、AIが自分の変更を自分で承認する意味ではない。正本への昇格は従来どおり
@@ -376,8 +411,13 @@ node scripts/harness-learn.mjs curate --archive --id <id> \
 ```bash
 node scripts/harness-receipts.mjs rollup            # 版ごとのゲート失敗率
 node scripts/harness-receipts.mjs rollup --harness koya-manga-video
+node scripts/harness-receipts.mjs rollup --by host   # ハーネス × ホスト × 版の pass 率・所要時間と、片方のホストだけ低い組の警告
 node scripts/harness-receipts.mjs export --out <path>   # 返せる形だけ
 ```
+
+`rollup` は学習の置き場の索引（`receipts/index.jsonl`）が指す RunReceipt を読み、`--project-dir <dir>` を
+付けると `<dir>/canvas/harness-runs/*/run-receipt.json` も読み取り専用で読む。`--by host` では、ホストの
+記録が無い（unrecorded）・判定できない（unknown）・作ったホストと再開したホストが混ざった組は比べない。
 
 `worstGates` の先頭が、次に直すべき場所。**ここを見ずに書いた提案は、
 思いつきと区別がつかない**。`capture` の evidence には、可能なら
@@ -402,7 +442,7 @@ node scripts/harness-receipts.mjs export --out <path>   # 返せる形だけ
 | 課金APIの再送規則・秘密の扱い | `platform:platform-craft`（正本は `lib/paidApiRetry.mjs`） |
 | どの入口を使わせるか | `platform:platform-craft`（正本は `lib/harnessRouting.mjs`） |
 | 証跡・指紋・記録の不変条件 | `platform:platform-craft`（正本は `lib/harnessRunReceipt.mjs`） |
-| 幸谷チャンネル固有の要求・禁止事項 | `channel-pack:koya`（非公開台帳） |
+| 漫画チャンネル固有の要求・禁止事項 | そのChannel Pack専用target（例: `channel-pack:koya`。非公開台帳） |
 | 特定ナレーションチャンネルの声・BGM・番組文法 | そのChannel Pack専用target（例: `channel-pack:narrated-story`） |
 
 分類できないときは推測で共有層へ書かず、`--help`とChannel Packの配置を確認する。
@@ -425,3 +465,9 @@ genre/platformへ引き上げる。
 - blocked の提案本文を、検査を通さずに正本へ貼る
 - `curate` の候補を、人の確認なしに機械の判断で退避する
 - フックの案内を「毎回何か capture せよ」と読む
+- 正本をエージェントが直接書き換える（書き換え案は `pending` に置いて人の `approve` を待つ）
+- `base-changed` を、正本を base の版へ手で戻して通す
+- approve・rollback を `--agent-attested` や PTY 経由で通そうとする
+- 評価の関門の警告を読まずに承認する
+- 運営者の代わりに `harness-feedback.mjs consent --enable` を打つ
+- 学習の台帳をホストの写し（plugin cache・`~/plugins/buzzassist/plugin`）の中へ書く
