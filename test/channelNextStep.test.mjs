@@ -94,7 +94,7 @@ async function createFixture(t) {
 }
 
 /** 作業フォルダにブリーフを書き、品質ループを回す。pass=false なら不合格の回を1回だけ記録する。 */
-async function writeBrief(fixture, channelId, { pass = true, briefChannelId = channelId, label = "r1", loop = true, skillFingerprint = null } = {}) {
+async function writeBrief(fixture, channelId, { pass = true, briefChannelId = channelId, label = "r1", loop = true, skillFingerprint = null, extra = {} } = {}) {
   const workDir = fixture.byId[channelId].strategy.workDir;
   const metrics = await writeJson(workDir, "evidence/metrics.json", metricsOutput());
   const brief = sampleBrief({
@@ -104,6 +104,7 @@ async function writeBrief(fixture, channelId, { pass = true, briefChannelId = ch
     evidence: [evidenceRow(metrics, { id: "e-metrics", kind: "metrics", premiseBound: false, premiseIndependenceReason: "合成: 公開済みの動画の実測" })],
     changes: { previous: null, keep: [{ point: "合成の残す点", evidenceIds: ["e-metrics"] }], change: [] },
     ...(skillFingerprint ? { provenance: { host: "claude-code", contextId: "ctx-planner-1", createdAt: "2026-09-21T00:00:00Z", strategySkill: skillFingerprint } } : {}),
+    ...extra,
   });
   const bytes = jsonBytes(brief);
   const briefPath = path.join(workDir, "brief.json");
@@ -188,7 +189,14 @@ test("ブリーフが無い: 次作・新規は hyp-design、制作は requireBr
   assert.equal(next.workflow.recommended.workDir, fixture.byId.alpha.strategy.workDir);
   assert.equal(next.workflow.recommended.produces.kind, "strategy-brief");
   assert.equal(next.workflow.recommended.strategySkill.fingerprint, (await strategySkillFingerprint(fixture.skillDir)).fingerprint);
-  assert.ok(next.workflow.recommended.then.some((entry) => entry.cli.includes("strategy-brief.mjs start --work-dir")));
+  // 終わったら作業フォルダからブリーフを組み立てる（docs/strategy-handoff-spec-ja.md の 7）。
+  const draft = next.workflow.recommended.then[0].cli;
+  assert.ok(draft.startsWith(`node scripts/strategy-brief.mjs draft --from-hyp "${fixture.byId.alpha.strategy.workDir}" --channel alpha`), draft);
+  assert.ok(draft.includes(`--strategy-skill-dir "${fixture.skillDir}"`), draft);
+  assert.ok(draft.endsWith(`--out "${path.join(fixture.byId.alpha.strategy.workDir, "strategy-brief-r1.json")}"`), draft);
+  assert.ok(!draft.includes("--previous"), "前のブリーフが無ければ --previous を付けない");
+  assert.ok(next.workflow.recommended.then.some((entry) => !entry.cli && /needsAuthoring/u.test(entry.what)));
+  assert.ok(next.workflow.recommended.then.some((entry) => entry.cli?.includes("strategy-brief.mjs start --work-dir")));
   assert.deepEqual(next.workflow.alternatives.map((entry) => entry.id), ["hyp-next-video"]);
   assert.equal(next.nextStep.action, "hyp-design");
   assert.equal(next.question, null);
@@ -213,7 +221,8 @@ test("ブリーフが無い: 次作・新規は hyp-design、制作は requireBr
 
   const post = await fixture.plan({ channelId: "alpha", request: "公開後の数字から改善したい" });
   assert.equal(post.workflow.recommended.id, "hyp-post-publish");
-  assert.ok(!post.workflow.recommended.then.some((entry) => entry.cli.includes("strategy-brief.mjs next")), "前のブリーフが無いので next は出さない");
+  assert.ok(!post.workflow.recommended.then.some((entry) => entry.cli?.includes("strategy-brief.mjs next")), "前のブリーフが無いので next は出さない");
+  assert.ok(post.workflow.recommended.then[0].cli.includes("strategy-brief.mjs draft --from-hyp"));
 
   const rerender = await fixture.plan({ channelId: "alpha", request: "同じ内容で再レンダーして" });
   assert.equal(rerender.workflow.recommended.id, "rerender");
@@ -304,13 +313,91 @@ test("合格していない・根拠が合わない・別のチャンネルの�
   assert.ok(mismatch.input.strategyBrief.reasonCodes.includes("strategy-brief-channel-mismatch"));
   assert.equal(mismatch.workflow.recommended.id, "hyp-design");
 
+  // 合格していても、制作を止める未確認事項が open なら制作へ渡さず、確かめる工程へ回す。
+  const fifth = await createFixture(t);
+  await writeBrief(fifth, "alpha", {
+    extra: { openQuestions: [{ id: "q-01", question: "合成の未確認事項", blocksProduction: true, plannedCheck: "合成の確かめ方" }] },
+  });
+  const blocking = await fifth.plan({ channelId: "alpha", request: "確定稿から動画を作って" });
+  assert.equal(blocking.input.strategyBrief.state, "needs-research");
+  assert.equal(blocking.workflow.recommended.id, "hyp-additional-research");
+  assert.deepEqual(blocking.workflow.recommended.gaps.map((gap) => [gap.openQuestionId, gap.reasonCode]), [["q-01", "strategy-brief-open-question-blocks-production"]]);
+  assert.equal(blocking.decision.blockers.find((entry) => entry.code === "channel-strategy-brief-not-passed").recommendedStep, "hyp-additional-research");
+
   // 明示のブリーフ（ループ前）→ 品質ループを始める。
   const fourth = await createFixture(t);
   const unlooped = await writeBrief(fourth, "alpha", { loop: false });
   const explicit = await fourth.plan({ channelId: "alpha", request: "次の動画の企画", strategyBriefPath: unlooped.briefPath });
   assert.equal(explicit.input.strategyBrief.source, "explicit");
   assert.equal(explicit.workflow.recommended.id, "strategy-brief-review");
-  assert.ok(explicit.workflow.recommended.then.some((entry) => entry.cli.includes("strategy-brief.mjs start --work-dir")));
+  assert.ok(explicit.workflow.recommended.then.some((entry) => entry.cli?.includes("strategy-brief.mjs start --work-dir")));
+});
+
+test("作業フォルダの下書き strategy-brief-r<N>.json: まだ採点していない最新の下書きを今の作業として見つける", async (t) => {
+  const fixture = await createFixture(t);
+  const workDir = fixture.byId.alpha.strategy.workDir;
+  // ループ前の下書き → 企画の品質ループへ（形の検査を通らない下書きなら、先に needsAuthoring を埋める）。
+  fs.writeFileSync(path.join(workDir, "strategy-brief-r1.json"), jsonBytes({ ...sampleBrief({ channel: { id: "alpha", designVersion: "design-v1" } }), question: null }));
+  const draft = await fixture.plan({ channelId: "alpha", request: "次の動画の企画" });
+  assert.equal(draft.input.strategyBrief.source, "draft");
+  assert.equal(draft.input.strategyBrief.path, path.join(workDir, "strategy-brief-r1.json"));
+  assert.equal(draft.workflow.recommended.id, "strategy-brief-review");
+  assert.match(draft.workflow.recommended.then[0].what, /needsAuthoring/u);
+  fs.rmSync(path.join(workDir, "strategy-brief-r1.json"));
+
+  // 合格した版のあとに新しい下書き r2 → r2 が今の作業。次の下書きの名前は r3。
+  const passed = await writeBrief(fixture, "alpha");
+  const r2 = path.join(workDir, "strategy-brief-r2.json");
+  fs.writeFileSync(r2, jsonBytes(sampleBrief({ label: "r2", channel: { id: "alpha", designVersion: "design-v1" } })));
+  const newer = await fixture.plan({ channelId: "alpha", request: "次の動画の企画" });
+  assert.equal(newer.input.strategyBrief.source, "draft");
+  assert.equal(newer.input.strategyBrief.path, r2);
+  assert.equal(newer.input.strategyBrief.state, "needs-review");
+  // 採点した版の下書き（同じ SHA）は今の作業に数えない。
+  fs.rmSync(r2);
+  fs.writeFileSync(path.join(workDir, "strategy-brief-r1.json"), fs.readFileSync(passed.briefPath));
+  const reviewed = await fixture.plan({ channelId: "alpha", request: "次の動画の企画" });
+  assert.equal(reviewed.input.strategyBrief.source, "quality-loop");
+  assert.equal(reviewed.input.strategyBrief.state, "passed");
+  const design = await fixture.plan({ channelId: "alpha", request: "チャンネルを設計し直したい" });
+  assert.ok(design.workflow.recommended.then[0].cli.includes(`--previous "${passed.briefPath}"`), "前のブリーフを引き継ぐ");
+  assert.ok(design.workflow.recommended.then[0].cli.endsWith(`--out "${path.join(workDir, "strategy-brief-r2.json")}"`));
+});
+
+test("前提を変えたブリーフ: 根拠の当てはまりの確認を先に記録し、当てはまらない根拠だけを取り直す", async (t) => {
+  const fixture = await createFixture(t);
+  const workDir = fixture.byId.alpha.strategy.workDir;
+  const notes = await writeJson(workDir, "evidence/notes.json", { synthetic: "合成の調査メモ" });
+  const metrics = await writeJson(workDir, "evidence/metrics.json", metricsOutput());
+  const brief = sampleBrief({
+    channel: { id: "alpha", designVersion: "design-v1" },
+    evidence: [
+      evidenceRow(metrics, { id: "e-metrics", kind: "metrics", premiseBound: false, premiseIndependenceReason: "合成: 公開済みの動画の実測" }),
+      evidenceRow(notes, { id: "e-notes", kind: "other" }),
+    ],
+    changes: { previous: null, keep: [{ point: "合成の残す点", evidenceIds: ["e-metrics", "e-notes"] }], change: [] },
+  });
+  const bytes = jsonBytes(brief);
+  const briefPath = path.join(workDir, "brief.json");
+  fs.writeFileSync(briefPath, bytes);
+  await startStrategyBriefLoop({ workDir, generatorContextId: "ctx-planner-1", now });
+  const review = await writeJson(workDir, "quality/reviews/r1.json", {
+    evaluatorId: "evaluator", evaluatorContextId: "ctx-eval-1", evaluatorHost: "codex", briefSha256: sha(bytes),
+    rubricScores: PASSING_SCORES, notes: "合成: ブリーフと根拠のファイルを開いて照合した", findings: [],
+  });
+  assert.equal((await recordStrategyBriefRound({ workDir, briefPath: "brief.json", reviewPath: review.rel, now })).state.status, "passed");
+  // 動画の問い（前提）を変える。
+  fs.writeFileSync(briefPath, jsonBytes({ ...brief, question: "合成の別の問い: 店を継ぐ前に何を確かめるか" }));
+  const result = await fixture.plan({ channelId: "alpha", request: "次の動画の企画" });
+  assert.equal(result.input.strategyBrief.state, "needs-research");
+  const step = result.workflow.recommended;
+  assert.equal(step.id, "hyp-additional-research");
+  assert.ok(step.gaps.some((gap) => gap.evidenceId === "e-notes" && gap.reasonCode.startsWith("strategy-evidence-applicability-review-required")), JSON.stringify(step.gaps));
+  assert.ok(!step.gaps.some((gap) => gap.evidenceId === "e-metrics"), "前提に依らない根拠は確認しない");
+  assert.ok(step.premiseChangedFields.includes("question"), JSON.stringify(step.premiseChangedFields));
+  assert.ok(step.then[0].cli.includes(`strategy-brief.mjs applicability --brief "${briefPath}"`));
+  assert.ok(step.then[1].cli.includes("--applies yes|no"));
+  assert.match(step.reason, /e-notes（strategy-evidence-applicability-review-required/u);
 });
 
 test("台本の添削: 戦略スキルの添削から、チャンネルの台帳のジャンルと Pack の台本の品質ループへ", async (t) => {
