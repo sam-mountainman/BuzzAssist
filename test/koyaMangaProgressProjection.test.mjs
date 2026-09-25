@@ -382,9 +382,9 @@ test("Windows の作業場のパス: 中か外かを区切り文字と前方一�
   );
   assert.equal(resolveKoyaWorkspacePath(workspace, "..\\outside.png", { pathApi: win }), "");
   assert.equal(resolveKoyaWorkspacePath(workspace, "", { pathApi: win }), "");
-  // POSIX 側も同じ規則（試験の期待値は path.join で作る）。
+  // 実行中の OS の規則でも同じ（期待値は path.resolve で作る。Windows ではドライブ名が付くので join では合わない）。
   const posixWorkspace = path.join(path.sep, "work", "run", "workspace");
-  assert.equal(resolveKoyaWorkspacePath(posixWorkspace, path.join("canvas", "a.png")), path.join(posixWorkspace, "canvas", "a.png"));
+  assert.equal(resolveKoyaWorkspacePath(posixWorkspace, path.join("canvas", "a.png")), path.resolve(posixWorkspace, "canvas", "a.png"));
 });
 
 test("WAV の長さと振幅の包絡を読み、読めない形式は null", () => {

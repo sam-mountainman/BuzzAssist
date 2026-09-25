@@ -215,17 +215,20 @@ test("読み返しの判定: 字ごとに違う形なら通し、豆腐・空白
 
 test("描画器が見つからないときは、OS ごとの直し方を返す（有料 API は呼ばない）", async () => {
   const failing = async () => { throw new Error("no rasterizer"); };
-  const linux = await probeSvgRasterizer({ platform: "linux", env: { PATH: "" }, rasterize: failing });
+  // 既定の置き場所は PATH に依らず見るので、「どこにも無い」端末は exists の差し替えで作る
+  // （CI の Ubuntu には Chrome が入っていて、PATH を空にしても見つかる）。
+  const nowhere = async () => false;
+  const linux = await probeSvgRasterizer({ platform: "linux", env: { PATH: "" }, rasterize: failing, exists: nowhere });
   assert.equal(linux.ok, false);
   assert.equal(linux.code, "browser-missing");
   assert.match(linux.fix, /apt install chromium/u);
 
-  const windows = await probeSvgRasterizer({ platform: "win32", env: { Path: "" }, rasterize: failing });
+  const windows = await probeSvgRasterizer({ platform: "win32", env: { Path: "" }, rasterize: failing, exists: nowhere });
   assert.equal(windows.code, "browser-missing");
   assert.match(windows.fix, /Edge/u);
   assert.match(windows.fix, new RegExp(CHROME_PATH_ENV, "u"));
 
-  const explicit = await probeSvgRasterizer({ platform: "linux", env: { [CHROME_PATH_ENV]: "/opt/missing/chrome" }, rasterize: failing });
+  const explicit = await probeSvgRasterizer({ platform: "linux", env: { [CHROME_PATH_ENV]: "/opt/missing/chrome" }, rasterize: failing, exists: nowhere });
   assert.equal(explicit.code, "browser-explicit-missing");
 });
 
