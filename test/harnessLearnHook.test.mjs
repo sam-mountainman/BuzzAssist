@@ -137,16 +137,19 @@ test("入力が閉じなくても短時間で exit 0 で終わり、ユーザー
   assert.ok(Date.now() - started < 5000, `終わるまでに時間がかかりすぎた: ${Date.now() - started}ms`);
 });
 
-test("両ホストのフック定義は UserPromptSubmit だけで、plugin.json から参照され、同じスクリプトを起動する", () => {
+test("両ホストのフック定義は UserPromptSubmit（学習）と Stop（完成前チェック）だけで、plugin.json から参照され、同じスクリプトを起動する", () => {
+  const expected = { UserPromptSubmit: /harness-learn-hook\.mjs/u, Stop: /harness-stop-hook\.mjs/u };
   for (const [manifestPath, hookPath] of Object.entries(PLUGIN_HOOK_MANIFESTS)) {
     const manifest = readJson(manifestPath);
     assert.equal(manifest.hooks, `./${hookPath}`, `${manifestPath} が ${hookPath} を参照していない`);
     const hooks = readJson(hookPath);
-    assert.deepEqual(Object.keys(hooks.hooks), ["UserPromptSubmit"], "UserPromptSubmit 以外のイベントに介入している");
-    for (const hook of hooks.hooks.UserPromptSubmit.flatMap((group) => group.hooks)) {
-      assert.equal(hook.type, "command");
-      assert.match(hook.command, /harness-learn-hook\.mjs/u);
-      assert.ok(hook.timeout > 0 && hook.timeout <= 10, "タイムアウトが長すぎる（入力を待たせる）");
+    assert.deepEqual(Object.keys(hooks.hooks).sort(), Object.keys(expected).sort(), "宣言していないイベントに介入している");
+    for (const [event, script] of Object.entries(expected)) {
+      for (const hook of hooks.hooks[event].flatMap((group) => group.hooks)) {
+        assert.equal(hook.type, "command");
+        assert.match(hook.command, script);
+        assert.ok(hook.timeout > 0 && hook.timeout <= 10, "タイムアウトが長すぎる（入力・停止を待たせる）");
+      }
     }
   }
   // Claude Code 既定の hooks/hooks.json は置かない（manifest の参照と二重に読まれ、
@@ -185,6 +188,9 @@ test("setup はフック定義を配布物へ入れ、参照先と起動スク�
     await assert.rejects(stagePluginHooks(ROOT, plugin), /起動するスクリプトが配布物に無い/u);
     mkdirSync(join(plugin, "scripts"), { recursive: true });
     cpSync(HOOK, join(plugin, "scripts", "harness-learn-hook.mjs"));
+    // Stop フックのスクリプトが無ければ、学習フックだけあっても配布を止める。
+    await assert.rejects(stagePluginHooks(ROOT, plugin), /起動するスクリプトが配布物に無い: node .*harness-stop-hook/u);
+    cpSync(join(ROOT, "scripts", "harness-stop-hook.mjs"), join(plugin, "scripts", "harness-stop-hook.mjs"));
     assert.deepEqual((await stagePluginHooks(ROOT, plugin)).sort(), ["hooks/claude-hooks.json", "hooks/codex-hooks.json"]);
     assert.ok(existsSync(join(plugin, "hooks", "claude-hooks.json")));
     assert.ok(existsSync(join(plugin, "hooks", "codex-hooks.json")));

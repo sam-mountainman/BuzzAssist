@@ -648,7 +648,8 @@ export const PLUGIN_HOOK_MANIFESTS = Object.freeze({
   ".claude-plugin/plugin.json": "hooks/claude-hooks.json",
   ".codex-plugin/plugin.json": "hooks/codex-hooks.json",
 });
-const PLUGIN_HOOK_SCRIPT = "harness-learn-hook.mjs";
+// UserPromptSubmit（学習の捕捉の促し）と Stop（合格前の完成報告の差し戻し）。
+const PLUGIN_HOOK_SCRIPTS = Object.freeze(["harness-learn-hook.mjs", "harness-stop-hook.mjs"]);
 
 export async function stagePluginHooks(sourceRoot, pluginRoot) {
   const staged = [];
@@ -667,9 +668,9 @@ export async function stagePluginHooks(sourceRoot, pluginRoot) {
       .flatMap((group) => group?.hooks || [])
       .map((hook) => String(hook?.command || ""));
     if (commands.length === 0) throw new Error(`${hookPath} にフックが1つも無い`);
-    const scriptPresent = await pathExists(join(pluginRoot, "scripts", PLUGIN_HOOK_SCRIPT));
     for (const command of commands) {
-      if (!command.includes(PLUGIN_HOOK_SCRIPT) || !scriptPresent) {
+      const script = PLUGIN_HOOK_SCRIPTS.find((name) => command.includes(name));
+      if (!script || !(await pathExists(join(pluginRoot, "scripts", script)))) {
         throw new Error(`${hookPath} の起動するスクリプトが配布物に無い: ${command.slice(0, 80)}`);
       }
     }
