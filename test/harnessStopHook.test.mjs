@@ -8,6 +8,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  HARD_TIMEOUT_MS,
   MAX_BLOCKS_PER_JOB,
   STOP_HOOK_REASON_PREFIX,
   STOP_HOOK_STATE_DIR_ENV,
@@ -355,7 +356,7 @@ const PROCESS_HANG_GUARD_MS = 120_000;
 
 // フック自身の見張り（scripts/harness-stop-hook.mjs の HARD_TIMEOUT_MS）。読み込みの後、この長さで判定を
 // 終えられなければ、止めない側に倒して何も出さずに exit 0 で終わる（ユーザーを待たせない作り）。
-const STOP_HOOK_GUARD_MS = 5_000;
+const STOP_HOOK_GUARD_MS = HARD_TIMEOUT_MS;
 
 test("実プロセス: 起動行をシェルで動かし、stdin の JSON に stdout の JSON で答える（両ホストの起動行）", (t) => {
   const fx = fixture();
@@ -370,7 +371,7 @@ test("実プロセス: 起動行をシェルで動かし、stdin の JSON に st
     const codex = readJson("hooks/codex-hooks.json").hooks.Stop[0].hooks[0].command;
     let session = 0;
     for (const [label, command, extraEnv] of [["claude", claude, {}], ["codex", codex, { PLUGIN_ROOT: ROOT }]]) {
-      // 負荷の高い端末では、読み込みの後の判定そのものがフックの見張り（5 秒）を超え、止めない側に倒れて
+      // 負荷の高い端末では、読み込みの後の判定そのものがフックの見張り（HARD_TIMEOUT_MS）を超え、止めない側に倒れて
       // 何も出さないことがある（同じ試験を 4 本並列で回して 20 回中 2 回、"Unexpected end of JSON input"）。
       // それは作りどおりの動きなので、見張りより長くかかって空だった回だけ、別の会話として起動し直す。
       // 見張りより早く空で返るのは本当の取りこぼしなので、測り直さずに落とす。
@@ -424,7 +425,7 @@ test("入力が閉じなくても、見張りの時計で exit 0 を呼び、何
     virtualMs += 100;
   }
   assert.deepEqual(exits, [0], "入力が閉じないまま待ち続けた");
-  assert.ok(virtualMs <= 5_000, `停止を待たせすぎる（${virtualMs}ms）`);
+  assert.ok(virtualMs <= HARD_TIMEOUT_MS, `停止を待たせすぎる（${virtualMs}ms）`);
   stdin.end();
   assert.equal(await running, 0);
   assert.equal(out, "");

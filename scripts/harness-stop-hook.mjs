@@ -47,7 +47,11 @@ export const STOP_HOOK_SWITCH_ENV = "BUZZASSIST_STOP_HOOK";
 export const MAX_BLOCKS_PER_JOB = 2;
 export const STOP_HOOK_REASON_PREFIX = "[BuzzAssist 完成前チェック]";
 const STATE_VERSION = "buzzassist-stop-hook-state-v1";
-const HARD_TIMEOUT_MS = 5000;
+// 判定を終えられなければ止めない側に倒す見張り。5 秒だと、制作を並列で回して端末が混んでいるとき
+// （負荷の平均 150〜250）に判定の前で打ち切られ、「完成」と書いても差し戻さずに通っていた。
+// 空いている端末では 1 秒かからないので、長くしても待たせるのは混んでいるときだけ。
+// ホストの timeout（hooks/*-hooks.json の Stop）はこれより長くする。
+export const HARD_TIMEOUT_MS = 20_000;
 const MAX_INPUT_BYTES = 4 * 1024 * 1024;
 const MAX_TRANSCRIPT_BYTES = 32 * 1024 * 1024;
 const MAX_JOB_RECORD_BYTES = 16 * 1024 * 1024;

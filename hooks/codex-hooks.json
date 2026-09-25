@@ -17,7 +17,7 @@
           {
             "type": "command",
             "command": "node -e \"import(require('url').pathToFileURL(require('path').join(process.env.PLUGIN_ROOT||process.env.CLAUDE_PLUGIN_ROOT||'','scripts','harness-stop-hook.mjs')).href).then((m)=>m.runStopHookCli()).catch(()=>{})\"",
-            "timeout": 10
+            "timeout": 30
           }
         ]
       }

@@ -17,7 +17,7 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/harness-stop-hook.mjs\"",
-            "timeout": 10
+            "timeout": 30
           }
         ]
       }
