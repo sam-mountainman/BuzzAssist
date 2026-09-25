@@ -163,7 +163,8 @@ node scripts/harness-learn.mjs capture \
 - 初回だけ、古い写しに残った台帳を取り込む（提案は ID と session で重複を除く。元は消さない）
 - 運営者の端末の `sync` は同梱の overlay を書き直さず、この端末の項目を印で囲んだ区画として、ホストが
   読む全部の写しの `references/learned-auto.md` の末尾へ届ける。setup のたびにも届け直す
-- チャンネルの台帳の保存先は `config/harness-deployments.json` の `channelLearning`（運営者の私有
+- チャンネルの台帳の保存先は、運営者の配置表 harness-deployments.json（配布物の
+  `config/harness-deployments.example.json` から作る、運営者の手元だけのファイル）の `channelLearning`（運営者の私有
   プロジェクト）か Channel Pack。配備 root とは別の設定で、共有台帳には決して解決しない
 
 ## 書き込み前の検査
