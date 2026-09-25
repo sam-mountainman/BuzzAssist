@@ -45,7 +45,7 @@ function usage() {
     "--script-quality-work-dir DIR（start。任意）: 台本の品質ループ（node scripts/script-quality-loop.mjs）の作業フォルダ。",
     "  省くと --script-path のあるフォルダ（台本スキルが script.md・script-package.json を出すフォルダで、ループの状態と",
     "  外部モデルの呼び出しの台帳はその quality/ にある）。options.scriptQualityWorkDir に残る（Job の識別子に入る。MCP /",
-    "  --options-json でも同じ鍵）。ナレーション物語（監査契約 v8 から）は、有料の処理の前に、",
+    "  --options-json でも同じ鍵）。漫画（制作契約 v56 から）とナレーション物語（監査契約 v8 から）は、有料の処理の前に、",
     "  使う台本のバイト列がこのフォルダのループで合格した版か、人がそのまま使うと認めた版（accept-human --human-verified）",
     "  かを問い、どちらでもなければ script-quality-required:<理由コード> と次のコマンドを返して人待ちで止まる。",
     "  plan-only の start も同じ理由を preflight.blockers に出す。依頼者・運営者が書いた台本は accept-human で通る。",

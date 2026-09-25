@@ -1510,26 +1510,37 @@ test("効力のある契約の必須監査が欠ければ、過去の版の Job 
   });
 });
 
-test("漫画: Job に固定した制作契約（v53・v54・v55）の必須監査で測り、版を上げても確定待ちの Job を落とさない", async (t) => {
+test("漫画: Job に固定した制作契約（v53〜v56）の必須監査で測り、契約を上げても確定待ちの Job を落とさない", async (t) => {
   const current = JSON.parse(await readFile(join(process.cwd(), "config/koya-manga-production-contract.json"), "utf8"));
-  assert.equal(current.version, "koya-manga-production-v55", "この試験は v55 の契約を前提にしている（上げたら v55 を過去の版として足す）");
+  assert.equal(current.version, "koya-manga-production-v56", "この試験は v56 の契約を前提にしている（上げたら v56 を過去の版として足す）");
   const past = JSON.parse(await readFile(fileURLToPath(new URL("./fixtures/koya-past-contract-audits.json", import.meta.url)), "utf8"));
-  // v53 の契約: 途中の成果物の品質ループの節（v54 から）が無く、必須監査は当時の一覧（asset-quality-loops が無い）。
-  const v53 = structuredClone(current);
-  v53.version = "koya-manga-production-v53";
-  delete v53.assetQualityGate;
-  delete v53.videoClipQualityGate;
-  v53.requiredAudits = [...past.contracts.find((entry) => entry.version === "koya-manga-production-v53").requiredAudits];
-  assert.equal(v53.requiredAudits.includes("asset-quality-loops"), false);
-  assert.equal(current.requiredAudits.includes("asset-quality-loops"), true, "v54 は途中の成果物の品質ループの監査を足した");
-  // v54 の契約: 動画クリップの品質ループの節（v55 から）が無い。必須監査の一覧は v55 と同じ（v55 は既存の
+  const roster = (version) => [...past.contracts.find((entry) => entry.version === version).requiredAudits];
+  // v55 の契約: 台本の関門の節（v56 から）が無く、必須監査は当時の一覧（script-quality-accepted が無い）。
+  const v55 = structuredClone(current);
+  v55.version = "koya-manga-production-v55";
+  delete v55.scriptQualityGate;
+  v55.requiredAudits = roster("koya-manga-production-v55");
+  assert.equal(v55.requiredAudits.includes("script-quality-accepted"), false);
+  assert.equal(current.requiredAudits.includes("script-quality-accepted"), true, "v56 は台本の関門の監査を足した");
+  // v54 の契約: 加えて動画クリップの品質ループの節（v55 から）が無い。必須監査の一覧は v55 と同じ（v55 は既存の
   // asset-quality-loops の中で差し替えのクリップも照らし直すので、監査も保証も足していない）。
-  const v54 = structuredClone(current);
+  const v54 = structuredClone(v55);
   v54.version = "koya-manga-production-v54";
   delete v54.videoClipQualityGate;
-  v54.requiredAudits = [...past.contracts.find((entry) => entry.version === "koya-manga-production-v54").requiredAudits];
-  assert.deepEqual(v54.requiredAudits, current.requiredAudits);
-  for (const [name, contract, notInForce] of [["v53", v53, ["asset-quality-loops"]], ["v54", v54, []], ["v55", current, []]]) {
+  v54.requiredAudits = roster("koya-manga-production-v54");
+  assert.deepEqual(v54.requiredAudits, v55.requiredAudits);
+  // v53 の契約: 加えて途中の成果物の品質ループの節（v54 から）も無く、asset-quality-loops も無い。
+  const v53 = structuredClone(v54);
+  v53.version = "koya-manga-production-v53";
+  delete v53.assetQualityGate;
+  v53.requiredAudits = roster("koya-manga-production-v53");
+  assert.equal(v53.requiredAudits.includes("asset-quality-loops"), false);
+  for (const [name, contract, notInForce] of [
+    ["v53", v53, ["asset-quality-loops", "script-quality-accepted"]],
+    ["v54", v54, ["script-quality-accepted"]],
+    ["v55", v55, ["script-quality-accepted"]],
+    ["v56", current, []],
+  ]) {
     await t.test(`${name} の契約に固定した Job は合格する`, async () => {
       const root = await mkdtemp(join(tmpdir(), `video-koya-contract-${name}-`));
       try {
@@ -1539,7 +1550,7 @@ test("漫画: Job に固定した制作契約（v53・v54・v55）の必須監�
         assert.equal(fixture.job.resolvedProductionContract.contractVersion, contract.version);
         const result = await createVideoHarnessRunReceipt({ job: fixture.job, outcome: fixture.outcome });
         assert.equal(result.receipt.outcome, "pass", JSON.stringify(result.receipt.summary));
-        assert.deepEqual(result.receipt.summary.notInForceGates, notInForce, "v54 で足した保証だけが v53 の Job で対象外");
+        assert.deepEqual([...result.receipt.summary.notInForceGates].sort(), notInForce, "後の版で足した保証だけが対象外");
         for (const id of notInForce) assert.equal(result.receipt.gates[id].verdict, "skip");
       } finally {
         await rm(root, { recursive: true, force: true });

@@ -43,6 +43,7 @@ import {
   approveVoiceLibraryCasting,
   createVoiceLibraryAuditionPlan,
 } from "../lib/voiceLibraryCasting.mjs";
+import { acceptScriptForTests } from "./helpers/scriptQualityAcceptance.mjs";
 
 const EPISODE_ID = "manga-guard-fixture-001";
 const JOB_ID = "video-koya-manga-video-0123456789abcdef";
@@ -1121,6 +1122,8 @@ test("the real Koya prepare call site stops when any other speaker has no voice"
 async function writeScript(project) {
   const scriptPath = join(project.projectDir, "script.txt");
   await writeFile(scriptPath, `${SCRIPT}\n`);
+  // 台本の関門（契約 v56 から）はこの試験の対象外。依頼者の台本を人がそのまま使うと認めた記録を置く。
+  await acceptScriptForTests(scriptPath);
   return scriptPath;
 }
 

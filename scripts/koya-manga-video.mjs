@@ -19,6 +19,8 @@ import {
   createKoyaEpisodeManifest,
   generateKoyaMangaImages,
   generateKoyaCharacterStylingVariations,
+  inspectKoyaScriptQuality,
+  koyaScriptQualityPauseResult,
   importKoyaCharacterStylingVariations,
   generateKoyaMangaSpeech,
   koyaEpisodePaths,
@@ -190,6 +192,7 @@ function usage() {
     "reviewer-key-create: --reviewer-key-path /absolute/outside-repo/reviewer-ed25519.pem [--reviewer-public-key-path FILE] [--reviewer-label NAME] (writes a new Ed25519 private key with mode 0600, refuses to overwrite either file, refuses paths inside this repository, --project-dir, or any git working tree, and prints the keyId plus the trust-list entry the operator registers out of band)",
     "handoff-export: [--output-dir DIR] [--bundle-id ID] [--character-ids id1,id2] [--visual-profile-ids id1] [--force] (exports only approved Koya data and SHA evidence; excludes candidate mappings, sessions and credentials)",
     "images/full wardrobe override: --wardrobe-readiness-override-reason TEXT starts the paid images without a passing wardrobe-readiness report; the reason is recorded in the inventory and the episode state and reported by the final audit",
+    "plan/images/full script quality: [--script-quality-work-dir DIR] (from contract v56, before any paid work images/full ask the script quality loop in DIR — default: the folder of --script-path; an outer Job passes its options.scriptQualityWorkDir — whether the exact script bytes were accepted: a person recorded node scripts/script-quality-loop.mjs accept-human --human-verified for them (the usual route for a client-written script), or the loop passed them (when proposing fixes). Otherwise they stop with exit 3, status awaiting-script-quality, script-quality-required:<reason code> and both next commands; the answer is kept in the episode state and checked by the final audit script-quality-accepted. plan only reports the answer)",
     "speech: R194 voice quality gate is always on; [--take-count 2..8] [--max-adaptive-takes 2..8]; --no-voice-quality-gate requires --voice-quality-gate-override-reason",
     "voice-audition: [--episode-id REGISTRY_SCOPE (default global = fixed cast)] --character-ids id1,id2 [--candidates-path JSON] writes a koya-voice-audition-candidates-v1 template (never overwrites); then --candidates-path JSON [--confirm-paid-preview] has every candidate voice read the same sampleLine through the contract's voice.dialogue adapter and writes the anonymous A-E listening page, the private mapping and the selections file. Without --confirm-paid-preview it only prints how many paid previews are pending (exit 3); existing previews whose SHA-256 still matches are reused, never paid again.",
     "voice-approve: [--episode-id REGISTRY_SCOPE] [--selections-path JSON] --approved-by NAME (the person who listened; records winnerLabel, selectionReason and previewConfirmed=true in the verdicts before opening the private mapping, then writes the human voice selection (selectionVersion 2) to the character registry)",
@@ -209,6 +212,8 @@ const common = {
   overridePath: args.overridePath ? resolve(args.overridePath) : "",
   protagonistSpeakerId: args.protagonistSpeakerId || "",
   wardrobeReviewPath: args.wardrobeReviewPath ? resolve(args.wardrobeReviewPath) : "",
+  // 台本の品質ループの作業フォルダ（上位 Job の options.scriptQualityWorkDir。無ければ台本のあるフォルダ）。
+  scriptQualityWorkDir: typeof args.scriptQualityWorkDir === "string" ? resolve(args.scriptQualityWorkDir) : "",
   // 衣装ゲートを外すのは監査に残る人の判断で、素の flag では外せない。
   wardrobeReadinessOverrideReason: typeof args.wardrobeReadinessOverrideReason === "string"
     ? args.wardrobeReadinessOverrideReason
@@ -611,7 +616,16 @@ switch (args.action) {
     if (!common.scriptPath) throw new Error("--script-path is required for plan.");
     await canonicalOuterJobContext();
     const result = await planKoyaMangaProduction(common);
-    print({ episodeId: result.episodeId, state: result.state, paths: result.paths });
+    // 台本の関門の答え（契約 v56 から）。plan は有料の処理をしないので止めず、答えと次のコマンドだけを出す。
+    const scriptQuality = await inspectKoyaScriptQuality({ ...common, episodeId: result.episodeId });
+    print({
+      episodeId: result.episodeId,
+      state: result.state,
+      paths: result.paths,
+      scriptQuality: scriptQuality.applicable
+        ? { pass: scriptQuality.pass, reasonCode: scriptQuality.reasonCode, acceptedBy: scriptQuality.acceptedBy || null, workDir: scriptQuality.workDir, next: scriptQuality.next }
+        : { applicable: false, contractVersion: scriptQuality.contractVersion },
+    });
     break;
   }
   case "wardrobe-readiness": {
@@ -654,7 +668,8 @@ switch (args.action) {
     try {
       result = await generateKoyaMangaImages(common);
     } catch (error) {
-      const paused = koyaWardrobeReadinessPauseResult(error, { preflight: null, projectDir, episodeId: args.episodeId, stage: "images" });
+      const paused = koyaScriptQualityPauseResult(error, { preflight: null, projectDir, episodeId: args.episodeId, stage: "images" })
+        || koyaWardrobeReadinessPauseResult(error, { preflight: null, projectDir, episodeId: args.episodeId, stage: "images" });
       if (!paused) throw error;
       print(paused.payload);
       exitCode = paused.exitCode;

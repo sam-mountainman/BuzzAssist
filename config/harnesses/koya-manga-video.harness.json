@@ -1,6 +1,6 @@
 {
   "id": "koya-manga-video",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "displayName": "漫画動画（固定キャスト・縦組み吹き出し）",
   "note": "クライアント名・チャンネル名はここに書かない。ここは『何が作れるか』の宣言であって、誰のためのものかの記録ではない。ルーターと横断レビューはこのファイルだけを読む。",
   "produces": {
@@ -33,6 +33,11 @@
     {
       "id": "visual-profile",
       "what": "チャンネルの画風ロック",
+      "blocking": true
+    },
+    {
+      "id": "script-quality-acceptance",
+      "what": "使う台本（start に渡した台本のバイト列）を人がそのまま使うと認めた記録（node scripts/script-quality-loop.mjs accept-human --human-verified。依頼者が書いた台本の通常の経路）か、台本の品質ループで合格した版（直しを提案するとき）。作業フォルダは Job の options.scriptQualityWorkDir、無ければ台本のあるフォルダ。無ければ有料の処理の前に人待ちで止まる（制作契約 v56 から）",
       "blocking": true
     }
   ],
@@ -93,6 +98,15 @@
       "human": "同一性・手指などの人の確認は、各成果物の品質ループで人が記録する（動画クリップは元の画を参照にするので、同一性と手指を人が見る）。合格の記録を持たない旧登録（契約 v54 より前の人物・場所）は効力の外として最終監査に出し、落とさない",
       "evidenceAuditIds": [
         "asset-quality-loops"
+      ]
+    },
+    {
+      "id": "script-quality-accepted",
+      "inForceSince": "koya-manga-production-v56",
+      "what": "有料の処理（本編の画・台詞の音声・動画クリップ）を始める前に、使う台本（Job に保存した写しのバイト列の SHA）を台本の品質ループの答え（lib/scriptQualityLoop.mjs の scriptQualityVerdict、ジャンル manga）に問い、人がそのまま使うと認めた SHA か、ループが合格した版と同じ SHA のときだけ進む。合格しなければ理由コード（script-quality-required:<理由>）と次のコマンドを返して人待ちで止まる。最終監査は、その答えが合格で、回の台本（manifest の台本の生テキストの SHA）と同じ台本に対するものであることを確かめる",
+      "human": "依頼者が書いた台本をそのまま使うかは人が決める（accept-human --human-verified を確認した人が自分の端末から打つ）。直しを提案するときは、作った文脈とは別の評価文脈で台本の品質ループを回す",
+      "evidenceAuditIds": [
+        "script-quality-accepted"
       ]
     },
     {

@@ -148,12 +148,18 @@ test("保証と運営者の素材は宣言から自動で作る（カードに�
   assert.deepEqual(noCard.guarantees.map((entry) => entry.id), ["g1"], "宣言から作れる部分は返す");
 });
 
-test("Koya のカードの start 引数は、Job を作る前に止める表（KOYA_REQUIRED_JOB_OPTIONS）と同じ", async () => {
+test("Koya のカードの必須の start 引数は、Job を作る前に止める表（KOYA_REQUIRED_JOB_OPTIONS）と同じ", async () => {
   const koya = harnesses.find((harness) => harness.id === "koya-manga-video");
   const { card } = await loadHarnessCapabilityCard(koya);
   assert.deepEqual(
-    card.inputs.startOptions.map(({ key, cliFlag }) => ({ key, cliFlag })),
+    card.inputs.startOptions.filter((entry) => !entry.requiredWhen).map(({ key, cliFlag }) => ({ key, cliFlag })),
     KOYA_REQUIRED_JOB_OPTIONS.map(({ key, cliFlag }) => ({ key, cliFlag })),
+  );
+  // 台本の品質ループの作業フォルダは条件つき（省けば台本のあるフォルダ。start が既定を入れる）。
+  const scriptQuality = { key: "scriptQualityWorkDir", cliFlag: "--script-quality-work-dir" };
+  assert.deepEqual(
+    card.inputs.startOptions.filter((entry) => entry.requiredWhen).map(({ key, cliFlag }) => ({ key, cliFlag })),
+    [scriptQuality],
   );
   // ナレーション物語の start 引数は Pack の宣言しだいで要るものだけ（条件つき）。CLI と同じ名前であること。
   const narrated = harnesses.find((harness) => harness.id === "narrated-story-video");
@@ -162,7 +168,7 @@ test("Koya のカードの start 引数は、Job を作る前に止める表（K
   assert.deepEqual(narratedOptions.map(({ key, cliFlag }) => ({ key, cliFlag })), [
     { key: "operatorImageManifestPath", cliFlag: "--operator-image-manifest" },
     { key: "operatorVideoManifestPath", cliFlag: "--operator-video-manifest" },
-    { key: "scriptQualityWorkDir", cliFlag: "--script-quality-work-dir" },
+    scriptQuality,
   ]);
   const cli = await readFile(join(root, "scripts", "run-video-harness.mjs"), "utf8");
   for (const entry of [...card.inputs.startOptions, ...narratedOptions]) {

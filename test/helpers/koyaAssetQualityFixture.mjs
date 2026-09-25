@@ -141,11 +141,18 @@ export async function passKoyaAssetQualityLoop({
 }
 
 /** v54 より前の契約（ゲートの効力の外）。今の契約の写しから版を戻し、節を外す。 */
+/** 台本の関門（v56 から）の節と最終監査を外す（それより前の版の契約の形にする）。 */
+function dropScriptQualityGate(contract) {
+  delete contract.scriptQualityGate;
+  contract.requiredAudits = contract.requiredAudits.filter((id) => id !== "script-quality-accepted");
+}
+
 export async function legacyKoyaContract(root) {
   const contract = JSON.parse(await readFile(path.join(root, "config/koya-manga-production-contract.json"), "utf8"));
   contract.version = "koya-manga-production-v53";
   delete contract.assetQualityGate;
   delete contract.videoClipQualityGate;
+  dropScriptQualityGate(contract);
   return contract;
 }
 
@@ -157,6 +164,7 @@ export async function v54KoyaContract(root) {
   const contract = JSON.parse(await readFile(path.join(root, "config/koya-manga-production-contract.json"), "utf8"));
   contract.version = "koya-manga-production-v54";
   delete contract.videoClipQualityGate;
+  dropScriptQualityGate(contract);
   return contract;
 }
 

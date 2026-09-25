@@ -17,7 +17,13 @@
       { "key": "episodeId", "cliFlag": "--episode-id", "what": "その回の ID" },
       { "key": "protagonistSpeakerId", "cliFlag": "--protagonist-speaker-id", "what": "主人公の話者 ID（語りの四角い枠も主人公の承認済みの声で読む）" },
       { "key": "characterBiblePath", "cliFlag": "--character-bible-path", "what": "その回の承認済みキャラ設定（character bible）" },
-      { "key": "storyReviewPath", "cliFlag": "--story-review-path", "what": "生成とは別の文脈で書いた台本のレビュー" }
+      { "key": "storyReviewPath", "cliFlag": "--story-review-path", "what": "生成とは別の文脈で書いた台本のレビュー" },
+      {
+        "key": "scriptQualityWorkDir",
+        "cliFlag": "--script-quality-work-dir",
+        "requiredWhen": "台本の品質ループの作業フォルダが --script-path のあるフォルダと違うとき（省けば台本のあるフォルダ。制作契約 v56 から、使う台本を人がそのまま使うと認めた記録か、そのフォルダのループの合格が無ければ有料の処理の前に止まる）",
+        "what": "台本の品質ループ（node scripts/script-quality-loop.mjs --work-dir）の作業フォルダ。依頼者の台本をそのまま使うなら accept-human をそこに記録する"
+      }
     ]
   },
   "outputs": [

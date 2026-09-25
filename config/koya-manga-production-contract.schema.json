@@ -344,6 +344,19 @@
         "stopWithoutPaidRegeneration": { "const": true }
       }
     },
+    "scriptQualityGate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "inForceSince", "stage", "genre", "acceptedBy", "stopWithoutPaidGeneration"],
+      "properties": {
+        "version": { "const": "koya-script-quality-gate-v1" },
+        "inForceSince": { "const": "koya-manga-production-v56" },
+        "stage": { "const": "before-paid-generation" },
+        "genre": { "const": "manga" },
+        "acceptedBy": { "const": ["quality-loop", "human"] },
+        "stopWithoutPaidGeneration": { "const": true }
+      }
+    },
     "editorial": {
       "type": "object",
       "additionalProperties": false,
@@ -510,7 +523,7 @@
       }
     },
     "requiredAudits": {
-      "$comment": "v53 までの一覧と、v54 から asset-quality-loops を足した一覧。v54 以降の契約で後者を要ることは意味検査（lib/koyaAssetQualityGatePolicy.mjs）が決める。",
+      "$comment": "v53 までの一覧と、v54 から asset-quality-loops を足した一覧（v55 も同じ）と、v56 から script-quality-accepted を足した一覧。v54 以降・v56 以降の契約でそれぞれを要ることは意味検査（lib/koyaAssetQualityGatePolicy.mjs・lib/koyaScriptQualityGatePolicy.mjs）が決める。",
       "enum": [
         [
           "contract-manifest", "editorial-quality", "quality-harness-final", "rendered-camera",
@@ -524,6 +537,13 @@
           "bubble-midpoint-frames", "bubble-transition-clear-frames", "bubble-camera-sweep",
           "independent-rendered-face", "bubble-typography", "thought-spotlight", "split-page-integrity",
           "video-substitution", "wardrobe-readiness", "asset-quality-loops", "stt-verification", "audio-onset", "audio-speaker-continuity", "audio-waveform-sync", "audio-click-hum-level",
+          "agent-contact-sheet-review", "full-decode"
+        ],
+        [
+          "contract-manifest", "editorial-quality", "quality-harness-final", "rendered-camera",
+          "bubble-midpoint-frames", "bubble-transition-clear-frames", "bubble-camera-sweep",
+          "independent-rendered-face", "bubble-typography", "thought-spotlight", "split-page-integrity",
+          "video-substitution", "wardrobe-readiness", "asset-quality-loops", "script-quality-accepted", "stt-verification", "audio-onset", "audio-speaker-continuity", "audio-waveform-sync", "audio-click-hum-level",
           "agent-contact-sheet-review", "full-decode"
         ]
       ]

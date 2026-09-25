@@ -706,7 +706,8 @@ test("full は照合待ちで Job を失敗にせず、終了コード3で再開
       generatorHost: "claude",
       generatorContextId: GENERATOR_CONTEXT,
     }, directRuntime(project.projectDir, {
-      // 声のゲートはこのテストの対象外（先に通ったことにする）。
+      // 声のゲートと台本の関門はこのテストの対象外（先に通ったことにする）。
+      checkScriptQuality: async () => ({ pass: true }),
       checkVoiceSelectionsBeforeImages: async () => ({ pass: true }),
       generateSpeech: async () => { throw new Error("speech must not start"); },
     }));

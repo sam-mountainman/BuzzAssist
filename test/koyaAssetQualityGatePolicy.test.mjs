@@ -59,7 +59,8 @@ test("契約: v54 から節が必須、v53 は節なしで通り節ありは落�
 
 test("契約: 動画クリップのゲートは v55 から節が必須、v54 は節なしで通り節ありは落ちる。効力は版で決める", async () => {
   const current = await currentKoyaContract(root);
-  assert.equal(current.version, KOYA_VIDEO_CLIP_GATE_IN_FORCE_SINCE, "今の契約は動画クリップのゲートが入った版");
+  // 今の契約は動画クリップのゲートが入った版かそれより後（v56 で台本の関門を足した）。
+  assert.equal(koyaVideoClipGateInForce(current), true, "今の契約では動画クリップのゲートが効いている");
   assert.equal(current.videoClipQualityGate.inForceSince, KOYA_VIDEO_CLIP_GATE_IN_FORCE_SINCE);
   assert.equal(koyaVideoClipGateInForce(current), true);
   assert.deepEqual(validateKoyaVideoClipQualityGateContract(current), []);

@@ -62,6 +62,9 @@ const contractPath = await (async () => {
   const contract = JSON.parse(await readFile(currentContractPath, "utf8"));
   contract.version = "koya-manga-production-v54";
   delete contract.videoClipQualityGate;
+  // 台本の関門（v56 から）の節と最終監査も、v54 の契約には無い。
+  delete contract.scriptQualityGate;
+  contract.requiredAudits = contract.requiredAudits.filter((id) => id !== "script-quality-accepted");
   const dir = await mkdtemp(join(tmpdir(), "cut-video-v54-contract-"));
   const file = join(dir, "koya-manga-production-contract.json");
   await writeFile(file, `${JSON.stringify(contract, null, 2)}\n`);
