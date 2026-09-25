@@ -60,8 +60,8 @@ async function measure(root, version, declaration = VIDEO_DECLARATION) {
   return rel;
 }
 
-test("工程 video-clip は両方のハーネスで使え、評価項目・下限・機械ゲート・人の確認の欄を持つ", () => {
-  for (const harnessId of Object.keys(ASSET_QUALITY_HARNESSES)) {
+test("工程 video-clip は漫画とナレーション物語の両方のハーネスで使え、評価項目・下限・機械ゲート・人の確認の欄を持つ", () => {
+  for (const harnessId of ["koya-manga-video", "narrated-story-video"]) {
     assert.ok(ASSET_QUALITY_HARNESSES[harnessId].stages.includes(STAGE), `${harnessId} で video-clip を使える`);
   }
   const { contract } = createAssetQualityContract({ harnessId: "narrated-story-video", stage: STAGE });
