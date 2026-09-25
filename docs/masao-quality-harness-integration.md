@@ -159,7 +159,9 @@ v3ではさらに、全rubric項目、generatorと異なる実Codex task/Claude 
 
 ### 事故知識の昇格
 
-`recordMangaQualityIncident` は同一signatureの再発数を数える。
+`recordMangaQualityIncident` は同一signatureの再発数を数える。再発として数えるのは、
+別の版（`revision.artifactSha256` か `revision.revisionDelta` が違う）で同じsignatureが出たときだけで、
+同じ版の監査し直しは `sameRevisionReaudits` に残すだけで数えない。一度上がった昇格は下げない。
 
 - 1回目: checklist
 - 2回目: instruction

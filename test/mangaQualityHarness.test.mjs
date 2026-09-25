@@ -268,6 +268,41 @@ test("repeated deterministic high-impact incidents are promoted into hard gates"
   assert.equal(second.incidents[0].promotion, "hard-gate");
 });
 
+test("re-auditing the same revision does not count as a recurrence; a new revision with the same failure does", () => {
+  // 同じ MP4（同じ成果物 SHA）を監査し直すたびに再発として数えていたので、1回の失敗が
+  // 監査の再実行だけで checklist → hard-gate へ格上げされていた（外部レビューで再現）。
+  const failure = { signature: "episode-x:bubble-safety", severity: "high", deterministic: true, failure: "吹き出しが顔に重なった" };
+  const first = recordMangaQualityIncident({
+    incident: { ...failure, revision: { artifactSha256: "a".repeat(64), revisionDelta: "" } },
+  });
+  const reaudit = recordMangaQualityIncident({
+    ledger: first,
+    incident: { ...failure, revision: { artifactSha256: "a".repeat(64), revisionDelta: "" } },
+  });
+  assert.equal(reaudit.incidents[0].occurrences, 1, "同じ版の再監査は再発ではない");
+  assert.equal(reaudit.incidents[0].promotion, "checklist");
+  assert.equal(reaudit.incidents[0].sameRevisionReaudits, 1, "再監査したことは残す");
+
+  const repaired = recordMangaQualityIncident({
+    ledger: reaudit,
+    incident: { ...failure, revision: { artifactSha256: "b".repeat(64), revisionDelta: "吹き出しを左へ寄せた" } },
+  });
+  assert.equal(repaired.incidents[0].occurrences, 2, "直した別の版で同じ失敗が出たら再発");
+  assert.equal(repaired.incidents[0].promotion, "hard-gate");
+
+  // 成果物が同じでも、修正内容（revisionDelta）が違えば別の版として数える。
+  const deltaOnly = recordMangaQualityIncident({
+    ledger: first,
+    incident: { ...failure, revision: { artifactSha256: "a".repeat(64), revisionDelta: "監査の設定を直した" } },
+  });
+  assert.equal(deltaOnly.incidents[0].occurrences, 2);
+
+  // 別々の台帳を合わせても、同じ版は二重に数えない。
+  const merged = mergeMangaQualityIncidentLedgers(repaired, reaudit);
+  assert.equal(merged.incidents[0].occurrences, 2);
+  assert.equal(merged.incidents[0].revisionKeys.length, 2);
+});
+
 test("tracked incident seed and runtime observations merge without losing the strongest promotion", () => {
   const merged = mergeMangaQualityIncidentLedgers(
     { incidents: [{ signature: "same", occurrences: 2, promotion: "hard-gate", evidence: ["seed"] }] },
