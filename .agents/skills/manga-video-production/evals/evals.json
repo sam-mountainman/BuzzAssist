@@ -332,6 +332,26 @@
         "新しい context の reviewer で signoff し直してから audit する",
         "止まった回の qualityLoopBestRound を合格として扱わない"
       ]
+    },
+    {
+      "id": "awaiting-script-quality",
+      "prompt": "漫画の images が awaiting-script-quality で止まった。依頼者の台本だから、このまま進めて。",
+      "shouldTrigger": true,
+      "invariants": [
+        "確認した人が自分の端末で打つ accept-human --human-verified で通すのが通常の経路と伝え、エージェントが代わりに打たない",
+        "直しを提案するなら --genre manga の台本の品質ループを回す",
+        "最終監査 script-quality-accepted が同じ台本の SHA を照らし直す"
+      ]
+    },
+    {
+      "id": "video-clip-loop-before-render",
+      "prompt": "差し替えたカットのクリップが video-clip-asset-quality-required で止まった。作り直して通して。",
+      "shouldTrigger": true,
+      "invariants": [
+        "有料で作り直さず、クリップの隣の測定を使って工程 video-clip の品質ループを回す",
+        "対象は <回>.video.<カット>、参照は元の静止画にする",
+        "ループに合格するまで render しない"
+      ]
     }
   ]
 }

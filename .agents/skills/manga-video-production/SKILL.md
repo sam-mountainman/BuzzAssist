@@ -129,6 +129,19 @@ node scripts/koya-blind-review.mjs record --set <spec.json> --winner A --reviewe
 採用の記録は公式CLI（`character-approve`、`character-style-select`）に残す。
 アリーナの選択は記録ではない。
 
+### 台本の関門（契約 v56 から。最終監査 script-quality-accepted）
+
+`images` と `full` は、有料の処理の前に、使う台本のバイト列が台本の品質ループで合格した版か、人がそのまま
+使うと認めた版かを問う（`lib/scriptQualityUseGate.mjs`。ナレーション物語と同じ関門）。どちらでもなければ
+終了コード3・`awaiting-script-quality` で止まり、`script-quality-required:<理由>` と次に打つコマンドを返す。
+`plan` は答えを報告するだけ。答えは回の状態に残り、最終監査 `script-quality-accepted` が照らし直す。
+
+- 依頼者が書いた台本は、確認した人が自分の端末で打つ
+  `node scripts/script-quality-loop.mjs accept-human --work-dir <台本のフォルダ> --script <台本> --reviewer <名前> --reason "…" --human-verified`
+  で通るのが通常の経路。エージェントは代わりに打たない。直しを提案するときは `--genre manga` のループを回す
+- 作業フォルダは `--script-quality-work-dir`（上位 Job の `options.scriptQualityWorkDir`。省けば台本のあるフォルダ）
+- ループの評価者の組・累計・指摘の採否は `../platform-craft/references/quality-loops-ja.md` にある
+
 ### 途中の成果物の品質ループ（契約 v54 から。最終監査 asset-quality-loops）
 
 人物の identity pack の各シート・場所の4ボード・本編の画（1枚の画と分割ページの各コマ）・サムネの
@@ -303,6 +316,7 @@ node scripts/koya-manga-video.mjs video-substitute --episode-id <episode-id> --c
 
 - **課金の扱い**: 生成層（`generateVideoMedia`）の例外は課金済みかを区別できないので、この工程は自動で再送しない。呼ぶ前に`video-substitution/ledger.json`へ送信済みを書くので、途中で落ちても「課金状態不明」の試行として残る。失敗・送信のまま止まった試行・検査不合格・完了済みクリップの消失は checkpoint で止まり、再送は`--retry-failed`（`full`では`--retry-failed-video`）を明示したときだけ。試行はカットごとに`maximumGenerationAttemptsPerCut`まで、成功・失敗を問わず数える。完了済みクリップは再開時に再利用し、二度払わない。
 - **生成直後の検査**: 全デコード、縦横比、尺、開始フレームとのSSIM（`minimumStartFrameSimilarity`）、要求モデルとの一致。落ちたクリップは課金済みなので保存したまま採用しない。
+- **品質ループに合格してからレンダーする（契約 v55 から）**: 結び付けたクリップは、途中の成果物の品質ループの工程 video-clip（対象 `<回>.video.<カット>`、参照は元の静止画、測定はクリップの隣の `measurement-<sha>.json`）で合格するまでレンダーしない。未合格なら `video-substitute` が `video-clip-asset-quality-required` と次の一手を返して止まる（作り直さない）。最終監査 `asset-quality-loops` もクリップの SHA で照らし直す。
 - **静止画へ戻すのは運営者の判断だけ**: `--allow-still-fallback --still-fallback-cut-ids cut-XX --still-fallback-reason <理由> --still-fallback-decided-by <名前>`。判断は台帳に残り、最終監査で報告される。失敗したカットを黙って静止画で出さない。
 - **レンダー前の拘束**: 印の付いたカットは、台帳の完了試行とクリップSHA・開始フレーム仕様・指示内容・モデルが一致する結び付けか、台帳に記録された静止画判断が無ければ止まる。manifestを手で書き換えて出所の無いクリップを結び付ける道もここで塞いでいる。画像・カメラ開始点・指示・モデルを変えたらクリップは作り直しになる。
 - **最終監査`video-substitution`**: 実MP4の差し替え区間をデコードし、そのクリップが実際にその区間にあること（吹き出し外で一致）、動きがあり静止の水増しが無いこと、開始フレームとの一致、色の大崩れが無いこと、吹き出し表示中は密サンプルで検出顔と開始時の保護領域（光学フローで追跡）がどちらも0pxであること、文字混入が無いこと（tesseract必須。測れなければ不合格）、フレーム数が一致することを確かめる。`rendered-camera`は差し替えカットを除いた静止カットだけで3系統を測るので、3系統は静止カット側で揃える。
@@ -387,3 +401,7 @@ MCP を使える host では、同じ工程を `run_koya_manga_pipeline`（`acti
 設定画、カットごとの採用テイク、画の台帳が品質ループの合格まで止めた行の「人の確認待ち」）が Run の
 左側のパネルに出る（読み取り側は `lib/koyaMangaProgressSnapshot.mjs`）。承認前の人物は「人物 N」と
 候補 A〜E だけが出る。候補を Canvas の表示名で呼ばず、採用は `character-approve --candidate-label` で記録する。
+
+Canvas は Job の workspace（`job.executionProjectDir`）の中の記録だけを読み、成果物の SHA で合否を突き合わせる。
+途中の成果物の品質ループは、ゲートと同じくその workspace の `canvas/` を `--work-dir` に渡して回す
+（状態は `canvas/quality/assets/`）。別の置き場で採点した記録は、合否にも表示にも効かない。
