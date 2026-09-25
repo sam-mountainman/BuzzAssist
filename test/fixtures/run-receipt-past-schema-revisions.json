@@ -1,0 +1,186 @@
+{
+  "note": "過去の schema revision の RunReceipt の実例（値は合成。台本・人名・パスは含まない）。ホストの欄（invocation）を足す前の版で書いた記録が、今の検証と集計でも従来どおり通ること（invocation は当時の契約に無かったので not-in-force、集計のホストは unrecorded）を CI で確かめるために使う。RUN_RECEIPT_SCHEMA_REVISION を上げたら、上げる前の版の実例をここへ足す。",
+  "source": "revision 1: ホストの記録を足す直前の lib/harnessRunReceipt.mjs（openRunReceipt → recordGate → finalizeRunReceipt）で合成の入力から書いた記録",
+  "revisions": {
+    "1": {
+      "version": "harness-run-receipt-v1",
+      "harnessBuild": {
+        "harness": {
+          "id": "narrated-story-video",
+          "version": "1.7.0",
+          "declarationDigest": "560f29c78aca275bbe4a4ecce9b20d5b998510625b1997347f1109bc5ccb93f7"
+        },
+        "genreSkills": {
+          "harness-parallel-execution": {
+            "tree": "20bc1f2f84d5d7bb3b1cd4ea94618b568bab0470f234b185ea7794968bdba603",
+            "fileCount": 2,
+            "learnedOverlay": "a677614b8afc81e1422878b0dc9cfc390a699c1a6168853530190091db913c74"
+          },
+          "narrated-story-video": {
+            "tree": "20e9ff67af97720ba76cee565faee25957da3b00b420e012ed58213755afed63",
+            "fileCount": 2,
+            "learnedOverlay": "be094f5b5cad6abac2eeb0d09a25e11d9c8d8769be04ca1dfda48f21409d69b3"
+          }
+        },
+        "platform": {
+          "lib/harnessRouting.mjs": "bd0d53a75f94bf2b443ef8341edf2f27b690da6bef4acedc9ff08e072b3547c0",
+          "lib/channelPackResolver.mjs": "cae372dd631659e1acf7bc5a441b00424c058aa58b0ed5aa5a8d32c1a3cfadb0",
+          "lib/channelPackEnvelope.mjs": "f99e0bd746774cae01760229b84ec7174d9566b05db859766248ab02d13e4de8",
+          "lib/harnessRunReceipt.mjs": "99209827d446aece327bf9968db7b6b46cf7f99f5545f5a688f54b53a64626e9",
+          "lib/harnessRuntimeResolver.mjs": "a0f87adb88846a591ba408b0746e85e3286d4ad70edebfe7e63a392552a68e42",
+          "lib/paidMediaJobBroker.mjs": "6b2d0d86d7e3b7ba680e9dac734371d53ccc410e5255d73436559dba0abf8250",
+          "lib/videoHarnessAdapters.mjs": "3ca0b81f091cbf79acf0c2546d561a62988522110f99fbc5a4517311b8298b90",
+          "lib/videoHarnessCanvasAdapter.mjs": "b120420f861b3a45e50c4a1ddf7de9c73b5ce30479ea6defd41918213fed2c6b",
+          "lib/videoHarnessJob.mjs": "3bf54a96395f78480459dd61fa4f528577eec2373f0dbb0e6e93b89e9566778f",
+          "lib/videoHarnessReceipt.mjs": "eba1ae29ccfceb06e881ab94f2a5563a069255fbc7a22aa13d97caa4efc1d1cc",
+          "lib/videoHarnessService.mjs": "35a68e5dd0a981e7db361e80dc8b34d891f0950f71dee06009155fcd14cc6859",
+          "lib/canvasRunState.mjs": "5315f268fb81e65f43563aa15b38e5c87f85524ffcb495035cdde9f36ef12c60",
+          "lib/canvasRunProjection.mjs": "1bce21ee038ee7302fb766a742d36e9e010d6a925c2fa205d4a8bfd686a16378",
+          "lib/canvasRunMediaProjection.mjs": "b8c4b608641ede7e57dd84ccfd12a33ebac5b7bca9f31bba106342634db4c8a2"
+        },
+        "productionDependencies": {
+          "version": "buzzassist-production-dependency-tree-v1",
+          "runtime": {
+            "version": "buzzassist-production-dependency-tree-v1",
+            "scope": "runtime",
+            "digest": "27fcd919d56c49b433776b2904aaf3090155297550a87cb87b7a8ad4845f6e99",
+            "fileCount": 360
+          },
+          "deployment": {
+            "version": "buzzassist-production-dependency-tree-v1",
+            "scope": "deployment",
+            "digest": "27fcd919d56c49b433776b2904aaf3090155297550a87cb87b7a8ad4845f6e99",
+            "fileCount": 360
+          }
+        },
+        "channelPack": null,
+        "declaredGates": [
+          "audio-loudness",
+          "narration-intelligibility",
+          "duration-conformance",
+          "content-addressing",
+          "external-visual-signoff",
+          "camera-continuity",
+          "bookend-audio-breath",
+          "bookend-transition-visual",
+          "operator-replacement-cleared",
+          "quality-loop",
+          "voice-quality",
+          "character-identity"
+        ]
+      },
+      "entrypoint": "scripts/run-video-harness.mjs",
+      "action": "full",
+      "inputDigests": {
+        "scriptSha256": "4f2e8d65483c641648cdb374ae9d8abd368d269e4ddffe092a8237b8162cddd6",
+        "jobIdentityDigest": "3138bb9bc78df27c473ecfd1410f7bd45ebac1f59cf3ff9cfe4db77aab7aedd3"
+      },
+      "gates": {
+        "audio-loudness": {
+          "verdict": "pass",
+          "evidenceDigest": "3c4c27f25d89a43bc02e6246803a97f42dc07bd20343933fdef6d1ef47b32923",
+          "detail": ""
+        },
+        "narration-intelligibility": {
+          "verdict": "pass",
+          "evidenceDigest": "07937f2758c411a73ee44006c32005b88a115ca3817b220945d4a850393c8e81",
+          "detail": ""
+        },
+        "duration-conformance": {
+          "verdict": "pass",
+          "evidenceDigest": "b1649f7891c2cbf82f6a4b73906f202f3f1ecb40bd57dfdbf95a6ad83f23b867",
+          "detail": ""
+        },
+        "content-addressing": {
+          "verdict": "pass",
+          "evidenceDigest": "6f08d4aacc8d0c1e033b2ac3cec28990268ec739e94b1039e8f8c64275590591",
+          "detail": ""
+        },
+        "external-visual-signoff": {
+          "verdict": "pass",
+          "evidenceDigest": "fc01e2229830b53c8b8e69f94d74fdb388be4d7ab9ec867fe75d767d81b9bb81",
+          "detail": ""
+        },
+        "camera-continuity": {
+          "verdict": "pass",
+          "evidenceDigest": "986ce88ac9e2dcc5df6a1221847b0c81dec6a3c0a1ddb9d7683fde35956f4b2a",
+          "detail": ""
+        },
+        "bookend-audio-breath": {
+          "verdict": "pass",
+          "evidenceDigest": "f2e7d7ce4f00f1f74861621228df76377b3cba3a234742252ada863563ffb707",
+          "detail": ""
+        },
+        "bookend-transition-visual": {
+          "verdict": "pass",
+          "evidenceDigest": "62169249b8440a166264c2d448d8dc8cf52fd4a4633f8264222e2189e25898bb",
+          "detail": ""
+        },
+        "operator-replacement-cleared": {
+          "verdict": "pass",
+          "evidenceDigest": "ed9dd94e31908da6c8f0cc1dc53927014345b3201fe8e1b4e5e6556d4e60421b",
+          "detail": ""
+        },
+        "quality-loop": {
+          "verdict": "pass",
+          "evidenceDigest": "4bd1bf0ac6fe06f220e83ce8c963db8e3f9196720d1a22e05192481b1b3714a5",
+          "detail": ""
+        },
+        "voice-quality": {
+          "verdict": "pass",
+          "evidenceDigest": "b83fa39fe9252e0a4ddb1b23c399d7b32e02d39d0bb8297455f8fd040953ef57",
+          "detail": ""
+        },
+        "character-identity": {
+          "verdict": "pass",
+          "evidenceDigest": "47352ffba5110313c1b7bffc93f3ff1509cf9bfda1eac8847e1d34147e44d493",
+          "detail": ""
+        }
+      },
+      "unexpectedGates": [],
+      "approvals": [
+        {
+          "type": "independent-agent",
+          "scope": "final-contact-sheet",
+          "evidenceDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "reviewer": "synthetic-reviewer",
+          "reviewerContextId": "synthetic-context-1",
+          "decidedAt": "2026-09-20T00:00:00.000Z"
+        }
+      ],
+      "artifacts": [
+        {
+          "kind": "final-video",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bytes": 1024,
+          "mimeType": "video/mp4"
+        }
+      ],
+      "mediaJobs": [],
+      "finalized": true,
+      "finalizedAt": "2026-09-20T01:00:00.000Z",
+      "outcome": "pass",
+      "outcomeRequested": "pass",
+      "outcomeOverridden": false,
+      "knownRemainingIssues": [],
+      "summary": {
+        "declaredGateCount": 12,
+        "passed": 12,
+        "failed": 0,
+        "skipped": 0,
+        "notInForce": 0,
+        "failedGates": [],
+        "skippedGates": [],
+        "notInForceGates": [],
+        "unexpectedGates": [],
+        "artifactCount": 1,
+        "mediaJobCount": 0,
+        "incompleteMediaJobCount": 0,
+        "mediaCostByCurrency": {},
+        "approvalCounts": {
+          "independent-agent": 1
+        }
+      }
+    }
+  }
+}

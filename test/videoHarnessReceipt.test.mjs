@@ -23,6 +23,7 @@ import {
 } from "../lib/videoHarnessJob.mjs";
 import { projectVideoHarnessJob } from "../lib/videoHarnessCanvasAdapter.mjs";
 import { createVideoHarnessRunReceipt } from "../lib/videoHarnessReceipt.mjs";
+import { RUN_RECEIPT_SCHEMA_REVISION, verifyRunReceiptInvocation } from "../lib/harnessRunReceipt.mjs";
 import { resolveCanvasRunStateFile } from "../lib/canvasRunState.mjs";
 import { createKoyaOuterJobBinding } from "../lib/koyaOuterJobBinding.mjs";
 import { stableJson } from "../lib/koyaMangaProductionContract.mjs";
@@ -905,6 +906,64 @@ test("SHA検証済みreport・完全roster・独立signoffから共通RunReceipt
     );
     const stored = JSON.parse(await readFile(result.path, "utf8"));
     assert.equal(stored.finalized, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Job に残った作ったホスト・再開したホストと所要時間を、共通 RunReceipt に digest つきで写す", async () => {
+  const root = await mkdtemp(join(tmpdir(), "video-receipt-host-"));
+  try {
+    const outcome = await completedFixture(root);
+    const call = (overrides) => ({
+      host: "claude-code",
+      hostVersion: "9.9.1",
+      clientName: "claude-code",
+      candidates: [],
+      model: "synthetic-model-a",
+      modelSource: "caller-declared",
+      buzzassistVersion: "0.1.27",
+      via: "mcp",
+      detectedFrom: "mcp-client-info",
+      operation: "start",
+      mode: "plan-only",
+      at: "2026-09-01T00:00:00.000Z",
+      ...overrides,
+    });
+    const invocation = {
+      version: "buzzassist-host-invocation-v1",
+      createdBy: call(),
+      resumedBy: [call({ host: "codex", hostVersion: "9.9.2", clientName: "codex-mcp-client", model: "unknown", modelSource: "unavailable", operation: "resume", mode: "execute", at: "2026-09-01T00:30:00.000Z" })],
+    };
+    const hosted = {
+      ...job(root),
+      createdAt: "2026-09-01T00:00:00.000Z",
+      stages: [{ id: "doctor", status: "pass", startedAt: "2026-09-01T00:30:00.000Z" }],
+      metadata: { invocation },
+    };
+    const result = await createVideoHarnessRunReceipt({ job: hosted, outcome, now: () => "2026-09-01T01:00:00.000Z" });
+    assert.equal(result.receipt.outcome, "pass");
+    assert.equal(result.receipt.schemaRevision, RUN_RECEIPT_SCHEMA_REVISION);
+    assert.deepEqual(result.receipt.invocation.createdBy, invocation.createdBy);
+    assert.deepEqual(result.receipt.invocation.resumedBy, invocation.resumedBy);
+    assert.equal(result.receipt.timing.durationSeconds, 1800, "最後に doctor を始めてから Receipt を確定するまで");
+    assert.equal(result.receipt.timing.receiptOnlyRetry, false);
+    const written = JSON.parse(await readFile(result.path, "utf8"));
+    assert.equal(verifyRunReceiptInvocation(written).ok, true, "書き出した Receipt の invocation は digest と合う");
+    written.invocation.resumedBy[0].host = "claude-code";
+    assert.deepEqual(verifyRunReceiptInvocation(written).failures, ["invocation-digest-mismatch"]);
+
+    // ホストの記録が無い Job（この変更より前に作った Job）の Receipt は、作ったホストを推測しない。
+    const plain = await createVideoHarnessRunReceipt({ job: job(root), outcome, now: () => "2026-09-01T01:00:00.000Z" });
+    assert.equal(plain.receipt.invocation.createdBy, null);
+    assert.equal(plain.receipt.timing.durationSeconds, null);
+    // Receipt の確定だけをやり直す回は、人待ちを含むことを印で残す。
+    const retried = await createVideoHarnessRunReceipt({
+      job: { ...hosted, pendingReceiptFinalization: { version: "buzzassist-video-harness-pending-receipt-v1" } },
+      outcome,
+      now: () => "2026-09-02T00:00:00.000Z",
+    });
+    assert.equal(retried.receipt.timing.receiptOnlyRetry, true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
