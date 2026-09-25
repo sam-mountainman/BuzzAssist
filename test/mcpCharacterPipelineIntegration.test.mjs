@@ -9,6 +9,13 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+// MCP の要求の制限時間。SDK の既定（DEFAULT_REQUEST_TIMEOUT_MSEC）は要求1件につき 60 秒で、作業の大きさと
+// 関係がない。この試験の1件は、候補6枚の生成（偽の画像ブリッジを6本同時に起動する）と、Python の人物監査を
+// 何本も続けて呼ぶ。単独では1件 2〜5 秒・全体 9 秒前後だが、別の試験が並列で走っている端末では同じ1件が
+// 60 秒を超え、`MCP error -32001: Request timed out` で落ちた（全体 81 秒）。同じ試験を 8 本並列で回すと、
+// 全体が 169 秒まで延びた（負荷の平均 180 超）。止まったときに気づけるよう上限は残し、作業に見合う長さにする。
+const MCP_REQUEST_OPTIONS = { timeout: 5 * 60_000 };
+
 async function passCandidateReview(pathname, castName) {
   const review = JSON.parse(await readFile(pathname, "utf8"));
   review.reviewer = { host: "codex", id: "candidate-reviewer", contextId: `candidate-review-${castName}`, reviewedAt: new Date().toISOString() };
@@ -80,13 +87,19 @@ test("MCP character pipeline runs candidates, approval packs, and a multi-charac
       EXCALIDRAW_PROJECT_DIR: projectDir,
       EXCALIDRAW_CANVAS_DIR: canvasDir,
       EXCALIDRAW_GPT_IMAGE_2_CODEX_COMMAND: `"${process.execPath}" "${fixturePath}"`,
+      // 画像ブリッジの命令は `$SHELL -lc` で起動される（lib/mediaGeneration.mjs の runShellBridge）。
+      // 開発者のログインシェル（zsh の profile など）を読むと、偽のブリッジ1本ごとに起動が 0.4 秒ほど
+      // 延び、この試験の12本ぶんが端末の設定しだいで変わる。偽のブリッジは profile を要らないので、
+      // 何も読まない /bin/sh で起動する。
+      SHELL: "/bin/sh",
     },
     stderr: "pipe",
   });
+  const callTool = (params) => client.callTool(params, undefined, MCP_REQUEST_OPTIONS);
 
   try {
-    await client.connect(transport);
-    const analyzed = await client.callTool({
+    await client.connect(transport, MCP_REQUEST_OPTIONS);
+    const analyzed = await callTool({
       name: "analyze_character_script",
       arguments: {
         projectDir,
@@ -104,7 +117,7 @@ test("MCP character pipeline runs candidates, approval packs, and a multi-charac
     assert.equal(analyzed.isError, undefined, JSON.stringify(analyzed));
     const workflowId = analyzed.structuredContent.workflow.id;
 
-    const candidates = await client.callTool({
+    const candidates = await callTool({
       name: "generate_character_candidates",
       arguments: {
         projectDir,
@@ -126,7 +139,7 @@ test("MCP character pipeline runs candidates, approval packs, and a multi-charac
     for (const cast of candidates.structuredContent.workflow.cast) {
       const selected = cast.candidates[1];
       await passCandidateReview(cast.candidateReviewDraftPath, cast.id);
-      const approved = await client.callTool({
+      const approved = await callTool({
         name: "approve_character_candidate",
         arguments: {
           projectDir,
@@ -150,7 +163,7 @@ test("MCP character pipeline runs candidates, approval packs, and a multi-charac
       assert.equal(approved.structuredContent.cast.approval.approvedBy, "integration-test-user");
       assert.match(approved.structuredContent.cast.approval.reason, /固定特徴/);
       await passIdentityReview(approved.structuredContent.identityReviewDraftPath, cast.id);
-      const registered = await client.callTool({
+      const registered = await callTool({
         name: "register_character_identity",
         arguments: {
           projectDir,
@@ -165,7 +178,7 @@ test("MCP character pipeline runs candidates, approval packs, and a multi-charac
       assert.match(registered.structuredContent.character.approval.identityReviewSha256, /^[a-f0-9]{64}$/u);
     }
 
-    const storyboard = await client.callTool({
+    const storyboard = await callTool({
       name: "generate_character_storyboard",
       arguments: {
         projectDir,
@@ -186,7 +199,7 @@ test("MCP character pipeline runs candidates, approval packs, and a multi-charac
     assert.equal(storyboard.structuredContent.succeeded, 2);
     assert.match(storyboard.structuredContent.validation.warnings.join("\n"), /identity-mixing risk/);
 
-    const missingVariant = await client.callTool({
+    const missingVariant = await callTool({
       name: "generate_character_storyboard",
       arguments: {
         projectDir,
