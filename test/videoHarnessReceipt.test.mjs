@@ -839,7 +839,13 @@ test("raw script→durable Koya Job→adapter child→RunReceipt→Canvasを完�
     assert.equal(receipt.approvals[0].evidenceDigest, childFixture.signoff.sha256);
     assert.equal(receipt.harnessBuild.productionDependencies.deployment.digest,
       completed.canonicalIdentity.productionDependencies.deployment.digest);
-    const canvasRun = JSON.parse(await readFile(resolveCanvasRunStateFile({ projectDir: root }, completed.id), "utf8"));
+    // Job の計画時に本番の profile が残した正本スキルの承認の状態を、Receipt へそのまま写す。
+    const plannedApproval = completed.canonicalIdentity.productionProfile.skillApproval;
+    assert.deepEqual(
+      { recorded: receipt.skillApproval.recorded, checkout: receipt.skillApproval.checkout, built: receipt.skillApproval.builtWithUnapprovedSkills, skills: receipt.skillApproval.unapprovedSkills },
+      { recorded: true, checkout: plannedApproval.checkout, built: plannedApproval.builtWithUnapprovedSkills, skills: plannedApproval.unapprovedSkills },
+    );
+    const canvasRun =JSON.parse(await readFile(resolveCanvasRunStateFile({ projectDir: root }, completed.id), "utf8"));
     assert.equal(canvasRun.status, "complete");
     assert.equal(canvasRun.artifacts.find((entry) => entry.kind === "final-mp4").sha256,
       `sha256:${byKind.get("final-video").sha256}`);

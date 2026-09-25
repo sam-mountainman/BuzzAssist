@@ -42,6 +42,7 @@ import {
 } from "../lib/koyaChannelGovernance.mjs";
 import { GENRE_CANONICAL_ENTRYPOINTS } from "../lib/harnessRouting.mjs";
 import { probeHostSkillSync } from "../lib/hostSkillSync.mjs";
+import { SKILL_APPROVAL_REQUIREMENT_ENV, probeSkillApproval } from "../lib/videoHarnessProductionProfile.mjs";
 import { channelPackRuntimeAdapterSpecs } from "../lib/harnessChannelPackRuntime.mjs";
 import {
   resolveHarnessDeployment,
@@ -686,6 +687,41 @@ async function probeChannelPack({ projectDir, harnessId, job, runtime }) {
  * `runtime` is dependency injection for deterministic tests; production
  * callers should omit it. Both CLI and MCP return this same report/schema.
  */
+/** doctor の skill-approval 項目。本文にはスキルの id と版だけを出す（パスも承認者名も出さない）。 */
+export function skillApprovalCheck(probe, { harnessId = "" } = {}) {
+  const list = (probe.unapprovedSkills || []).map((row) => `${row.id} ${row.version}（${row.approvalState}）`).join(", ");
+  const common = {
+    id: "skill-approval",
+    required: Boolean(harnessId) && probe.enforced === true,
+    ok: probe.ok === true,
+    checkout: probe.checkout,
+    unapprovedSkills: (probe.unapprovedSkills || []).map((row) => row.id),
+  };
+  if (probe.unreadable) {
+    return { ...common, detail: `正本スキルの在庫を読めない: ${probe.unreadable}`, fix: "在庫 .agents/skills/inventory.manifest.json と profiles.manifest.json を直す" };
+  }
+  if (probe.ok === true) {
+    return { ...common, detail: `正本スキル ${probe.checked} 本の人の承認が、今の版と内容に付いている`, fix: "" };
+  }
+  if (probe.enforced !== true) {
+    const why = probe.checkout === "development"
+      ? "開発用チェックアウトなので止めない"
+      : `${SKILL_APPROVAL_REQUIREMENT_ENV}=0 で止めていない`;
+    return {
+      ...common,
+      detail: `承認前の正本スキルがある（${why}。Job と RunReceipt に「承認前の正本で作った」とスキルの id・版・sha256 が残る）: ${list}`,
+      fix: "運営者へ配る版（Release）を出す前に、承認者が自分の端末で node scripts/skill-inventory.mjs --approve <id> --reviewer <名前> --human-verified を打つ（npm run skills:check:release と release.yml が確かめる）。エージェントは代わりに打たない",
+    };
+  }
+  return {
+    ...common,
+    detail: `承認前の正本スキルがあるので、この写しでは本番を止める: ${list}`,
+    fix: probe.checkout === "development"
+      ? `${SKILL_APPROVAL_REQUIREMENT_ENV} を外すか、承認者が自分の端末で node scripts/skill-inventory.mjs --approve <id> --reviewer <名前> --human-verified を打つ`
+      : "承認済みの Release へ更新する（setup のやり直しか自動更新）。配布された写しの正本スキルを手で直さない",
+  };
+}
+
 export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "", job = null, runtime = {} } = {}) {
   const checks = [];
   const add = (entry) => { checks.push(entry); return entry; };
@@ -927,6 +963,14 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "",
     ...(hostSync.blockingSkills?.length ? { blockingSkills: hostSync.blockingSkills } : {}),
     developmentCheckout: hostSync.developmentCheckout === true,
   });
+
+  // 正本スキルの人の承認（運営者の決定 2026-09-26: 人が確かめるのはリリースのときの1回）。
+  // 開発用チェックアウトでは止めずに知らせる（Job と RunReceipt に「承認前の正本で作った」と残る）。
+  // 配布された写しでハーネスを指定したときは、Job の作成と同じく止める。判定は Job の作成と同じ関数。
+  const skillApproval = typeof runtime.skillApprovalProbe === "function"
+    ? await runtime.skillApprovalProbe({ declaration })
+    : await probeSkillApproval({ repoRoot: REPO_ROOT, env: runtimeEnv, declaration });
+  add(skillApprovalCheck(skillApproval, { harnessId }));
 
   // Codex は /hooks で信頼されたフックだけを動かす。信頼が無いと学習フックは黙って飛ばされる。
   add({
