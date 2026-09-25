@@ -75,6 +75,34 @@ test("同じ評価者でも文脈が新しければ次の回を採点でき、�
   }), /Fresh evaluator context required/u);
 });
 
+test("回の時刻がループの開始や前の回より早くても例外にせず、経過時間は2つの時刻をまたぐ長さで数える", () => {
+  // レビューの署名（observedAt）と、ループを開いた監査の時刻（startedAt）は、
+  // 運用によってどちらが先にもなる。順序に依存して例外にすると監査が落ちる。
+  const early = round(freshState(), {
+    reviewScores: scores({ "voice-performance": 50 }),
+    extra: { observedAt: "2026-09-23T23:00:00Z" }, // startedAt の 1 時間前
+  });
+  assert.equal(early.clockStartedAt, "2026-09-23T23:00:00.000Z");
+  assert.equal(early.elapsedMs, 60 * 60_000);
+  assert.equal(early.rounds[0].elapsedMs, 60 * 60_000);
+
+  // 2回目のレビューが1回目より前の時刻を名乗っても、経過時間は縮まず負にもならない。
+  const second = round(early, {
+    context: "review-context-2",
+    extra: {
+      observedAt: "2026-09-23T22:30:00Z",
+      previousFailureFingerprint: early.rounds[0].failureFingerprint,
+      revisionDelta: "声を差し替えた",
+    },
+  });
+  assert.equal(second.clockStartedAt, "2026-09-23T22:30:00.000Z");
+  assert.equal(second.elapsedMs, 90 * 60_000, "最も早い時刻から最も遅い時刻まで");
+  assert.ok(second.rounds.every((entry) => entry.elapsedMs >= 0));
+
+  // 時刻として読めない値は、理由つきで拒否する（順序を正せない）。
+  assert.throws(() => round(freshState(), { extra: { observedAt: "not-a-time" } }), /observedAt/u);
+});
+
 test("最終監査は、2回目以降の修正内容が無ければ例外ではなく人待ちの理由を返す", async () => {
   const dir = await mkdtemp(join(tmpdir(), "quality-round-"));
   try {
