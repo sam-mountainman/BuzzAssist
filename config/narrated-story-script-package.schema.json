@@ -102,7 +102,16 @@
           "type": "boolean",
           "description": "運営者本人の体験へ差し替える文。true の間は声にも字幕にもせず、有料生成の前に止まる"
         },
-        "camera": { "$ref": "#/$defs/cameraMove" }
+        "camera": { "$ref": "#/$defs/cameraMove" },
+        "layout": {
+          "enum": ["plain", "tv-left-presenter-right"],
+          "description": "感想パートの配置の型。plain は TV 枠なし（人物の映像があれば全面、無ければこの文の画）、tv-left-presenter-right は左に TV 枠（中に本編の場面の画）と右に人物の枠（人物の映像が無ければ空の枠）。無ければ Channel Pack の bookends.review.layout.default"
+        },
+        "tvScene": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "description": "TV 枠の中に出す本編の場面の id（story[].id）。無ければ本編の場面を順に出す"
+        }
       }
     },
     "cameraMove": {
