@@ -60,6 +60,7 @@ import { resolveCodexCommand } from "./codex-image-bridge.mjs";
 import { appendManagedToolsToPath } from "../lib/prerequisiteTools.mjs";
 import { probeSvgRasterizerCached } from "../lib/svgRasterizer.mjs";
 import { probeYtQualityLoopHooks } from "../lib/ytQualityLoopHooks.mjs";
+import { probeCodexLearningHookTrust } from "../lib/codexHookTrust.mjs";
 
 const defaultRunCommand = promisify(execFile);
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -913,6 +914,13 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "",
     hosts: hostSync.installs.map((install) => ({ host: install.host, version: install.version })),
     ...(hostSync.blockingSkills?.length ? { blockingSkills: hostSync.blockingSkills } : {}),
     developmentCheckout: hostSync.developmentCheckout === true,
+  });
+
+  // Codex は /hooks で信頼されたフックだけを動かす。信頼が無いと学習フックは黙って飛ばされる。
+  add({
+    id: "learning-hook-trust",
+    required: false,
+    ...probeCodexLearningHookTrust({ env: runtimeEnv, homeDir: runtime.homeDir || runtimeEnv.BUZZASSIST_SETUP_HOME || homedir() }),
   });
 
   const blocking = checks.filter((c) => c.required && !c.ok);
