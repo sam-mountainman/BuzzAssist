@@ -119,10 +119,24 @@ function briefRound() {
   };
 }
 
-test("チャンネルの決め方: 明示・Job・Job の台本の作業フォルダ・戦略の作業フォルダ・projectDir・ブリーフの順で、食い違えば決めない", async (t) => {
+test("チャンネルの決め方: 明示・Job・Job の台本の作業フォルダ・戦略の作業フォルダ・projectDir・ブリーフの順で、食い違えば（明示とほかの手がかりでも）決めない", async (t) => {
   const { root, env, scriptWorkDir } = setup(t);
   const resolve = (where) => resolveLearningChannel({ env, ...where });
-  assert.deepEqual(await resolve({ channelId: "beta", workDir: scriptWorkDir }), { channelId: "beta", selectedBy: "explicit" });
+  // 明示は、ほかの手がかりと同じチャンネルか、ほかの手がかりが何も指さないときだけ決める。
+  assert.deepEqual(await resolve({ channelId: "alpha", workDir: scriptWorkDir }), { channelId: "alpha", selectedBy: "explicit" });
+  assert.deepEqual(await resolve({ channelId: "beta", workDir: path.join(root, "elsewhere") }), { channelId: "beta", selectedBy: "explicit" });
+  assert.deepEqual(await resolve({ channelId: ["beta", "beta"] }), { channelId: "beta", selectedBy: "explicit" });
+  // 明示と作業フォルダ・Job・ブリーフ、明示どうしが別のチャンネルを指せば決めない（どちらへも寄せない）。
+  for (const where of [
+    { channelId: "beta", workDir: scriptWorkDir },
+    { channelId: "alpha", job: { metadata: { channel: { id: "beta" } } } },
+    { channelId: "alpha", briefChannelId: "beta" },
+    { channelId: ["alpha", "beta"] },
+  ]) {
+    const result = await resolve(where);
+    assert.equal(result.skippedReason, LEARNING_CHANNEL_AMBIGUOUS, JSON.stringify(where));
+    assert.deepEqual(result.candidates, ["alpha", "beta"]);
+  }
   assert.deepEqual(await resolve({ job: { metadata: { channel: { id: "beta" } } }, workDir: scriptWorkDir }), { channelId: "beta", selectedBy: "job" });
   // 制作の Job の台本の作業フォルダ（とその中）は、その Job のチャンネル。
   assert.deepEqual(await resolve({ workDir: scriptWorkDir }), { channelId: "alpha", selectedBy: "job-work-dir" });

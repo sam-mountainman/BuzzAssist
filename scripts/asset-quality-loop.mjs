@@ -4,7 +4,8 @@
 //   node scripts/asset-quality-loop.mjs start  --work-dir <dir> --harness <id> --stage <工程> --subject <id> --generator-context <会話ID>
 //   node scripts/asset-quality-loop.mjs sheet  --work-dir <dir> --stage <工程> --subject <id> --asset <file> [--reference <file|sha>]...
 //   node scripts/asset-quality-loop.mjs record --work-dir <dir> --stage <工程> --subject <id> --asset <file> --version <版> \
-//        --review <採点ファイル> --producer-context <id> --producer-host <host> --route <経路> [--reference <file|sha>]...
+//        --review <採点ファイル> --producer-context <id> --producer-host <host> --route <経路> [--reference <file|sha>]... \
+//        [--channel <チャンネルの id>] [--job <制作の Job の ID>]
 //   node scripts/asset-quality-loop.mjs verify --work-dir <dir> --stage <工程> --subject <id> --asset <file> \
 //        --check <identity|hand-safety> (--pass|--reject) --reviewer <名前> --note "..." --human-verified
 //   node scripts/asset-quality-loop.mjs status --work-dir <dir> [--stage <工程> --subject <id>] [--asset <file>] [--require-pass]
@@ -30,6 +31,7 @@ import path from "node:path";
 
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
 import { captureAssetLearning } from "../lib/assetQualityLearning.mjs";
+import { learningChannelCliHints } from "../lib/learningChannelResolver.mjs";
 import { resolveFfmpegToolchain } from "../lib/harnessRuntimeResolver.mjs";
 import { writeVideoClipMeasurement } from "../lib/videoClipMeasurement.mjs";
 import {
@@ -59,6 +61,7 @@ const VALUE_OPTIONS = new Set([
   "--channel-config", "--reason", "--asset", "--version", "--review", "--producer-host", "--route",
   "--reference-exempt-reason", "--approved-references", "--measurement", "--revision-delta", "--previous-failure",
   "--blocking-condition", "--cost", "--reviewer", "--note", "--batch", "--declaration", "--out",
+  "--channel", "--job",
 ]);
 /** measure-video の既定の書き先（作業フォルダからの相対）。record --measurement にそのまま渡す。 */
 export const VIDEO_CLIP_MEASUREMENT_DIR = "quality/video-clip-measurements";
@@ -142,6 +145,12 @@ export function assetQualityHelp() {
                                   quality/assets/<工程>--<対象>.revision-delta.json に書いてもよい）
     [--blocking-condition "..."]  人の判断が要るなら書く（ループは blocked で止まる）
     [--cost <n>]
+    [--channel <id>]              学習を積むチャンネル（運営者の配置表の channels の id）。台帳に無ければ止める
+    [--job <Job の ID>]           この成果物を使う制作の Job。その Job の metadata.channel のチャンネルへ積む
+                                  （台帳のチャンネルの作業フォルダに無い Job・チャンネルの無い Job は止める）。
+                                  どちらも無ければ、作業フォルダ（台帳のチャンネルの場所・制作の Job の台本の作業フォルダ）
+                                  からチャンネルを引く。明示と作業フォルダが別のチャンネルを指せば、学習は積まずに
+                                  channel-learning-channel-ambiguous を返す（回は記録する）。verify・batch の record でも使える
 
   verify    人の確認を記録する（${Object.entries(ASSET_HUMAN_CHECKS).map(([id, text]) => `${id}: ${text}`).join(" / ")}）。
             確認した人が自分の対話端末から --human-verified を付けたときだけ人の確認に数える。
@@ -217,7 +226,14 @@ export async function runAssetQualityCli(argv = process.argv.slice(2), {
     return { exitCode: args.action ? 0 : 2 };
   }
   const injected = { ...(now ? { now } : {}), ...(loadChannel ? { loadChannel } : {}) };
-  const learn = captureLearning || ((input) => captureAssetLearning({ ...input, env }));
+  const learnsChannel = ["record", "verify"].includes(args.action);
+  if ((args.channel !== undefined || args.job !== undefined) && !learnsChannel) {
+    throw new Error("--channel / --job は record と verify でだけ使える（学習を積むチャンネルの手がかり）。");
+  }
+  // 学習を積むチャンネルの明示（--channel / --job）。台帳に無いチャンネル・見つからない Job は、記録の前に止める。
+  const hints = learnsChannel ? await learningChannelCliHints({ channelId: args.channel, jobId: args.job, env }) : { captureInput: {} };
+  const capture = captureLearning || ((input) => captureAssetLearning({ ...input, env }));
+  const learn = (input) => capture({ ...input, ...hints.captureInput });
   if (args.batch) {
     if (args.action === "verify") {
       throw new Error("人の確認は対象ごと（--batch は使えない）。確認した人が対象ごとに verify --subject <id> --asset <file> を打つ。");

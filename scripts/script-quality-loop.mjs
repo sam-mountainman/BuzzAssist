@@ -4,7 +4,8 @@
 //   node scripts/script-quality-loop.mjs start  --work-dir <台本の作業フォルダ> --generator-context <初稿を書いた会話ID>
 //   node scripts/script-quality-loop.mjs sheet  --work-dir <dir> --script <版のファイル> --stage <工程>
 //   node scripts/script-quality-loop.mjs record --work-dir <dir> --script <版のファイル> --version <版の名前> \
-//        --stage <draft|external-rewrite|meaning-check|revision> --review <採点ファイル> [--external-call <id>]...
+//        --stage <draft|external-rewrite|meaning-check|revision> --review <採点ファイル> [--external-call <id>]... \
+//        [--channel <チャンネルの id>] [--job <制作の Job の ID>]
 //   node scripts/script-quality-loop.mjs status --work-dir <dir> [--require-pass]
 //   node scripts/script-quality-loop.mjs verdict --work-dir <dir> (--script <台本> | --script-sha256 <sha>)
 //   node scripts/script-quality-loop.mjs accept-human --work-dir <dir> --script <台本> --reviewer <名前> --reason "..." --human-verified
@@ -16,6 +17,7 @@
 // 終了コード: 0 = 済んだ / 3 = 人待ち・直しが要る（記録していない）/ 4 = --require-pass・verdict で未合格 / 2 = 入力の誤り
 
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
+import { learningChannelCliHints } from "../lib/learningChannelResolver.mjs";
 import { captureScriptRoundLearning } from "../lib/scriptQualityLearning.mjs";
 import {
   SCRIPT_QUALITY_GENRES,
@@ -37,6 +39,7 @@ const VALUE_OPTIONS = new Set([
   "--work-dir", "--genre", "--generator-context", "--generator-host", "--channel-pack", "--channel-config",
   "--reason", "--script", "--version", "--stage", "--review", "--base-version", "--revision-delta",
   "--blocking-condition", "--cost", "--ledger", "--reviewer", "--finding-dispositions", "--script-sha256",
+  "--channel", "--job",
 ]);
 const REPEATABLE_OPTIONS = new Set(["--producer-context", "--external-call"]);
 const FLAG_OPTIONS = new Set(["--json", "--restart", "--require-pass", "--human-verified", "--agent-attested", "--help", "-h"]);
@@ -112,6 +115,12 @@ export function scriptQualityHelp() {
     [--cost <n>]                  この回の費用。書かなければ「分からない」として、参照した外部モデルの呼び出しを
                                   0円ではなく不明の件数に数える（同じ呼び出しは1回だけ数える）
     [--ledger <file>]
+    [--channel <id>]              学習を積むチャンネル（運営者の配置表の channels の id）。台帳に無ければ止める
+    [--job <Job の ID>]           この台本を使う制作の Job。その Job の metadata.channel のチャンネルへ積む
+                                  （台帳のチャンネルの作業フォルダに無い Job・チャンネルの無い Job は止める）。
+                                  どちらも無ければ、作業フォルダ（制作の Job の台本の作業フォルダ・台帳のチャンネルの
+                                  場所）からチャンネルを引く。明示と作業フォルダが別のチャンネルを指せば、学習は積まずに
+                                  channel-learning-channel-ambiguous を返す（回は記録する）
             Pack の script-quality.json が acceptance.evaluators で評価者を宣言していれば、採点は
             「評価の組」に入り、宣言した評価者が全員そろった時点で1回として閉じる。組が開いている間は
             record --work-dir <dir> --review <採点ファイル> だけでよい（版・工程・台本は組を開いた記録を使う）。
@@ -178,6 +187,9 @@ export async function runScriptQualityCli(argv = process.argv.slice(2), {
     return { exitCode: args.action ? 0 : 2 };
   }
   const injected = { ...(now ? { now } : {}), ...(loadChannel ? { loadChannel } : {}) };
+  if ((args.channel !== undefined || args.job !== undefined) && args.action !== "record") {
+    throw new Error("--channel / --job は record でだけ使える（学習を積むチャンネルの手がかり）。");
+  }
   switch (args.action) {
     case "contract": {
       const genre = scriptQualityGenre(args.genre || "narrated-story");
@@ -249,6 +261,9 @@ export async function runScriptQualityCli(argv = process.argv.slice(2), {
       return { exitCode: 0, result };
     }
     case "record": {
+      // 学習を積むチャンネルの明示（--channel / --job）。台帳に無いチャンネル・見つからない Job は、回を記録する前に止める。
+      const hints = await learningChannelCliHints({ channelId: args.channel, jobId: args.job, env });
+      const capture = captureLearning || ((input) => captureScriptRoundLearning({ ...input, env }));
       const result = await recordScriptQualityRound({
         workDir: args.workDir,
         scriptPath: args.script,
@@ -268,7 +283,7 @@ export async function runScriptQualityCli(argv = process.argv.slice(2), {
         ...injected,
         // 合格しなかった回は、評価項目 id・機械ゲート id・止まった理由のコードだけを台本の
         // 非公開台帳へ積む（lib/scriptQualityLearning.mjs。BUZZASSIST_LEARNING_AUTO_CAPTURE=0 で止まる）。
-        captureLearning: captureLearning || ((input) => captureScriptRoundLearning({ ...input, env })),
+        captureLearning: (input) => capture({ ...input, ...hints.captureInput }),
       });
       print(stdout, result, args.json);
       if (!args.json && result.learning) {

@@ -5,7 +5,8 @@
 //   node scripts/strategy-brief.mjs fingerprint --skill-dir <戦略の道具のフォルダ>
 //   node scripts/strategy-brief.mjs start  --work-dir <作業フォルダ> --generator-context <ブリーフを書いた会話ID>
 //   node scripts/strategy-brief.mjs sheet  --brief <ブリーフ> [--work-dir <dir>]
-//   node scripts/strategy-brief.mjs record --brief <ブリーフ> --review <採点ファイル> [--work-dir <dir>]
+//   node scripts/strategy-brief.mjs record --brief <ブリーフ> --review <採点ファイル> [--work-dir <dir>] \
+//        [--channel <チャンネルの id>] [--job <制作の Job の ID>]
 //   node scripts/strategy-brief.mjs status [--work-dir <dir> | --brief <ブリーフ>] [--require-pass]
 //   node scripts/strategy-brief.mjs verdict --brief <ブリーフ> [--work-dir <dir>] [--require-pass]
 //   node scripts/strategy-brief.mjs next --from <前のブリーフ> --metrics <指標の集計 JSON> [--referrals <JSON>] \
@@ -25,6 +26,7 @@ import { dirname, resolve } from "node:path";
 
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
 import { readStrategyBrief, strategySkillFingerprint, validateStrategyBrief } from "../lib/strategyBrief.mjs";
+import { learningChannelCliHints } from "../lib/learningChannelResolver.mjs";
 import { draftStrategyBriefFromTool } from "../lib/strategyBriefDraft.mjs";
 import { captureStrategyBriefLearning } from "../lib/strategyBriefLearning.mjs";
 import { draftNextStrategyBrief } from "../lib/strategyBriefNext.mjs";
@@ -44,7 +46,7 @@ const VALUE_OPTIONS = new Set([
   "--revision-delta", "--blocking-condition", "--skill-dir",
   "--from", "--metrics", "--referrals", "--audience-run", "--out",
   "--evidence", "--applies", "--context",
-  "--from-hyp", "--channel", "--previous", "--strategy-skill-dir",
+  "--from-hyp", "--channel", "--previous", "--strategy-skill-dir", "--job",
 ]);
 const REPEATABLE_OPTIONS = new Set(["--producer-context"]);
 const FLAG_OPTIONS = new Set(["--json", "--restart", "--require-pass", "--help", "-h"]);
@@ -103,6 +105,12 @@ export function strategyBriefHelp() {
     [--revision-delta "..."]       2回目以降に必須。前回の失敗をどう直したか
                                    （quality/strategy-brief-revision-delta.json に書いてもよい）
     [--blocking-condition "..."]   人の判断が要るなら書く（ループは blocked で止まる）
+    [--channel <id>]               学習を積むチャンネル（運営者の配置表の channels の id）。台帳に無ければ止める
+    [--job <Job の ID>]            このブリーフで作る制作の Job。その Job の metadata.channel のチャンネルへ積む
+                                   （台帳のチャンネルの作業フォルダに無い Job・チャンネルの無い Job は止める）。
+                                   どちらも無ければ、ブリーフの channel.id・作業フォルダ（台帳のチャンネルの
+                                   strategy.workDir・projectDir）からチャンネルを引く。明示とそれらが別のチャンネルを
+                                   指せば、学習は積まずに channel-learning-channel-ambiguous を返す（回は記録する）
 
   status       今の状態。deliverable は合格して、その版のブリーフが今も同じバイト列のときだけ
     [--work-dir <dir> | --brief <file>] [--require-pass]   未合格なら終了コード 4
@@ -193,6 +201,10 @@ export async function runStrategyBriefCli(argv = process.argv.slice(2), {
     return { exitCode: args.action ? 0 : 2 };
   }
   const injected = now ? { now } : {};
+  if (args.job !== undefined && args.action !== "record") throw new Error("--job は record でだけ使える（学習を積むチャンネルの手がかり）。");
+  if (args.channel !== undefined && !["record", "draft"].includes(args.action)) {
+    throw new Error("--channel は record（学習を積むチャンネル）と draft（ブリーフのチャンネル）でだけ使える。");
+  }
   switch (args.action) {
     case "validate": {
       const file = requireBrief(args);
@@ -233,6 +245,9 @@ export async function runStrategyBriefCli(argv = process.argv.slice(2), {
     }
     case "record": {
       if (typeof args.review !== "string" || !args.review.trim()) throw new Error("--review に採点ファイルが要ります。");
+      // 学習を積むチャンネルの明示（--channel / --job）。台帳に無いチャンネル・見つからない Job は、回を記録する前に止める。
+      const hints = await learningChannelCliHints({ channelId: args.channel, jobId: args.job, env });
+      const capture = captureLearning || ((input) => captureStrategyBriefLearning({ ...input, env }));
       const result = await recordStrategyBriefRound({
         workDir: strategyWorkDir(args),
         briefPath: requireBrief(args),
@@ -243,7 +258,7 @@ export async function runStrategyBriefCli(argv = process.argv.slice(2), {
         ...injected,
         // 合格しなかった回は、失敗指紋・評価項目 id・機械ゲート id だけを Channel Pack の非公開台帳へ積む
         // （lib/strategyBriefLearning.mjs。BUZZASSIST_LEARNING_AUTO_CAPTURE=0 で止まる）。
-        captureLearning: captureLearning || ((input) => captureStrategyBriefLearning({ ...input, env })),
+        captureLearning: (input) => capture({ ...input, ...hints.captureInput }),
       });
       print(stdout, result, args.json);
       if (!args.json && result.learning) {
