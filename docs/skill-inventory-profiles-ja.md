@@ -151,6 +151,11 @@ node scripts/skill-evals.mjs report          # 版ごと・ホストごとの合
 - **モデル**: 未指定だと claude はアカウントの既定、codex は CLI の既定（`config.toml` は読まない）。
   ホスト間で比べるときは両方のモデルを明示する
 
+`npm run skills:check:release`（`--require-approval`）は、承認しようとしている版
+（manifest の版と `contentSha256`）について、本番の正本スキルごとに両ホストの結果がそろっているか、
+片方のホストだけ落ちた eval が無いかを**警告として**出す。止めるかどうかは運営者が決めるので、
+`--require-evals` を付けたときだけ exit 5 で止める。別の SHA の結果は数えない。
+
 ## Skill Creator
 
 BuzzAssist版の正本は `.agents/skills/skill-creator/SKILL.md`。plugin配布時は

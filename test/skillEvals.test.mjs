@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -25,6 +26,7 @@ import { runSkillEvalsCli } from "../scripts/skill-evals.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const fakeAgent = fileURLToPath(new URL("./fixtures/fakeSkillEvalAgent.mjs", import.meta.url));
+const inventoryCli = join(repoRoot, "scripts", "skill-inventory.mjs");
 
 const sha = (value) => `sha256:${createHash("sha256").update(value).digest("hex")}`;
 
@@ -410,6 +412,63 @@ test("report は前の版からの悪化を拾い、読めない行を数える"
     assert.match(reported.stdout, /前の版からの悪化/u);
     assert.match(reported.stdout, /\| buzzassist:alpha-skill \| 1 \| claude \| 1\.0\.0（2\/2/u);
     assert.match(reported.stdout, /読めない行 1/u);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+function inventoryRelease(fixture, extraArgs = []) {
+  return spawnSync(process.execPath, [inventoryCli, "--project-dir", fixture.project, "--require-approval", ...extraArgs], {
+    cwd: fixture.project,
+    env: { ...fixture.env, PATH: process.env.PATH },
+    encoding: "utf8",
+  });
+}
+
+test("skills:check:release は承認する版の eval 結果を警告し、--require-evals のときだけ止める", () => {
+  const fixture = makeFixture();
+  try {
+    // 結果が無い: 既定は警告だけ（exit 0）、--require-evals なら exit 5
+    let result = inventoryRelease(fixture);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /警告のみ/u);
+    assert.match(result.stdout, /buzzassist:alpha-skill 1\.0\.0 .*記録 claude 0\/2、codex 0\/2/u);
+    result = inventoryRelease(fixture, ["--require-evals"]);
+    assert.equal(result.status, 5);
+
+    // 両ホストの結果がそろい、全部合格: 止めない
+    const dir = join(fixture.learning, "evals");
+    mkdirSync(dir, { recursive: true });
+    const records = [];
+    for (const [name, spec] of Object.entries(SKILLS)) {
+      for (const evalCase of normalizeSkillEvalCases(spec.evals)) {
+        for (const host of ["claude", "codex"]) records.push(syntheticRecord({ skillId: `buzzassist:${name}`, contentSha256: sha(spec.md), evalId: evalCase.id, host, passed: 2 }));
+      }
+    }
+    writeFileSync(join(dir, "complete.jsonl"), `${records.map((record) => JSON.stringify(record)).join("\n")}\n`);
+    result = inventoryRelease(fixture, ["--require-evals"]);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /2\/2 スキルで両ホストの結果がそろい/u);
+
+    // 別の版（SHA）の結果は数えない
+    writeFileSync(join(dir, "complete.jsonl"), `${records.map((record) => JSON.stringify({ ...record, contentSha256: sha("別の版") })).join("\n")}\n`);
+    result = inventoryRelease(fixture, ["--require-evals"]);
+    assert.equal(result.status, 5, "承認する版と違う SHA の結果で通さない");
+
+    // 片方のホストだけ落ちた eval がある: 既定は警告、--require-evals で止める
+    writeFileSync(join(dir, "complete.jsonl"), `${records.map((record) => JSON.stringify(record)).join("\n")}\n`);
+    writeFileSync(join(dir, "later.jsonl"), `${JSON.stringify(syntheticRecord({ skillId: "buzzassist:beta-skill", contentSha256: sha(SKILLS["beta-skill"].md), evalId: "b-trigger", host: "codex", passed: 1, recordedAt: "2026-09-26T00:00:00.000Z" }))}\n`);
+    result = inventoryRelease(fixture);
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /片方だけ落ちた eval b-trigger（合格 claude \/ 不合格 codex）/u);
+    result = inventoryRelease(fixture, ["--require-evals"]);
+    assert.equal(result.status, 5);
+
+    // --json のときは標準出力を JSON だけに保つ
+    result = inventoryRelease(fixture, ["--json"]);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.evalCoverage.ok, false);
+    assert.match(result.stderr, /片方だけ落ちた/u);
   } finally {
     fixture.cleanup();
   }

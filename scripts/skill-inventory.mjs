@@ -2,13 +2,14 @@
 
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkSkillEvalCoverage, formatSkillEvalCoverage } from "../lib/skillEvals.mjs";
 import { CHANNEL_SKILLS_ENV, buildSkillInventory, recordSkillApproval } from "../lib/skillInventory.mjs";
 
 function parseArgs(argv) {
   const args = { declaredSkillIds: [] };
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
-    if (["--include-global", "--include-plugin-cache", "--json", "--fail-on-external-divergence", "--require-approval", "--human-verified"].includes(token)) {
+    if (["--include-global", "--include-plugin-cache", "--json", "--fail-on-external-divergence", "--require-approval", "--require-evals", "--human-verified"].includes(token)) {
       args[token.slice(2).replace(/-([a-z])/gu, (_match, letter) => letter.toUpperCase())] = true;
       continue;
     }
@@ -130,11 +131,28 @@ export async function runSkillInventoryCli(argv = process.argv.slice(2), options
     declaredSkillIds: args.declaredSkillIds,
     channelSkillsDir,
   });
+  // リリースの関門: 承認しようとしている版（manifest の版と contentSha256）で、両ホストの
+  // eval 結果がそろっているか、片方のホストだけ落ちた eval が無いか。止めるかどうかは運営者が
+  // 決めることなので既定は警告だけにし、--require-evals のときだけ exit 5 にする。
+  if (args.requireApproval || args.requireEvals) {
+    report.evalCoverage = await checkSkillEvalCoverage({
+      projectDir: resolve(args.projectDir || process.cwd()),
+      env,
+      ...(options.homeDir ? { homeDir: options.homeDir } : {}),
+    });
+  }
   if (args.json) process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   else printHumanReport(report);
+  if (report.evalCoverage && (!report.evalCoverage.ok || !args.json)) {
+    const text = formatSkillEvalCoverage(report.evalCoverage, { blocking: Boolean(args.requireEvals) });
+    // JSON を機械に渡しているときは標準出力を JSON だけに保つ
+    if (args.json) process.stderr.write(text);
+    else process.stdout.write(`\n${text}`);
+  }
   if (!report.analysis.ok) process.exitCode = 2;
   if (args.failOnExternalDivergence && (report.analysis.externalDivergentHashes.length > 0 || !report.analysis.hostSyncOk)) process.exitCode = 3;
   if (args.requireApproval && report.analysis.unapprovedProductionSkills.length > 0) process.exitCode = 4;
+  if (args.requireEvals && report.evalCoverage && !report.evalCoverage.ok) process.exitCode = 5;
   return report;
 }
 
