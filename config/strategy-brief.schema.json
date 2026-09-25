@@ -1,0 +1,281 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://buzzassist.local/schemas/strategy-brief-v1.json",
+  "title": "BuzzAssist strategy brief v1",
+  "description": "企画の判断の結果を制作へ渡す形（戦略ブリーフ）。判断そのものはホストのエージェントと運営者がする。BuzzAssist はこの形を検査し、根拠のファイルを sha256 で照合し、企画の品質ループ（scripts/strategy-brief.mjs）で記録する。lib/strategyBrief.mjs の validateStrategyBrief と同じ規則（欄どうしの対応は strategyBriefLinkIssues）。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "label", "channel", "question", "audience", "entry", "payoffs", "evidence", "changes", "production", "postPublish", "provenance"],
+  "properties": {
+    "version": { "const": "buzzassist-strategy-brief-v1" },
+    "label": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+      "description": "この版の名前。品質ループの回と結び付く"
+    },
+    "channel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "designVersion"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+        "designVersion": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$", "description": "チャンネル設計の版" }
+      }
+    },
+    "question": { "type": "string", "minLength": 4, "maxLength": 400, "description": "動画の問い（1つ）。前提の欄" },
+    "audience": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["who", "whyWatch"],
+      "description": "見る人と見る理由。前提の欄",
+      "properties": {
+        "who": { "type": "string", "minLength": 4, "maxLength": 300 },
+        "whyWatch": { "type": "string", "minLength": 4, "maxLength": 300 }
+      }
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["promises"],
+      "description": "入口（タイトル・サムネイル・冒頭）で約束すること。前提の欄",
+      "properties": {
+        "promises": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 12,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "surface", "text"],
+            "properties": {
+              "id": { "$ref": "#/$defs/itemId" },
+              "surface": { "enum": ["title", "thumbnail", "opening"] },
+              "text": { "type": "string", "minLength": 2, "maxLength": 200 }
+            }
+          }
+        }
+      }
+    },
+    "payoffs": {
+      "type": "array",
+      "minItems": 1,
+      "description": "本文で約束を回収する箇所。どの約束にも1つ以上",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["promiseId", "where"],
+        "properties": {
+          "promiseId": { "$ref": "#/$defs/itemId" },
+          "where": { "type": "string", "minLength": 4, "maxLength": 300 },
+          "locator": { "type": "string", "minLength": 1, "maxLength": 200 }
+        }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "maxItems": 100,
+      "items": { "$ref": "#/$defs/evidence" }
+    },
+    "changes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["previous", "keep", "change"],
+      "description": "前の回から残す点と変える点。どの点も根拠（evidence の id）に結び付ける",
+      "properties": {
+        "previous": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["label", "sha256"],
+              "properties": {
+                "label": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+                "sha256": { "$ref": "#/$defs/sha256" }
+              }
+            }
+          ]
+        },
+        "keep": { "type": "array", "maxItems": 30, "items": { "$ref": "#/$defs/changePoint" } },
+        "change": { "type": "array", "maxItems": 30, "items": { "$ref": "#/$defs/changePoint" } }
+      }
+    },
+    "production": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "conditions"],
+      "description": "制作条件",
+      "properties": {
+        "harnessId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+        "format": { "enum": ["long", "short", "live"] },
+        "conditions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 30,
+          "items": { "type": "string", "minLength": 2, "maxLength": 300 }
+        },
+        "targetDurationSeconds": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "postPublish": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metrics"],
+      "description": "公開後に見る指標",
+      "properties": {
+        "metrics": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/metric" } }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "contextId", "createdAt"],
+      "description": "このブリーフを作った文脈とホスト。この文脈はブリーフを採点できない",
+      "properties": {
+        "host": { "enum": ["claude-code", "codex", "antigravity", "cursor", "human", "other"] },
+        "contextId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$" },
+        "createdAt": { "type": "string", "minLength": 10 },
+        "strategySkill": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["fingerprint"],
+          "description": "戦略の道具の版の指紋（任意）。node scripts/strategy-brief.mjs fingerprint --skill-dir DIR で作る。中身は持たない",
+          "properties": {
+            "fingerprint": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+            "fileCount": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "itemId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,47}$" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "changePoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["point", "evidenceIds"],
+      "properties": {
+        "point": { "type": "string", "minLength": 4, "maxLength": 300 },
+        "evidenceIds": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/itemId" } }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "path", "sha256", "state", "collected"],
+      "properties": {
+        "id": { "$ref": "#/$defs/itemId" },
+        "kind": { "enum": ["snapshot", "audience-run", "metrics", "referrals", "production-instructions", "market-research", "other"] },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "作業フォルダからの相対パス（/ 区切り。\\ は / と読む）。絶対パス・ドライブ名・.. は不可。audience-run は run フォルダ"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256",
+          "description": "ファイルの SHA-256。audience-run は report-manifest.json の SHA-256"
+        },
+        "state": { "enum": ["verified", "provisional", "unverified"] },
+        "collected": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["at", "conditions"],
+          "description": "取得した時期と条件。premise は集めたときの前提（前の版から引き継いだ行に付く）",
+          "properties": {
+            "at": { "type": "string", "description": "ISO の日付か日時。分からなければ unknown" },
+            "conditions": { "type": "string", "minLength": 2, "maxLength": 500 },
+            "premise": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["digest"],
+              "properties": {
+                "digest": { "$ref": "#/$defs/sha256" },
+                "question": { "$ref": "#/$defs/sha256" },
+                "audience": { "$ref": "#/$defs/sha256" },
+                "entryPromises": { "$ref": "#/$defs/sha256" }
+              }
+            }
+          }
+        },
+        "verification": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["method"],
+          "description": "state が verified のときに要る。何をどう確かめたか",
+          "properties": {
+            "method": { "type": "string", "minLength": 4, "maxLength": 300 },
+            "by": { "type": "string", "minLength": 1, "maxLength": 128 }
+          }
+        },
+        "premiseBound": {
+          "type": "boolean",
+          "description": "既定 true。false にするのは前提に依らない根拠（公開済みの動画の実測など）で、premiseIndependenceReason が要る"
+        },
+        "premiseIndependenceReason": { "type": "string", "minLength": 4, "maxLength": 300 },
+        "note": { "type": "string", "minLength": 1, "maxLength": 300 }
+      },
+      "allOf": [
+        { "if": { "properties": { "state": { "const": "verified" } } }, "then": { "required": ["verification"] } },
+        { "if": { "properties": { "premiseBound": { "const": false } }, "required": ["premiseBound"] }, "then": { "required": ["premiseIndependenceReason"] } }
+      ]
+    },
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "source", "metric", "expectation"],
+      "properties": {
+        "id": { "$ref": "#/$defs/itemId" },
+        "source": { "enum": ["metrics", "referrals"] },
+        "metric": {
+          "enum": [
+            "views", "median_views_observed", "impressions", "watch_time_hours", "estimated_weighted_ctr_pct", "end_screen_element_ctr_pct",
+            "ctr_pct", "end_screen_element_impressions", "end_screen_element_clicks",
+            "self_share_pct", "external_share_pct", "unresolved_share_pct", "external_share_excluding_self_pct",
+            "observed_all_views", "reported_all_views", "report_views_covered_pct"
+          ],
+          "description": "source ごとに使える名前が違う（lib/strategyBrief.mjs の POST_PUBLISH_METRICS）"
+        },
+        "comparison": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["format", "window", "traffic_source", "metric_definition"],
+          "description": "source が metrics のときに要る。集計の区分と同じ4つ",
+          "properties": {
+            "format": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "window": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "traffic_source": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "metric_definition": { "type": "string", "minLength": 1, "maxLength": 200 }
+          }
+        },
+        "videoId": { "type": "string", "minLength": 1, "maxLength": 64, "description": "source が metrics のとき、1本の動画の行を見る" },
+        "context": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "source が referrals のとき、関連元レポートの条件との照合に使う",
+          "properties": {
+            "scope_id": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "period_start": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "period_end": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "timezone": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "format": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "traffic_source": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "metric_definition": { "type": "string", "minLength": 1, "maxLength": 200 }
+          }
+        },
+        "expectation": { "type": "string", "minLength": 4, "maxLength": 300 },
+        "expected": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["comparator", "value"],
+          "description": "機械で照らす数値（任意）。無ければ照合だけして判定しない",
+          "properties": {
+            "comparator": { "enum": [">=", ">", "<=", "<"] },
+            "value": { "type": "number" }
+          }
+        },
+        "promiseIds": { "type": "array", "items": { "$ref": "#/$defs/itemId" } }
+      }
+    }
+  }
+}

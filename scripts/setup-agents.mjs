@@ -508,6 +508,7 @@ export const DISTRIBUTABLE_CONFIG_ENTRIES = Object.freeze([
   "koya-reading-dictionary.json",
   "narrated-story-script-package.schema.json", // 台本パッケージの形。台本スキルが出力の形を確かめるのに読む
   "parallel-plans",
+  "strategy-brief.schema.json",        // 戦略ブリーフの形。企画の品質ループと制作への受け渡しが読む
 ]);
 
 // パス要素として、どこに現れても配布しないもの（ディレクトリ名もファイル名も見る）。
