@@ -1,6 +1,6 @@
 {
   "id": "narrated-story-video",
-  "version": "1.13.1",
+  "version": "1.14.0",
   "displayName": "ナレーション物語動画（実写素材＋カメラワーク）",
   "note": "クライアント名・チャンネル名はここに書かない。ここは『何が作れるか』の宣言であって、誰のためのものかの記録ではない。",
   "produces": {
@@ -80,7 +80,7 @@
     },
     {
       "id": "duration-conformance",
-      "what": "ナレーション実尺が計画比±3%。超えたら画の尺を再計画する",
+      "what": "ナレーション実尺が計画比±3%。超えたら画の尺を再計画する。Channel Pack の pacing で本編の文と文・場面と場面の間に置いた間は、計画の尺に入れて比べる",
       "evidenceAuditIds": [
         "duration"
       ]
@@ -255,6 +255,14 @@
         "cameraFocusMeasured"
       ],
       "inForceSince": "buzzassist-narrated-story-audit-v10"
+    },
+    {
+      "id": "narration-pacing-declared",
+      "what": "Channel Pack が pacing（sentenceGapSeconds・sceneGapSeconds。無ければ 0）を宣言したら、本編の隣り合う文の間に、語りの声も字幕も無く BGM だけが流れる間を置く。場面の画が変わる所は sceneGapSeconds（欄が無ければ sentenceGapSeconds）、同じ画の中は sentenceGapSeconds で、足し合わせない。本編の最初の文の前・最後の文の後ろ（OP・感想パートとの境目は字幕なし lead-in の決まりのまま）と感想パートの文の間には置かない。間は声のテイクの前後の無音の外に足し、場面の画は間の間も映り（カメラのショットは間を含めて1つの動き）、場面の画の切り替えは間の真ん中に置いて crossfade の重なりを間の中に収める（間より長い crossfade の宣言は有料生成の前に止める）。字幕は語りの始まりで出て語りの終わりで消える。尺の計画・BGM の依頼の長さ・カメラのショットの長さ・字幕と声の時刻は間を含めた同じ時間割から作る。完成 MP4 と、それへ入れた voice stem で、間ごとに、stem の間の区間が無音、語りの端どうしの無音からテイクの端の無音を除いた長さが宣言と 1 フレーム以内、MP4 の間の区間で BGM が途切れず語りの大きさの音が無い、次の語りの発話の開始が MP4 と stem で揃う、MP4 の字幕が前の語りの終わりで消えて次の語りの始まりで出て間の中に無い、焼き込み字幕の頁と場面の切り替えが間の中の計画であることを測る。宣言が無ければ、本編の文が間を空けずに並んでいることを確かめる",
+      "evidenceAuditIds": [
+        "narrationPacingMeasured"
+      ],
+      "inForceSince": "buzzassist-narrated-story-audit-v11"
     }
   ],
   "entrypoint": "node scripts/run-video-harness.mjs",
