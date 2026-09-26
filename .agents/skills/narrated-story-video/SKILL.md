@@ -90,10 +90,14 @@ Fish Audio、ElevenLabs、字幕、retime、finalize用scriptを手で順番に�
 
 - `opening`: `title-card`（文言・書体・背景・音はPack内のファイル）か、Pack内の`video`
 - `review`: 台本の区切り行（`scriptMarker`）、人物素材（`presenter`。必須と宣言して無ければ停止）、
-  感想用の曲
+  感想用の曲、声の有無（`bookends.review.voice`: `voiced` 既定／`none`）。`none` なら感想の文は全部字幕だけで、
+  声の Media Job を作らない。秒数は文の `captionOnlySeconds`、無ければ1秒4文字（最短1.5秒）で、秒数の無い文は
+  文ごとに字幕1枚。1文が30秒を越える（`caption-only-seconds-exceed-limit`）・感想の文に `speaker`・`readings` が
+  ある（`review-voice-none-mismatch:<speaker|reading>:<文の id>`）なら、有料生成の前に止まる
 - `transitions.openingToStory` / `transitions.storyToReview`: `hard-cut`、`fade-through-black`、
   `film-burn` のどれかと、秒数、字幕なしの間（lead-in）。film-burnは外部素材なしで手続き的に描く
 - 境目では、字幕なしのlead-inのあとに語りと字幕が同時に始まり、BGMは境目を通して鳴り続ける
+  （声なしの感想パートでは字幕だけが始まり、感想の区間の voice stem が無音で BGM が途切れないことを測る）
 - Packで決まっていないこと（未受領の曲、権利根拠の無い声、未提供の人物素材など）は、埋めずに
   Packの`blockers`配列へ書く。Jobは有料生成の前に`awaiting-operator-input`で止まる
 
@@ -116,13 +120,16 @@ Fish Audio、ElevenLabs、字幕、retime、finalize用scriptを手で順番に�
   書体に無い字・1行に入らない語は、有料生成の前に止まる
 - `camera`: 場面の画のゆっくりした寄り引きの型（`slow-push-in` / `slow-pull-out` / `pan-left` /
   `pan-right` / `static`）と速さ。同じ画の文（話者ごとに分けた場面）は1つの動きで通し、動きを
-  始め直さない。台本パッケージの場面は `camera` で型を指定できる（Pack に無い型は止まる）
+  始め直さない。台本パッケージの場面は `camera` で型を指定できる（Pack に無い型は止まる）。本編の場面は
+  `cameraFocus: { x, y }`（画の中の顔の位置など。0〜1、左上が0）で焦点を指定でき、無い場面は Pack の型ごとの焦点の
+  まま。見せる範囲は画の外へ出ず、1.010 倍の寄りでは中心から離れた焦点は一番近い端（角）を動かさない寄りになる。
+  同じ場面の文は同じ焦点で、食い違えば `camera-focus-conflict` で止まる。焦点は書いた値だけを使い、画から顔を推測しない
 - `sceneTransition`: 本編の場面の切り替え。`{ "type": "crossfade", "durationSeconds": 0.1〜2 }` を宣言した
   ときだけ混ぜ、無ければ cut。尺と字幕・声の時刻は変わらない（前後の場面を伸ばして重ねる）。短い場面の
   隣では重なりを縮め、2フレームに満たなければ cut のまま描いて計画に `reduced` を残す
 - `bookends.review.layout`: 感想パートの配置（`plain` / `tv-left-presenter-right`）。人物の映像が
   無ければ人物の枠は空のまま（代わりの人物を描かない）。台本パッケージの感想の文は `layout`・
-  `tvScene`・`captionOnlySeconds`（声を作らず字幕だけを出す文。0.5〜30秒。感想パートの最初の文には
+  `tvScene`・`captionOnlySeconds`（声を作らず字幕だけを出す文。0.5〜30秒。声のある感想パートでは最初の文に
   使えない）を持てる。TV 枠の中身は `tv.content` で `still`（既定）/ `scene-motion`（本編でその場面に
   当てたカメラの型で動かす）/ `operator-video`（取り込みの記録の枠 `review-tv` の動画。必須で、音は
   使わず、短ければ頭から繰り返す）
@@ -138,7 +145,9 @@ Fish Audio、ElevenLabs、字幕、retime、finalize用scriptを手で順番に�
 `cameraMotionMeasured`・`reviewLayoutMeasured`・`episodeOpeningProvenance`）。字幕は輝度（Y）で測る。
 監査契約 v9（宣言 1.12.0）から、場面の切り替えと重ね物も測る（`sceneTransitionMeasured`・`fixedOverlaysMeasured`）。
 `reviewLayoutMeasured` は、TV の中身が動く型なら区間の始まりと終わりの変わり方まで測り、止まった画での
-代用を落とす。どれも、宣言していない機能は「描いていない」ことを確かめて通る。
+代用を落とす。監査契約 v10（宣言 1.13.0）から、場面ごとの焦点も測る（`cameraFocusMeasured`。焦点を指定した場面の
+ショットの最初と最後のフレームを、計画の見せる範囲で切り出した絵と比べる。指定が無ければ測らずに通る）。どれも、
+宣言していない機能は「描いていない」ことを確かめて通る。
 
 監査契約 v7 から、取り込んだ運営者の映像（回ごとの OP 映像・感想パートの人物の映像。後から足した TV 枠の動画も
 同じ経路）は、途中の成果物の品質ループ（工程 video-clip）に合格した版でなければ使わない。取り込みの記録のフォルダで、先に `node scripts/asset-quality-loop.mjs measure-video`
@@ -177,7 +186,7 @@ Fish Audio、ElevenLabs、字幕、retime、finalize用scriptを手で順番に�
   `assetQualityLoop.pending` を返す。有料の再生成はしない。ループを回してから同じ Job を resume する
 - 確定の前にも、描いた画と採用したテイクが今も合格した版かを照合する
 - 対象が多い回（長い動画の声のテイク・本編の画）は `sheet --batch` / `record --batch` で1つの評価文脈が
-  まとめて採点できる（1回 50 件まで。人の確認は対象ごとに `verify`）
+  まとめて採点できる（1回 50 件まで。人の確認は対象ごとに `verify`、多いときは `verify-pages`（ページ画像で数枚ずつ））
 
 ## サムネ
 
@@ -319,8 +328,9 @@ subject を署名する唯一の経路であり、finalize と RunReceipt は `v
 - 途中の成果物の品質ループと画の来歴の実測 pass（`sceneImageAssetLoopPassed`・`characterAssetLoopPassed`・
   `voiceTakeAssetLoopPassed`・`sceneImageProvenance`）と、監査契約 v6 の見た目の4監査（宣言していない
   機能は描いていないことの確認）
-- 監査契約 v7〜v9 の実測 pass（運営者の映像のループの合格 `operatorVideoAssetLoopPassed`、台本の受け入れ
-  `scriptQualityAccepted`、場面の切り替え `sceneTransitionMeasured`、重ね物 `fixedOverlaysMeasured`）
+- 監査契約 v7〜v10 の実測 pass（運営者の映像のループの合格 `operatorVideoAssetLoopPassed`、台本の受け入れ
+  `scriptQualityAccepted`、場面の切り替え `sceneTransitionMeasured`、重ね物 `fixedOverlaysMeasured`、場面ごとの焦点
+  `cameraFocusMeasured`）
 - `knownRemainingIssues`が空
 - Canvas Runが最終成果物と同じartifact SHAを表示
 

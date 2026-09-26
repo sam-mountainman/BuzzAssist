@@ -100,6 +100,16 @@
         "焼き込み字幕・TV 枠・人物の枠・顔の範囲と重なる置き場所は有料生成の前に止まるので、重ならない位置にする",
         "OP と境目の転換には重ねず、完成 MP4 の fixedOverlaysMeasured（監査契約 v9）で確かめる"
       ]
+    },
+    {
+      "id": "voiceless-review-part",
+      "prompt": "このチャンネルの感想パートは声を入れず、字幕だけにしたい。",
+      "shouldTrigger": true,
+      "invariants": [
+        "署名済み Channel Pack の bookends.review.voice を none にする（感想の声の Media Job は作らない）",
+        "字幕の秒数は文の captionOnlySeconds、無ければ1秒4文字（最短1.5秒）で、1文30秒を越える文は有料生成の前に止まる",
+        "感想の文に speaker や readings を書くと review-voice-none-mismatch で止まるので外す"
+      ]
     }
   ]
 }

@@ -182,8 +182,8 @@
     {
       "id": "buzzassist:narrated-story-video",
       "name": "narrated-story-video",
-      "version": "1.5.0",
-      "contentSha256": "sha256:f99704813658b0528f1f4903f7f833ebea8529512692fb2888d1a8a3bd248657",
+      "version": "1.6.0",
+      "contentSha256": "sha256:0c5440a481df88267af3d41696205b40d4d1dd947268ddea0f90d5934ca206cc",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",
