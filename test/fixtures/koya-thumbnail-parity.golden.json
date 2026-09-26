@@ -1368,7 +1368,7 @@
         }
       ],
       "failures": [
-        "asset-quality-required:thumbnail:synthetic-parity-loop-b:not-passed（評価者の採点は通った。人の確認（hand-safety）が要る。確認した人が自分の端末から verify --check <欄> --pass --reviewer <名前> --note \"何を見たか\" --human-verified を打つ（機械は人の確認を記録できない）: asset-quality-human-verification-required:hand-safety）"
+        "asset-quality-required:thumbnail:synthetic-parity-loop-b:not-passed（評価者の採点は通った。人の確認（hand-safety）が要る。確認した人が自分の端末から verify --check <欄> --pass --reviewer <名前> --note \"何を見たか\" --human-verified を打つ（機械は人の確認を記録できない。対象が多いときは verify-pages で数枚ずつのページにして見る）: asset-quality-human-verification-required:hand-safety）"
       ],
       "warnings": []
     }
