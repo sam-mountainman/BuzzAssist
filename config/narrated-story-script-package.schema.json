@@ -86,7 +86,8 @@
         "speaker": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
         "sceneIntent": { "type": "string", "maxLength": 2000, "description": "画面の意図（場所・人物・寄り引き）。画像の指示に使う" },
         "musicSection": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$", "description": "BGM の区分（Channel Pack の musicPlan.sections[].id）" },
-        "camera": { "$ref": "#/$defs/cameraMove" }
+        "camera": { "$ref": "#/$defs/cameraMove" },
+        "cameraFocus": { "$ref": "#/$defs/cameraFocus" }
       }
     },
     "reviewSegment": {
@@ -127,6 +128,16 @@
     "cameraMove": {
       "enum": ["slow-push-in", "slow-pull-out", "pan-left", "pan-right", "static"],
       "description": "この場面（画1枚）のカメラの型。Channel Pack の camera.moves に宣言した型だけ。無ければ Pack の camera.sequence を順に当てる。話者ごとに分けた文も同じ画の続きなので、1つの動きを通しで続ける"
+    },
+    "cameraFocus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "description": "この本編の場面（画1枚）の焦点。画の中の位置（顔の位置など）を、画の幅・高さに対する割合で書く（左上が 0、右下が 1）。無ければ Channel Pack の camera.moves の型ごとの焦点（focusX / focusY）のまま。寄り・引きは寄った端の見せる範囲の中心、パンは縦の中心と道のりの中ほど、static は見せる範囲の中心になり、どの型でも見せる範囲は画の外へ出ない（焦点が端に近いほど、その端に寄せた寄りになる）。話者ごとに分けた文も同じ焦点で1つの動きを通す。焦点は書いた値だけを使い、画から顔を推測しない。完成 MP4 で焦点どおりに見せていることを監査 cameraFocusMeasured が測る",
+      "properties": {
+        "x": { "type": "number", "minimum": 0, "maximum": 1 },
+        "y": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
     }
   }
 }

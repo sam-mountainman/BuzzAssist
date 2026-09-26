@@ -117,6 +117,50 @@ test("台本パッケージ: 見出しを本文に入れない・読みは本文
   assert.equal(broken.stage, "script-package");
 });
 
+test("台本パッケージ: 本編の場面の焦点（cameraFocus）は場面の全部の文に同じ値で付き、生成記録に残る。形の誤り・感想の文の焦点は止める", async () => {
+  const focus = { x: 0.31, y: 0.42 };
+  const result = plan(samplePackage({
+    story: [
+      { id: "s01", text: "雨の朝、店の戸を開けずに待った。", camera: "slow-push-in", cameraFocus: focus },
+      { id: "s02", text: "看板には『本日休業』とある。それでも客は来た。" },
+    ],
+  }));
+  assert.deepEqual(result.issues, []);
+  const [first, second, third] = result.storySegments;
+  assert.deepEqual(first.cameraFocus, focus);
+  assert.equal(second.cameraFocus, undefined, "焦点の無い場面は Pack の型ごとの焦点のまま");
+  assert.equal(third.cameraFocus, undefined);
+  assert.deepEqual(narratedSegmentManifestFields(first).cameraFocus, focus);
+  assert.equal("cameraFocus" in narratedSegmentManifestFields(second), false);
+  // 話者ごと・文ごとに分けた場面の文は、全部同じ焦点（1つのショットで通す）。
+  const split = plan(samplePackage({
+    speakers: [{ id: "c-shop", castRole: "shopkeeper" }],
+    story: [{ id: "s01", text: "店主は言った。「いらっしゃい」そして笑った。", speaker: "c-shop", cameraFocus: focus }],
+    readings: [],
+  }), baseConfig({ cast: { roles: { shopkeeper: { status: "approved" } } } }), {
+    resolveRole: (role) => ({ ok: true, role, voice: { voiceId: `voice-${role}` }, routedBy: "fixture" }),
+  });
+  assert.deepEqual(split.issues, []);
+  assert.ok(split.storySegments.length >= 3, split.storySegments.map((segment) => segment.id).join(", "));
+  for (const segment of split.storySegments) assert.deepEqual(segment.cameraFocus, focus, segment.id);
+  // 有料生成の前の見た目の検査も、同じ場面の文を1つのショットとして見て食い違いが無いことを確かめる。
+  const { checkNarratedVisualPlan } = await import("../lib/narratedStoryVisuals.mjs");
+  const { normalizeNarratedCameraConfig } = await import("../lib/narratedStoryCamera.mjs");
+  const visualConfig = { camera: normalizeNarratedCameraConfig(undefined).config, subtitles: { burnIn: false } };
+  assert.deepEqual((await checkNarratedVisualPlan({ config: visualConfig, segments: split.storySegments })).issues, []);
+  const conflicting = split.storySegments.map((segment, index) => (index === 1 ? { ...segment, cameraFocus: { x: 0.7, y: 0.42 } } : segment));
+  assert.deepEqual((await checkNarratedVisualPlan({ config: visualConfig, segments: conflicting })).issues, ["camera-focus-conflict:s01"]);
+  // 形の誤り（範囲外・文字列・知らない欄・欠け）と、感想の文の焦点は検査で止める。
+  const invalid = (story, extra = {}) => validateNarratedScriptPackage(samplePackage({ story, readings: [], ...extra })).problems;
+  assert.ok(invalid([{ id: "s01", text: "本文。", cameraFocus: { x: 1.4, y: 0.5 } }]).includes("script-package-invalid:story[0].cameraFocus.x"));
+  assert.ok(invalid([{ id: "s01", text: "本文。", cameraFocus: { x: "0.3", y: 0.5 } }]).includes("script-package-invalid:story[0].cameraFocus.x"));
+  assert.ok(invalid([{ id: "s01", text: "本文。", cameraFocus: { x: 0.3 } }]).includes("script-package-invalid:story[0].cameraFocus.y"));
+  assert.ok(invalid([{ id: "s01", text: "本文。", cameraFocus: { x: 0.3, y: 0.5, width: 0.2 } }]).includes("script-package-invalid:story[0].cameraFocus.width-unknown"));
+  assert.ok(invalid([{ id: "s01", text: "本文。", cameraFocus: [0.3, 0.5] }]).includes("script-package-invalid:story[0].cameraFocus"));
+  assert.ok(invalid([{ id: "s01", text: "本文。" }], { reviewMarker: MARKER, review: [{ id: "r01", text: "感想。", cameraFocus: focus }] })
+    .includes("script-package-invalid:review[0].cameraFocus-unknown"));
+});
+
 test("台本パッケージ: 登場人物の台詞は配役が無ければ有料生成の前に止める（黙って語りの声へ落とさない）", () => {
   const pkg = samplePackage({
     speakers: [{ id: "c-shop", castRole: "shopkeeper" }],
@@ -275,6 +319,13 @@ test("plan-only の preflight は台本パッケージを読み、止まる理�
   assert.equal(ready.ok, true, ready.blockers.join(", "));
   assert.deepEqual(ready.segments, { story: 3, review: 0 });
   assert.equal(ready.scriptInput.format, NARRATED_SCRIPT_PACKAGE_FORMAT);
+  // 場面ごとの焦点の形の誤りも、有料生成の前に理由コードつきで止まる。
+  await writeFile(packagePath, JSON.stringify(samplePackage({ story: [{ id: "s01", text: "本文です。", cameraFocus: { x: 1.5, y: 0.2 } }], readings: [] })), "utf8");
+  await acceptScriptForTests(packagePath);
+  const badFocus = await inspectNarratedStoryPlan({ scriptPath: packagePath, channelPackDir: pack });
+  assert.equal(badFocus.ok, false);
+  assert.deepEqual(badFocus.blockers, ["script-package-invalid:story[0].cameraFocus.x"]);
+  assert.equal(badFocus.paidCallsAttempted, false);
 });
 
 test("durable Job へ持ち込む Pack の形の検査: scriptIntake と qualityLoop を受け、未知の下位項目は拒否する", async (t) => {

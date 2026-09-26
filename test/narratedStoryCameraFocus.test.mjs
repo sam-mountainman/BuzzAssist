@@ -228,6 +228,32 @@ test("食い違い: 同じ画が続く文の焦点が違えば（片方だけ指
   assert.deepEqual(narratedCameraFocusConflicts(separate), []);
 });
 
+test("感想の TV の中（scene-motion）: 本編でその場面に当てた型と焦点で動かす（焦点の無い場面は Pack の型ごとの焦点）", async () => {
+  const { planNarratedReviewLayout } = await import("../lib/narratedStoryVisuals.mjs");
+  const camera = normalizeNarratedCameraConfig(PACKS.large).config;
+  const config = {
+    camera,
+    render: RENDER,
+    bookends: { enabled: true, review: { layout: { default: "tv-left-presenter-right", tv: { content: "scene-motion" } } } },
+  };
+  const bookendPlan = {
+    parts: [{ id: "story", startFrame: 0, frames: 96 }, { id: "review", startFrame: 96, frames: 48 }],
+    segments: [
+      { id: "p1", imageKey: "p1", part: "story", partStartFrame: 0, frames: 48, cameraMove: "slow-push-in", cameraFocus: { x: 0.2, y: 0.3 } },
+      { id: "p2", imageKey: "p2", part: "story", partStartFrame: 48, frames: 48, cameraMove: "slow-push-in" },
+      { id: "r1", imageKey: "r1", part: "review", partStartFrame: 0, frames: 24, tvScene: "p1" },
+      { id: "r2", imageKey: "r2", part: "review", partStartFrame: 24, frames: 24, tvScene: "p2" },
+    ],
+  };
+  const planned = planNarratedReviewLayout({ config, bookendPlan, storyScenes: [{ sceneId: "p1", imagePath: "p1.png" }, { sceneId: "p2", imagePath: "p2.png" }] });
+  assert.deepEqual(planned.problems, []);
+  const [withFocus, withoutFocus] = planned.sections;
+  assert.deepEqual(withFocus.tvMotion.focus, { x: 0.2, y: 0.3, source: "script-package" });
+  assert.deepEqual([withFocus.tvMotion.to.centerX, withFocus.tvMotion.to.centerY], [0.2, 0.3]);
+  assert.equal("focus" in withoutFocus.tvMotion, false);
+  assert.deepEqual([withoutFocus.tvMotion.to.centerX, withoutFocus.tvMotion.to.centerY], [0.5, 0.5]);
+});
+
 test("判定（純粋関数）: 計画の見せ方と位置・拡大が許容の中なら通り、越えれば焦点の違い・大きさの違い、推定できなければ測れない", () => {
   assert.deepEqual(judgeCameraFocusView({ scale: 1.0001, dx: 0.1, dy: -0.1, residual: 1 }).problems, []);
   assert.deepEqual(judgeCameraFocusView({ scale: 1, dx: CAMERA_FOCUS_SHIFT_TOLERANCE_PX, dy: 0.3, residual: 1 }).problems, ["focus-differs-from-plan"]);
