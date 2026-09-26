@@ -139,9 +139,9 @@
       },
       "approval": {
         "reviewer": "sam-mountainman",
-        "approvedAt": "2026-09-26T05:57:00.629Z",
-        "version": "1.8.0",
-        "contentSha256": "sha256:bdbe7b0d85463059c9c2aedb0d3372d4edac60aa97f82ab3b8a5be698dcfe8bd",
+        "approvedAt": "2026-09-26T06:29:32.709Z",
+        "version": "1.8.1",
+        "contentSha256": "sha256:96d115c2fab5e7802ad8c68fb871146792f46ec98c7339cf973aec1b2d76d2e7",
         "attestedBy": "human-verified"
       }
     },
