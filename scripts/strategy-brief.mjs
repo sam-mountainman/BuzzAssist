@@ -9,6 +9,7 @@
 //        [--channel <チャンネルの id>] [--job <制作の Job の ID>]
 //   node scripts/strategy-brief.mjs status [--work-dir <dir> | --brief <ブリーフ>] [--require-pass]
 //   node scripts/strategy-brief.mjs verdict --brief <ブリーフ> [--work-dir <dir>] [--require-pass]
+//   node scripts/strategy-brief.mjs stop --work-dir <dir> --reason "..." --reviewer <名前> --human-verified
 //   node scripts/strategy-brief.mjs next --from <前のブリーフ> --metrics <指標の集計 JSON> [--referrals <JSON>] \
 //        [--audience-run <4分析の run フォルダ>] [--work-dir <dir>] [--out <下書き>]
 //   node scripts/strategy-brief.mjs applicability --brief <ブリーフ> [--evidence <id> --applies yes|no --reason "..."] \
@@ -35,6 +36,7 @@ import {
   recordStrategyBriefRound,
   recordStrategyEvidenceApplicability,
   startStrategyBriefLoop,
+  stopStrategyBriefLoop,
   strategyBriefReviewTemplate,
   strategyBriefStatus,
   strategyBriefVerdict,
@@ -46,10 +48,10 @@ const VALUE_OPTIONS = new Set([
   "--revision-delta", "--blocking-condition", "--skill-dir",
   "--from", "--metrics", "--referrals", "--audience-run", "--out",
   "--evidence", "--applies", "--context",
-  "--from-hyp", "--channel", "--previous", "--strategy-skill-dir", "--job",
+  "--from-hyp", "--channel", "--previous", "--strategy-skill-dir", "--job", "--reviewer",
 ]);
 const REPEATABLE_OPTIONS = new Set(["--producer-context"]);
-const FLAG_OPTIONS = new Set(["--json", "--restart", "--require-pass", "--help", "-h"]);
+const FLAG_OPTIONS = new Set(["--json", "--restart", "--require-pass", "--human-verified", "--agent-attested", "--help", "-h"]);
 
 function camel(option) {
   return option.replace(/^--?/u, "").replace(/-([a-z])/gu, (_match, letter) => letter.toUpperCase());
@@ -90,7 +92,8 @@ export function strategyBriefHelp() {
     --work-dir <dir>               ブリーフと根拠を置く作業フォルダ（私有側）
     --generator-context <id>       ブリーフを書いた会話・タスクの ID（この文脈は採点できない）
     [--generator-host <claude-code|codex>]
-    [--restart --reason "..."]     止まったループだけ始め直せる（前の状態は history に残る）
+    [--restart --reason "..."]     止まったループだけ始め直せる（前の状態は history に残る。続いているループは、
+                                   人が stop で止めてから）
 
   sheet        評価者へ渡す評価シートと採点ファイルの雛形を出す（briefSha256 を計算して埋める）。
                合格点・下限・重み・前の回の点数は載せない
@@ -124,6 +127,14 @@ export function strategyBriefHelp() {
                strategy-brief-open-question-blocks-production:<id>。採点した版から未確認を確認済みにした・
                仮説の状態を変えた書き換えは、新しい根拠が無ければ ...-without-new-evidence:<id>
     --brief <file> [--work-dir <dir>] [--require-pass]     pass でなければ終了コード 4
+
+  stop         続いているループを、採点なしで止める（企画の方向を変えると決めた・評価項目が改定された、など）。
+               契約が変わって record が contract-changed で止まるループの出口でもある
+    --work-dir <dir> --reason "何を決めたか" --reviewer <名前> --human-verified
+                                   止めると決めた人が自分の対話端末から打つ。--agent-attested は数えず何も変えない。
+                                   状態は blocked（止まった理由 human-stopped）になり、止めた人・理由・時刻が
+                                   humanStop に残る（始め直すと history にも残る）。回・時間は数えない。止めても
+                                   合格にはならず、verdict は制作へ渡さない。続けるなら start --restart --reason "..."
 
   next         公開後の数字から次のブリーフの下書きを作る（照合と下書きだけ。数字の解釈と次の企画の判断は
                ホストのエージェントと運営者がする）。前のブリーフの postPublish.metrics を実際の数字と照らし、
@@ -189,11 +200,16 @@ function requireBrief(args) {
   return resolve(args.brief);
 }
 
+function interactiveTerminal() {
+  return process.stdin.isTTY === true && process.stdout.isTTY === true;
+}
+
 export async function runStrategyBriefCli(argv = process.argv.slice(2), {
   env = process.env,
   stdout = process.stdout,
   now,
   captureLearning,
+  isInteractive = interactiveTerminal(),
 } = {}) {
   const args = parseStrategyBriefArgs(argv);
   if (!args.action || ["--help", "-h", "help"].includes(args.action) || args.help) {
@@ -237,6 +253,19 @@ export async function runStrategyBriefCli(argv = process.argv.slice(2), {
       });
       print(stdout, result, args.json);
       return { exitCode: result.started ? 0 : 3, result };
+    }
+    case "stop": {
+      const result = await stopStrategyBriefLoop({
+        workDir: strategyWorkDir(args),
+        reviewer: args.reviewer,
+        reason: args.reason,
+        humanVerified: args.humanVerified === true,
+        agentAttested: args.agentAttested === true,
+        isInteractive,
+        ...injected,
+      });
+      print(stdout, result, args.json);
+      return { exitCode: result.stopped ? 0 : 3, result };
     }
     case "sheet": {
       const result = await strategyBriefReviewTemplate({ workDir: strategyWorkDir(args), briefPath: requireBrief(args) });
@@ -351,7 +380,7 @@ export async function runStrategyBriefCli(argv = process.argv.slice(2), {
       return { exitCode: 0, result };
     }
     default:
-      throw new Error(`不明なアクション: ${args.action}（validate / fingerprint / start / sheet / record / status / verdict / next / applicability / draft）`);
+      throw new Error(`不明なアクション: ${args.action}（validate / fingerprint / start / sheet / record / status / verdict / stop / next / applicability / draft）`);
   }
 }
 

@@ -14,6 +14,7 @@ import {
   ASSET_REVIEW_SHEET_FORBIDDEN_KEYS,
   ASSET_STAGES,
   assetQualityPaths,
+  assetQualityReasonCode,
   assetQualityReviewSheet,
   assetQualityReviewTemplate,
   assetQualityStage,
@@ -24,6 +25,7 @@ import {
   recordAssetQualityRound,
   requiredHumanChecks,
   startAssetQualityLoop,
+  stopAssetQualityLoop,
   workDirRelative,
 } from "../lib/assetQualityLoop.mjs";
 import { HUMAN_VERIFIED } from "../scripts/harness-learn.mjs";
@@ -518,4 +520,60 @@ test("Windows の区切りでも、作業フォルダの中だけを受け、状
   // 一覧は、対象 id に "--" が入っていても工程と取り違えない。
   const listed = await listAssetQualityStatus({ workDir: root });
   assert.deepEqual(listed.entries.map((entry) => [entry.stage, entry.subjectId]), [["scene-image", "cut-01--b"]]);
+});
+
+test("人が stop で止めると回・費用・時間を数えずに blocked（human-stopped）になり、使う前の照合は止まり、restart で人の確認を引き継いで始め直せる", async (t) => {
+  const root = await workspace(t);
+  const stage = "character";
+  const subjectId = "synthetic-cast-stop";
+  await startAssetQualityLoop({ workDir: root, harnessId: "koya-manga-video", stage, subjectId, generatorContextId: MAKER, generatorHost: "claude-code", now });
+  const contract = createAssetQualityContract({ harnessId: "koya-manga-video", stage }).contract;
+  const fx = await stageInputs(root, stage);
+  const v1 = await fx.asset(1);
+  const first = await recordAssetQualityRound({
+    workDir: root, stage, subjectId, assetPath: v1.rel, versionLabel: "v1", now, cost: 2, ...(await fx.recordExtra(v1)),
+    reviewPath: await writeReview(root, "stop-r1", reviewFor({ stage, context: "ctx-eval-1", assetSha: v1.sha, refs: fx.refs, contract, overrides: { "identity-match": 40 } })),
+  });
+  assert.equal(first.state.status, "active");
+  assert.equal((await verify(root, stage, subjectId, v1.rel, ["identity"])).counted, true);
+  const stopArgs = { workDir: root, stage, subjectId, reviewer: "synthetic-reviewer", reason: "設定画の評価項目の改定を決めた", now };
+  // 機械の申告・対話端末でない --human-verified では止まらない。
+  await assert.rejects(stopAssetQualityLoop({ ...stopArgs, humanVerified: true, isInteractive: false }), /対話端末/u);
+  const agent = await stopAssetQualityLoop({ ...stopArgs, agentAttested: true, isInteractive: true });
+  assert.equal(agent.stopped, false);
+  assert.deepEqual(agent.issues, ["asset-quality-stop-not-counted:agent-self-attested"]);
+  assert.equal(agent.state.status, "active");
+
+  const stopped = await stopAssetQualityLoop({ ...stopArgs, humanVerified: true, isInteractive: true });
+  assert.equal(stopped.stopped, true);
+  assert.equal(stopped.state.status, "blocked");
+  assert.equal(stopped.state.stopReason, "human-stopped");
+  assert.equal(stopped.state.humanStop.reviewer, "synthetic-reviewer");
+  assert.equal(stopped.state.rounds.length, 1);
+  assert.equal(stopped.state.totalCost, first.state.totalCost);
+  assert.equal(stopped.state.elapsedMs, first.state.elapsedMs);
+  assert.equal(stopped.check.humanStop.reason, "設定画の評価項目の改定を決めた");
+  // 止めても合格にはならない。使う前の照合はどちらの語彙でも止まる。
+  const status = await assetQualityStatus({ workDir: root, stage, subjectId, assetPath: v1.rel });
+  assert.equal(status.pass, false);
+  assert.equal(assetQualityReasonCode(status), "loop-stopped:blocked");
+  assert.equal(assetQualityReasonCode(status, { vocabulary: "before-use" }), "not-passed");
+  const v2 = await fx.asset(2);
+  const refused = await recordAssetQualityRound({
+    workDir: root, stage, subjectId, assetPath: v2.rel, versionLabel: "v2", now, ...(await fx.recordExtra(v2)),
+    revisionDelta: "参照の渡し方を直した", previousFailureFingerprint: first.round.failureFingerprint,
+    reviewPath: await writeReview(root, "stop-r2", reviewFor({ stage, context: "ctx-eval-2", assetSha: v2.sha, refs: fx.refs, contract })),
+  });
+  assert.equal(refused.recorded, false);
+  assert.ok(refused.issues.includes("asset-quality-stopped:blocked:human-stopped"));
+  assert.deepEqual((await stopAssetQualityLoop({ ...stopArgs, humanVerified: true, isInteractive: true })).issues, ["asset-quality-stop-loop-not-active:blocked"]);
+
+  const restarted = await startAssetQualityLoop({
+    workDir: root, harnessId: "koya-manga-video", stage, subjectId, generatorContextId: MAKER, now, restart: true, restartReason: "改定した評価項目で採点し直す",
+  });
+  assert.equal(restarted.started, true);
+  assert.equal(restarted.state.status, "active");
+  assert.equal(restarted.state.asset.history.at(-1).stopReason, "human-stopped");
+  assert.equal(restarted.state.asset.history.at(-1).humanStop.reviewer, "synthetic-reviewer");
+  assert.equal(restarted.state.asset.humanVerifications.length, 1, "人の確認の記録は引き継ぐ");
 });

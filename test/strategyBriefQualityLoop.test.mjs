@@ -10,8 +10,10 @@ import {
   createStrategyBriefQualityContract,
   recordStrategyBriefRound,
   startStrategyBriefLoop,
+  stopStrategyBriefLoop,
   strategyBriefReviewTemplate,
   strategyBriefStatus,
+  strategyBriefVerdict,
 } from "../lib/strategyBriefQualityLoop.mjs";
 import {
   captureStrategyBriefLearning,
@@ -304,4 +306,51 @@ test("CLI: 台本のループと同じ終了コード（0 済んだ / 3 人待�
   assert.equal(learning.length, 0);
   assert.equal((await runStrategyBriefCli(["status", "--brief", briefPath, "--require-pass"], { stdout: out() })).exitCode, 0);
   await assert.rejects(runStrategyBriefCli(["record", "--brief", briefPath], { stdout: out() }), /--review/u);
+});
+
+test("人が stop で止めると回・時間を数えずに blocked（human-stopped）になり、verdict は制作へ渡さず、restart で始め直せる", async (t) => {
+  const { root, first } = await setup(t);
+  await start(root);
+  const r1 = await writeReview(root, "stop-r1", review({ context: "ctx-eval-1", briefSha256: first.sha256, rubricScores: scores({ "promise-payoff": 40 }) }));
+  const recorded = await record(root, { briefPath: first.rel, reviewPath: r1 });
+  assert.equal(recorded.state.status, "active");
+  const stdout = { write() {} };
+  const cli = ["stop", "--work-dir", root, "--reviewer", "synthetic-operator", "--reason", "企画の方向を変えると決めた"];
+  // 対話端末でない --human-verified は入力の誤り、機械の申告は数えない（何も変えない）。
+  await assert.rejects(runStrategyBriefCli([...cli, "--human-verified"], { stdout, now, isInteractive: false }), /対話端末/u);
+  const agent = await runStrategyBriefCli([...cli, "--agent-attested", "--json"], { stdout, now, isInteractive: false });
+  assert.equal(agent.exitCode, 3);
+  assert.deepEqual(agent.result.issues, ["strategy-brief-stop-not-counted:agent-self-attested"]);
+  assert.equal((await strategyBriefStatus({ workDir: root })).state.status, "active");
+
+  const human = await runStrategyBriefCli([...cli, "--human-verified", "--json"], { stdout, now, isInteractive: true });
+  assert.equal(human.exitCode, 0);
+  const stopped = human.result.state;
+  assert.equal(stopped.status, "blocked");
+  assert.equal(stopped.stopReason, "human-stopped");
+  assert.equal(stopped.humanStop.reviewer, "synthetic-operator");
+  assert.equal(stopped.rounds.length, 1);
+  assert.equal(stopped.elapsedMs, recorded.state.elapsedMs);
+  const status = await strategyBriefStatus({ workDir: root });
+  assert.equal(status.deliverable, false);
+  assert.equal(status.check.humanStop.reason, "企画の方向を変えると決めた");
+  const verdict = await strategyBriefVerdict({ workDir: root, briefPath: path.join(root, first.rel) });
+  assert.equal(verdict.pass, false);
+  assert.ok(verdict.reasonCodes.includes("strategy-brief-loop-not-passed:blocked"));
+  // 止めたループには回を足せず、止め直しもしない。
+  const second = await writeBrief(root, "brief-r2.json", { ...first.brief, label: "r2", changes: { ...first.brief.changes, previous: { label: "r1", sha256: first.sha256 } } });
+  const refused = await record(root, {
+    briefPath: second.rel, revisionDelta: "約束の回収を本文に足した",
+    reviewPath: await writeReview(root, "stop-r2", review({ context: "ctx-eval-2", briefSha256: second.sha256 })),
+  });
+  assert.equal(refused.recorded, false);
+  assert.ok(refused.issues.includes("strategy-brief-stopped:blocked:human-stopped"));
+  assert.equal((await runStrategyBriefCli([...cli, "--human-verified"], { stdout, now, isInteractive: true })).exitCode, 3);
+  assert.equal((await stopStrategyBriefLoop({ workDir: root, reviewer: "synthetic-operator", reason: "もう一度止める", humanVerified: true, isInteractive: true, now })).issues[0], "strategy-brief-stop-loop-not-active:blocked");
+
+  const restarted = await start(root, { restart: true, restartReason: "企画の方向を変えたので始め直す" });
+  assert.equal(restarted.started, true);
+  assert.equal(restarted.state.status, "active");
+  assert.equal(restarted.state.strategy.history.at(-1).stopReason, "human-stopped");
+  assert.equal(restarted.state.strategy.history.at(-1).humanStop.reviewer, "synthetic-operator");
 });

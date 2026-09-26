@@ -14,6 +14,8 @@
 //        （人の確認を数枚ずつのページ画像で見て、ページごとに答える。記録は対象ごとの verify と同じ形。
 //          本体は lib/assetQualityVerifyPages.mjs）
 //   node scripts/asset-quality-loop.mjs status --work-dir <dir> [--stage <工程> --subject <id>] [--asset <file>] [--require-pass]
+//   node scripts/asset-quality-loop.mjs stop --work-dir <dir> --stage <工程> --subject <id> --reason "..." --reviewer <名前> --human-verified
+//        （続いているループを採点なしで止める。評価項目の改定を決めたときなど。回・費用・時間は数えない）
 //   node scripts/asset-quality-loop.mjs measure-video --work-dir <dir> --asset <動画> --declaration <宣言.json> [--out <file>]
 //        （動画クリップの工程の測定。ffprobe / ffmpeg で形式・全フレームのデコード・尺・fps・解像度・音声の有無を測り、
 //          record --measurement に渡すファイルを書く）
@@ -65,6 +67,7 @@ import {
   recordAssetQualityBatch,
   recordAssetQualityRound,
   startAssetQualityLoop,
+  stopAssetQualityLoop,
   workDirRelative,
 } from "../lib/assetQualityLoop.mjs";
 
@@ -136,7 +139,8 @@ export function assetQualityHelp() {
                                   下限を上げ、重み・上限を変えられる（下限は下げられない）。検証の公開鍵は
                                   BUZZASSIST_CHANNEL_PACK_PUBLIC_KEY
     [--channel-config <file>]     署名の無い設定（手元の試行用。契約に unsigned-file と刻まれる）
-    [--restart --reason "..."]    止まったループ・人の確認で否とされたループだけ始め直せる（前の状態は history に残る）
+    [--restart --reason "..."]    止まったループ・人の確認で否とされたループだけ始め直せる（前の状態は history に残る。
+                                  続いているループは、人が stop で止めてから）
 
   sheet     評価者へ渡す評価シートと採点ファイルの雛形（合格点・下限・重み・前の回の点数は載せない）
     --work-dir <dir> --stage <工程> --subject <id> --asset <file> [--reference <file|sha>]...
@@ -185,6 +189,17 @@ export function assetQualityHelp() {
   status    今の状態。合格は、評価者の採点で合格し、要る人の確認が揃い、その版のファイルが今も同じときだけ
     --work-dir <dir> [--stage <工程> [--subject <id> [--asset <file>]]] [--require-pass]   未合格なら終了コード 4
     --asset を付けると、そのファイルが合格した版そのものかも見る
+
+  stop      続いているループを、採点なしで止める（評価項目の改定を決めた・方向を変えると決めた、など）。
+            次の版を古い契約で採点して --blocking-condition で止めると、同じ版を新しい契約でもう一度採点する
+            ことになり、回数の上限を1回無駄にする。Pack が変わって record が contract-changed で止まるループの
+            出口でもある。1つのループ（工程と対象）ずつ
+    --work-dir <dir> --stage <工程> --subject <id> --reason "何を決めたか" --reviewer <名前> --human-verified
+                                  止めると決めた人が自分の対話端末から打つ。--agent-attested は数えず何も変えない。
+                                  状態は blocked（止まった理由 human-stopped）になり、止めた人・理由・時刻が
+                                  humanStop に残る（始め直すと history にも残る）。回・費用・時間は数えない。
+                                  止めても合格にはならない（使う前の照合は止まる）。続けるなら
+                                  start --restart --reason "..."（Pack を変えたなら --channel-pack も）で始め直す
 
   measure-video  動画クリップ（video-clip）を ffprobe / ffmpeg で測り、record --measurement に渡すファイルを書く
     --work-dir <dir> --asset <動画> --declaration <宣言.json> [--out <file>]
@@ -459,6 +474,21 @@ export async function runAssetQualityCli(argv = process.argv.slice(2), {
       if (!result.started) return { exitCode: 3, result };
       return { exitCode: args.requirePass && !result.pass ? 4 : 0, result };
     }
+    case "stop": {
+      const result = await stopAssetQualityLoop({
+        workDir: args.workDir,
+        stage: args.stage,
+        subjectId: args.subject,
+        reviewer: args.reviewer,
+        reason: args.reason,
+        humanVerified: args.humanVerified === true,
+        agentAttested: args.agentAttested === true,
+        isInteractive,
+        ...(now ? { now } : {}),
+      });
+      print(stdout, result, args.json);
+      return { exitCode: result.stopped ? 0 : 3, result };
+    }
     case "measure-video": {
       const result = await measureVideoClipCli(args, { toolchain, now });
       if (args.json) stdout.write(`${JSON.stringify(result, null, 2)}\n`);
@@ -474,7 +504,7 @@ export async function runAssetQualityCli(argv = process.argv.slice(2), {
       return { exitCode: Object.values(result.verdict.gates).every(Boolean) ? 0 : 3, result };
     }
     default:
-      throw new Error(`不明なアクション: ${args.action}（contract / start / sheet / record / verify / verify-pages / status / measure-video）`);
+      throw new Error(`不明なアクション: ${args.action}（contract / start / sheet / record / verify / verify-pages / status / stop / measure-video）`);
   }
 }
 
