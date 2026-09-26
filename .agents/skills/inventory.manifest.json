@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "manifestVersion": "1.17.0",
+  "manifestVersion": "1.18.0",
   "namespace": "buzzassist",
   "classifications": [
     "installed",
@@ -433,7 +433,7 @@
     {
       "id": "buzzassist:core-plugin",
       "name": "buzzassist",
-      "version": "0.1.29",
+      "version": "0.1.30",
       "owner": "BuzzAssist maintainers",
       "origin": "project-bundle",
       "manifestPaths": [
