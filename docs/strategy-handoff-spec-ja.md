@@ -326,6 +326,18 @@ plan-request は依頼の種類（`requestKind`）とブリーフの状態から
 | `post-publish`（公開後の数字から次へ） | `hyp-post-publish`（前のブリーフがあれば `next --from`） |
 | `research`（調べる） | `hyp-research` |
 
+**`requireBrief` の決め方。** 合格したブリーフを制作の条件にするかは運営者が決めます。完成済みの納品を取り込むだけのチャンネル
+（解説動画のハーネス `explainer-video` の import-delivery。`docs/explainer-video-harness-ja.md`）で、ブリーフの独立評価がまだ
+済んでいない・直している間は `false` にしておきます。取り込みは有料の呼び出しをせず、ブリーフの書き方の直し待ちで止める
+理由が無いためです。ブリーフの状態は plan-request の理由（`strategyBrief.summary`）と、`--strategy-brief` を渡した start の
+Job（`options.strategyBriefSha256` と `metadata.strategyBrief`）に残ります。運営者が「ブリーフの合格を制作の条件にする」と
+決めたら `true` に変えます（`true` で合格していないブリーフを渡すと、start は Job を作る前に `channel-strategy-brief-not-passed`
+で止まります）。なお `--strategy-brief` を渡して作った Job は、そのブリーフを書き直すと resume が
+`strategy-brief-changed-since-start` で止まるので、書き直したブリーフでは新しい Job として start します。
+
+**ブリーフの `production.harnessId`。** 任意です。台帳のチャンネルで start するときハーネスは台帳の `production.harnessId` から
+決まり、ブリーフに harnessId が無くても止まりません。書くなら台帳と同じ id を書きます（違う id は plan-request の理由に出ます）。
+
 HYP の工程について返すのは、工程の名前・作業フォルダ・HYP の採用版の指紋・終わったら作るもの（ブリーフ）・その後のコマンドの順番
 だけで、HYP の文面は持ちません。`requireBrief` のチャンネルでは、合格したブリーフが無いと `start` が Job を作る前に止まります
 （`channel-strategy-brief-required` / `channel-strategy-brief-not-passed`）。`resume` は、start のときのブリーフが書き換わって
