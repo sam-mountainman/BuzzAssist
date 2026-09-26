@@ -234,3 +234,83 @@ test("カメラ: 台本パッケージが Pack に無い型を指定したら、
     await rm(temp, { recursive: true, force: true });
   }
 });
+
+// 運営者の見本のような、ごく小さな寄り（1.010 倍）とパン。
+const FOCUS_CAMERA_PACK = {
+  moves: { "slow-push-in": { zoomPerSecond: 0.03, maxZoom: 1.01 }, "pan-left": { panPerSecond: 0.005, zoom: 1.02 } },
+  sequence: ["slow-push-in"],
+};
+
+test("カメラの焦点: 台本パッケージの場面の焦点（1.010 倍の寄りとパン）で描き、完成 MP4 のフレームで焦点どおりの見せ方を測る。焦点の無い場面は Pack の型ごとの焦点のまま", {
+  skip: toolchain.ok ? false : "ffmpeg/ffprobe is unavailable",
+}, async () => {
+  assert.ok(fontPath, "日本語の書体が見つからない");
+  const temp = await mkdtemp(join(os.tmpdir(), "narrated-visual-camera-focus-"));
+  try {
+    const env = await trustEnv(temp);
+    const fixture = await createBookendFixtureMedia(join(temp, "fixture-media"), toolchain);
+    const { outcome } = await runVisualFixture({
+      root: join(temp, "run"),
+      env,
+      fixture,
+      script: cameraScript([
+        { id: "p1", text: "最初の物語です。次の場面です。", cameraFocus: { x: 0.2, y: 0.3 } },
+        { id: "p2", text: "最初の物語です。", camera: "pan-left", cameraFocus: { x: 0.7, y: 0.75 } },
+        { id: "p3", text: "終わりの場面です。" },
+      ]),
+      extend: (config) => ({ ...config, camera: FOCUS_CAMERA_PACK }),
+    });
+    assert.equal(outcome.status, "awaiting-human-review", JSON.stringify(outcome.knownRemainingIssues));
+    assertAutomaticAuditsPass(outcome);
+    const focus = outcome.auditChecks.cameraFocusMeasured;
+    assert.equal(focus.pass, true, focus.detail);
+    // 焦点を指定した2つの場面だけを測り、どちらも Pack の型ごとの焦点の見せ方と許容を越えて違う（焦点が効いた）。
+    assert.deepEqual(focus.measurement.shots.map((shot) => [shot.move, shot.segmentIds.length, shot.focus.x, shot.focus.y]), [["slow-push-in", 2, 0.2, 0.3], ["pan-left", 1, 0.7, 0.75]]);
+    assert.equal(focus.measurement.distinguishableCount, 2);
+    const manifest = JSON.parse(await readFile(outcome.artifacts.generationManifest.path, "utf8"));
+    const storyShots = manifest.camera.shots.filter((shot) => shot.part === "story");
+    assert.deepEqual(storyShots.map((shot) => shot.focus || null), [
+      { x: 0.2, y: 0.3, source: "script-package" },
+      { x: 0.7, y: 0.75, source: "script-package" },
+      null,
+    ]);
+    const p1 = manifest.segments.filter((segment) => segment.sourceSegmentId === "p1");
+    assert.equal(p1.length, 2);
+    for (const segment of p1) assert.deepEqual(segment.cameraFocus, { x: 0.2, y: 0.3 });
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("カメラの焦点: 焦点を書かない台本では何も測らずに通り（Pack の型ごとの焦点）、形の誤った焦点は有料生成の前に理由コードつきで止まる", {
+  skip: toolchain.ok ? false : "ffmpeg/ffprobe is unavailable",
+}, async () => {
+  assert.ok(fontPath, "日本語の書体が見つからない");
+  const temp = await mkdtemp(join(os.tmpdir(), "narrated-visual-camera-focus-none-"));
+  try {
+    const env = await trustEnv(temp);
+    const fixture = await createBookendFixtureMedia(join(temp, "fixture-media"), toolchain);
+    const plain = await runVisualFixture({
+      root: join(temp, "plain"),
+      env,
+      fixture,
+      script: cameraScript([{ id: "p1", text: "最初の物語です。" }]),
+      extend: (config) => ({ ...config, camera: FOCUS_CAMERA_PACK }),
+    });
+    assert.equal(plain.outcome.status, "awaiting-human-review", JSON.stringify(plain.outcome.knownRemainingIssues));
+    assert.equal(plain.outcome.auditChecks.cameraFocusMeasured.pass, true);
+    assert.equal(plain.outcome.auditChecks.cameraFocusMeasured.measurement.shotCount, 0);
+    const bad = await runVisualFixture({
+      root: join(temp, "bad"),
+      env,
+      fixture,
+      script: cameraScript([{ id: "p1", text: "最初の物語です。", cameraFocus: { x: 0.2, y: 1.3 } }]),
+      extend: (config) => ({ ...config, camera: FOCUS_CAMERA_PACK }),
+    });
+    assert.equal(bad.outcome.status, "awaiting-operator-input");
+    assert.ok(bad.outcome.knownRemainingIssues.includes("script-package-invalid:story[0].cameraFocus.y"), JSON.stringify(bad.outcome.knownRemainingIssues));
+    assert.equal(bad.adapters.calls.generation, 0, "有料生成へ進まない");
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});

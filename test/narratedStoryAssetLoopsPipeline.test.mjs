@@ -199,11 +199,12 @@ test("古い契約: 関門が無かった版（v4）の ready state は、品質
   // v4 の production が書いた state と自動監査の報告の形にする（当時は関門も場面の画の出どころの保証も無く、
   // state に作った版の印も無い）。報告の SHA は state の成果物の記録に合わせる。
   // v5・v6（見た目の実測）・v7（運営者の動画の品質ループ）・v8（台本の品質ループの合格）・v9（本編の場面の切り替えと
-  // 固定の重ね物）で足した監査は、v4 の state と報告には無い。
+  // 固定の重ね物）・v10（場面ごとの焦点）で足した監査は、v4 の state と報告には無い。
   const v5Only = new Set([
     ...NARRATED_ASSET_LOOP_AUDIT_IDS, NARRATED_SCENE_IMAGE_PROVENANCE_AUDIT_ID,
     "burnedSubtitlesMeasured", "cameraMotionMeasured", "reviewLayoutMeasured", "episodeOpeningProvenance",
     "operatorVideoAssetLoopPassed", "scriptQualityAccepted", "sceneTransitionMeasured", "fixedOverlaysMeasured",
+    "cameraFocusMeasured",
   ]);
   const state = JSON.parse(await readFile(statePath, "utf8"));
   delete state.auditContractVersion;
@@ -246,7 +247,8 @@ test("古い契約: 関門が無かった版（v4）の ready state は、品質
   const done = finalizeRunReceipt(common, { outcome: "pass", timestamp: "2026-09-25T00:00:00.000Z" });
   assert.equal(done.outcome, "pass", `不合格 ${done.summary.failedGates.join(", ")} / 未測定 ${done.summary.skippedGates.join(", ")}`);
   assert.deepEqual([...done.summary.notInForceGates].sort(), [
-    "asset-quality-loop", "burned-subtitles-legible", "camera-motion-declared", "episode-opening-provenance", "fixed-overlays-declared",
-    "operator-video-asset-loop", "review-layout", "scene-image-provenance", "scene-transition-declared", "script-quality-accepted",
+    "asset-quality-loop", "burned-subtitles-legible", "camera-focus-declared", "camera-motion-declared", "episode-opening-provenance",
+    "fixed-overlays-declared", "operator-video-asset-loop", "review-layout", "scene-image-provenance", "scene-transition-declared",
+    "script-quality-accepted",
   ]);
 });

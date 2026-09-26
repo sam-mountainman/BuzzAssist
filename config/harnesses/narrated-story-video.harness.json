@@ -1,6 +1,6 @@
 {
   "id": "narrated-story-video",
-  "version": "1.12.1",
+  "version": "1.13.0",
   "displayName": "ナレーション物語動画（実写素材＋カメラワーク）",
   "note": "クライアント名・チャンネル名はここに書かない。ここは『何が作れるか』の宣言であって、誰のためのものかの記録ではない。",
   "produces": {
@@ -38,6 +38,11 @@
     {
       "id": "overlay-images",
       "what": "固定の重ね物（告知の枠など）の画像。Channel Pack の overlays.items に、Pack の中の PNG（透過つき可、8 bit）・重ねる部（story / review）・区間・位置を書き、重ねる部ごとに人の顔が出うる範囲（overlays.faceRegions）を宣言する。Core に既定の画像も位置も無い（実在のブランドのロゴなどを重ねる運用を想定した既定値は置かない）。字幕・感想の配置の枠・顔の範囲と重なる置き場所、顔の範囲の宣言が無い部、不透明な画素の無い画像は有料生成の前に止める",
+      "blocking": false
+    },
+    {
+      "id": "scene-camera-focus",
+      "what": "場面ごとの寄り引きの焦点（顔の位置など）。台本パッケージの本編の場面に cameraFocus: { x, y }（画の幅・高さに対する割合、左上が 0）を書く。無い場面は Channel Pack の camera の型ごとの焦点のまま。ハーネスは画から顔を推測しない（運営者の画の取り込みの記録と Pack の overlays.faceRegions からも焦点を決めない）。形の誤り・同じ場面の文の食い違いは有料生成の前に止める",
       "blocking": false
     },
     {
@@ -242,6 +247,14 @@
         "fixedOverlaysMeasured"
       ],
       "inForceSince": "buzzassist-narrated-story-audit-v9"
+    },
+    {
+      "id": "camera-focus-declared",
+      "what": "台本パッケージの本編の場面が焦点（cameraFocus: 画の中の位置 x・y、0〜1）を指定したら、その場面のショットは Channel Pack の型ごとの焦点の代わりにその焦点で寄り引きを計画する（寄り・引きは寄った端の見せる範囲の中心、パンは縦の中心と道のりの中ほど、static は見せる範囲の中心。どの型でも見せる範囲は画の外へ出ず、焦点が端に近いほどその端に寄せた寄りになる）。完成 MP4 で、そのショットの測る範囲の最初と最後のフレームを、場面の画を計画の見せる範囲で切り出した絵と比べ、位置と拡大の差が許容の中にあることを測る（フレームどうしの動きに出ないパン・static の焦点と、1.010 倍の寄りの焦点も絶対の位置で見る）。同じショットの文の焦点が食い違えば有料生成の前に止める。焦点は台本に書いた値だけを使い、画から顔を推測しない。指定が無ければ、どのショットも Pack の型ごとの焦点で計画したことを確かめる",
+      "evidenceAuditIds": [
+        "cameraFocusMeasured"
+      ],
+      "inForceSince": "buzzassist-narrated-story-audit-v10"
     }
   ],
   "entrypoint": "node scripts/run-video-harness.mjs",

@@ -579,7 +579,7 @@ test("ナレーション物語: 過去の監査契約を満たした回は保証
   // 見た目の実測（焼き込み字幕・カメラの動き・感想パートの配置・回ごとの OP 映像の来歴）は v6、
   // 回ごとの運営者の動画の品質ループ（operatorVideoAssetLoopPassed）は v7、
   // 台本の品質ループの合格（scriptQualityAccepted）は v8、本編の場面の切り替え（sceneTransitionMeasured）と
-  // 固定の重ね物（fixedOverlaysMeasured）は v9 から。
+  // 固定の重ね物（fixedOverlaysMeasured）は v9、場面ごとの焦点（cameraFocusMeasured）は v10 から。
   // 当時の必須監査を全て満たした過去の回を、保証を足した今の宣言で記録しても、当時無かった保証のぶんだけ
   // 後から不合格にしない。
   const { isGateNotInForce } = await import("../lib/harnessRunReceipt.mjs");
@@ -654,8 +654,12 @@ test("ナレーション物語: 過去の監査契約を満たした回は保証
   for (const [id, evidence] of Object.entries(addedV9)) {
     const added = declaration.guarantees.find((g) => g.id === id);
     assert.deepEqual(added?.evidenceAuditIds, evidence, `${id}: 見た目の実測の監査`);
-    assert.equal(added.inForceSince, NARRATED_STORY_AUDIT_CONTRACT_VERSION, `${id}: それが入った監査契約の版から`);
+    assert.equal(added.inForceSince, `${current.series}-v9`, `${id}: それが入った監査契約の版から`);
   }
+  const { NARRATED_CAMERA_FOCUS_AUDIT_ID } = await import("../lib/narratedStoryCamera.mjs");
+  const focusGuarantee = declaration.guarantees.find((g) => g.id === "camera-focus-declared");
+  assert.deepEqual(focusGuarantee?.evidenceAuditIds, [NARRATED_CAMERA_FOCUS_AUDIT_ID], "場面ごとの焦点の実測の監査");
+  assert.equal(focusGuarantee.inForceSince, NARRATED_STORY_AUDIT_CONTRACT_VERSION, "場面ごとの焦点は、それが入った監査契約の版から");
   // 人の判断に依存する保証は、何を人が判断するのかを宣言に書く。
   for (const id of ["external-visual-signoff", "quality-loop", "character-identity", "asset-quality-loop", "operator-video-asset-loop", "script-quality-accepted"]) {
     assert.ok(String(declaration.guarantees.find((g) => g.id === id)?.human || "").length > 10, `${id}: human が無い`);
@@ -689,12 +693,13 @@ test("ナレーション物語: 過去の監査契約を満たした回は保証
   const previousRoster = fixture.contracts.find((entry) => entry.version === previous).requiredAudits;
   const shrunk = record(previousRoster, NARRATED_STORY_AUDIT_CONTRACT_VERSION);
   assert.equal(shrunk.outcome, "fail");
-  assert.deepEqual([...shrunk.summary.skippedGates].sort(), ["fixed-overlays-declared", "scene-transition-declared"]);
+  assert.deepEqual([...shrunk.summary.skippedGates].sort(), ["camera-focus-declared"]);
   for (const id of [
     "qualityLoopPassed", "voiceTakeQuality", "voiceCastRouting", "characterIdentityReviewed",
     "sceneImageProvenance", "sceneImageAssetLoopPassed", "voiceTakeAssetLoopPassed", "characterAssetLoopPassed",
     "burnedSubtitlesMeasured", "cameraMotionMeasured", "reviewLayoutMeasured", "episodeOpeningProvenance",
     "operatorVideoAssetLoopPassed", "scriptQualityAccepted", "sceneTransitionMeasured", "fixedOverlaysMeasured",
+    "cameraFocusMeasured",
   ]) {
     assert.equal(record([...NARRATED_STORY_AUDIT_IDS], NARRATED_STORY_AUDIT_CONTRACT_VERSION, id).outcome, "fail", `${id} が落ちても合格になる`);
   }
