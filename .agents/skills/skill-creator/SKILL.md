@@ -30,10 +30,15 @@ Operator Production の動画生成経路からは呼ばない。端末にある
 4. `.agents/skills` の正本を日本語で変更する。条件別の詳細だけを `references/` へ分ける。
 5. `evals/evals.json` に現実的な正例と近接した負例を置き、観測可能な不変条件をテストする。
 6. Claude Code の adapter（`.claude/skills`）は正本への相対参照だけに保ち、手順を複製しない。Codex 用の adapter は作らない。
-7. inventory manifestのsemver、言語、owner、由来、対応host、内容SHAを更新する。
-   semver は「配った版・承認の付いた版から中身が変わったら上げる」。まだ配っていない（Release に載って
-   いない・承認の付いていない）版がすでに上がっているなら、同じ版のまま内容SHAだけ更新する——承認は版と
-   内容SHAの両方に束縛されるので、承認済みの版を同じ番号のまま中身だけ変えることはしない。
+7. inventory manifestのsemver、言語、owner、由来、対応host、内容SHA（`contentSha256`）、束のdigest
+   （`bundleSha256`）を更新する。束のdigestは SKILL.md と、一緒に配る `references/`・`scripts/`・`agents/` などの
+   付属物を覆う（`evals/` と、機械が書き直す `references/learned-auto.md`・`learned-archive.md` は外す）。
+   references や付属物だけを変えたときも、SKILL.md が同じでも束のdigestを更新する。値は `npm run skills:check`
+   の食い違いの行に出る。
+   semver は「配った版・承認の付いた版から中身（SKILL.md・references・付属物のどれか）が変わったら上げる」。
+   references だけの変更でも上げる。まだ配っていない（Release に載っていない・承認の付いていない）版が
+   すでに上がっているなら、同じ版のまま内容SHAと束のdigestだけ更新する——承認は版・内容SHA・束のdigestに
+   束縛されるので、承認済みの版を同じ番号のまま中身だけ変えることはしない。
    `plugins[].version` はリリースの版上げで `package.json` と各 plugin manifest と同じ値にそろえる
    （inventory の検査が照合する）。
 8. focused testとSkill validatorを実行し、`skill inventory` のcollisionとdivergent hashを確認する。
@@ -59,11 +64,11 @@ Operator Productionでは常に候補外にする。
 
 次を満たすまで配布可能としない。
 
-- 正本の内容SHAがmanifestと一致する。
+- 正本の内容SHAと束のdigestがmanifestと一致する。
 - project adapterが同じ正本を指し、独自手順を持たない。
 - 同じ解決scopeの同名Skillに異なる実装が無い。
 - Operator Productionで目的外Skillが暗黙選択されない。
-- 配る版では、評価結果と人間承認が版・内容SHAへ拘束されている（リリースの関門）。
+- 配る版では、評価結果が版・内容SHAへ、人間承認が版・内容SHA・束のdigestへ拘束されている（リリースの関門）。
 
 機械が自分でreviewer名を入力した記録は人間承認ではない。エージェントが当てた正本の変更は
 「エージェントが当てた」と記録され、配る版の人の承認とは別物として扱う（`harness-self-improvement`

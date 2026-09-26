@@ -222,9 +222,9 @@
     {
       "id": "buzzassist:skill-creator",
       "name": "skill-creator",
-      "version": "0.2.0",
-      "contentSha256": "sha256:d3709162d71a5370b7b65057f6846db0173ac93ed51e37546a0921e7b9408947",
-      "bundleSha256": "sha256:5d2081ff7066fbc439e39d741e3ae1b8238cf2a8dca2b1b77c09069250250dbb",
+      "version": "0.3.0",
+      "contentSha256": "sha256:7b45414a36e1cd7664df8a1552b593fae60c829617493ccd3aeff15e4627ce6b",
+      "bundleSha256": "sha256:88209cb4cff0a087bc95a7ca24e49b6b11c66d065532acaf7025f31a857b8abb",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",

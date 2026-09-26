@@ -20,6 +20,12 @@
       "files": []
     },
     {
+      "id": 5,
+      "prompt": "BuzzAssistのplatform-craftの references/quality-loops-ja.md だけを直しました。SKILL.md は変えていません。運営者へ配る次の版に入れられるようにしてください。",
+      "expected_output": "SKILL.md が同じでも references は配布物に入り動きを変えるので、在庫の bundleSha256 を今の内容へ更新し、配った版・承認の付いた版からの変更なら semver を上げる。learned-auto.md・learned-archive.md と evals/ は束の digest に入らないことを踏まえ、skills:check で食い違いが無いことを確かめる。人の承認は承認者本人の端末の skill-inventory --approve で、エージェントは打たない。",
+      "files": []
+    },
+    {
       "id": 3,
       "prompt": "この動画の字幕とBGMを作ってください。",
       "expected_output": "Skill自体の保守ではないため、この管理用Skillを発火させない。",
