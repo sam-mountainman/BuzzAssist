@@ -12,8 +12,10 @@ import {
   findStaleQualityFeedback,
   normalizeQualityAcceptance,
   normalizeQualityRubric,
+  HUMAN_STOP_REASON,
   recordQualityRound,
   rubricFloorFailures,
+  stopQualityLoopByHuman,
 } from "../lib/qualityLoop.mjs";
 
 const EVIDENCE = [{ path: "audits/signoff.json", sha256: "a".repeat(64), note: "署名済みの全尺レビュー" }];
@@ -379,4 +381,38 @@ test("each-evaluator は宣言した評価者それぞれの総合点と項目�
   assert.equal(relaxedRound.status, "passed");
   assert.throws(() => normalizeQualityAcceptance({ mode: "average", evaluators: ["a"], minimumEvaluatorScore: 85 }), /each-evaluator/u);
   assert.throws(() => normalizeQualityAcceptance({ mode: "each-evaluator", evaluators: ["a"], minimumEvaluatorScore: 120 }), /minimumEvaluatorScore/u);
+});
+
+test("人が採点なしで止めると、回・費用・時間を足さずに blocked（human-stopped）になり、合格にはならない", () => {
+  const first = round(freshState(), { reviewScores: scores({ "voice-performance": 50 }), extra: { cost: 3 } });
+  assert.equal(first.status, "active");
+  const stop = (extra = {}) => stopQualityLoopByHuman({
+    state: first, reason: "評価項目の改定を決めた", reviewer: "operator", attestedBy: "human-verified", stoppedAt: "2026-09-24T02:00:00Z", ...extra,
+  });
+  const stopped = stop();
+  assert.equal(stopped.status, "blocked");
+  assert.equal(stopped.stopReason, HUMAN_STOP_REASON);
+  assert.equal(stopped.nextAction, "restart-with-reason");
+  assert.deepEqual(stopped.humanStop, {
+    stoppedAt: "2026-09-24T02:00:00.000Z", reason: "評価項目の改定を決めた", reviewer: "operator", attestedBy: "human-verified", roundsAtStop: 1,
+  });
+  assert.equal(stopped.rounds.length, 1);
+  assert.equal(stopped.totalCost, first.totalCost);
+  assert.equal(stopped.elapsedMs, first.elapsedMs);
+  assert.equal(stopped.bestRound.passed, false, "最高点の回は残すが合格ではない");
+  assert.equal(Object.isFrozen(stopped), true);
+  // 止めたループには回を足せない。止まっているループは止め直さない。
+  assert.throws(() => round(stopped, { context: "review-context-2", extra: { previousFailureFingerprint: first.rounds[0].failureFingerprint, revisionDelta: "直した" } }), /already blocked/u);
+  assert.throws(() => stop({ state: stopped }), /already blocked/u);
+  // 人の確認（human-verified）以外・理由・名前が無い止めは受けない。
+  for (const attestedBy of ["agent-self-attested", "cli-interactive-claimed", ""]) {
+    assert.throws(() => stop({ attestedBy }), /human-verified/u);
+  }
+  assert.throws(() => stop({ reason: "" }), /reason/u);
+  assert.throws(() => stop({ reviewer: "" }), /reviewer/u);
+  // 回の無いループも止められる（最高点の回は無い）。
+  const empty = stopQualityLoopByHuman({ state: freshState(), reason: "方向を変えると決めた", reviewer: "operator", attestedBy: "human-verified" });
+  assert.equal(empty.status, "blocked");
+  assert.equal(empty.humanStop.roundsAtStop, 0);
+  assert.equal(Object.hasOwn(empty, "bestRound"), false);
 });

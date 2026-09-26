@@ -13,6 +13,7 @@ import {
   recordScriptQualityRound,
   scriptQualityVerdict,
   startScriptQualityLoop,
+  stopScriptQualityLoop,
 } from "../lib/scriptQualityLoop.mjs";
 import {
   SCRIPT_QUALITY_REQUIRED_ISSUE,
@@ -194,6 +195,33 @@ test("採点したが合格していない版は script-quality-not-passed で�
   assert.ok(gate.evidence.loop.score < gate.evidence.loop.targetScore);
   const lines = gate.next.join("\n");
   assert.match(lines, /status --work-dir/u);
+  assert.match(lines, /accept-human/u, "依頼者の台本をそのまま使う口も並べる");
+});
+
+test("人が stop で止めたループの台本は script-quality-stopped で止まり（止めても合格にならない）、始め直しの手順を案内する", async (t) => {
+  const root = await workspace(t);
+  await startScriptQualityLoop({ workDir: root, genre: "manga", generatorContextId: "ctx-writer", generatorHost: "claude-code", now });
+  const { contract } = createScriptQualityContract({ genre: "manga" });
+  const rubricScores = Object.fromEntries(contract.rubric.map((row) => [row.id, row.id === "bubble-fit" ? 50 : 96]));
+  await writeFile(join(root, "quality", "reviews", "r1.json"), JSON.stringify({
+    evaluatorId: "evaluator", evaluatorContextId: "ctx-eval-1", evaluatorHost: "codex", scriptSha256: sha(SCRIPT), rubricScores,
+    notes: "合成の所見: 吹き出しに収まらない台詞がある", findings: [],
+  }));
+  await recordScriptQualityRound({ workDir: root, scriptPath: "script.md", versionLabel: "v1", stage: "draft", reviewPath: "quality/reviews/r1.json", now });
+  // 人の確認の判定だけを合成の確認に差し替える（止めの記録は本物）。
+  const stopped = await stopScriptQualityLoop({
+    workDir: root, reviewer: "synthetic-operator", reason: "合成: 評価項目の改定を決めた", humanVerified: true, isInteractive: true, now,
+    attest: ({ reviewer }) => ({ ok: true, attestation: { reviewer, attestedBy: "human-verified" } }),
+  });
+  assert.equal(stopped.stopped, true);
+  const gate = await checkScriptQualityBeforeProduction({ workDir: root, scriptPath: join(root, "script.md"), genre: "manga" });
+  assert.equal(gate.pass, false);
+  assert.equal(gate.reasonCode, SCRIPT_QUALITY_VERDICT_CODES.stopped);
+  assert.deepEqual(gate.issues, ["script-quality-required:script-quality-stopped"]);
+  assert.equal(gate.evidence.loop.status, "blocked");
+  assert.equal(gate.acceptedBy, null);
+  const lines = gate.next.join("\n");
+  assert.match(lines, /start --work-dir .* --restart --reason/u);
   assert.match(lines, /accept-human/u, "依頼者の台本をそのまま使う口も並べる");
 });
 

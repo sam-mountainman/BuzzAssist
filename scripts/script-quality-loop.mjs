@@ -10,6 +10,7 @@
 //   node scripts/script-quality-loop.mjs verdict --work-dir <dir> (--script <台本> | --script-sha256 <sha>)
 //   node scripts/script-quality-loop.mjs accept-human --work-dir <dir> --script <台本> --reviewer <名前> --reason "..." --human-verified
 //   node scripts/script-quality-loop.mjs reset-cumulative --work-dir <dir> --reviewer <名前> --reason "..." --human-verified
+//   node scripts/script-quality-loop.mjs stop --work-dir <dir> --reviewer <名前> --reason "..." --human-verified
 //
 // 版ごとに、その版を作った文脈とは別の評価文脈の採点を1回として記録する。実装の正本は
 // lib/scriptQualityLoop.mjs（中核は lib/qualityLoop.mjs）。状態は作業フォルダの quality/ に書く。
@@ -33,6 +34,7 @@ import {
   scriptQualityStatus,
   scriptQualityVerdict,
   startScriptQualityLoop,
+  stopScriptQualityLoop,
 } from "../lib/scriptQualityLoop.mjs";
 
 const VALUE_OPTIONS = new Set([
@@ -86,7 +88,8 @@ export function scriptQualityHelp() {
                                   評価項目を足し、下限を上げられる（下げられない）。検証の公開鍵は
                                   BUZZASSIST_CHANNEL_PACK_PUBLIC_KEY
     [--channel-config <file>]     署名の無い設定（手元の試行用。契約に unsigned-file と刻まれる）
-    [--restart --reason "..."]    止まったループだけ始め直せる（前の状態は history に残る）。同じ作業フォルダの
+    [--restart --reason "..."]    止まったループだけ始め直せる（前の状態は history に残る。続いているループは、
+                                  人が stop で止めてから）。同じ作業フォルダの
                                   回数・費用・時間の累計は持ち越し、止まる条件は累計でも判定する。累計が上限に
                                   届いていれば、新しいループは始めた時点で止まっている（終了コード 3）
 
@@ -114,7 +117,7 @@ export function scriptQualityHelp() {
     [--blocking-condition "..."]  人の判断が要るなら書く（ループは blocked で止まる）。評価の組では、組のどの
                                   record に付けても、組が全員そろって閉じた時点で効く（採点ファイルの
                                   blockingCondition より、record に付けた値が先）
-    [--cost <n>]                この回の費用。書かなければ「分からない」として、参照した外部モデルの呼び出しを
+    [--cost <n>]                  この回の費用。書かなければ「分からない」として、参照した外部モデルの呼び出しを
                                   0円ではなく不明の件数に数える（同じ呼び出しは1回だけ数える）
     [--ledger <file>]
     [--channel <id>]              学習を積むチャンネル（運営者の配置表の channels の id）。台帳に無ければ止める
@@ -151,6 +154,20 @@ export function scriptQualityHelp() {
     --work-dir <dir> --reason "何が変わったか" --reviewer <名前> --human-verified
                                   確認した人が自分の対話端末から打つ。--agent-attested は数えず何も変えない。
                                   戻す前の累計は cumulativeResets に残る
+
+  stop      続いているループを、採点なしで止める（評価項目の改定を決めた・方向を変えると決めた、など）。
+            次の版を古い契約で採点して --blocking-condition で止めると、同じ版を新しい契約でもう一度採点する
+            ことになり、回数の上限を1回無駄にする。Pack が変わって record が contract-changed で止まるループの
+            出口でもある
+    --work-dir <dir> --reason "何を決めたか" --reviewer <名前> --human-verified
+                                  止めると決めた人が自分の対話端末から打つ。--agent-attested は数えず何も変えない。
+                                  状態は blocked（止まった理由 human-stopped）になり、止めた人・理由・時刻が
+                                  humanStop に残る（始め直すと history にも残る）。回・費用・時間は数えない。
+                                  開いている評価の組は閉じずに破棄した記録（script.discardedPanel）を残す
+                                  （採点のファイルは消さない）。止めても合格にはならず、verdict は
+                                  script-quality-stopped（制作の関門は人待ちで止まる）。続けるなら
+                                  start --restart --reason "..."（Pack を変えたなら --channel-pack も）で始め直す。
+                                  回数・費用・時間の累計は今までどおり持ち越す
 
   終了コード: 0 済んだ / 3 人待ち・直しが要る（記録していない）/ 4 --require-pass・verdict で未合格 / 2 入力の誤り
 `;
@@ -255,6 +272,19 @@ export async function runScriptQualityCli(argv = process.argv.slice(2), {
       print(stdout, result, args.json);
       return { exitCode: result.reset ? 0 : 3, result };
     }
+    case "stop": {
+      const result = await stopScriptQualityLoop({
+        workDir: args.workDir,
+        reviewer: args.reviewer,
+        reason: args.reason,
+        humanVerified: args.humanVerified === true,
+        agentAttested: args.agentAttested === true,
+        isInteractive,
+        ...(now ? { now } : {}),
+      });
+      print(stdout, result, args.json);
+      return { exitCode: result.stopped ? 0 : 3, result };
+    }
     case "sheet": {
       const result = await scriptQualityReviewTemplate({
         workDir: args.workDir, scriptPath: args.script, baseVersion: args.baseVersion, stage: args.stage || "draft",
@@ -311,7 +341,7 @@ export async function runScriptQualityCli(argv = process.argv.slice(2), {
       return { exitCode: args.requirePass && !result.deliverable ? 4 : 0, result };
     }
     default:
-      throw new Error(`不明なアクション: ${args.action}（contract / start / sheet / record / status / verdict / accept-human / reset-cumulative）`);
+      throw new Error(`不明なアクション: ${args.action}（contract / start / sheet / record / status / verdict / accept-human / reset-cumulative / stop）`);
   }
 }
 

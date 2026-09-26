@@ -22,6 +22,7 @@ import {
   scriptQualityStatus,
   scriptQualityVerdict,
   startScriptQualityLoop,
+  stopScriptQualityLoop,
 } from "../lib/scriptQualityLoop.mjs";
 import { runScriptQualityCli } from "../scripts/script-quality-loop.mjs";
 
@@ -949,6 +950,145 @@ test("組の宣言が壊れた Pack は blocker で止め、黙って1人の組�
   assert.deepEqual(blocked({ evaluators: "a" }), ["script-quality.acceptance.evaluators"]);
   assert.deepEqual(blocked({ quorum: 1 }), ["script-quality.acceptance.quorum-unknown"]);
   assert.deepEqual(blocked([]), ["script-quality.acceptance"]);
+});
+
+test("人が stop で止めると回・費用・時間を数えずに blocked（human-stopped）になり、合格にはならず、restart で新しい契約から始め直せる", async (t) => {
+  const root = await workspace(t);
+  const configPath = join(root, "script-quality.json");
+  await writeFile(configPath, JSON.stringify({ version: SCRIPT_QUALITY_CHANNEL_CONFIG_VERSION, limits: { maximumReviewRounds: 3, maximumCostUnits: 50 } }));
+  await start(root, { channelConfig: configPath });
+  await writeFile(join(root, "drafts/draft.md"), DRAFT);
+  const first = await record(root, {
+    scriptPath: "drafts/draft.md", versionLabel: "v1", stage: "draft", cost: 2,
+    reviewPath: await writeReview(root, "r1", review({ context: "ctx-eval-1", script: DRAFT, rubricScores: scores({ "narration-voice": 55 }) })),
+  });
+  assert.equal(first.state.status, "active");
+  const before = (await scriptQualityStatus({ workDir: root })).check.cumulative;
+
+  const stopped = await stopScriptQualityLoop({
+    workDir: root, reviewer: "operator", reason: "評価項目の改定を決めた（語り口の下限を上げる）", humanVerified: true, isInteractive: true, now,
+  });
+  assert.equal(stopped.stopped, true);
+  assert.equal(stopped.state.status, "blocked");
+  assert.equal(stopped.state.stopReason, "human-stopped");
+  assert.deepEqual(
+    { reviewer: stopped.state.humanStop.reviewer, attestedBy: stopped.state.humanStop.attestedBy, roundsAtStop: stopped.state.humanStop.roundsAtStop },
+    { reviewer: "operator", attestedBy: "human-verified", roundsAtStop: 1 },
+  );
+  assert.equal(stopped.state.humanStop.reason, "評価項目の改定を決めた（語り口の下限を上げる）");
+  assert.ok(Number.isFinite(Date.parse(stopped.state.humanStop.stoppedAt)));
+  // 回・費用・時間は止めても増えない。
+  assert.equal(stopped.state.rounds.length, 1);
+  assert.equal(stopped.state.totalCost, first.state.totalCost);
+  assert.equal(stopped.state.elapsedMs, first.state.elapsedMs);
+  const after = (await scriptQualityStatus({ workDir: root })).check;
+  assert.deepEqual(
+    { rounds: after.cumulative.rounds, cost: after.cumulative.cost, elapsedMs: after.cumulative.elapsedMs, loops: after.cumulative.loops },
+    { rounds: before.rounds, cost: before.cost, elapsedMs: before.elapsedMs, loops: before.loops },
+  );
+  assert.equal(after.pass, false);
+  assert.equal(after.humanStop.reviewer, "operator");
+  // 止めても合格にはならない。最高点の回は bestRound に残る（合格ではない）。
+  assert.equal(stopped.state.bestRound.passed, false);
+  assert.equal(stopped.state.bestRound.artifactSha256, sha(DRAFT));
+  assert.ok(stopped.issues.includes("script-quality-stopped:blocked:human-stopped"));
+  const verdict = await scriptQualityVerdict({ workDir: root, scriptPath: "drafts/draft.md" });
+  assert.equal(verdict.pass, false);
+  assert.equal(verdict.reasonCode, "script-quality-stopped");
+  // 止めたループには回を足せず、止め直しもしない。
+  await writeFile(join(root, "drafts/v2.md"), REWRITE);
+  const refused = await record(root, {
+    scriptPath: "drafts/v2.md", versionLabel: "v2", stage: "revision", revisionDelta: "語り口を直した",
+    reviewPath: await writeReview(root, "r2", review({ context: "ctx-eval-2", script: REWRITE, base: DRAFT })),
+  });
+  assert.equal(refused.recorded, false);
+  assert.ok(refused.issues.includes("script-quality-stopped:blocked:human-stopped"));
+  const again = await stopScriptQualityLoop({ workDir: root, reviewer: "operator", reason: "もう一度止める", humanVerified: true, isInteractive: true, now });
+  assert.equal(again.stopped, false);
+  assert.deepEqual(again.issues, ["script-quality-stop-loop-not-active:blocked"]);
+
+  // 改定した契約（下限を上げた Pack の設定）で始め直す。累計は持ち越し、止めた記録は history に残る。
+  await writeFile(configPath, JSON.stringify({ version: SCRIPT_QUALITY_CHANNEL_CONFIG_VERSION, floors: { "narration-voice": 75 }, limits: { maximumReviewRounds: 3, maximumCostUnits: 50 } }));
+  const restarted = await start(root, { channelConfig: configPath, restart: true, restartReason: "改定した評価項目で採点し直す" });
+  assert.equal(restarted.started, true);
+  assert.deepEqual(restarted.issues, []);
+  assert.equal(restarted.state.status, "active");
+  assert.notEqual(restarted.state.contractDigest, stopped.state.contractDigest);
+  assert.deepEqual(restarted.state.carriedOver, { loops: 1, rounds: 1, cost: 2, elapsedMs: first.state.elapsedMs, unpricedCount: 0 });
+  assert.equal(restarted.state.script.history.at(-1).stopReason, "human-stopped");
+  assert.equal(restarted.state.script.history.at(-1).humanStop.reason, "評価項目の改定を決めた（語り口の下限を上げる）");
+  assert.equal(restarted.state.script.history.at(-1).state.humanStop.reviewer, "operator");
+  // 同じ版を新しい契約で採点し直せる（新しいループの1回目・累計では2回目）。
+  const rescored = await record(root, {
+    scriptPath: "drafts/draft.md", versionLabel: "v1", stage: "draft",
+    reviewPath: await writeReview(root, "r1-new-contract", review({ context: "ctx-eval-3", script: DRAFT, rubricScores: scores({ "narration-voice": 70 }) })),
+  });
+  assert.equal(rescored.recorded, true);
+  assert.equal(rescored.round.index, 1);
+  assert.deepEqual(rescored.round.floorFailures, ["narration-voice"], "改定した下限（75）で採点している");
+  assert.equal((await scriptQualityStatus({ workDir: root })).check.cumulative.rounds, 2);
+});
+
+test("stop は止めると決めた人の対話端末と --human-verified が無いと何も変えない（機械は止めの記録を作れない）", async (t) => {
+  const root = await workspace(t);
+  const stopArgs = { workDir: root, reviewer: "operator", reason: "評価項目の改定を決めた", now };
+  assert.deepEqual((await stopScriptQualityLoop({ ...stopArgs, humanVerified: true, isInteractive: true })).issues, ["script-quality-loop-not-started"]);
+  await start(root);
+  const statePath = scriptQualityPaths(root).statePath;
+  const original = await readFile(statePath, "utf8");
+  await assert.rejects(stopScriptQualityLoop({ ...stopArgs, humanVerified: true, isInteractive: false }), /対話端末/u);
+  await assert.rejects(stopScriptQualityLoop({ ...stopArgs, isInteractive: false }), /--human-verified/u);
+  const agent = await stopScriptQualityLoop({ ...stopArgs, agentAttested: true, isInteractive: true });
+  assert.equal(agent.stopped, false);
+  assert.deepEqual(agent.issues, ["script-quality-stop-not-counted:agent-self-attested"]);
+  const claimed = await stopScriptQualityLoop({ ...stopArgs, isInteractive: true });
+  assert.equal(claimed.stopped, false, "対話端末だけでは人の確認に数えない（--human-verified が要る）");
+  assert.deepEqual(claimed.issues, ["script-quality-stop-not-counted:cli-interactive-claimed"]);
+  await assert.rejects(stopScriptQualityLoop({ ...stopArgs, reason: "", humanVerified: true, isInteractive: true }), /--reason/u);
+  await assert.rejects(stopScriptQualityLoop({ ...stopArgs, reviewer: "", humanVerified: true, isInteractive: true }), /reviewer/u);
+  assert.equal(await readFile(statePath, "utf8"), original, "数えない試みは状態を変えない");
+
+  // CLI: 対話端末でない --human-verified は入力の誤り（例外）、機械の申告は 3、人の確認つきは 0。
+  const stdout = { write() {} };
+  const cli = ["stop", "--work-dir", root, "--reviewer", "operator", "--reason", "評価項目の改定を決めた"];
+  await assert.rejects(runScriptQualityCli([...cli, "--human-verified"], { stdout, now, isInteractive: false }), /対話端末/u);
+  assert.equal((await runScriptQualityCli([...cli, "--agent-attested"], { stdout, now, isInteractive: false })).exitCode, 3);
+  assert.equal(JSON.parse(await readFile(statePath, "utf8")).status, "active");
+  const human = await runScriptQualityCli([...cli, "--human-verified", "--json"], { stdout, now, isInteractive: true });
+  assert.equal(human.exitCode, 0);
+  assert.equal(human.result.state.stopReason, "human-stopped");
+  assert.equal((await runScriptQualityCli([...cli, "--human-verified"], { stdout, now, isInteractive: true })).exitCode, 3, "止まったループは止め直さない");
+});
+
+test("stop のとき開いていた評価の組は、閉じずに破棄した記録を残す（回に数えず、採点のファイルは消さない）", async (t) => {
+  const { root, contract } = await startPanel(t, { evaluators: ["eval-a", "eval-b"] });
+  await writeFile(join(root, "drafts/draft.md"), DRAFT);
+  const reviewPath = await writeReview(root, "a", review({ context: "ctx-a", script: DRAFT, evaluatorId: "eval-a", rubricScores: scores({}, contract) }));
+  const opened = await record(root, { scriptPath: "drafts/draft.md", versionLabel: "v1", stage: "draft", cost: 4, reviewPath });
+  assert.equal(opened.panelAccepted, true);
+  const stopped = await stopScriptQualityLoop({ workDir: root, reviewer: "operator", reason: "評価者の宣言を改定する", humanVerified: true, isInteractive: true, now });
+  assert.equal(stopped.stopped, true);
+  assert.equal(stopped.state.rounds.length, 0, "欠員の組は回として数えない");
+  assert.equal(stopped.state.totalCost, 0, "閉じていない組の費用は累計に入れない");
+  assert.equal(stopped.state.script.pendingPanel, undefined);
+  assert.equal(stopped.state.bestRound, undefined, "回が無ければ最高点の回も無い");
+  const discarded = stopped.state.script.discardedPanel;
+  assert.equal(discarded.reason, "human-stopped");
+  assert.equal(discarded.versionLabel, "v1");
+  assert.equal(discarded.scriptSha256, sha(DRAFT));
+  assert.deepEqual(discarded.missing, ["eval-b"]);
+  assert.deepEqual(discarded.reviews.map((row) => [row.evaluatorId, row.reviewPath]), [["eval-a", "quality/reviews/a.json"]]);
+  assert.equal(discarded.cost, 4);
+  assert.deepEqual(stopped.discardedPanel, discarded);
+  assert.equal((await readFile(join(root, reviewPath), "utf8")).length > 0, true, "採点のファイルは残る");
+  // 組の続きは受け付けない。verdict は組の欠けではなく「止まった」を返す。
+  const late = await record(root, { reviewPath: await writeReview(root, "b", review({ context: "ctx-b", script: DRAFT, evaluatorId: "eval-b", rubricScores: scores({}, contract) })) });
+  assert.equal(late.recorded, false);
+  assert.ok(late.issues.includes("script-quality-stopped:blocked:human-stopped"));
+  assert.equal((await scriptQualityVerdict({ workDir: root, scriptPath: "drafts/draft.md" })).reasonCode, "script-quality-stopped");
+  const status = await scriptQualityStatus({ workDir: root });
+  assert.equal(status.check.discardedPanel.versionLabel, "v1");
+  assert.equal(status.check.cumulative.rounds, 0);
 });
 
 test("CLI は人待ちを終了コード 3、未合格の --require-pass を 4 で返し、--help では何も書かない", async (t) => {
