@@ -171,6 +171,24 @@ node scripts/skill-inventory.mjs --approve <id> --reviewer <名前> --human-veri
 未解決: eval の記録と `--require-evals` は `contentSha256` に結び付いたままなので、references だけの変更では
 「その版の eval 結果が無い」とは言わない。
 
+**Release を出したあと（受け入れ確認、2026-09-27）**: 関門を通って Release が公開されても、運営者の端末に
+その版が入ったとは限らない（0.1.26 以降、自動更新の最後の確認が依存の無い置き場で落ちて毎回巻き戻り、新しい版が
+端末に届いていなかった。更新器の試験は模擬の置き場で通っていた）。Release のあと、運営者の実機で次を回し、
+Claude Code と Codex の両方で版が上がったことを確かめてから「配った」と言う:
+
+```bash
+npm run update:now          # 自動更新の定刻を待たずに1回入れる（または release:accept に --update-first）
+npm run release:accept      # 両ホストの版・フック・MCP を確かめる（読むだけ。本体 lib/releaseAcceptance.mjs）
+```
+
+- 合格（exit 0）は、両ホストが有効にしている版が最新の Release と同じで、その版のフック（UserPromptSubmit・
+  Stop）が登録され（Codex は `/hooks` の信頼まで）、ホストが起動するのと同じ定義の MCP が道具の一覧と
+  `read_me` を返したとき。未確定（exit 2）は合格ではない（最新の Release を確かめられない、MCP の依存が無くて
+  起動していない、など）。更新中（exit 3）は終わってから回し直す
+- 本物のセッションでフックが発火するかはモデルを呼ぶので自動では確かめない。両ホストで新しいセッションを開き、
+  `/hooks` に BuzzAssist の UserPromptSubmit と Stop が並ぶかを人が見る
+- `node scripts/harness-doctor.mjs` は、入っている版が最新の Release より古いと `release-currency`（任意）で知らせる
+
 ## コマンド
 
 project sourceだけを検査:

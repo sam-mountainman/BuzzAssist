@@ -132,6 +132,8 @@ npm run update:now
 npm run update:disable
 ```
 
+更新のあと、両ホストに新しい版が本当に入ったかは`npm run release:accept`で確かめます（読むだけ。Claude Code と Codex の版・フック・MCP を見て、0 合格 / 1 不合格 / 2 未確定 / 3 更新中 を返します。詳しくは README の「Release のあとの受け入れ確認」）。
+
 定期更新を使わない明示的な導入では`--no-auto-update`を付けます。
 
 ```bash

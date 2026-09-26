@@ -150,6 +150,24 @@ npm run update:now
 npm run update:disable
 ```
 
+### Release のあとの受け入れ確認
+
+Release を出したあと（または自動更新・`npm run update:now`のあと）、運営者の実機で次を回し、Claude Code と Codex の両方に新しい版が本当に入ったことを確かめます。更新器の試験は模擬の置き場で通るので、実機でしか分からない失敗はここで見つけます（0.1.26 以降、自動更新の最後の確認が依存の無い置き場で落ちて毎回巻き戻り、新しい版が運営者の端末に届いていませんでした。0.1.30 で直しました）。
+
+```bash
+# 読むだけ。両ホストの版・フック・MCP を確かめる
+npm run release:accept
+
+# 先に更新を1回走らせてから確かめる（走っている更新があれば待たずに止まる）
+npm run release:accept -- --update-first
+```
+
+- `version`: 両ホストが有効にしている BuzzAssist の版が、最新の stable Release と同じか（ホストの記録と置き場の manifest の版がそろっているかも見る）
+- `hooks`: その版のフック（UserPromptSubmit・Stop）が登録され、起動する script を読み込めるか。Codex は `/hooks` の信頼、Claude Code は `disableAllHooks` も見る
+- `mcp`: ホストが起動するのと同じ定義で MCP を起動し、道具の一覧と`read_me`が返るか。project と canvas は一時フォルダに向け、運営者の canvas には触りません。起動する置き場の版も比べます
+
+終了コードは 0 合格 / 1 不合格 / 2 未確定（最新の Release を確かめられない・MCP を確かめられない）/ 3 更新中。ホストの設定や plugin は書き換えず、更新の途中では確かめません。モデルは呼ばないので、本物のセッションでフックが発火するかは、両ホストで新しいセッションを開いて`/hooks`に BuzzAssist の UserPromptSubmit と Stop が並ぶかで確かめます。`node scripts/harness-doctor.mjs`も、入っている版が最新の Release より古ければ`release-currency`で知らせます（ネットワークに届かなければ黙ります）。
+
 初回セットアップ時に定期更新を登録しない場合だけ`--no-auto-update`を付けてください。再度有効にする場合は通常のセットアップコマンドをもう一度実行します。CodexとClaude Codeの両方を明示的に同じPCへ設定する場合は、次を使えます。
 
 ```bash

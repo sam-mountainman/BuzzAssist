@@ -84,6 +84,7 @@
     "update:status": "node scripts/auto-update.mjs status",
     "update:disable": "node scripts/auto-update.mjs uninstall",
     "release:verify": "node scripts/verify-release-version.mjs",
+    "release:accept": "node scripts/release-acceptance.mjs",
     "mcp": "node mcp/server.mjs",
     "preview": "node scripts/serve-canvas.mjs",
     "speech-bubbles:render": "node scripts/render-speech-bubbles.mjs",

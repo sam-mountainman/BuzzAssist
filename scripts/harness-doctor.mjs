@@ -42,6 +42,8 @@ import {
 } from "../lib/koyaChannelGovernance.mjs";
 import { GENRE_CANONICAL_ENTRYPOINTS } from "../lib/harnessRouting.mjs";
 import { probeHostSkillSync } from "../lib/hostSkillSync.mjs";
+import { fetchLatestStableRelease } from "../lib/pluginAutoUpdate.mjs";
+import { probeReleaseCurrency, readUpdaterRecords } from "../lib/releaseAcceptance.mjs";
 import { SKILL_APPROVAL_REQUIREMENT_ENV, probeSkillApproval } from "../lib/videoHarnessProductionProfile.mjs";
 import { describeSkillApprovalStaleReason } from "../lib/skillInventory.mjs";
 import { channelPackRuntimeAdapterSpecs } from "../lib/harnessChannelPackRuntime.mjs";
@@ -779,6 +781,36 @@ export function skillApprovalCheck(probe, { harnessId = "" } = {}) {
   };
 }
 
+/**
+ * release-currency の判定。runtime.latestRelease（{ version } か null）が渡されればそれ、
+ * runtime.fetchLatestRelease があればそれで GitHub に聞く（失敗は黙る）、どちらも無ければ
+ * 自動更新の記録だけを使う。
+ */
+async function probeDoctorReleaseCurrency({ runtime = {}, env = process.env, installs = [], homeDir }) {
+  const { config, state } = readUpdaterRecords(homeDir);
+  let latestVersion = "";
+  let latestSource = "";
+  if (runtime.latestRelease !== undefined) {
+    latestVersion = runtime.latestRelease?.version || "";
+    latestSource = runtime.latestRelease?.source || "runtime";
+  } else if (typeof runtime.fetchLatestRelease === "function") {
+    try {
+      const release = await runtime.fetchLatestRelease({ repository: config?.repository || undefined, env });
+      latestVersion = String(release?.tag_name || "");
+      latestSource = "github";
+    } catch {
+      // ネットワークに届かないときは黙る（下で自動更新の記録を見る）
+    }
+  }
+  const { skipped, latestVersion: latest, latestSource: source, behind, ...check } = probeReleaseCurrency({ installs, latestVersion, latestSource, updaterState: state });
+  return {
+    ...check,
+    ...(skipped ? { skipped: true } : {}),
+    ...(latest ? { latestVersion: latest, latestSource: source } : {}),
+    ...(behind?.length ? { behind } : {}),
+  };
+}
+
 export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "", job = null, runtime = {} } = {}) {
   const checks = [];
   const add = (entry) => { checks.push(entry); return entry; };
@@ -1052,6 +1084,22 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "",
     developmentCheckout: hostSync.developmentCheckout === true,
   });
 
+  // 入っている版が最新の Release より古いか（2026-09-27 に足した。0.1.26 以降、自動更新が毎回
+  // 巻き戻って新しい版が端末に届いていなかったのに、doctor は何も言わなかった）。
+  // 最新の版は、doctor を直に起動したときだけ GitHub に聞く（runtime.fetchLatestRelease）。
+  // Job の作成や setup から呼ばれたときはネットワークに出ず、自動更新の記録（state.json）を使う。
+  // どちらでも分からなければ黙る（止めない・警告もしない）。
+  add({
+    id: "release-currency",
+    required: false,
+    ...await probeDoctorReleaseCurrency({
+      runtime,
+      env: runtimeEnv,
+      installs: hostSync.installs,
+      homeDir: runtime.homeDir || runtimeEnv.BUZZASSIST_SETUP_HOME || homedir(),
+    }),
+  });
+
   // 正本スキルの人の承認（運営者の決定 2026-09-26: 人が確かめるのはリリースのときの1回）。
   // 開発用チェックアウトでは止めずに知らせる（Job と RunReceipt に「承認前の正本で作った」と残る）。
   // 配布された写しでハーネスを指定したときは、Job の作成と同じく止める。判定は Job の作成と同じ関数。
@@ -1158,7 +1206,14 @@ async function main() {
   if (args.harnessId && !ids.includes(args.harnessId)) {
     throw new Error(`未知のハーネス: ${args.harnessId}\n宣言があるのは: ${ids.join(", ")}`);
   }
-  const report = await runHarnessDoctor({ projectDir: args.projectDir, harnessId: args.harnessId });
+  // 直に起動したときだけ、最新の Release を GitHub に聞く（10 秒。届かなければ黙る。遅い回線で 5〜10 秒かかるのを実測した）。
+  const report = await runHarnessDoctor({
+    projectDir: args.projectDir,
+    harnessId: args.harnessId,
+    runtime: {
+      fetchLatestRelease: (options) => fetchLatestStableRelease({ ...options, timeoutMs: 10_000 }),
+    },
+  });
   process.stdout.write(args.json ? `${JSON.stringify(report, null, 2)}\n` : `${render(report)}\n`);
   // 必須が欠けているときだけ非0。任意の欠落で止めると、canvas だけ使いたい人が
   // セットアップできなくなる。

@@ -20,6 +20,7 @@ import {
   UPDATER_INSTALL_ENV,
   compareVersions,
   detectInstalledBuzzAssistHosts,
+  fetchLatestStableRelease,
   hostsBehindVersion,
   normalizeUpdateHosts,
   normalizeVersion,
@@ -178,29 +179,10 @@ async function releaseLock() {
   await rm(paths.lockDir, { recursive: true, force: true });
 }
 
-function githubHeaders() {
-  const headers = {
-    Accept: "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
-    "User-Agent": "BuzzAssist-safe-updater",
-  };
-  const token = String(process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "").trim();
-  if (token) headers.Authorization = `Bearer ${token}`;
-  return headers;
-}
-
+// 最新の stable Release の読み方は lib/pluginAutoUpdate.mjs に1つだけ置く
+// （Release のあとの受け入れ確認 release-acceptance と doctor も同じ関数を使う）。
 async function fetchLatestRelease(repository) {
-  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) {
-    throw new Error(`Invalid GitHub repository: ${repository}`);
-  }
-  const response = await fetch(`https://api.github.com/repos/${repository}/releases/latest`, {
-    headers: githubHeaders(),
-    signal: AbortSignal.timeout(20_000),
-  });
-  if (!response.ok) throw new Error(`GitHub Release check failed (${response.status}).`);
-  const release = await response.json();
-  releaseVersion(release);
-  return release;
+  return fetchLatestStableRelease({ repository, env: process.env, timeoutMs: 20_000 });
 }
 
 // 配布物（tgz と .sha256）の取得には GitHub の token を付けない。公開 Release の asset は
