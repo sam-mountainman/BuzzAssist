@@ -26,6 +26,11 @@ finished while the Job this conversation handled is not settled as pass (`comple
 Codex runs plugin hooks only after they are trusted in `/hooks`.
 {{/hosts}}
 
+解説動画（ハーネス `explainer-video`。チャンネルの手元の制作が作った完成版の納品を取り込む）はジャンルの正本スキルが
+まだ無いので、platform-craft と `docs/explainer-video-harness-ja.md` を最後まで読んでから同じ入口で始める。人の全編の
+試聴と初見の評価は、Job を動かした文脈とは別の文脈で `node scripts/explainer-video.mjs signoff`（MCP の
+`signoff_video_harness_job`）から記録し、それまでの `awaiting-human-review` は正当な停止として報告する。
+
 # 並列実行 — 両ハーネス共通ルート
 
 複数の作業を同時に流すとき（「並列で」「同時に」「一気に」「最短で」、
