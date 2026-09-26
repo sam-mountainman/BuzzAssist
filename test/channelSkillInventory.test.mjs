@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   CHANNEL_SKILL_INVENTORY_MANIFEST_PATH,
+  SKILL_BUNDLE_DIGEST_VERSION,
   SKILL_INVENTORY_MANIFEST_PATH,
   buildSkillInventory,
   recordSkillApproval,
@@ -22,6 +23,11 @@ const sha = (value) => `sha256:${createHash("sha256").update(value).digest("hex"
 const SKILL_SOURCE = "---\nname: synthetic-script-writer\ndescription: 合成のチャンネル専用の台本スキル\n---\n\n# 合成の台本スキル\n";
 const ADAPTER_SOURCE = "---\nname: synthetic-script-writer\n---\n\n正本は skills/synthetic-script-writer/SKILL.md を読む。\n";
 const SKILL_ID = "synthetic-channel:synthetic-script-writer";
+const REFERENCE_SOURCE = "# 合成の参照\n\n台本の決まり\n";
+// 束（SKILL.md と references）の digest。実装を通さずに仕様どおり組み立てる（test/skillBundleDigest.test.mjs と同じ式）。
+const hex = (value) => createHash("sha256").update(value).digest("hex");
+const bundleOf = (files) => `sha256:${hex(`${SKILL_BUNDLE_DIGEST_VERSION}\n${files.map(([path, content]) => `${hex(content)} ${JSON.stringify(path)}\n`).join("")}`)}`;
+const BUNDLE = bundleOf([["SKILL.md", SKILL_SOURCE], ["references/rules-ja.md", REFERENCE_SOURCE]]);
 
 function channelManifest(overrides = {}) {
   return {
@@ -34,6 +40,7 @@ function channelManifest(overrides = {}) {
       name: "synthetic-script-writer",
       version: "0.3.0",
       contentSha256: sha(SKILL_SOURCE),
+      bundleSha256: BUNDLE,
       language: "ja",
       owner: "synthetic operator",
       origin: "channel-private",
@@ -52,6 +59,8 @@ async function channelDir(t, manifest = channelManifest()) {
   await mkdir(join(root, "skills", "synthetic-script-writer"), { recursive: true });
   await mkdir(join(root, ".claude", "skills", "synthetic-script-writer"), { recursive: true });
   await writeFile(join(root, "skills", "synthetic-script-writer", "SKILL.md"), SKILL_SOURCE);
+  await mkdir(join(root, "skills", "synthetic-script-writer", "references"), { recursive: true });
+  await writeFile(join(root, "skills", "synthetic-script-writer", "references", "rules-ja.md"), REFERENCE_SOURCE);
   await writeFile(join(root, ".claude", "skills", "synthetic-script-writer", "SKILL.md"), ADAPTER_SOURCE);
   await writeFile(join(root, CHANNEL_SKILL_INVENTORY_MANIFEST_PATH), `${JSON.stringify(manifest, null, 2)}\n`);
   return root;
@@ -91,6 +100,14 @@ test("私有の在庫の SHA のずれ・名前のずれ・経路のずれは ma
   assert.match(issues, /channel adapter does not route/u);
   const missing = await buildSkillInventory({ projectDir, channelSkillsDir: join(root, "no-such") });
   assert.match(missing.analysis.manifestIssues.join("\n"), /channel: channel skill manifest could not be read/u);
+  // references だけの食い違い・digest の書き忘れも manifest の問題として数える（実物の値を出す）。
+  const noBundle = await channelDir(t, channelManifest({ bundleSha256: undefined }));
+  assert.match((await buildSkillInventory({ projectDir, channelSkillsDir: noBundle })).analysis.manifestIssues.join("\n"), new RegExp(`channel manifest bundleSha256 is missing \\(actual ${BUNDLE}\\)`, "u"));
+  const edited = await channelDir(t);
+  await writeFile(join(edited, "skills", "synthetic-script-writer", "references", "rules-ja.md"), `${REFERENCE_SOURCE}足した決まり\n`);
+  const editedReport = await buildSkillInventory({ projectDir, channelSkillsDir: edited });
+  assert.equal(editedReport.analysis.ok, false);
+  assert.match(editedReport.analysis.manifestIssues.join("\n"), /channel manifest bundle hash/u);
 });
 
 test("私有の在庫の manifest は、公開の名前空間・在庫の外のパス・plugin・機械の承認を受け付けない", () => {
@@ -107,6 +124,7 @@ test("私有の在庫の manifest は、公開の名前空間・在庫の外の�
   assert.match(issuesFor(channelManifest({
     approval: { reviewer: "agent", approvedAt: "2026-09-25T00:00:00.000Z", version: "0.3.0", contentSha256: sha(SKILL_SOURCE), attestedBy: "agent-self-attested" },
   })), /attestedBy must be human-verified/u);
+  assert.match(issuesFor(channelManifest({ bundleSha256: "abc" })), /bundleSha256 must be SHA-256/u);
   assert.match(issuesFor({ ...channelManifest(), skills: [] }), /non-empty/u);
 });
 
@@ -122,6 +140,7 @@ test("私有スキルの承認も、承認者の対話端末＋--human-verified 
   const result = await recordSkillApproval({ ...base, humanVerified: true, isInteractive: true });
   assert.equal(result.scope, "channel");
   assert.equal(result.approval.contentSha256, sha(SKILL_SOURCE));
+  assert.equal(result.approval.bundleSha256, BUNDLE);
   const written = JSON.parse(await readFile(join(root, CHANNEL_SKILL_INVENTORY_MANIFEST_PATH), "utf8"));
   assert.equal(skillApprovalState(written.skills[0]), "current");
   assert.deepEqual(await readFile(join(projectDir, SKILL_INVENTORY_MANIFEST_PATH)), publicBefore, "公開の manifest に書いた");
@@ -133,6 +152,14 @@ test("私有スキルの承認も、承認者の対話端末＋--human-verified 
   const stale = await buildSkillInventory({ projectDir, channelSkillsDir: root });
   assert.equal(stale.skills.find((entry) => entry.qualifiedId === SKILL_ID).approvalState, "stale");
   await assert.rejects(() => recordSkillApproval({ ...base, humanVerified: true, isInteractive: true }), /contentSha256 が正本と一致しない/u);
+
+  // references だけを変えても承認は古くなり、在庫の bundleSha256 を直すまで承認を書けない。
+  await writeFile(join(root, "skills", "synthetic-script-writer", "SKILL.md"), SKILL_SOURCE);
+  await writeFile(join(root, "skills", "synthetic-script-writer", "references", "rules-ja.md"), `${REFERENCE_SOURCE}足した決まり\n`);
+  const referencesOnly = await buildSkillInventory({ projectDir, channelSkillsDir: root });
+  const record = referencesOnly.skills.find((entry) => entry.qualifiedId === SKILL_ID);
+  assert.deepEqual([record.approvalState, record.approvalStaleReason], ["stale", "bundle-changed"]);
+  await assert.rejects(() => recordSkillApproval({ ...base, humanVerified: true, isInteractive: true }), /bundleSha256 が正本の references・付属物と一致しない/u);
 });
 
 test("CLI は --channel-skills か環境変数で私有の在庫を読み、--require-approval で未承認の私有スキルを止める", async (t) => {

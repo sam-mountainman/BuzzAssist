@@ -22,6 +22,7 @@ import {
   summarizeSkillEvals,
   windowsCmdInvocation,
 } from "../lib/skillEvals.mjs";
+import { skillBundleDigestOf } from "../lib/skillInventory.mjs";
 import { runSkillEvalsCli } from "../scripts/skill-evals.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -74,11 +75,19 @@ function makeFixture() {
     for (const [rel, content] of Object.entries(spec.references)) writeFile(join(dir, ...rel.split("/")), content);
     writeFile(join(dir, "evals", "evals.json"), `${JSON.stringify(spec.evals, null, 2)}\n`);
     const contentSha256 = sha(spec.md);
+    // 承認は束（SKILL.md と references。evals/ は外す）にも付く。合成のファイルは改行が LF だけなので、
+    // 中身の sha256 をそのまま並べた一覧が束の正規の一覧になる。
+    const bundleSha256 = skillBundleDigestOf(
+      [["SKILL.md", spec.md], ...Object.entries(spec.references)]
+        .map(([path, content]) => ({ path, sha256: createHash("sha256").update(content).digest("hex") }))
+        .sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0)),
+    );
     skills.push({
       id: `buzzassist:${name}`,
       name,
       version: "1.0.0",
       contentSha256,
+      bundleSha256,
       language: "ja",
       owner: "test",
       origin: "project-canonical",
@@ -86,7 +95,7 @@ function makeFixture() {
       hosts: ["claude-code", "codex"],
       adapters: [],
       classification: { installed: false, bundled: true, productionAllowed: true, developmentOnly: false },
-      approval: { reviewer: "試験の承認者", approvedAt: "2026-09-25T00:00:00.000Z", version: "1.0.0", contentSha256, attestedBy: "human-verified" },
+      approval: { reviewer: "試験の承認者", approvedAt: "2026-09-25T00:00:00.000Z", version: "1.0.0", contentSha256, bundleSha256, attestedBy: "human-verified" },
     });
   }
   writeFile(join(project, ".agents", "skills", "inventory.manifest.json"), `${JSON.stringify({

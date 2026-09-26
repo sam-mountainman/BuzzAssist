@@ -18,7 +18,7 @@ const declaration = { canonicalSkills: [".agents/skills/narrated-story-video/SKI
 async function policy(mutate) {
   const loaded = structuredClone(await loadSkillPolicyManifests(root));
   for (const skill of loaded.inventory.skills) {
-    skill.approval = { reviewer: "test-reviewer", approvedAt: "2026-09-26T00:00:00.000Z", version: skill.version, contentSha256: skill.contentSha256, attestedBy: "human-verified" };
+    skill.approval = { reviewer: "test-reviewer", approvedAt: "2026-09-26T00:00:00.000Z", version: skill.version, contentSha256: skill.contentSha256, bundleSha256: skill.bundleSha256, attestedBy: "human-verified" };
     mutate?.(skill);
   }
   return async () => loaded;

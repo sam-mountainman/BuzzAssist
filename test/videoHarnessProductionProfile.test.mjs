@@ -42,6 +42,7 @@ async function policyWithApprovals(mutate) {
       approvedAt: "2026-09-24T00:00:00.000Z",
       version: skill.version,
       contentSha256: skill.contentSha256,
+      bundleSha256: skill.bundleSha256,
       attestedBy: "human-verified",
     };
     mutate?.(skill);

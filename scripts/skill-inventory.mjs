@@ -3,7 +3,7 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkSkillEvalCoverage, formatSkillEvalCoverage } from "../lib/skillEvals.mjs";
-import { CHANNEL_SKILLS_ENV, buildSkillInventory, recordSkillApproval } from "../lib/skillInventory.mjs";
+import { CHANNEL_SKILLS_ENV, buildSkillInventory, describeSkillApprovalStaleReason, recordSkillApproval } from "../lib/skillInventory.mjs";
 
 function parseArgs(argv) {
   const args = { declaredSkillIds: [] };
@@ -53,7 +53,7 @@ function printHumanReport(report) {
   process.stdout.write(`External divergent hashes: ${report.analysis.externalDivergentHashes.length}\n`);
   process.stdout.write(`Exact mirrors (incl. shipped depth-rewrite copies): ${report.analysis.exactMirrors.length}\n`);
   process.stdout.write(`Same generic name across explicit scopes: ${report.analysis.crossScopeSameNames.length}\n`);
-  process.stdout.write(`Production skills without a human approval bound to the current version/SHA: ${report.analysis.unapprovedProductionSkills.length}\n`);
+  process.stdout.write(`Production skills without a human approval bound to the current version/SHA/bundle: ${report.analysis.unapprovedProductionSkills.length}\n`);
   if (report.channel) {
     process.stdout.write(`Channel-private skills (namespace ${report.channel.namespace || "unknown"}, manifest ${report.channel.manifestVersion || "unreadable"}): ${report.channel.skills}\n`);
   }
@@ -94,7 +94,8 @@ function printHumanReport(report) {
   if (report.analysis.unapprovedProductionSkills.length > 0) {
     process.stdout.write("\nUnapproved production skills (record a human approval with --approve <id> --reviewer <name> --human-verified from that person's terminal):\n");
     report.analysis.unapprovedProductionSkills.forEach((entry) => {
-      process.stdout.write(`  - ${entry.id} ${entry.version} (${entry.approvalState}${entry.scope ? `, ${entry.scope}` : ""})\n`);
+      const reason = entry.reason ? `: ${describeSkillApprovalStaleReason(entry.reason)}` : "";
+      process.stdout.write(`  - ${entry.id} ${entry.version} (${entry.approvalState}${reason}${entry.scope ? `, ${entry.scope}` : ""})\n`);
     });
   }
   if (report.analysis.externalDivergentHashes.length > 0) {
@@ -120,7 +121,7 @@ export async function runSkillInventoryCli(argv = process.argv.slice(2), options
       humanVerified: Boolean(args.humanVerified),
       isInteractive: options.isInteractive ?? process.stdin.isTTY === true,
     });
-    process.stdout.write(`${result.skillId} ${result.approval.version} を人の承認として記録しました（reviewer: ${result.approval.reviewer}、SHA ${result.approval.contentSha256.slice(7, 19)}${result.scope === "channel" ? "、私有の在庫" : ""}）\n`);
+    process.stdout.write(`${result.skillId} ${result.approval.version} を人の承認として記録しました（reviewer: ${result.approval.reviewer}、SKILL.md ${result.approval.contentSha256.slice(7, 19)}、束 ${result.approval.bundleSha256.slice(7, 19)}${result.scope === "channel" ? "、私有の在庫" : ""}）\n`);
     return result;
   }
   const report = await buildSkillInventory({
