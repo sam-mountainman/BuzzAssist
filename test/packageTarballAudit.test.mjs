@@ -125,6 +125,8 @@ test("配布物の監査は、setup-agents と自動更新が tgz から入れ�
     "scripts/start-mcp.mjs",
     "scripts/update-current.mjs",
     "scripts/verify-plugin-runtime.mjs",
+    "lib/pluginRuntimeDependencies.mjs",
+    "lib/mcpClientSdk.mjs",
     "scripts/test-setup-distribution.mjs",
     "lib/releasePackage.mjs",
     "lib/narratedStoryBookends.mjs",

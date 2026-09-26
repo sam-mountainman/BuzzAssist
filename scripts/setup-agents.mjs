@@ -580,10 +580,13 @@ export async function verifyStagedPluginContents(pluginRoot) {
     "mcp/server.mjs",
     "config/harness-deployments.example.json",
     "lib/harnessDeploymentResolver.mjs",
+    // 導入後の検証（verify-plugin-runtime）が、依存の無いこの置き場を確かめるのに使う。
+    "lib/mcpClientSdk.mjs",
     "lib/narratedStoryBookends.mjs",
     "lib/narratedStoryOutcome.mjs",
     "lib/narratedStoryPipeline.mjs",
     "lib/narratedStoryVideo.mjs",
+    "lib/pluginRuntimeDependencies.mjs",
     "scripts/narrated-story-video.mjs",
     "scripts/start-mcp.mjs",
     "scripts/verify-plugin-runtime.mjs",
@@ -690,6 +693,55 @@ export async function stagePluginHooks(sourceRoot, pluginRoot) {
   return staged;
 }
 
+// ホストへ配る置き場（~/plugins/buzzassist/plugin）へ写すもの。導入後の検証の試験も同じ一覧で
+// 置き場を作る（一覧が変わったときに、試験の置き場だけ古い形のまま残らないように）。
+export const PLUGIN_SOURCE_DIRECTORIES = Object.freeze([
+  "assets",
+  "config",
+  "dist",
+  "dist-widget",
+  "lib",
+  "mcp",
+  "scripts",
+  "skills",
+  ".codex-plugin",
+  ".claude-plugin",
+  ".antigravity-plugin",
+  ".cursor",
+  ".agents",
+]);
+
+export const PLUGIN_SOURCE_FILES = Object.freeze([
+  ".mcp.json",
+  "AGENTS.md",
+  "CLAUDE.md",
+  "GEMINI.md",
+  "README.md",
+  "SETUP.md",
+  // 要求台帳と番組ガバナンスはチャンネル固有なので配布しない。
+  // それらは Channel Pack 側（運営者の手元）にあり、共有される
+  // 配布物に入れると、パックを分離した意味が無くなる。
+  //
+  // 一方、スキルが参照する運用 runbook と測定証跡はジャンル／
+  // プラットフォーム層のもので、これが無いと配布先には**手順名だけが届き、
+  // 手順の実体と測定根拠を読めない**。固有語を含まないことは
+  // audit-public-surface で確認済み。
+  "docs/koya-harness-handoff-ja.md",
+  "docs/koya-character-gate-runbook-ja.md",
+  "docs/koya-voice-quality-runbook-ja.md",
+  // 戦略の道具から制作へ渡す仕様（strategy-brief.mjs draft --from-hyp のヘルプが指す）。
+  "docs/strategy-handoff-spec-ja.md",
+  // 解説動画のハーネスの説明（strategy-handoff-spec の 7.1 と run-video-harness の使い方が指す）。
+  "docs/explainer-video-harness-ja.md",
+  "docs/learning/targets.json",
+  // 本文つき台帳（proposals.jsonl）は配布しない。公開版 catalog だけ。
+  "docs/learning/proposals.public.jsonl",
+  "docs/measurements/parallel-limits-2026-08-28.json",
+  "package.json",
+  "package-lock.json",
+  "vite.config.js",
+]);
+
 async function refreshManagedPluginSource() {
   if (skipPluginSource) {
     console.log(`Skipping managed plugin source refresh: ${managedPluginDir}`);
@@ -707,21 +759,7 @@ async function refreshManagedPluginSource() {
   await rm(tmpDir, { recursive: true, force: true });
   await mkdir(tmpPluginRoot, { recursive: true });
 
-  for (const dirName of [
-    "assets",
-    "config",
-    "dist",
-    "dist-widget",
-    "lib",
-    "mcp",
-    "scripts",
-    "skills",
-    ".codex-plugin",
-    ".claude-plugin",
-    ".antigravity-plugin",
-    ".cursor",
-    ".agents",
-  ]) {
+  for (const dirName of PLUGIN_SOURCE_DIRECTORIES) {
     await copyIfExists(join(repoRoot, dirName), join(tmpPluginRoot, dirName));
   }
   await stagePluginHooks(repoRoot, tmpPluginRoot);
@@ -775,36 +813,7 @@ async function rewriteSkillRelativeDepth(skillDir) {
     );
   }
 
-  for (const fileName of [
-    ".mcp.json",
-    "AGENTS.md",
-    "CLAUDE.md",
-    "GEMINI.md",
-    "README.md",
-    "SETUP.md",
-    // 要求台帳と番組ガバナンスはチャンネル固有なので配布しない。
-    // それらは Channel Pack 側（運営者の手元）にあり、共有される
-    // 配布物に入れると、パックを分離した意味が無くなる。
-    //
-    // 一方、スキルが参照する運用 runbook と測定証跡はジャンル／
-    // プラットフォーム層のもので、これが無いと配布先には**手順名だけが届き、
-    // 手順の実体と測定根拠を読めない**。固有語を含まないことは
-    // audit-public-surface で確認済み。
-    "docs/koya-harness-handoff-ja.md",
-    "docs/koya-character-gate-runbook-ja.md",
-    "docs/koya-voice-quality-runbook-ja.md",
-    // 戦略の道具から制作へ渡す仕様（strategy-brief.mjs draft --from-hyp のヘルプが指す）。
-    "docs/strategy-handoff-spec-ja.md",
-    // 解説動画のハーネスの説明（strategy-handoff-spec の 7.1 と run-video-harness の使い方が指す）。
-    "docs/explainer-video-harness-ja.md",
-    "docs/learning/targets.json",
-    // 本文つき台帳（proposals.jsonl）は配布しない。公開版 catalog だけ。
-    "docs/learning/proposals.public.jsonl",
-    "docs/measurements/parallel-limits-2026-08-28.json",
-    "package.json",
-    "package-lock.json",
-    "vite.config.js",
-  ]) {
+  for (const fileName of PLUGIN_SOURCE_FILES) {
     await copyIfExists(join(repoRoot, fileName), join(tmpPluginRoot, fileName));
   }
 
