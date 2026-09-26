@@ -16,7 +16,8 @@
 // --skip-policyを使う。FFmpeg/Pythonなど必須toolchainの欠落はallowlistできない。
 
 import { spawnSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -73,6 +74,29 @@ const HOST_IDENTITY_ENV = new Set([
 ]);
 const testEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !HOST_IDENTITY_ENV.has(key)));
 testEnv.EXCALIDRAW_OPEN_MODE ??= "none";
+
+// 試験の一時フォルダは、1 回の実行ごとの専用の場所に作らせ、終わったら丸ごと消す。多くの試験が
+// mkdtemp の後片付けをしておらず（1 ファイルに 39 か所・rm 0 か所など）、2026-09-26 に OS の一時フォルダへ
+// 数千個・6GB が溜まってディスクが満杯になり、全セッションの書き込みが止まった。試験を 1 つずつ直すより、
+// 入口で囲うほうが漏れない。os.tmpdir() は macOS / Linux で TMPDIR、Windows で TEMP / TMP を読む。
+// 途中で落ちた前回の実行の残りは、1 日を過ぎたものだけ消す（並行して走る別の実行のものは消さない）。
+const TEST_RUN_TMP_PREFIX = "buzzassist-test-run-";
+const TEST_RUN_TMP_STALE_MS = 24 * 60 * 60 * 1000;
+const systemTmp = tmpdir();
+for (const name of (() => { try { return readdirSync(systemTmp); } catch { return []; } })()) {
+  if (!name.startsWith(TEST_RUN_TMP_PREFIX)) continue;
+  const stale = join(systemTmp, name);
+  try {
+    if (Date.now() - statSync(stale).mtimeMs > TEST_RUN_TMP_STALE_MS) rmSync(stale, { recursive: true, force: true, maxRetries: 3 });
+  } catch { /* 消せなければ次の実行に任せる */ }
+}
+const testRunTmp = mkdtempSync(join(systemTmp, TEST_RUN_TMP_PREFIX));
+testEnv.TMPDIR = testRunTmp;
+testEnv.TEMP = testRunTmp;
+testEnv.TMP = testRunTmp;
+process.on("exit", () => {
+  try { rmSync(testRunTmp, { recursive: true, force: true, maxRetries: 3 }); } catch { /* 次の実行が 1 日後に消す */ }
+});
 
 let skipped = [];
 // process.exit() は書きかけの stdout を捨てる。CI のログはパイプで、捕まえた
