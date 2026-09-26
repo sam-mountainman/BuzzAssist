@@ -8,6 +8,11 @@
 //        [--channel <チャンネルの id>] [--job <制作の Job の ID>]
 //   node scripts/asset-quality-loop.mjs verify --work-dir <dir> --stage <工程> --subject <id> --asset <file> \
 //        --check <identity|hand-safety> (--pass|--reject) --reviewer <名前> --note "..." --human-verified
+//   node scripts/asset-quality-loop.mjs verify-pages --work-dir <dir> --stage <character|scene-image|thumbnail> \
+//        --reviewer <名前> --human-verified [--approved-references <json> --reference <設定画のファイルかフォルダ>...] \
+//        [--per-page <1〜6>] [--targets <対象の一覧.json>]
+//        （人の確認を数枚ずつのページ画像で見て、ページごとに答える。記録は対象ごとの verify と同じ形。
+//          本体は lib/assetQualityVerifyPages.mjs）
 //   node scripts/asset-quality-loop.mjs status --work-dir <dir> [--stage <工程> --subject <id>] [--asset <file>] [--require-pass]
 //   node scripts/asset-quality-loop.mjs measure-video --work-dir <dir> --asset <動画> --declaration <宣言.json> [--out <file>]
 //        （動画クリップの工程の測定。ffprobe / ffmpeg で形式・全フレームのデコード・尺・fps・解像度・音声の有無を測り、
@@ -35,6 +40,13 @@ import { learningChannelCliHints } from "../lib/learningChannelResolver.mjs";
 import { resolveFfmpegToolchain } from "../lib/harnessRuntimeResolver.mjs";
 import { writeVideoClipMeasurement } from "../lib/videoClipMeasurement.mjs";
 import {
+  ASSET_VERIFY_PAGE_DEFAULT_ITEMS,
+  ASSET_VERIFY_PAGE_MAX_ITEMS,
+  ASSET_VERIFY_PAGE_STAGES,
+  ASSET_VERIFY_TARGETS_VERSION,
+  runAssetVerifyPages,
+} from "../lib/assetQualityVerifyPages.mjs";
+import {
   ASSET_GENERATION_ROUTES,
   ASSET_HUMAN_CHECKS,
   ASSET_MACHINE_GATES,
@@ -61,7 +73,7 @@ const VALUE_OPTIONS = new Set([
   "--channel-config", "--reason", "--asset", "--version", "--review", "--producer-host", "--route",
   "--reference-exempt-reason", "--approved-references", "--measurement", "--revision-delta", "--previous-failure",
   "--blocking-condition", "--cost", "--reviewer", "--note", "--batch", "--declaration", "--out",
-  "--channel", "--job",
+  "--channel", "--job", "--per-page", "--targets",
 ]);
 /** measure-video の既定の書き先（作業フォルダからの相対）。record --measurement にそのまま渡す。 */
 export const VIDEO_CLIP_MEASUREMENT_DIR = "quality/video-clip-measurements";
@@ -158,6 +170,18 @@ export function assetQualityHelp() {
     --work-dir <dir> --stage <工程> --subject <id> --asset <file> --check <欄>... (--pass|--reject)
     --reviewer <名前> --note "何を見てどう判断したか" (--human-verified | --agent-attested)
 
+  verify-pages  人の確認を、数枚ずつの「ページ画像」で見て答える（対象が多いとき。本編の画が数百枚など）
+    --work-dir <dir> --stage <${ASSET_VERIFY_PAGE_STAGES.join("|")}> --reviewer <名前> --human-verified
+    [--approved-references <json> --reference <承認済みの設定画のファイルかフォルダ>...]  同一性の確認が要る対象に要る
+    [--per-page <n>]              1ページの枚数（既定 ${ASSET_VERIFY_PAGE_DEFAULT_ITEMS}、上限 ${ASSET_VERIFY_PAGE_MAX_ITEMS}）
+    [--targets <json>]            対象を絞る・並べる順・画の中の人物の範囲（${ASSET_VERIFY_TARGETS_VERSION}）
+    載るのは、評価者の採点が合格して人の確認を待っている対象（見る欄は、その版でまだ済んでいない欄）。各画を短い辺
+    720px で、拡大（人物の範囲の記録があればその範囲、無ければ画全体の4分割）と、同一性なら承認済みの設定画と並べた
+    ページ画像を作り、1枚ずつ開く。端末で「pass」か落とす画の番号（と否とする欄・理由）を答える。見せてから答える
+    までが短すぎる答えは受け付けない。記録は対象ごとの verify と同じ形（ページの id・ページ画像の sha256・見せた時刻・
+    答えた時刻を足す）で、1つの否は他の可を消さない。途中でやめても答えたページまでは残り、同じコマンドで残りから続く。
+    対話端末と --human-verified が要るのは verify と同じ（機械は人の確認を記録できない）。動画クリップは1件ずつ verify
+
   status    今の状態。合格は、評価者の採点で合格し、要る人の確認が揃い、その版のファイルが今も同じときだけ
     --work-dir <dir> [--stage <工程> [--subject <id> [--asset <file>]]] [--require-pass]   未合格なら終了コード 4
     --asset を付けると、そのファイルが合格した版そのものかも見る
@@ -184,7 +208,7 @@ export function assetQualityHelp() {
     対象の一覧: { "version": "buzzassist-asset-quality-batch-v1", "stage", "producerContexts", "producerHost", "route",
                  "approvedReferences"?, "items": [{ "subjectId", "asset", "version", "references"?, "referenceExemptReason"?,
                  "measurement"?, "previousFailureFingerprint"?, "revisionDelta"? }] }
-    人の確認（verify）は batch では記録できない。要る対象は1件ずつ verify する
+    人の確認（verify）は batch では記録できない。要る対象は、人が対象ごとに verify する（多いときは verify-pages）
 
   機械ゲート: ${Object.keys(ASSET_MACHINE_GATES).join(" / ")}
   終了コード: 0 済んだ / 3 人待ち・直しが要る / 4 --require-pass で未合格 / 2 入力の誤り
@@ -217,8 +241,12 @@ export async function runAssetQualityCli(argv = process.argv.slice(2), {
   loadChannel,
   captureLearning,
   isInteractive = interactiveTerminal(),
-  // measure-video の ffmpeg / ffprobe（{ ffmpeg: { command, args }, ffprobe: {...} }）。無ければ解決する。
+  // measure-video・verify-pages の ffmpeg / ffprobe（{ ffmpeg: { command, args }, ffprobe: {...} }）。無ければ解決する。
   toolchain = null,
+  // verify-pages の差し替え（試験用）: ask（1行を聞く）・openPage（ページ画像を開く）・renderTile（タイルの画素）
+  ask = null,
+  openPage = null,
+  renderTile = null,
 } = {}) {
   const args = parseAssetQualityArgs(argv);
   if (!args.action || ["--help", "-h", "help"].includes(args.action) || args.help) {
@@ -226,17 +254,21 @@ export async function runAssetQualityCli(argv = process.argv.slice(2), {
     return { exitCode: args.action ? 0 : 2 };
   }
   const injected = { ...(now ? { now } : {}), ...(loadChannel ? { loadChannel } : {}) };
-  const learnsChannel = ["record", "verify"].includes(args.action);
+  const learnsChannel = ["record", "verify", "verify-pages"].includes(args.action);
   if ((args.channel !== undefined || args.job !== undefined) && !learnsChannel) {
-    throw new Error("--channel / --job は record と verify でだけ使える（学習を積むチャンネルの手がかり）。");
+    throw new Error("--channel / --job は record と verify でだけ使える（verify-pages も verify に数える。学習を積むチャンネルの手がかり）。");
+  }
+  if ((args.perPage !== undefined || args.targets !== undefined) && args.action !== "verify-pages") {
+    throw new Error("--per-page / --targets は verify-pages でだけ使える。");
   }
   // 学習を積むチャンネルの明示（--channel / --job）。台帳に無いチャンネル・見つからない Job は、記録の前に止める。
   const hints = learnsChannel ? await learningChannelCliHints({ channelId: args.channel, jobId: args.job, env }) : { captureInput: {} };
   const capture = captureLearning || ((input) => captureAssetLearning({ ...input, env }));
   const learn = (input) => capture({ ...input, ...hints.captureInput });
   if (args.batch) {
-    if (args.action === "verify") {
-      throw new Error("人の確認は対象ごと（--batch は使えない）。確認した人が対象ごとに verify --subject <id> --asset <file> を打つ。");
+    if (args.action === "verify" || args.action === "verify-pages") {
+      throw new Error("人の確認は対象ごと（--batch は使えない）。確認した人が対象ごとに verify --subject <id> --asset <file> を打つか、"
+        + "verify-pages でページごとに答える（対象を絞るなら --targets）。");
     }
     if (!["sheet", "record"].includes(args.action)) throw new Error("--batch は sheet と record だけで使える。");
     const conflicting = PER_SUBJECT_OPTIONS.filter(([key]) => args[key] !== undefined).map(([, option]) => option);
@@ -370,6 +402,35 @@ export async function runAssetQualityCli(argv = process.argv.slice(2), {
       print(stdout, result, args.json);
       return { exitCode: result.recorded && result.counted ? 0 : 3, result };
     }
+    case "verify-pages": {
+      const conflicting = ["subject", "asset", "check", "pass", "reject", "note", "version", "review"]
+        .filter((key) => (Array.isArray(args[key]) ? args[key].length > 0 : args[key] !== undefined))
+        .map((key) => `--${key}`);
+      if (conflicting.length > 0) {
+        throw new Error(`verify-pages では ${conflicting.join(" / ")} を使わない（対象・欄・答えはページごとに端末で聞く。1件だけなら verify）。`);
+      }
+      const result = await runAssetVerifyPages({
+        workDir: args.workDir,
+        stage: args.stage,
+        reviewer: args.reviewer,
+        humanVerified: args.humanVerified === true,
+        agentAttested: args.agentAttested === true,
+        isInteractive,
+        perPage: args.perPage,
+        targetsPath: args.targets,
+        references: args.reference,
+        approvedReferencesPath: args.approvedReferences,
+        ...(ask ? { ask } : {}),
+        ...(openPage ? { openPage } : {}),
+        ...(renderTile ? { renderTile } : {}),
+        ...(toolchain ? { toolchain } : {}),
+        ...(now ? { now } : {}),
+        captureLearning: learn,
+        output: stdout,
+      });
+      if (args.json) stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+      return { exitCode: result.complete ? 0 : 3, result };
+    }
     case "status": {
       if (args.subject) {
         const result = await assetQualityStatus({ workDir: args.workDir, stage: args.stage, subjectId: args.subject, assetPath: args.asset });
@@ -413,7 +474,7 @@ export async function runAssetQualityCli(argv = process.argv.slice(2), {
       return { exitCode: Object.values(result.verdict.gates).every(Boolean) ? 0 : 3, result };
     }
     default:
-      throw new Error(`不明なアクション: ${args.action}（contract / start / sheet / record / verify / status / measure-video）`);
+      throw new Error(`不明なアクション: ${args.action}（contract / start / sheet / record / verify / verify-pages / status / measure-video）`);
   }
 }
 
