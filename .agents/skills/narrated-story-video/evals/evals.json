@@ -110,6 +110,17 @@
         "字幕の秒数は文の captionOnlySeconds、無ければ1秒4文字（最短1.5秒）で、1文30秒を越える文は有料生成の前に止まる",
         "感想の文に speaker や readings を書くと review-voice-none-mismatch で止まるので外す"
       ]
+    },
+    {
+      "id": "narration-pacing-gaps",
+      "prompt": "本編の語りが詰まって聞こえる。見本みたいに、文と文の間に1秒弱BGMだけ流れる間を入れたい。場面の切り替えのクロスフェードはそのままで。",
+      "shouldTrigger": true,
+      "invariants": [
+        "署名済み Channel Pack の narrated-story.json の pacing（sentenceGapSeconds・sceneGapSeconds、0 か 0.1〜3 秒）で宣言し、台本パッケージの文ごとに書かない",
+        "場面の間を sceneTransition の crossfade より短くしない（短ければ有料生成の前に pacing.sceneGapSeconds-shorter-than-sceneTransition で止まる）",
+        "本編の最初の文の前・最後の文の後ろと感想パートには間を置かず、plan-only の preflight.pacing で伸びる秒を確かめてから --confirmed へ進む",
+        "完成の判定は完成 MP4 と voice stem を測る narrationPacingMeasured（監査契約 v11）の実測 pass で行う"
+      ]
     }
   ]
 }

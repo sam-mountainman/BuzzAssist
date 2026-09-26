@@ -120,10 +120,15 @@ Fish Audio、ElevenLabs、字幕、retime、finalize用scriptを手で順番に�
   書体に無い字・1行に入らない語は、有料生成の前に止まる
 - `camera`: 場面の画のゆっくりした寄り引きの型（`slow-push-in` / `slow-pull-out` / `pan-left` /
   `pan-right` / `static`）と速さ。同じ画の文（話者ごとに分けた場面）は1つの動きで通し、動きを
-  始め直さない。台本パッケージの場面は `camera` で型を指定できる（Pack に無い型は止まる）。本編の場面は
-  `cameraFocus: { x, y }`（画の中の顔の位置など。0〜1、左上が0）で焦点を指定でき、無い場面は Pack の型ごとの焦点の
-  まま。見せる範囲は画の外へ出ず、1.010 倍の寄りでは中心から離れた焦点は一番近い端（角）を動かさない寄りになる。
-  同じ場面の文は同じ焦点で、食い違えば `camera-focus-conflict` で止まる。焦点は書いた値だけを使い、画から顔を推測しない
+  始め直さない。台本パッケージの場面は `camera` で型を指定できる（Pack に無い型は止まる）
+- 場面の焦点（`cameraFocus: { x, y }`、画の中の顔の位置など。0〜1、左上が0）は、運営者の画の取り込みの記録の
+  場面の行か、台本パッケージの本編の場面に書く。決まる順は取り込みの記録 → 台本パッケージ → Pack の型ごとの焦点。
+  見せる範囲は画の外へ出ず、1.010 倍の寄りでは中心から離れた焦点は一番近い端（角）を動かさない寄りになる。
+  焦点は書いた値だけを使い、画から顔を推測しない。同じ場面の文で焦点が食い違う（`camera-focus-conflict`）、
+  取り込みの記録と台本パッケージの両方に書いて値が違う（`camera-focus-conflict:<場面>:image-vs-package`）、
+  取り込みの記録で感想パートの場面に書いた（`camera-focus-review-scene:<場面>`。焦点は本編の場面だけ）ときは、
+  有料生成の前に止まる。計画と生成記録のショットに出どころ `focusSource`（`image-manifest` / `script-package` /
+  `pack`）が残るので、どの焦点で描いたかは後から追える
 - `sceneTransition`: 本編の場面の切り替え。`{ "type": "crossfade", "durationSeconds": 0.1〜2 }` を宣言した
   ときだけ混ぜ、無ければ cut。尺と字幕・声の時刻は変わらない（前後の場面を伸ばして重ねる）。短い場面の
   隣では重なりを縮め、2フレームに満たなければ cut のまま描いて計画に `reduced` を残す
@@ -139,7 +144,8 @@ Fish Audio、ElevenLabs、字幕、retime、finalize用scriptを手で順番に�
 - `bookends.opening.kind: "episode-video"`: 回ごとの OP 映像。OP の動画・感想パートの人物の映像
   （`presenter.episodeVideo`）・TV 枠の動画は、取り込みの記録（`buzzassist-operator-video-manifest-v1`）を
   `run-video-harness.mjs start --operator-video-manifest FILE`（MCP / `--options-json` では
-  `options.operatorVideoManifestPath`）で渡す。Job の識別子に入り、plan-only でも検査する
+  `options.operatorVideoManifestPath`）で渡す。記録のパスが Job の識別子に、中身の SHA が入力の同一性に入り、
+  plan-only でも検査する
 
 監査契約 v6 から、字幕・カメラ・感想の配置・OP の来歴を完成 MP4 のフレームで測る（`burnedSubtitlesMeasured`・
 `cameraMotionMeasured`・`reviewLayoutMeasured`・`episodeOpeningProvenance`）。字幕は輝度（Y）で測る。
@@ -155,6 +161,31 @@ Fish Audio、ElevenLabs、字幕、retime、finalize用scriptを手で順番に�
 有料の処理の前に `video-clip-asset-loop-not-passed:<枠>:<理由>` の `awaiting-human-review` で止まる。
 人物が写る映像は同一性と手指を人が確かめる（そのまま公開面に出るため）。
 
+## 本編の間（pacing）
+
+文と文・場面と場面の間に、語りも字幕も無く BGM だけが流れる時間は、Channel Pack の `narrated-story.json` の
+`pacing`（例 `{ "sentenceGapSeconds": 0.94, "sceneGapSeconds": 0.94 }`）で宣言する。無ければ 0 で、今までどおり
+文は声のテイクの実尺で隙間なく並ぶ。間の長さはチャンネルの語りの呼吸なので、Core は既定値を持たない。
+
+- 同じ場面の画の中の境目は `sentenceGapSeconds`、画が変わる境目は `sceneGapSeconds`（欄が無ければ文の間と同じ、
+  0 なら場面の境目には置かない）。場面の境目は文の境目でもあるが、二重にならないよう足し合わせない
+- 置くのは本編の隣り合う文の間だけ。本編の最初の文の前・最後の文の後ろ（OP・感想パートとの境目は字幕なし
+  lead-in の決まりのまま）と、感想パート（声あり・声なし）の文の間には置かない
+- 間は声のテイクの前後の無音の外に足す。間の中は語りも字幕も無く、BGM だけが鳴り続ける。字幕は語りの始まりで
+  出て、語りの終わりで消える
+- 場面の画は間の間も映り、カメラのショットは間を含めて1つの動きで通す。画の切り替えは場面の間の真ん中に置き、
+  crossfade の重なりは間の中に収める。間より長い crossfade の宣言は、有料生成の前に
+  `channel-pack-config-required:pacing.sceneGapSeconds-shorter-than-sceneTransition` で止まる
+- 尺の計画・BGM の依頼の長さ・カメラのショット・字幕と声の時刻は、間を含めた同じ時間割から作る（どれか1つでも
+  間を知らないと、声と画と字幕がずれるため）。plan-only の start は間の件数と伸びる秒を `preflight.pacing` に
+  返すので、尺の見込みはそこで確かめる
+- 値は 0 か 0.1〜3 秒（3 秒を越える無音は語りが途切れたように聞こえる）。数でない値・範囲外の値は
+  `channel-pack-config-required:pacing.<欄>` で止まる。台本パッケージに文ごとの上書きは無い
+
+監査契約 v11（宣言 1.14.0）から、間を完成 MP4 と、それへ入れた voice stem で測る（`narrationPacingMeasured`）。
+間の区間に語りが無く BGM が途切れないこと、足した無音が宣言と 1 フレーム以内であること、字幕と場面の切り替えが
+上の決まりどおりであることを見る。宣言が無ければ、本編の文が間を空けずに並んでいることを確かめて通る。
+
 ## 運営者が用意した画（image.source: operator-file）
 
 本編の画をハーネスの外（運営者の web 画面・Codex・ローカルモデルなど）で作るチャンネルは、Pack の
@@ -162,12 +193,16 @@ Fish Audio、ElevenLabs、字幕、retime、finalize用scriptを手で順番に�
 "job-option"`・`expectedSize`・`tolerancePx`・`approvedReferences`・`requireAssetLoopPass`）を宣言する。
 
 - 取り込みの記録（`buzzassist-operator-image-manifest-v1`）は `run-video-harness.mjs start
-  --operator-image-manifest FILE`（MCP では `options.operatorImageManifestPath`）で渡す。Job の識別子に入る
+  --operator-image-manifest FILE`（MCP では `options.operatorImageManifestPath`）で渡す。記録のパスが Job の
+  識別子に、中身の SHA が入力の同一性に入る
 - 全部の場面を記録から取り、broker の画と混在させない。sha256・場面の過不足・使い回しの理由・
   承認済みの参照・寸法・品質ループの合格のどれかが合わなければ、有料の処理の前に `operator-image-*` で止まる
 - 画の Media Job は作らず、費用は `operator-external-contract` として記録する。会話の URL は私有の
   Job フォルダにだけ残り、公開面（生成記録・監査・RunReceipt・Canvas）は sha256 だけ
-- 画を差し替えたら、記録の sha256 を直して同じ Job を resume する（声と BGM は払い直さない）
+- 画を差し替えた・焦点を直したときは、記録（sha256・`cameraFocus`）を直して同じ Job を resume する。Job ID は
+  変わらず入力の同一性が変わるので、声と BGM を払い直さずに描き直す
+- 焦点は画ができてから決まる。画の後で決めた焦点は、記録の場面の行の `cameraFocus` に書く。台本パッケージに
+  書き足すと台本のバイト列が変わり、台本の品質ループの合格が外れて `script-quality-required:*` で止まる
 - 自動監査 `sceneImageProvenance` が、描いた画を Media Job の受領記録か取り込みの記録と照合する
 
 ## 途中の成果物の品質ループ（監査契約 v5 から）
@@ -328,9 +363,9 @@ subject を署名する唯一の経路であり、finalize と RunReceipt は `v
 - 途中の成果物の品質ループと画の来歴の実測 pass（`sceneImageAssetLoopPassed`・`characterAssetLoopPassed`・
   `voiceTakeAssetLoopPassed`・`sceneImageProvenance`）と、監査契約 v6 の見た目の4監査（宣言していない
   機能は描いていないことの確認）
-- 監査契約 v7〜v10 の実測 pass（運営者の映像のループの合格 `operatorVideoAssetLoopPassed`、台本の受け入れ
+- 監査契約 v7〜v11 の実測 pass（運営者の映像のループの合格 `operatorVideoAssetLoopPassed`、台本の受け入れ
   `scriptQualityAccepted`、場面の切り替え `sceneTransitionMeasured`、重ね物 `fixedOverlaysMeasured`、場面ごとの焦点
-  `cameraFocusMeasured`）
+  `cameraFocusMeasured`、本編の間 `narrationPacingMeasured`）
 - `knownRemainingIssues`が空
 - Canvas Runが最終成果物と同じartifact SHAを表示
 
