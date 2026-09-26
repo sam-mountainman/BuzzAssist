@@ -475,6 +475,10 @@ test("adapter: 取り込みの実行で関所が呼び出しを止めていた�
   }
 });
 
+// 運営者の配置表（追跡しない config/harness-deployments.json）は端末ごとに違い、explainer-video の行が無い
+// 端末もある。試験は同梱の例の配置表を明示して使い、運営者の設定に頼らない。
+const EXAMPLE_DEPLOYMENTS = fileURLToPath(new URL("../config/harness-deployments.example.json", import.meta.url));
+
 async function runJob({ fixture, bundleDir, publicKeyPem, projectDir, options = {} }) {
   const created = await createVideoHarnessJob({
     projectDir,
@@ -482,6 +486,7 @@ async function runJob({ fixture, bundleDir, publicKeyPem, projectDir, options = 
     harnessId: "explainer-video",
     channelPackPath: bundleDir,
     options,
+    deploymentPath: EXAMPLE_DEPLOYMENTS,
   });
   const run = () => runVideoHarnessJob({
     projectDir,
@@ -534,7 +539,7 @@ test("Job: 取り込みは制作を起動せず、関所の中で監査して Jo
     assert.equal(report.productionScriptsRun, false);
     assert.ok(!JSON.stringify(receipt).includes("合成の台本の一文目"), "RunReceipt に台本の本文を残さない");
 
-    const again = await createVideoHarnessJob({ projectDir, scriptPath: fixture.scriptPath, harnessId: "explainer-video", channelPackPath: bundleDir, options: {} });
+    const again = await createVideoHarnessJob({ projectDir, scriptPath: fixture.scriptPath, harnessId: "explainer-video", channelPackPath: bundleDir, options: {}, deploymentPath: EXAMPLE_DEPLOYMENTS });
     assert.equal(again.attached, true);
     assert.equal(again.job.id, created.job.id);
     const resumed = await run();
