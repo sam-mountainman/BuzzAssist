@@ -64,6 +64,23 @@ test("配布された写しでハーネスを指定したら、未承認で止�
   assert.deepEqual({ ok: unreadable.ok, required: unreadable.required }, { ok: false, required: true });
 });
 
+test("束（references・付属物）を覆っていない古い承認は、doctor でも承認済みにせず理由を出す", async () => {
+  const probe = await probeSkillApproval({
+    repoRoot: root,
+    env: {},
+    declaration,
+    checkout: "distributed",
+    loadPolicy: await policy((skill) => { if (skill.id === "buzzassist:narrated-story-video") delete skill.approval.bundleSha256; }),
+  });
+  assert.deepEqual(
+    probe.unapprovedSkills.map((row) => [row.id, row.approvalState, row.reason]),
+    [["buzzassist:narrated-story-video", "stale", "bundle-not-covered"]],
+  );
+  const check = skillApprovalCheck(probe, { harnessId: "narrated-story-video" });
+  assert.deepEqual({ ok: check.ok, required: check.required }, { ok: false, required: true });
+  assert.match(check.detail, /buzzassist:narrated-story-video \d+\.\d+\.\d+（stale: 承認が references・付属物を覆っていない/u);
+});
+
 test("ハーネス未指定では、リリースの関門と同じ集合（正本の本番スキル）を見る", async () => {
   const probe = await probeSkillApproval({ repoRoot: root, env: {}, checkout: "development", loadPolicy: await policy((skill) => { skill.approval = undefined; }) });
   const loaded = await loadSkillPolicyManifests(root);

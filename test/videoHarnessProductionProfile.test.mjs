@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -58,6 +58,8 @@ test("本番の記録は、宣言された全スキルの承認状態と版を�
   for (const row of profile.declaredSkills) {
     assert.ok(["current", "stale", "none"].includes(row.approvalState), `${row.id}: 承認状態が記録されていない`);
     assert.match(row.version, /^\d+\.\d+\.\d+/u, `${row.id}: 版が記録されていない`);
+    // Job の同一性に束（references・付属物）の digest も入る。計画の後に references だけが変わっても気づく。
+    assert.match(row.bundleSha256, /^[a-f0-9]{64}$/u, `${row.id}: 束の digest が記録されていない`);
   }
   assert.equal(profile.skillApproval.version, SKILL_APPROVAL_RECORD_VERSION);
 });
@@ -122,6 +124,44 @@ test("開発用チェックアウトでは、承認前の正本スキルでも�
     () => assertVideoHarnessProductionProfile({ job: koyaJob(), repoRoot: root, loadPolicy: staleInventory, env: {}, checkout: "development" }),
     /Production inventory SHA is stale/u,
   );
+});
+
+test("承認は references・付属物にも束縛される: 古い承認（束なし）も references だけの変更も、配布された写しでは止め、開発用では記録する", async (t) => {
+  // bundleSha256 の無い 2026-09-26 までの承認は、SKILL.md が同じでも references を覆っていない。
+  const legacy = await policyWithApprovals((skill) => { delete skill.approval.bundleSha256; });
+  await assert.rejects(
+    () => assertVideoHarnessProductionProfile({ job: koyaJob(), repoRoot: root, loadPolicy: legacy, env: {}, checkout: "distributed" }),
+    /has no human approval bound to its current content \(stale: bundle-not-covered\)/u,
+  );
+  const recorded = await assertVideoHarnessProductionProfile({ job: koyaJob(), repoRoot: root, loadPolicy: legacy, env: {}, checkout: "development" });
+  assert.ok(recorded.skillApproval.unapprovedSkills.length > 0 && recorded.skillApproval.unapprovedSkills.every((row) => row.approvalState === "stale"));
+
+  // references だけを変えた写し（在庫も承認も前の束のまま）。SKILL.md の SHA は一致している。
+  const tmp = realpathSync(mkdtempSync(join(tmpdir(), "skill-approval-bundle-")));
+  t.after(() => rmSync(tmp, { recursive: true, force: true }));
+  const copy = join(tmp, "plugin");
+  cpSync(join(root, ".agents", "skills"), join(copy, ".agents", "skills"), { recursive: true });
+  const reference = join(copy, ".agents", "skills", "manga-video-production", "references", "final-review-ja.md");
+  writeFileSync(reference, `${readFileSync(reference, "utf8")}\n<!-- 合成の追記: references だけの変更 -->\n`);
+  const policy = await (await policyWithApprovals())();
+  const copiedPolicy = async () => ({
+    ...policy,
+    inventoryPath: join(copy, ".agents", "skills", "inventory.manifest.json"),
+    profilesPath: join(copy, ".agents", "skills", "profiles.manifest.json"),
+  });
+  await assert.rejects(
+    () => assertVideoHarnessProductionProfile({ job: koyaJob(copy), repoRoot: copy, loadPolicy: copiedPolicy, env: {}, checkout: "distributed" }),
+    /buzzassist:manga-video-production .*\(stale: bundle-changed\)/u,
+  );
+  const development = await assertVideoHarnessProductionProfile({ job: koyaJob(copy), repoRoot: copy, loadPolicy: copiedPolicy, env: {}, checkout: "development" });
+  assert.deepEqual(development.skillApproval.unapprovedSkills.map((row) => [row.id, row.approvalState]), [["buzzassist:manga-video-production", "stale"]]);
+  // 機械が書き直す overlay だけの変更では承認は外れない。
+  const clean = join(tmp, "clean");
+  cpSync(join(root, ".agents", "skills"), join(clean, ".agents", "skills"), { recursive: true });
+  writeFileSync(join(clean, ".agents", "skills", "manga-video-production", "references", "learned-auto.md"), "# 合成の overlay\n");
+  const cleanPolicy = async () => ({ ...policy, inventoryPath: join(clean, ".agents", "skills", "inventory.manifest.json"), profilesPath: join(clean, ".agents", "skills", "profiles.manifest.json") });
+  const overlayOnly = await assertVideoHarnessProductionProfile({ job: koyaJob(clean), repoRoot: clean, loadPolicy: cleanPolicy, env: {}, checkout: "distributed" });
+  assert.equal(overlayOnly.skillApproval.builtWithUnapprovedSkills, false);
 });
 
 test("写しの種類は既定で repoRoot から決まる（.git と .claude/skills と .agents/skills が揃えば開発用）", async (t) => {

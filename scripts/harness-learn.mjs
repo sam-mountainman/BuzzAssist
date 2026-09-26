@@ -2628,7 +2628,8 @@ async function runLearningChangeCli(args, now, scope = null) {
       );
       if (result.canonicalSkill) {
         process.stdout.write(
-          "  正本スキルを書き換えました。.agents/skills/inventory.manifest.json の contentSha256 を今の内容へ更新してください"
+          "  正本スキルを書き換えました。.agents/skills/inventory.manifest.json の contentSha256 と bundleSha256 を今の内容へ更新してください"
+          + "（値は npm run skills:check の食い違いの行に出ます）"
           + "（版の扱いは skill-creator の決まり）。開発用チェックアウトの制作は止まらず、RunReceipt に承認前の正本で作ったと残ります。"
           + "運営者へ配る版（Release）を出す前に、人が承認者の端末で skill-inventory --approve を打ちます（skills:check:release が確かめます）。\n",
         );

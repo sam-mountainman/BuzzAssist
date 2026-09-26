@@ -43,6 +43,7 @@ import {
 import { GENRE_CANONICAL_ENTRYPOINTS } from "../lib/harnessRouting.mjs";
 import { probeHostSkillSync } from "../lib/hostSkillSync.mjs";
 import { SKILL_APPROVAL_REQUIREMENT_ENV, probeSkillApproval } from "../lib/videoHarnessProductionProfile.mjs";
+import { describeSkillApprovalStaleReason } from "../lib/skillInventory.mjs";
 import { channelPackRuntimeAdapterSpecs } from "../lib/harnessChannelPackRuntime.mjs";
 import {
   resolveHarnessDeployment,
@@ -737,9 +738,15 @@ async function probeChannelPack({ projectDir, harnessId, job, runtime }) {
  * `runtime` is dependency injection for deterministic tests; production
  * callers should omit it. Both CLI and MCP return this same report/schema.
  */
-/** doctor の skill-approval 項目。本文にはスキルの id と版だけを出す（パスも承認者名も出さない）。 */
+/**
+ * doctor の skill-approval 項目。本文にはスキルの id と版と stale の理由だけを出す（パスも承認者名も出さない）。
+ * 承認は版・SKILL.md の内容 SHA・束の digest（references・付属物）の全部に付いているときだけ ok。
+ */
 export function skillApprovalCheck(probe, { harnessId = "" } = {}) {
-  const list = (probe.unapprovedSkills || []).map((row) => `${row.id} ${row.version}（${row.approvalState}）`).join(", ");
+  const list = (probe.unapprovedSkills || []).map((row) => {
+    const reason = row.reason ? `: ${describeSkillApprovalStaleReason(row.reason) || row.reason}` : "";
+    return `${row.id} ${row.version}（${row.approvalState}${reason}）`;
+  }).join(", ");
   const common = {
     id: "skill-approval",
     required: Boolean(harnessId) && probe.enforced === true,
@@ -751,7 +758,7 @@ export function skillApprovalCheck(probe, { harnessId = "" } = {}) {
     return { ...common, detail: `正本スキルの在庫を読めない: ${probe.unreadable}`, fix: "在庫 .agents/skills/inventory.manifest.json と profiles.manifest.json を直す" };
   }
   if (probe.ok === true) {
-    return { ...common, detail: `正本スキル ${probe.checked} 本の人の承認が、今の版と内容に付いている`, fix: "" };
+    return { ...common, detail: `正本スキル ${probe.checked} 本の人の承認が、今の版と内容（SKILL.md と references・付属物）に付いている`, fix: "" };
   }
   if (probe.enforced !== true) {
     const why = probe.checkout === "development"
