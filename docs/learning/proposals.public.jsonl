@@ -21,6 +21,7 @@
 {"id":"4d93db7bf25b","kind":"fact","target":"genre:manga-video-production"}
 {"id":"545f81ec58ed","kind":"correction","target":"platform:harness-parallel-execution"}
 {"id":"554024fe106c","kind":"correction","target":"genre:narrated-story-video"}
+{"id":"5c224b2b70d2","kind":"correction","target":"platform:platform-craft"}
 {"id":"5c9e59882b26","kind":"fact","target":"genre:manga-video-production"}
 {"id":"5fc7cb6c8930","kind":"correction","target":"genre:narrated-story-video"}
 {"id":"6261ec9acf18","kind":"fact","target":"genre:narrated-story-video"}
