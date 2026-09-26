@@ -42,8 +42,8 @@
     },
     {
       "id": "human-review",
-      "what": "人の全編の試聴・初見の評価。機械の監査の外で、記録の口がまだ無いので、Job はいつも explainer-human-review-pending を残して awaiting-human-review で止まる（点数を作らない）",
-      "blocking": false
+      "what": "人の確認: 生成とは別の文脈の評価者が完成 MP4 を全編通して見て（聞いて）、初見の視聴者として評価シート（Job の explainer/review/review-sheet.json。評価項目は共通の解説動画の項目。合格点・下限は載せない）で採点し、機械では測れない所見を添えて、運営者の信頼リストにある鍵で署名した signoff（node scripts/explainer-video.mjs signoff、MCP の signoff_video_harness_job）。無ければ explainer-human-review-pending で awaiting-human-review に止まる",
+      "blocking": true
     }
   ],
   "guarantees": [
@@ -124,6 +124,23 @@
         "noBuzzAssistPaidCalls"
       ],
       "inForceSince": "buzzassist-explainer-audit-v1"
+    },
+    {
+      "id": "human-review-signed",
+      "what": "人の全編の試聴と初見の評価を、生成とは別の文脈の評価者が承認し、運営者の信頼リストにある鍵（lib/koyaReviewAttestation.mjs の subject explainer-video）で、Job の識別子・完成 MP4・完成 MP4 から作った contact sheet・取り込んだ納品の記録の SHA に結び付けて署名した。runner と共通の RunReceipt の両方が署名を検証し直す",
+      "human": "全編を通して見た（聞いた）かどうか・初見で分かるか・聞きやすいかは人が決める（機械では合否を決めない）",
+      "evidenceAuditIds": [
+        "humanReviewSigned"
+      ],
+      "inForceSince": "buzzassist-explainer-audit-v2"
+    },
+    {
+      "id": "quality-loop",
+      "what": "署名された人の評価を品質ループ（lib/explainerQualityLoop.mjs。中核は lib/qualityLoop.mjs）の1回として、機械の監査が全部通った後にだけ記録し、評価項目の加重平均が目標以上・どの項目も下限以上・評価者が承認した回だけを合格にする。評価者に合格点・下限は見せない",
+      "evidenceAuditIds": [
+        "qualityLoopPassed"
+      ],
+      "inForceSince": "buzzassist-explainer-audit-v2"
     }
   ],
   "entrypoint": "node scripts/run-video-harness.mjs",
@@ -139,11 +156,11 @@
   ],
   "learningTargets": [],
   "status": "implementation-in-progress",
-  "statusNote": "既存のローカル制作の納品の取り込み（照合・実デコード・監査・RunReceipt・Canvas の投影）は動く。人の試聴・初見の評価を完成 MP4 に結び付けて記録する口と、共通の RunReceipt で completed へ確定する検証器（reviewAttestation の subject）がまだ無いので、Job は awaiting-human-review で止まる",
+  "statusNote": "既存のローカル制作の納品の取り込み（照合・実デコード・監査）から、人の確認の signoff と品質ループを経て、共通の RunReceipt で completed に確定するところまで動く（試験は合成の小さな MP4）。本番の尺の Job を completed に確定した実績はまだ無い",
   "completion": {
-    "status": "pending",
-    "reason": "完成（completed）と呼ぶには、人の試聴・初見の評価を完成 MP4 の SHA に結び付けた署名つきの記録と、それを共通の RunReceipt（lib/videoHarnessReceipt.mjs の SIGNOFF_BINDING_VALIDATORS）で検証する口が要る。まだ無いので、取り込みの機械の監査が全部通っても explainer-human-review-pending が残る",
-    "requiredWork": "reviewAttestation の subject explainer-video（lib/koyaReviewAttestation.mjs）と、その signoff の検証器・contact sheet の作り方を足し、宣言に reviewAttestation.subject を書いて版を上げる"
+    "status": "ready",
+    "since": "buzzassist-explainer-audit-v2",
+    "how": "機械の監査が全部通り、途中の成果物の品質ループ（サムネ）が合格し、評価者の署名つきの人の確認（signoff）が承認で、その評価が品質ループで合格すると、runner が final-audited を返し、共通の RunReceipt（lib/videoHarnessReceipt.mjs の SIGNOFF_BINDING_VALIDATORS の explainer-video）が署名・完成 MP4・contact sheet・納品の記録を検証し直して completed（RunReceipt の outcome pass、knownRemainingIssues 空）に確定する"
   },
   "keywords": [
     "解説",
@@ -159,5 +176,8 @@
     "input": "checks object",
     "failClosed": true
   },
-  "gateEvidenceNote": "各保証は evidenceAuditIds が全て pass のときだけ pass にできる。人の評価は保証に入れず knownRemainingIssues に残す（記録の口が無いものを保証として並べない）。"
+  "gateEvidenceNote": "各保証は evidenceAuditIds が全て pass のときだけ pass にできる。人の確認（human-review-signed・quality-loop）は監査契約 v2 から効く保証で、v1 で測る記録では効力の外（not-in-force）になる（すでに走った Job を後から落とさない）。",
+  "reviewAttestation": {
+    "subject": "explainer-video"
+  }
 }

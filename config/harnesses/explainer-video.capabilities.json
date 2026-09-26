@@ -37,8 +37,9 @@
   "outputs": [
     { "id": "imported-delivery", "what": "照合した完成版の納品（動画・字幕・サムネ・投稿用情報）の SHA と大きさ。ファイルは写さず、チャンネルのフォルダを指す" },
     { "id": "audit-report", "what": "完成 MP4 の実デコード・尺・字幕の時刻・サムネ・表示の決まり・品質ループの照合をまとめた監査の報告（Job の run フォルダの explainer/）" },
-    { "id": "run-receipt", "what": "保証ごとの判定と証拠の指紋を持つ RunReceipt（人の評価が残る間は outcome fail で、knownRemainingIssues に理由が残る）" },
-    { "id": "canvas-projection", "what": "BuzzAssist Canvas への Job の投影（状態と監査の報告。完成動画のファイルは写さない）" }
+    { "id": "human-review", "what": "完成 MP4 から作った contact sheet と評価シート（Job の run フォルダの explainer/review/）。評価者の署名つきの人の確認（全編の試聴と初見の評価）を、品質ループの1回として記録する" },
+    { "id": "run-receipt", "what": "保証ごとの判定と証拠の指紋を持つ RunReceipt。人の確認と品質ループが合格すれば、共通の RunReceipt が署名を検証し直して completed（outcome pass）に確定する。残る間は outcome fail で、knownRemainingIssues に理由が残る" },
+    { "id": "canvas-projection", "what": "BuzzAssist Canvas への Job の投影（状態・監査の報告・contact sheet。完成 MP4 は completed に確定したときだけ、元のファイルから1回投影する）" }
   ],
   "suitedFor": [
     "手元の制作で完成した解説動画を、作り直さずに共通の Job と記録へつなぐ",
@@ -49,7 +50,7 @@
     "台本から画・声・BGM を有料で生成して作る動画（ナレーション物語のハーネス）",
     "吹き出しとコマで見せる漫画動画（漫画動画のハーネス）",
     "チャンネルの制作がまだ無い・納品の記録を書かない制作",
-    "人の試聴を済ませた完成（completed）の確定（記録の口が未実装）"
+    "人が全編を試聴せずに完成（completed）と呼ぶこと（評価者の署名つきの人の確認が要る）"
   ],
   "estimates": {
     "cost": {
@@ -69,7 +70,7 @@
     { "doctorCheckId": "ffmpeg-capability", "checkedAt": "before-job", "what": "libx264 と aac を含む ffmpeg で、1本作って読み返せる" },
     { "doctorCheckId": "disk-space", "checkedAt": "before-job", "what": "作業フォルダーの空き容量" },
     { "doctorCheckId": "windows-work-path", "checkedAt": "before-job", "what": "Windows では、子プロセスを起動する作業フォルダが上限（238 字）に収まる（Windows 以外は見ない）" },
-    { "doctorCheckId": "reviewer-trust", "checkedAt": "before-job", "what": "運営者の reviewer 信頼リスト（環境変数 BUZZASSIST_REVIEWER_TRUST。resume の前に共通の入口が確かめる）" },
+    { "doctorCheckId": "reviewer-trust", "checkedAt": "before-job", "what": "運営者の reviewer 信頼リスト（環境変数 BUZZASSIST_REVIEWER_TRUST。resume の前に共通の入口が確かめ、人の確認の署名の検証に使う）" },
     { "doctorCheckId": "channel-pack", "checkedAt": "job-prepare", "what": "署名済み Channel Pack の検証の記録（Job の prepare が残す）" },
     { "doctorCheckId": "host-skill-sync", "checkedAt": "before-job", "conditional": true, "what": "ホストが読むスキルの写しが配布元と同じ版（ずれているときだけ止まる）" }
   ]

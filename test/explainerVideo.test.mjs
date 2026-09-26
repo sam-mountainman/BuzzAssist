@@ -3,20 +3,14 @@
 // 制作の実行（produce）は合成のダミーの制作スクリプトで、3つのパスを明示して起動することだけを確かめる。
 
 import assert from "node:assert/strict";
-import { execFile as execFileCallback } from "node:child_process";
-import { createHash, generateKeyPairSync } from "node:crypto";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 
-import { createChannelPackEnvelope } from "../lib/channelPackEnvelope.mjs";
 import { validateChannelRegistry } from "../lib/channelRegistry.mjs";
 import {
-  EXPLAINER_CHANNEL_PACK_FILE,
-  EXPLAINER_PAYLOAD_KIND,
   assertExplainerStartOptions,
   resolveExplainerSteps,
   validateExplainerChannelPack,
@@ -24,183 +18,44 @@ import {
 import {
   EXPLAINER_AUDIT_IDS,
   EXPLAINER_HUMAN_REVIEW_ISSUE,
+  EXPLAINER_MACHINE_AUDIT_IDS,
   _testing as explainerTesting,
   auditExplainerDelivery,
   parseSrt,
   planExplainerVideo,
   runExplainerVideo,
 } from "../lib/explainerVideo.mjs";
-import { resolveFfmpegToolchain } from "../lib/harnessRuntimeResolver.mjs";
-import { _testing as adapterTesting, executeVideoHarnessAdapter, prepareVideoHarnessJob } from "../lib/videoHarnessAdapters.mjs";
-import { createVideoHarnessJob, runVideoHarnessJob } from "../lib/videoHarnessJob.mjs";
+import { _testing as adapterTesting } from "../lib/videoHarnessAdapters.mjs";
+import { createVideoHarnessJob } from "../lib/videoHarnessJob.mjs";
 import { runHarnessDoctor } from "../scripts/harness-doctor.mjs";
 import { loadHarnesses } from "../scripts/harness-registry.mjs";
+import {
+  CHANNEL,
+  EXAMPLE_DEPLOYMENTS,
+  createFixture,
+  needsFfmpeg,
+  packPayload,
+  passingGates,
+  runJob,
+  sha256,
+  signPack,
+} from "./helpers/explainerFixture.mjs";
 import { acceptScriptForTests } from "./helpers/scriptQualityAcceptance.mjs";
 
-const execFile = promisify(execFileCallback);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const toolchain = await resolveFfmpegToolchain();
-const needsFfmpeg = { skip: toolchain.ok ? false : "ffmpeg/ffprobe is unavailable" };
-const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
-const CHANNEL = "sample-explainer";
-const SCRIPT_TEXT = "# 合成の解説\n\n合成の台本の一文目。\n\n合成の台本の二文目。\n";
-
-async function ffmpeg(args) {
-  await execFile(toolchain.ffmpeg.command, [...(toolchain.ffmpeg.args || []), "-hide_banner", "-loglevel", "error", "-y", ...args]);
-}
-
-/** 声だけ（文の間に無音）の3秒の動画。bgm: true なら低い持続音を敷く。 */
-async function makeVideo(file, { bgm = false } = {}) {
-  const voice = "if(lt(mod(t\\,1)\\,0.6)\\,0.3*sin(2*PI*440*t)\\,0)";
-  const expression = bgm ? `${voice}+0.03*sin(2*PI*220*t)` : voice;
-  await ffmpeg([
-    "-f", "lavfi", "-i", "color=c=blue:s=320x180:r=30:d=3",
-    "-f", "lavfi", "-i", `aevalsrc=${expression}:s=48000:d=3`,
-    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", file,
-  ]);
-}
-
-async function probe(file) {
-  const { stdout } = await execFile(toolchain.ffprobe.command, [...(toolchain.ffprobe.args || []), "-v", "error",
-    "-show_entries", "stream=codec_type,width,height,nb_frames:format=duration", "-of", "json", file]);
-  const parsed = JSON.parse(stdout);
-  const video = parsed.streams.find((stream) => stream.codec_type === "video");
-  return { duration: Number(parsed.format.duration), width: video.width, height: video.height, frames: Number(video.nb_frames) };
-}
-
-const DUMMY_PRODUCER = `// 合成のダミーの制作スクリプト（試験用）。受け取った引数を記録し、用意済みの成果物で納品の記録を書き直す。
-import { createHash } from "node:crypto";
-import { copyFileSync, writeFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-const args = process.argv.slice(2);
-const value = (name) => args[args.indexOf(name) + 1];
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-writeFileSync(path.join(root, "producer-ran.json"), JSON.stringify({ args }));
-const output = value("--output-dir");
-for (const name of ["final.mp4", "captions.srt", "thumbnail.jpg", "UPLOAD.md", "DELIVERY.json"]) {
-  copyFileSync(path.join(root, "prepared", name), path.join(output, name));
-}
-`;
-
-/**
- * 合成の制作のフォルダ（videoRoot）: production/SCRIPT.md、out/ の完成版と DELIVERY.json、prepared/ に同じ写し、
- * scripts/produce.mjs（ダミーの制作）。captions / bgm で字幕と音を差し替えられる。
- */
-async function createFixture({ captions = "1\n00:00:00,100 --> 00:00:00,900\n合成の字幕1\n\n2\n00:00:01,100 --> 00:00:02,500\n\n合成の字幕2 20ページ\n", bgm = false } = {}) {
-  const base = await mkdtemp(path.join(tmpdir(), "explainer-video-"));
-  const videoRoot = path.join(base, "video-root");
-  const out = path.join(videoRoot, "out");
-  const production = path.join(videoRoot, "production");
-  const prepared = path.join(videoRoot, "prepared");
-  for (const dir of [out, production, prepared, path.join(videoRoot, "visuals"), path.join(videoRoot, "scripts")]) await mkdir(dir, { recursive: true });
-  const scriptPath = path.join(production, "SCRIPT.md");
-  await writeFile(scriptPath, SCRIPT_TEXT);
-  const video = path.join(out, "final.mp4");
-  await makeVideo(video, { bgm });
-  const facts = await probe(video);
-  await writeFile(path.join(out, "captions.srt"), captions);
-  await ffmpeg(["-f", "lavfi", "-i", "color=c=red:s=1280x720", "-frames:v", "1", path.join(out, "thumbnail.jpg")]);
-  await writeFile(path.join(out, "UPLOAD.md"), "# 合成の投稿用情報\n");
-  const shaOf = async (file) => sha256(await readFile(file));
-  const scriptSha256 = await shaOf(scriptPath);
-  const videoBytes = (await readFile(video)).length;
-  const delivery = {
-    script_sha256: scriptSha256,
-    video: {
-      script_sha256: scriptSha256,
-      file: video,
-      sha256: await shaOf(video),
-      bytes: videoBytes,
-      duration_seconds: facts.duration,
-      width: facts.width,
-      height: facts.height,
-      fps: 30,
-      frames: String(facts.frames),
-      bgm,
-    },
-    captions: path.join(out, "captions.srt"),
-    captions_sha256: await shaOf(path.join(out, "captions.srt")),
-    thumbnail: path.join(out, "thumbnail.jpg"),
-    thumbnail_sha256: await shaOf(path.join(out, "thumbnail.jpg")),
-    upload_metadata: path.join(out, "UPLOAD.md"),
-    script: scriptPath,
-  };
-  await writeFile(path.join(out, "DELIVERY.json"), `${JSON.stringify(delivery, null, 2)}\n`);
-  for (const name of ["final.mp4", "captions.srt", "thumbnail.jpg", "UPLOAD.md", "DELIVERY.json"]) {
-    await writeFile(path.join(prepared, name), await readFile(path.join(out, name)));
-  }
-  await writeFile(path.join(videoRoot, "scripts", "produce.mjs"), DUMMY_PRODUCER);
-  const pins = {
-    deliverySha256: await shaOf(path.join(out, "DELIVERY.json")),
-    scriptSha256,
-    videoSha256: delivery.video.sha256,
-    captionsSha256: delivery.captions_sha256,
-    thumbnailSha256: delivery.thumbnail_sha256,
-    uploadMetadataSha256: await shaOf(path.join(out, "UPLOAD.md")),
-  };
-  return { base, videoRoot, scriptPath, delivery, pins };
-}
-
-function packPayload(fixture, overrides = {}) {
-  return {
-    version: "buzzassist-explainer-channel-pack-v1",
-    channelId: CHANNEL,
-    harnessId: "explainer-video",
-    videoRoot: fixture.videoRoot,
-    paths: { productionDir: "production", visualsDir: "visuals", outputDir: "out" },
-    delivery: { file: "out/DELIVERY.json" },
-    release: fixture.pins,
-    scriptQuality: { genre: "explainer", workDir: "production" },
-    assetQuality: { workDir: ".", stages: ["thumbnail"] },
-    display: { bgm: "none", numerals: "arabic" },
-    production: {
-      steps: [{ id: "produce", argv: ["node", "scripts/produce.mjs", "--production-dir", "{productionDir}", "--visuals-dir", "{visualsDir}", "--output-dir", "{outputDir}"] }],
-    },
-    ...overrides,
-  };
-}
-
-function keyPair() {
-  const pair = generateKeyPairSync("ed25519");
-  return {
-    privateKeyPem: pair.privateKey.export({ type: "pkcs8", format: "pem" }),
-    publicKeyPem: pair.publicKey.export({ type: "spki", format: "pem" }),
-  };
-}
-
-async function signPack(fixture, payload, name = "pack") {
-  const source = path.join(fixture.base, `${name}-source`);
-  await mkdir(source, { recursive: true });
-  await writeFile(path.join(source, EXPLAINER_CHANNEL_PACK_FILE), `${JSON.stringify(payload, null, 2)}\n`);
-  const key = keyPair();
-  const bundleDir = path.join(fixture.base, name);
-  await createChannelPackEnvelope({
-    sourceDir: source,
-    outputDir: bundleDir,
-    id: "synthetic-explainer-pack",
-    version: "1.0.0",
-    harnessId: "explainer-video",
-    payloadKind: EXPLAINER_PAYLOAD_KIND,
-    privateKeyPem: key.privateKeyPem,
-  });
-  return { bundleDir, publicKeyPem: key.publicKeyPem };
-}
-
-const passingGates = {
-  scriptQualityCheck: async () => ({ pass: true, reasonCode: "script-quality-passed", acceptedBy: "quality-loop", issues: [], next: [], evidence: { genre: "explainer" } }),
-  assetQualityCheck: async ({ stage }) => ({ stage, pass: true, code: "", detail: "合成の合格" }),
-};
 
 test("宣言の監査 id と runner の監査 id が一致し、どの保証も監査に結び付いている", () => {
   const declaration = loadHarnesses().find((harness) => harness.id === "explainer-video");
   assert.ok(declaration, "宣言が読める");
   const declared = declaration.guarantees.flatMap((guarantee) => guarantee.evidenceAuditIds);
   assert.deepEqual([...declared].sort(), [...EXPLAINER_AUDIT_IDS].sort());
-  assert.ok(declaration.guarantees.every((guarantee) => guarantee.inForceSince === "buzzassist-explainer-audit-v1"));
-  assert.equal(declaration.reviewAttestation, undefined, "完成へ確定する検証器が無い間は subject を名乗らない");
-  assert.equal(declaration.completion.status, "pending");
-  assert.ok(declaration.completion.reason && declaration.completion.requiredWork);
+  // 機械の監査は v1 から、人の確認（署名と品質ループ）は v2 から効く（すでに走った Job を後から落とさない）。
+  const since = (auditId) => declaration.guarantees.find((guarantee) => guarantee.evidenceAuditIds.includes(auditId)).inForceSince;
+  for (const id of EXPLAINER_MACHINE_AUDIT_IDS) assert.equal(since(id), "buzzassist-explainer-audit-v1", id);
+  for (const id of ["humanReviewSigned", "qualityLoopPassed"]) assert.equal(since(id), "buzzassist-explainer-audit-v2", id);
+  assert.deepEqual(declaration.reviewAttestation, { subject: "explainer-video" }, "共通の RunReceipt の検証器を名乗る");
+  assert.equal(declaration.completion.status, "ready");
+  assert.equal(declaration.completion.since, "buzzassist-explainer-audit-v2");
 });
 
 test("Channel Pack の形: パスは制作のフォルダの中だけ、シェル・知らない欄・3つのパスの無い雛形は受けない", async () => {
@@ -295,7 +150,8 @@ test("取り込みの監査: 一致すれば全部の監査が通り、壊した
     const job = { script: { path: fixture.scriptPath, sha256: sha256(await readFile(fixture.scriptPath)) }, options: {} };
     const guardPath = path.join(fixture.base, "guard.jsonl");
     const good = await auditExplainerDelivery({ job, pack, mode: "import-delivery", guardPath }, passingGates);
-    for (const id of EXPLAINER_AUDIT_IDS) assert.equal(good.checks[id]?.pass, true, `${id}: ${good.checks[id]?.detail}`);
+    for (const id of EXPLAINER_MACHINE_AUDIT_IDS) assert.equal(good.checks[id]?.pass, true, `${id}: ${good.checks[id]?.detail}`);
+    assert.equal(good.bound.video.sha256, fixture.delivery.video.sha256, "人の評価を結び付ける完成 MP4 は、納品の記録と一致して最後までデコードできたもの");
     assert.deepEqual(good.issues, []);
     assert.deepEqual(good.artifacts.map((row) => row.kind).sort(), ["final-video", "subtitle", "thumbnail", "upload-metadata"]);
     assert.deepEqual(good.observations.map((row) => row.id), ["captions-blank-line-after-timing"], "時刻の直後の空行は観察として残し、合否には使わない");
@@ -475,29 +331,6 @@ test("adapter: 取り込みの実行で関所が呼び出しを止めていた�
   }
 });
 
-// 運営者の配置表（追跡しない config/harness-deployments.json）は端末ごとに違い、explainer-video の行が無い
-// 端末もある。試験は同梱の例の配置表を明示して使い、運営者の設定に頼らない。
-const EXAMPLE_DEPLOYMENTS = fileURLToPath(new URL("../config/harness-deployments.example.json", import.meta.url));
-
-async function runJob({ fixture, bundleDir, publicKeyPem, projectDir, options = {} }) {
-  const created = await createVideoHarnessJob({
-    projectDir,
-    scriptPath: fixture.scriptPath,
-    harnessId: "explainer-video",
-    channelPackPath: bundleDir,
-    options,
-    deploymentPath: EXAMPLE_DEPLOYMENTS,
-  });
-  const run = () => runVideoHarnessJob({
-    projectDir,
-    jobId: created.job.id,
-    doctor: async () => ({ ready: true, blocking: [], checks: [] }),
-    prepare: ({ job }) => prepareVideoHarnessJob({ job, trustedKey: { trustedPublicKeyPem: publicKeyPem }, env: {} }),
-    adapter: executeVideoHarnessAdapter,
-    projectCanvas: async () => {},
-  });
-  return { created, run };
-}
 
 test("Job: 取り込みは制作を起動せず、関所の中で監査して Job と RunReceipt に残し、人の評価で止まる。resume で同じ Job に付く", needsFfmpeg, async () => {
   const fixture = await createFixture();
@@ -516,7 +349,9 @@ test("Job: 取り込みは制作を起動せず、関所の中で監査して Jo
       assert.equal(job.auditChecks[id]?.pass, true, `${id}: ${job.auditChecks[id]?.detail}`);
     }
     assert.equal(job.auditChecks.assetQualityLoopsPassed.pass, false);
-    assert.deepEqual(job.artifacts.map((row) => row.kind).sort(), ["audit-report", "genre-run-receipt"], "完成版のファイルは Job の成果物に写さない（Canvas に複製を作らない）");
+    assert.deepEqual(job.artifacts.map((row) => row.kind).sort(), ["audit-report", "contact-sheet", "genre-run-receipt"], "人待ちの間は完成 MP4 と納品の記録を Job の成果物に載せない（Canvas に複製を作らない）");
+    assert.equal(job.auditChecks.humanReviewSigned.pass, false);
+    assert.equal(job.auditChecks.qualityLoopPassed.pass, false);
     await assert.rejects(access(path.join(fixture.videoRoot, "producer-ran.json")), "取り込みは制作のスクリプトを起動しない");
     const { readdir } = await import("node:fs/promises");
     const guards = (await readdir(path.join(job.runDir, "explainer"))).filter((name) => name.startsWith("paid-call-guard-"));
@@ -533,6 +368,7 @@ test("Job: 取り込みは制作を起動せず、関所の中で監査して Jo
     assert.equal(receipt.gates["asset-quality-loop"].verdict, "fail");
     assert.equal(receipt.mediaJobs.length, 0);
     assert.ok(receipt.knownRemainingIssues.some((issue) => issue.startsWith(EXPLAINER_HUMAN_REVIEW_ISSUE)));
+    assert.equal(receipt.gates["human-review-signed"].verdict, "fail");
     const report = JSON.parse(await readFile(path.join(job.runDir, "explainer", "audit-report.json"), "utf8"));
     assert.equal(report.paidCallsAttempted, 0);
     assert.equal(report.modelCallsAttempted, 0);
