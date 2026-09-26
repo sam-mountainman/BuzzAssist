@@ -100,6 +100,15 @@ test("the updater passes the harness-not-ready override and keeps the MCP verifi
   assert.match(updater, /logInstallWarnings\(result\.report\);\n\s*await verifyRuntime\(/u);
 });
 
+test("導入後の検証には、依存を入れた Release の展開先を渡し、写しで npm install にまわっても収まる上限にする", async () => {
+  // 置き場（config.pluginRoot）は依存なしで配る。検証はそこへ node_modules を作らず、写しに
+  // Release の展開先の依存をつなぐ（scripts/verify-plugin-runtime.mjs）。
+  const updater = await readFile(new URL("../scripts/update-current.mjs", import.meta.url), "utf8");
+  assert.match(updater, /await verifyRuntime\(config\.pluginRoot, config\.projectDir, config\.canvasDir, \{ depsRoot: sourceDir \}\);/u);
+  assert.match(updater, /\.\.\.\(depsRoot \? \["--deps-root", depsRoot\] : \[\]\)/u);
+  assert.match(updater, /timeoutMs: VERIFY_RUNTIME_TIMEOUT_MS/u);
+});
+
 test("setup-agents recognizes both the new and the already-deployed updater invocations, and nothing else", () => {
   const legacyArgs = ["--agents", "claude", "--project-dir", "/p", "--canvas-dir", "/p/canvas", "--skip-install", "--skip-build", "--no-launch", "--no-auto-update"];
   assert.deepEqual(isUpdaterInstallInvocation({ argv: ["--agents", "claude"], env: { BUZZASSIST_UPDATER_INSTALL: "1" } }), { updater: true, signal: "env" });

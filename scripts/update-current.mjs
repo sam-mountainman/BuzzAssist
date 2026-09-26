@@ -302,16 +302,25 @@ async function prepareReleaseSource(release, version) {
   }
 }
 
-async function verifyRuntime(pluginRoot, projectDir, canvasDir) {
-  log(`Verifying MCP runtime at ${pluginRoot}.`);
+// setup が作り直した置き場（config.pluginRoot）は依存なしで配る（ホストの plugin キャッシュが
+// node_modules を丸ごと写さないように）。verify-plugin-runtime.mjs はそこへ node_modules を作らず、
+// 一時フォルダの写しに依存をつないで確かめる。depsRoot には依存を入れた Release の展開先を渡す
+// （渡さなくても同じ版の展開先を探すが、明示すれば版の決め方が変わっても外れない）。
+// Release の依存を使えば数秒で終わる。写しで npm install にまわると数分かかりうるので上限を広げる
+// （これより前の update-current は 60 秒のまま。その経路でも Release の依存を使えば収まる）。
+const VERIFY_RUNTIME_TIMEOUT_MS = 5 * 60 * 1000;
+
+async function verifyRuntime(pluginRoot, projectDir, canvasDir, { depsRoot = "" } = {}) {
+  log(`Verifying MCP runtime at ${pluginRoot}${depsRoot ? ` (dependencies from ${depsRoot})` : ""}.`);
   await run(process.execPath, [
     join(pluginRoot, "scripts", "verify-plugin-runtime.mjs"),
     "--plugin-root", pluginRoot,
     "--project-dir", projectDir,
     "--canvas-dir", canvasDir,
+    ...(depsRoot ? ["--deps-root", depsRoot] : []),
   ], {
     cwd: pluginRoot,
-    timeoutMs: 60_000,
+    timeoutMs: VERIFY_RUNTIME_TIMEOUT_MS,
     env: { ...process.env, EXCALIDRAW_NO_AUTO_OPEN: "1" },
   });
 }
@@ -446,7 +455,7 @@ async function installRelease(sourceDir) {
   stableSourceTouched = true;
   if (!result.ok) throw new Error(`Host plugin update failed with exit ${result.code}.`);
   logInstallWarnings(result.report);
-  await verifyRuntime(config.pluginRoot, config.projectDir, config.canvasDir);
+  await verifyRuntime(config.pluginRoot, config.projectDir, config.canvasDir, { depsRoot: sourceDir });
   return result.report;
 }
 
