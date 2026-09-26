@@ -22,6 +22,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { claudeAutomationPlanLine, notifyClaudeLaunchOnce } from "../lib/claudeAutomationBilling.mjs";
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
 import { childAgentEnvironment } from "../lib/harnessLearningGuard.mjs";
 
@@ -221,11 +222,13 @@ function resolveBinary(engine, options = {}) {
 // エンジンが「実際に使えるか」は、存在するかではなく認証が通っているかで決まる。
 // claude CLI は入っていてもログインしていないと即座に失敗する。存在だけを見て
 // 選ぶと、全タスクが同じエラーで落ちてから気づくことになる。
-export async function probeEngine(engineId, { timeoutMs = 60_000, readOnly = false, env = process.env } = {}) {
+export async function probeEngine(engineId, { timeoutMs = 60_000, readOnly = false, env = process.env, notifyClaudeLaunch = notifyClaudeLaunchOnce } = {}) {
   const engine = ENGINES[engineId];
   if (!engine) return { engineId, available: false, reason: `未知のエンジン: ${engineId}` };
   const binary = resolveBinary(engine, { env });
   if (!binary) return { engineId, available: false, reason: "実行ファイルが見つかりません" };
+  // プローブも claude -p の起動（月額クレジットから引かれる）。起動する前に1回だけ注意を出す。
+  if (engineId === "claude") notifyClaudeLaunch({ plannedLaunches: 1, purpose: "エンジンの確認（プローブ）" });
 
   const probeTask = { prompt: "Reply with exactly: PROBE-OK" };
   const outputPath = path.join(
@@ -344,6 +347,18 @@ export async function selectEngine(requested, options = {}) {
   throw new Error(`使えるエージェントCLIがありません（${detail}）`);
 }
 
+/**
+ * claude -p を何回起動する見込みか（プローブ 1 回 + タスクの数）。auto は codex を先に試すので、
+ * codex が使えれば 0 回。計画（--dry-run）と起動前の注意に使う。
+ */
+export function plannedClaudeLaunches({ engine = "auto", taskCount = 0 } = {}) {
+  const withClaude = taskCount + 1;
+  const breakdown = `プローブ 1 + タスク ${taskCount}`;
+  if (engine === "claude") return { min: withClaude, max: withClaude, label: `${withClaude} 回（${breakdown}）` };
+  if (engine === "codex") return { min: 0, max: 0, label: "0 回" };
+  return { min: 0, max: withClaude, label: `codex が使えれば 0 回、使えなければ ${withClaude} 回（${breakdown}）` };
+}
+
 // 結果本文から合否を読む。パターンが指定されていなければ判定しない。
 // 「判定していない」を「合格」に丸めないことが、この関数の唯一の役割。
 export function evaluateVerdict(text, pattern) {
@@ -352,8 +367,10 @@ export function evaluateVerdict(text, pattern) {
   return re.test(String(text ?? "")) ? "pass" : "fail";
 }
 
-async function runTask(task, { engine, binary, outDir, disableMcp, readOnly, defaultTimeoutMs }) {
+async function runTask(task, { engine, binary, outDir, disableMcp, readOnly, defaultTimeoutMs, notifyClaudeLaunch }) {
   const startedAt = Date.now();
+  // 注意は1回だけ（係が覚えている）。プローブで出ていれば、ここでは何も出ない。
+  if (engine.id === "claude") notifyClaudeLaunch({ purpose: "LLM 判断の並列実行" });
   const outputPath = path.join(outDir, `${task.id}.result.txt`);
   const logPath = path.join(outDir, `${task.id}.log`);
   const args = engine.buildArgs(task, { outputPath, disableMcp, readOnly });
@@ -459,6 +476,7 @@ export async function runAgentTasks(tasks, options = {}) {
     throw new Error(`--concurrency は 1 以上の整数にしてください: ${options.concurrency}`);
   }
   const concurrency = requested;
+  const notifyClaudeLaunch = options.notifyClaudeLaunch ?? notifyClaudeLaunchOnce;
   const outDir = options.outDir
     ?? path.join(REPO_ROOT, "canvas", "parallel-runs", `agents-${Date.now()}`);
   fs.mkdirSync(outDir, { recursive: true });
@@ -481,6 +499,7 @@ export async function runAgentTasks(tasks, options = {}) {
           disableMcp: options.disableMcp ?? true,
           readOnly: options.readOnly ?? false,
           defaultTimeoutMs: options.timeoutMs ?? 900_000,
+          notifyClaudeLaunch,
         });
       } catch (error) {
         // 1件の失敗でキューごと止めない。止めると残りが未実行のまま
@@ -509,6 +528,8 @@ export async function runAgentTasks(tasks, options = {}) {
     concurrency,
     cpuCount: os.cpus().length,
     host: options.host ?? process.env.HARNESS_PARALLEL_HOST ?? "unspecified",
+    // claude -p の起動回数（タスクの分。プローブは入れない）。月額クレジットから引かれる回数の目安。
+    claudePrintLaunches: engineInfo.engineId === "claude" ? ordered.filter((r) => r.status !== "failed").length : 0,
     // digest はタスクだけでなく、どのエンジン・どの設定で走ったかまで含める。
     // 同じ digest なのに engine が違えば「同じ実行」とは言えない。
     runDigest: createHash("sha256")
@@ -571,6 +592,7 @@ function parseArgs(argv) {
     else if (arg === "--read-only") out.readOnly = true;
     else if (arg === "--allow-write") out.readOnly = false;
     else if (arg === "--probe") out.probe = true;
+    else if (arg === "--dry-run") out.dryRun = true;
     else if (arg === "--help" || arg === "-h") out.help = true;
     else throw new Error(`不明な引数: ${arg}`);
   }
@@ -593,7 +615,12 @@ function printHelp() {
   --allow-write        ファイル変更を許す（既定は禁止。必要なときだけ明示する）
   --verdict-pattern    結果本文がこの正規表現に一致したら合格とする。
                        指定しなければ合否は判定せず「未判定」と記録する
-  --probe              使えるエンジンを調べて終了する
+  --probe              使えるエンジンを調べて終了する（claude のプローブは claude -p を1回起動する）
+  --dry-run            タスクを検証し、どのエンジンで何回起動する見込みかを出して終わる
+                       （エンジンを1つも起動しない）
+
+  claude -p の起動は、2026-06-15 からサブスクの枠ではなく月額クレジット（API と同じ価格・
+  繰り越しなし）から引かれる。auto は codex を先に選ぶ。claude を起動する前に1回だけ注意を出す。
 
   タスクJSONの形:
     { "tasks": [ { "id": "review-horo", "title": "もも同一性QA",
@@ -652,20 +679,45 @@ async function main() {
     }
   }
 
+  const planned = plannedClaudeLaunches({ engine: options.engine, taskCount: tasks.length });
+  if (options.dryRun) {
+    // 計画だけ。エンジンを1つも起動しない（プローブも claude -p / codex exec の起動になるため）。
+    process.stdout.write(
+      `dry-run（エンジンを起動しません）\n`
+        + `タスク ${tasks.length} 件 / エンジン ${options.engine} / 同時 ${options.concurrency ?? 8}`
+        + ` / ${options.readOnly ? "read-only" : "書き込み可"}\n`
+        + `claude -p の起動見込み: ${planned.label}\n`,
+    );
+    const billing = planned.max > 0 ? claudeAutomationPlanLine(planned.label) : "";
+    if (billing) process.stdout.write(`${billing}\n`);
+    process.exit(0);
+  }
+  // claude を起動する直前に1回だけ、課金の注意を出す（auto で codex が使えれば出ない）。
+  const withClaude = `${tasks.length + 1} 回（プローブ 1 + タスク ${tasks.length}）`;
+  const notifyClaudeLaunch = (notice = {}) => notifyClaudeLaunchOnce({
+    ...notice,
+    plannedLaunches: withClaude,
+    alternative: "codex で足りるなら --engine codex を付ける（auto は codex を先に選ぶ）。",
+  });
+
   let engineInfo;
   try {
-    engineInfo = await selectEngine(options.engine, { readOnly: Boolean(options.readOnly) });
+    engineInfo = await selectEngine(options.engine, { readOnly: Boolean(options.readOnly), notifyClaudeLaunch });
   } catch (error) {
     process.stderr.write(`${error.message}\n`);
     process.exit(2);
   }
   process.stdout.write(`エンジン: ${engineInfo.engineId} (${engineInfo.binary})\n`);
+  if (engineInfo.engineId === "claude") {
+    process.stdout.write(`claude -p をこのあと ${tasks.length} 回起動します（プローブで 1 回起動済み）\n`);
+  }
 
   if (options.verdictPattern) {
     for (const task of tasks) task.verdictPattern = task.verdictPattern ?? options.verdictPattern;
   }
   const summary = await runAgentTasks(tasks, {
     engineInfo,
+    notifyClaudeLaunch,
     concurrency: options.concurrency ?? 8,
     outDir: options.outDir ? path.resolve(options.outDir) : undefined,
     disableMcp: !options.mcp,
@@ -698,8 +750,9 @@ async function main() {
     `\n合計 ${summary.counts.total} 件 / 完走 ${summary.counts.completed} / エラー ${summary.counts.errored}`
       + (summary.counts.unjudged > 0 ? ` / 合否未判定 ${summary.counts.unjudged}` : "")
       + (summary.counts.verdictFail > 0 ? ` / 不合格 ${summary.counts.verdictFail}` : "")
-      + ` / 同時 ${summary.concurrency} / 所要 ${(summary.totalDurationMs / 1000).toFixed(1)}秒\n`
-      + `結果: ${summary.outDir}\n`,
+      + ` / 同時 ${summary.concurrency} / 所要 ${(summary.totalDurationMs / 1000).toFixed(1)}秒`
+      + (summary.claudePrintLaunches > 0 ? ` / claude -p ${summary.claudePrintLaunches} 回（月額クレジット）` : "")
+      + `\n結果: ${summary.outDir}\n`,
   );
   process.exit(summary.ok ? 0 : 1);
 }

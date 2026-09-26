@@ -22,6 +22,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { claudeAutomationPlanLine, isClaudePrintInvocation, notifyClaudeLaunchOnce } from "../lib/claudeAutomationBilling.mjs";
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
 import {
   MACHINE_SLOT_POOLS,
@@ -587,6 +588,15 @@ export async function shutdownRunner(signal) {
   process.stderr.write("ロックと端末全体の枠を外しました。\n");
 }
 
+/**
+ * 計画のうち、claude を非対話（-p / --print）で直接起動するジョブ。2026-06-15 から claude -p は
+ * サブスクの枠ではなく月額クレジットから引かれるので、dry-run に回数を出し、走らせる前に1回だけ注意を出す。
+ * （harness-parallel-agents.mjs・skill-evals.mjs を呼ぶジョブは、その中で注意を出す。）
+ */
+export function claudePrintJobs(plan) {
+  return (plan?.jobs ?? []).filter((job) => isClaudePrintInvocation(job?.command, job?.args));
+}
+
 export async function executePlan(plan, options = {}) {
   const concurrency = options.concurrency ?? defaultConcurrency();
   const dryRun = Boolean(options.dryRun);
@@ -744,6 +754,7 @@ export async function executePlan(plan, options = {}) {
       dryRun: ordered.filter((r) => r.status === "dry-run").length,
     },
     logDir: dryRun ? null : logDir,
+    claudePrintJobs: claudePrintJobs(plan).map((job) => job.id),
     jobs: ordered,
   };
   summary.ok = summary.counts.failed === 0 && summary.counts.skipped === 0;
@@ -759,7 +770,8 @@ function printHelp() {
   --concurrency <n|auto> 同時実行数（既定 auto = min(8, CPU-2)）
   --report <path>        レポートJSONの出力先
   --log-dir <path>       各ジョブのログ出力先
-  --dry-run              実行せず計画の検証と順序だけ確認する
+  --dry-run              実行せず計画の検証と順序だけ確認する（claude を -p / --print で
+                         直接起動するジョブがあれば、その回数と課金の注意も出す）
 
   計画JSONの形:
     {
@@ -827,6 +839,13 @@ async function main() {
     process.exit(2);
   }
 
+  const claudeJobs = claudePrintJobs(plan);
+  if (claudeJobs.length > 0 && !options.dryRun) {
+    notifyClaudeLaunchOnce({
+      plannedLaunches: claudeJobs.length,
+      purpose: `計画のジョブ（${claudeJobs.map((job) => job.id).join(", ")}）`,
+    });
+  }
   const summary = await executePlan(plan, {
     concurrency,
     dryRun: options.dryRun,
@@ -856,6 +875,9 @@ async function main() {
     `\n合計 ${counts.total} 件 / 成功 ${counts.passed} / 失敗 ${counts.failed} / スキップ ${counts.skipped}`
       + ` / 同時 ${summary.concurrency} / 所要 ${(summary.totalDurationMs / 1000).toFixed(1)}秒\n`,
   );
+  if (claudeJobs.length > 0 && options.dryRun) {
+    process.stdout.write(`${claudeAutomationPlanLine(`${claudeJobs.length} 回（${claudeJobs.map((job) => job.id).join(", ")}）`)}\n`);
+  }
   process.exit(summary.ok ? 0 : 1);
 }
 

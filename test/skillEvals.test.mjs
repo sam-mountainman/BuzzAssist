@@ -217,6 +217,14 @@ test("plan は呼び出し回数の見込みを出すだけで、何も起動し
     const planned = await runCli(fixture, ["plan", "--project-dir", fixture.project]);
     assert.match(planned.stdout, /合計 20 回/u);
     assert.match(planned.stdout, /モデルは呼びません/u);
+    // claude -p は 2026-06-15 から月額クレジットから引かれる。計画に回数と課金の1行を出す。
+    assert.equal(plan.claudeAutomation.launches, 10);
+    assert.match(planned.stdout, /claude -p の起動見込み: 10 回/u);
+    assert.match(planned.stdout, /月額クレジット/u);
+    const codexOnly = buildSkillEvalPlan(loaded, { hosts: ["codex"], grader: "codex", cpuCount: 8 });
+    assert.equal(codexOnly.claudeAutomation, null, "claude を起動しない計画には課金の行を出さない");
+    const codexPlanned = await runCli(fixture, ["plan", "--project-dir", fixture.project, "--hosts", "codex", "--grader", "codex"]);
+    assert.doesNotMatch(codexPlanned.stdout, /claude -p の起動見込み/u);
     const notExecuted = await runCli(fixture, ["run", "--project-dir", fixture.project]);
     assert.match(notExecuted.stderr, /--execute が無いので実行しません/u);
     const help = await runCli(fixture, ["run", "--execute", "--help"]);
@@ -243,6 +251,9 @@ test("run --execute: 別のホストが採点し、採点者に合格点も実�
     const projectBefore = treeDigest(fixture.project);
     const run = await runCli(fixture, ["run", "--execute", "--project-dir", fixture.project, "--eval", "1", "--eval", "2", "--eval", "b-trigger", "--eval", "b-negative"]);
     assert.equal(run.exitCode, 0, run.stdout + run.stderr);
+    // claude を起動する前に、課金の注意を1回だけ出す（標準エラー。8 回の起動ごとには出さない）。
+    assert.equal(run.stderr.split("[課金の注意]").length - 1, 1, run.stderr);
+    assert.match(run.stderr, /見込み 8 回/u);
 
     // 記録: 1回の eval 実行ごとに1行
     const files = readdirSync(join(fixture.learning, "evals"));

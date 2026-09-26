@@ -2,7 +2,7 @@
 // 正本スキルの evals を Claude Code と Codex の両方で流し、別ベンダーの新しい文脈で採点する。
 //
 //   node scripts/skill-evals.mjs [plan]        計画だけ（既定。モデルは呼ばない）
-//   node scripts/skill-evals.mjs run --execute  実行する（両ホストの利用枠を使う）
+//   node scripts/skill-evals.mjs run --execute  実行する（codex は利用枠、claude -p は月額クレジットを使う）
 //   node scripts/skill-evals.mjs report         版ごと・ホストごとの合格率を表にする
 //
 // 本体は lib/skillEvals.mjs。
@@ -10,6 +10,7 @@
 import os from "node:os";
 import path from "node:path";
 
+import { createClaudeLaunchNotifier } from "../lib/claudeAutomationBilling.mjs";
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
 import {
   SKILL_EVAL_HOSTS,
@@ -43,7 +44,9 @@ const HELP = `正本スキルの evals を Claude Code と Codex で流して採
   --grader <cross|claude|codex>  採点するホスト（既定 cross = 実行したのと別のホスト）
 
 実行:
-  --execute                run のときに必須。無ければ計画を出すだけで何も起動しない
+  --execute                run のときに必須。無ければ計画を出すだけで何も起動しない。
+                           claude -p は 2026-06-15 からサブスクの枠ではなく月額クレジット（API と同じ価格・
+                           繰り越しなし）から引かれる。claude を起動する前に1回だけ注意を出す
   --concurrency <auto|n>   同時実行数（既定 auto: claude は min(10, max(2, コア-2))、codex は 8。上限 16）
   --timeout-ms <n>         実行者1回の時間切れ（既定 15 分。採点者は 10 分）
   --claude-bin <path>      claude の実行ファイル（既定は PATH）
@@ -117,13 +120,15 @@ function formatPlan(plan, { evalsDir, evalsDirSource, binaries }) {
     const binary = binaries[host] || "見つからない（PATH か --" + host + "-bin）";
     lines.push(`  ${host}: 実行 ${calls.executor} + 採点 ${calls.grader} = ${calls.total} 回（モデル ${model}、effort ${effort}、同時 ${plan.concurrency[host]}、実行ファイル ${binary}）`);
   }
-  lines.push(`  合計 ${plan.totalCalls} 回`, "");
+  lines.push(`  合計 ${plan.totalCalls} 回`);
+  if (plan.claudeAutomation) lines.push(`  ${plan.claudeAutomation.note}`);
+  lines.push("");
   lines.push(`記録の置き場: ${evalsDir}（${evalsDirSource === "env" ? "BUZZASSIST_LEARNING_DIR" : evalsDirSource === "development-checkout" ? "開発用チェックアウト" : "運営者の端末"}）`);
   if (plan.warnings.length > 0) {
     lines.push("", "注意:");
     for (const warning of plan.warnings) lines.push(`  - ${warning}`);
   }
-  lines.push("", "実行するには run --execute を付けます（両ホストの利用枠を使います）。");
+  lines.push("", "実行するには run --execute を付けます（codex は利用枠、claude -p は月額クレジットを使います）。");
   return `${lines.join("\n")}\n`;
 }
 
@@ -173,6 +178,7 @@ export async function runSkillEvalsCli(argv = process.argv.slice(2), { env = pro
     timeouts: args.timeoutMs ? { executorMs: args.timeoutMs } : {},
     keepWork: args.keepWork,
     platform,
+    notifyClaudeLaunch: createClaudeLaunchNotifier({ write: (text) => stderr.write(text) }).notify,
     onProgress: (event) => {
       if (args.json) return;
       if (event.type === "started") {
