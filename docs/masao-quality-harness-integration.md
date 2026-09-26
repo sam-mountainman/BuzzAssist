@@ -146,6 +146,7 @@ v3ではさらに、全rubric項目、generatorと異なる実Codex task/Claude 
 - rubricで比較できる低リスク判断だけfresh evaluatorのblind Best-of-Nへ送る。
 - 匿名候補は2〜5件、`variationAxis`重複禁止、artifact必須。公開packetはA〜E・匿名artifact・SHA-256だけ、provider・元ファイル・内部ID・生成順・variation axis対応表は別のprivate mappingへ物理分離する。対応表は`setId`、採用ラベル、判定者、時刻、具体的理由を持つverdict確定後だけ開示する。キャラクター画像と音声試聴MP3の双方で実ファイルhashを採用前に再検証する。
 - 漫画動画ハーネスのキャラクター承認CLIは`--approval-reason`を必須にし、声の採用も`selectionReason`と人間reviewerをレジストリへ保存する。
+- 2026-09-27: ジャンルに依らない「並べて選ぶ」の入口 `node scripts/human-choice.mjs`（`lib/humanChoice.mjs`）を足した。工程ごとの振り分け（並べて選ぶ／1案に赤を入れる／人に聞かない）、決め手の札、選んだ理由をチャンネルの採点表に足す候補として承認キューへ積む流れは `docs/human-choice-ja.md` にある。採点表（署名済みの Channel Pack）は自動では書き換えない。
 
 ### 最終品質決定
 

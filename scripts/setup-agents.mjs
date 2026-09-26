@@ -733,6 +733,8 @@ export const PLUGIN_SOURCE_FILES = Object.freeze([
   "docs/strategy-handoff-spec-ja.md",
   // 解説動画のハーネスの説明（strategy-handoff-spec の 7.1 と run-video-harness の使い方が指す）。
   "docs/explainer-video-harness-ja.md",
+  // 判断の振り分けと、並べて選ぶ手順（human-choice.mjs のヘルプが指す）。
+  "docs/human-choice-ja.md",
   "docs/learning/targets.json",
   // 本文つき台帳（proposals.jsonl）は配布しない。公開版 catalog だけ。
   "docs/learning/proposals.public.jsonl",
