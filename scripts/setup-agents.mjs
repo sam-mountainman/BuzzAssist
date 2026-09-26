@@ -42,7 +42,7 @@ import {
   migrateLegacyLearningState,
   resolveLearningState,
 } from "../lib/harnessLearningState.mjs";
-import { CODEX_HOOK_TRUST_FIX, probeCodexLearningHookTrust } from "../lib/codexHookTrust.mjs";
+import { CODEX_HOOK_TRUST_FIX, probeCodexLearningHookTrust, probeCodexStopHookTrust } from "../lib/codexHookTrust.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const pluginName = "buzzassist";
@@ -1628,11 +1628,13 @@ export async function runSetupAgents() {
     console.log("BUZZASSIST_HOST_RESTART_REQUIRED=yes");
     console.log("Start a new Codex task or Claude Code session after setup so the newly installed skills and MCP tools are loaded.");
   }
-  // Codex は /hooks で信頼したフックだけを動かす（信頼が無いと学習フックは黙って飛ばされる）。
+  // Codex は /hooks で信頼したフックだけを動かす（信頼が無いと学習フックも完成前チェックも黙って飛ばされる）。
   if (results.codex || detectInstalledBuzzAssistHosts({ homeDir }).includes("codex")) {
     const hookTrust = probeCodexLearningHookTrust({ env: process.env, homeDir });
+    const stopHookTrust = probeCodexStopHookTrust({ env: process.env, homeDir });
     console.log(`BUZZASSIST_LEARNING_HOOK_TRUST=${hookTrust.status}`);
-    if (!hookTrust.ok) console.log(`次にやること（Codex）: ${CODEX_HOOK_TRUST_FIX}`);
+    console.log(`BUZZASSIST_COMPLETION_HOOK_TRUST=${stopHookTrust.status}`);
+    if (!hookTrust.ok || !stopHookTrust.ok) console.log(`次にやること（Codex）: ${CODEX_HOOK_TRUST_FIX}`);
   }
   // reviewer 信頼リストの MCP 経路（R6-F2）。設定ファイルには env 名だけを書いたこと、
   // 値は host を起動するシェルに置くことを、値を印字せずに報告する。

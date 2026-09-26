@@ -61,7 +61,7 @@ import { resolveCodexCommand } from "./codex-image-bridge.mjs";
 import { appendManagedToolsToPath } from "../lib/prerequisiteTools.mjs";
 import { probeSvgRasterizerCached } from "../lib/svgRasterizer.mjs";
 import { probeYtQualityLoopHooks } from "../lib/ytQualityLoopHooks.mjs";
-import { probeCodexLearningHookTrust } from "../lib/codexHookTrust.mjs";
+import { probeCodexLearningHookTrust, probeCodexStopHookTrust } from "../lib/codexHookTrust.mjs";
 import {
   WINDOWS_WORK_PATH_TOO_LONG,
   checkWindowsWorkPaths,
@@ -1022,10 +1022,18 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "",
   add(skillApprovalCheck(skillApproval, { harnessId }));
 
   // Codex は /hooks で信頼されたフックだけを動かす。信頼が無いと学習フックは黙って飛ばされる。
+  const hookTrustHome = runtime.homeDir || runtimeEnv.BUZZASSIST_SETUP_HOME || homedir();
   add({
     id: "learning-hook-trust",
     required: false,
-    ...probeCodexLearningHookTrust({ env: runtimeEnv, homeDir: runtime.homeDir || runtimeEnv.BUZZASSIST_SETUP_HOME || homedir() }),
+    ...probeCodexLearningHookTrust({ env: runtimeEnv, homeDir: hookTrustHome }),
+  });
+  // 完成前チェック（Stop フック）も同じく /hooks の信頼が要る。信頼が無いと、Job が終わっていないのに
+  // 「完成」と書いた返答を Codex では差し戻さない。
+  add({
+    id: "completion-hook-trust",
+    required: false,
+    ...probeCodexStopHookTrust({ env: runtimeEnv, homeDir: hookTrustHome }),
   });
 
   const blocking = checks.filter((c) => c.required && !c.ok);

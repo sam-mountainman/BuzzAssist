@@ -12,6 +12,7 @@ import {
   inspectCodexHookTrust,
   parseCodexHookState,
   probeCodexLearningHookTrust,
+  probeCodexStopHookTrust,
 } from "../lib/codexHookTrust.mjs";
 import { runHarnessDoctor } from "../scripts/harness-doctor.mjs";
 
@@ -90,6 +91,27 @@ test("信頼の状態を見分ける（未導入・プラグイン無効・信�
   assert.equal(probeCodexLearningHookTrust({ env: {}, homeDir: home }).status, "untrusted");
 });
 
+test("完成前チェック（Stop）のフックの信頼は、学習フックとは別に見分ける", (t) => {
+  const home = tempHome(t);
+  const stopKey = "buzzassist@buzzassist:hooks/codex-hooks.json:stop:0:0";
+  stageCodex(home, PLUGIN_ENABLED);
+  const neither = probeCodexStopHookTrust({ env: {}, homeDir: home });
+  assert.equal(neither.status, "untrusted");
+  assert.match(neither.detail, /Stop/u);
+  assert.match(neither.fix, /harness-stop-hook/u);
+
+  // 学習フックだけを信頼しても、Stop は未信頼のまま（逆も同じ）。
+  stageCodex(home, `${PLUGIN_ENABLED}\n[hooks.state."${KEY}"]\ntrusted_hash = "${HASH}"\n`);
+  assert.equal(probeCodexLearningHookTrust({ env: {}, homeDir: home }).status, "trusted");
+  assert.equal(probeCodexStopHookTrust({ env: {}, homeDir: home }).status, "untrusted");
+  stageCodex(home, `${PLUGIN_ENABLED}\n[hooks.state."${stopKey}"]\ntrusted_hash = "${HASH}"\n`);
+  assert.equal(probeCodexLearningHookTrust({ env: {}, homeDir: home }).status, "untrusted");
+  assert.equal(probeCodexStopHookTrust({ env: {}, homeDir: home }).status, "trusted");
+
+  stageCodex(home, `${PLUGIN_ENABLED}\n[hooks.state."${stopKey}"]\ntrusted_hash = "${HASH}"\nenabled = false\n`);
+  assert.equal(probeCodexStopHookTrust({ env: {}, homeDir: home }).status, "disabled");
+});
+
 test("CODEX_HOME を尊重し、config.toml は読むだけで書き換えない", (t) => {
   const home = tempHome(t);
   const elsewhere = path.join(home, "custom-codex-home");
@@ -133,4 +155,10 @@ test("doctor に advisory の learning-hook-trust が出て、止めずに直し
   assert.equal(check.status, "untrusted");
   assert.ok(report.advisory.includes("learning-hook-trust"));
   assert.equal(report.blocking.includes("learning-hook-trust"), false, "信頼の欠落で本番を止めた");
+  const stop = report.checks.find((entry) => entry.id === "completion-hook-trust");
+  assert.ok(stop, "completion-hook-trust の検査が無い");
+  assert.equal(stop.required, false);
+  assert.equal(stop.status, "untrusted");
+  assert.ok(report.advisory.includes("completion-hook-trust"));
+  assert.equal(report.blocking.includes("completion-hook-trust"), false, "信頼の欠落で本番を止めた");
 });
