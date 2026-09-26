@@ -864,6 +864,56 @@ test("評価者を宣言した組は全員そろった時点で1回として閉�
   assert.deepEqual((await record(root, { scriptPath: "drafts/draft.md", versionLabel: "v1b", stage: "revision", revisionDelta: "直していない", reviewPath: await panelReview("a4", reviewOf("ctx-a4", "eval-a", DRAFT, { baseScriptSha256: sha(DRAFT) })) })).issues, ["script-quality-script-unchanged:v1"]);
 });
 
+test("組の2件目以降の record に付けた --blocking-condition も、組が閉じたときに効く（採点ファイルの値より CLI の値が先）", async (t) => {
+  const failing = (contract) => scores({ "narration-voice": 55 }, contract);
+  const openPanel = async () => {
+    const { root, contract } = await startPanel(t, { evaluators: ["eval-a", "eval-b"] });
+    await writeFile(join(root, "drafts/draft.md"), DRAFT);
+    const opened = await record(root, {
+      scriptPath: "drafts/draft.md", versionLabel: "v1", stage: "draft",
+      reviewPath: await writeReview(root, "a", review({ context: "ctx-a", script: DRAFT, evaluatorId: "eval-a", rubricScores: failing(contract) })),
+    });
+    assert.equal(opened.panelAccepted, true);
+    return { root, contract };
+  };
+
+  // ライブラリから: 2件目の record の blockingCondition で閉じた回が blocked で止まる。
+  const lib = await openPanel();
+  const closed = await record(lib.root, {
+    blockingCondition: "評価項目の改定を運営者が決めた",
+    reviewPath: await writeReview(lib.root, "b", review({ context: "ctx-b", script: DRAFT, evaluatorId: "eval-b", rubricScores: failing(lib.contract) })),
+  });
+  assert.equal(closed.recorded, true);
+  assert.equal(closed.state.status, "blocked");
+  assert.equal(closed.state.stopReason, "blocking-condition");
+  assert.equal(closed.state.blockingCondition, "評価項目の改定を運営者が決めた");
+
+  // CLI から: 2件目の --blocking-condition が、採点ファイルの blockingCondition より先に効く。
+  const cli = await openPanel();
+  const reviewPath = await writeReview(cli.root, "b", {
+    ...review({ context: "ctx-b", script: DRAFT, evaluatorId: "eval-b", rubricScores: failing(cli.contract) }),
+    blockingCondition: "採点者が書いた止める条件",
+  });
+  const ran = await runScriptQualityCli(
+    ["record", "--work-dir", cli.root, "--review", reviewPath, "--blocking-condition", "運営者が CLI で書いた止める条件", "--json"],
+    { stdout: { write() {} }, now, env: { BUZZASSIST_LEARNING_AUTO_CAPTURE: "0" } },
+  );
+  assert.equal(ran.exitCode, 0);
+  assert.equal(ran.result.state.status, "blocked");
+  assert.equal(ran.result.state.blockingCondition, "運営者が CLI で書いた止める条件");
+
+  // CLI の値が無ければ、2件目の採点ファイルの値が効く（今までどおり）。
+  const file = await openPanel();
+  const fromFile = await record(file.root, {
+    reviewPath: await writeReview(file.root, "b", {
+      ...review({ context: "ctx-b", script: DRAFT, evaluatorId: "eval-b", rubricScores: failing(file.contract) }),
+      blockingCondition: "採点者が書いた止める条件",
+    }),
+  });
+  assert.equal(fromFile.state.status, "blocked");
+  assert.equal(fromFile.state.blockingCondition, "採点者が書いた止める条件");
+});
+
 test("受け入れ方 each-evaluator は Pack で選び、平均だけ目標を越える組を合格にしない（average なら合格）", async (t) => {
   const run = async (acceptance) => {
     const { root, contract } = await startPanel(t, acceptance);

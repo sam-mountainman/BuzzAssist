@@ -111,8 +111,10 @@ export function scriptQualityHelp() {
     [--base-version <版>]         意味の保持を比べる前の版（既定は直前の版）
     [--revision-delta "..."]      2回目以降に必須。前回の失敗をどう直したか
                                   （quality/script-revision-delta.json に書いてもよい）
-    [--blocking-condition "..."]  人の判断が要るなら書く（ループは blocked で止まる）
-    [--cost <n>]                  この回の費用。書かなければ「分からない」として、参照した外部モデルの呼び出しを
+    [--blocking-condition "..."]  人の判断が要るなら書く（ループは blocked で止まる）。評価の組では、組のどの
+                                  record に付けても、組が全員そろって閉じた時点で効く（採点ファイルの
+                                  blockingCondition より、record に付けた値が先）
+    [--cost <n>]                この回の費用。書かなければ「分からない」として、参照した外部モデルの呼び出しを
                                   0円ではなく不明の件数に数える（同じ呼び出しは1回だけ数える）
     [--ledger <file>]
     [--channel <id>]              学習を積むチャンネル（運営者の配置表の channels の id）。台帳に無ければ止める
