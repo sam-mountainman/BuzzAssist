@@ -133,7 +133,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["x", "y"],
-      "description": "この本編の場面（画1枚）の焦点。画の中の位置（顔の位置など）を、画の幅・高さに対する割合で書く（左上が 0、右下が 1）。無ければ Channel Pack の camera.moves の型ごとの焦点（focusX / focusY）のまま。寄り・引きは寄った端の見せる範囲の中心、パンは縦の中心と道のりの中ほど、static は見せる範囲の中心になり、どの型でも見せる範囲は画の外へ出ない（焦点が端に近いほど、その端に寄せた寄りになる）。話者ごとに分けた文も同じ焦点で1つの動きを通す。焦点は書いた値だけを使い、画から顔を推測しない。完成 MP4 で焦点どおりに見せていることを監査 cameraFocusMeasured が測る",
+      "description": "この本編の場面（画1枚）の焦点。画の中の位置（顔の位置など）を、画の幅・高さに対する割合で書く（左上が 0、右下が 1）。無ければ Channel Pack の camera.moves の型ごとの焦点（focusX / focusY）のまま。寄り・引きは寄った端の見せる範囲の中心、パンは縦の中心と道のりの中ほど、static は見せる範囲の中心になり、どの型でも見せる範囲は画の外へ出ない（焦点が端に近いほど、その端に寄せた寄りになる）。話者ごとに分けた文も同じ焦点で1つの動きを通す。焦点は書いた値だけを使い、画から顔を推測しない。完成 MP4 で焦点どおりに見せていることを監査 cameraFocusMeasured が測る。焦点は画に属する値なので、画の後で決める焦点は運営者の画の取り込みの記録（buzzassist-operator-image-manifest-v1）の場面の行に同じ形で書く。台本パッケージに書き足すとバイト列が変わり、台本の品質ループの合格が外れる。焦点は取り込みの記録 → 台本パッケージ → Channel Pack の型ごとの焦点の順に決まり、両方に書いて値が違えば有料生成の前に camera-focus-conflict:<場面>:image-vs-package で止まる",
       "properties": {
         "x": { "type": "number", "minimum": 0, "maximum": 1 },
         "y": { "type": "number", "minimum": 0, "maximum": 1 }

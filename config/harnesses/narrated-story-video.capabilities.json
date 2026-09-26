@@ -23,7 +23,7 @@
         "key": "operatorImageManifestPath",
         "cliFlag": "--operator-image-manifest",
         "requiredWhen": "Channel Pack の image.source が operator-file のとき",
-        "what": "運営者が用意した本編の画の取り込みの記録（buzzassist-operator-image-manifest-v1）"
+        "what": "運営者が用意した本編の画の取り込みの記録（buzzassist-operator-image-manifest-v1）。場面の行に、画の後で決めた焦点（cameraFocus: 画の中の顔の位置など）も書ける"
       },
       {
         "key": "operatorVideoManifestPath",
@@ -51,7 +51,7 @@
     "シーン画像にカメラワークを当てて見せる構成",
     "本編のあとに感想パート（人物素材、または声なしの字幕と BGM だけ）を付ける構成",
     "運営者が用意した本編の画を取り込んで作る構成",
-    "字幕の書体・寄り引きの型・感想パートの配置を Channel Pack で決めて毎回同じ見た目で作り、場面ごとの焦点（顔の位置）は台本パッケージに書く構成",
+    "字幕の書体・寄り引きの型・感想パートの配置を Channel Pack で決めて毎回同じ見た目で作り、場面の焦点（顔の位置）は画の取り込みの記録か台本に書く構成",
     "運営者が外で作った短い OP 映像や、後から撮った人物の映像を来歴つきで取り込む構成",
     "場面の crossfade・感想の TV の中の動き・告知の枠の重ね物を Channel Pack で決めて作る構成"
   ],
