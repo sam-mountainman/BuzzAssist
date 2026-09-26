@@ -86,6 +86,12 @@ function usage() {
     "  画の Media Job は作らず、全部の場面をこの記録から取る。sha256・場面の過不足・使い回しの理由・承認済みの参照・寸法の",
     "  いずれかが合わなければ有料の処理の前に operator-image-* の理由で止まる。画を差し替えたら同じ Job を resume すれば、",
     "  声と BGM を払い直さずに作り直す。会話の URL は私有の Job フォルダにだけ残り、Receipt と Canvas には sha256 だけが出る。",
+    "Explainer (explainer-video) options: [--explainer-mode import-delivery|produce] [--explainer-renderer-url URL] [--script-quality-work-dir DIR]",
+    "  既定の import-delivery は、Channel Pack が指す納品の記録（動画・字幕・サムネ・投稿用情報）と台本の SHA を照合して取り込み、",
+    "  完成 MP4 で監査する（制作のスクリプトを起動しない。BuzzAssist の有料の送り口は関所で送る前に止まる）。produce は Pack の",
+    "  制作のコマンドを3つのパスを明示して起動する。どちらも start の時点で決まる（Job の識別子に入る）。台本の品質ループの",
+    "  作業フォルダは --script-quality-work-dir、無ければ Pack の scriptQuality.workDir。人の試聴・初見の評価は機械の監査の外で、",
+    "  Job は explainer-human-review-pending を残して awaiting-human-review で止まる。",
     "Common: --want TEXT --title TEXT --options-json FILE",
     "",
     "--confirmed が無い start は durable job を作るだけで、有料APIを呼びません。",
@@ -134,8 +140,12 @@ async function optionsFrom(args) {
     ["operatorImageManifestPath", typeof args.operatorImageManifest === "string" ? resolve(args.operatorImageManifest) : ""],
     ["operatorVideoManifestPath", typeof args.operatorVideoManifest === "string" ? resolve(args.operatorVideoManifest) : ""],
     ["scriptQualityWorkDir", typeof args.scriptQualityWorkDir === "string" ? resolve(args.scriptQualityWorkDir) : ""],
+    ["explainerMode", typeof args.explainerMode === "string" ? args.explainerMode : ""],
+    ["explainerRendererUrl", typeof args.explainerRendererUrl === "string" ? args.explainerRendererUrl : ""],
   ];
   if (args.scriptQualityWorkDir === true) throw new Error("--script-quality-work-dir には台本の品質ループの作業フォルダの path が要る。");
+  if (args.explainerMode === true) throw new Error("--explainer-mode には import-delivery か produce が要る。");
+  if (args.explainerRendererUrl === true) throw new Error("--explainer-renderer-url には手元の HTTP サーバーの URL が要る。");
   if (args.operatorImageManifest === true) throw new Error("--operator-image-manifest には取り込みの記録（manifest JSON）の path が要る。");
   if (args.operatorVideoManifest === true) throw new Error("--operator-video-manifest には取り込みの記録（manifest JSON）の path が要る。");
   for (const [key, value] of mappings) if (value !== undefined && value !== "") options[key] = value;
