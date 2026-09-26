@@ -71,6 +71,7 @@
 {"id":"e5fc6bc0daff","kind":"correction","target":"genre:narrated-story-video"}
 {"id":"e722b47c28f8","kind":"fact","target":"genre:manga-video-production"}
 {"id":"e778fdfbbc3e","kind":"correction","target":"genre:narrated-story-video"}
+{"id":"e89e4827a0cf","kind":"fact","target":"platform:platform-craft"}
 {"id":"e90e362408cd","kind":"fact","target":"genre:manga-video-production"}
 {"id":"e9f64448c2a7","kind":"fact","target":"platform:platform-craft"}
 {"id":"ea0506a8f155","kind":"fact","target":"platform:harness-parallel-execution"}
