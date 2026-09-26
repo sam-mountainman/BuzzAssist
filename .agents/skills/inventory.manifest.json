@@ -37,9 +37,9 @@
       },
       "approval": {
         "reviewer": "sam-mountainman",
-        "approvedAt": "2026-09-25T07:05:17.961Z",
-        "version": "1.6.0",
-        "contentSha256": "sha256:cd55d68ec70cf30db8e454780299d350d6c3d698ea139744f2fd5c73a4972b4d",
+        "approvedAt": "2026-09-26T05:57:00.420Z",
+        "version": "1.7.0",
+        "contentSha256": "sha256:95c82c225574e1402565fcb7093fab5b44098caa47fc44523f6c399f167c86ff",
         "attestedBy": "human-verified"
       }
     },
@@ -71,9 +71,9 @@
       },
       "approval": {
         "reviewer": "sam-mountainman",
-        "approvedAt": "2026-09-25T07:05:17.723Z",
-        "version": "1.1.0",
-        "contentSha256": "sha256:aa4c53b9719dd4c32e38925fbdd3d97b62552481889a8aac5b42155ac95e2317",
+        "approvedAt": "2026-09-26T05:57:00.498Z",
+        "version": "1.2.0",
+        "contentSha256": "sha256:f6c6432dd6f6b2b2e4721fae2ac3384187e1911e340640a71fddc8e93814c2f4",
         "attestedBy": "human-verified"
       }
     },
@@ -105,9 +105,9 @@
       },
       "approval": {
         "reviewer": "sam-mountainman",
-        "approvedAt": "2026-09-25T07:05:17.791Z",
-        "version": "1.4.0",
-        "contentSha256": "sha256:e799976f147b50acbcab3cb273cad5cf8bbbc339b446f53b1c7994b337387783",
+        "approvedAt": "2026-09-26T05:57:00.561Z",
+        "version": "1.5.0",
+        "contentSha256": "sha256:9cfc5246ee1cbab42d0e3334e278b6196fe0d5a5597bb436f64d1e7f50ce08e7",
         "attestedBy": "human-verified"
       }
     },
@@ -139,9 +139,9 @@
       },
       "approval": {
         "reviewer": "sam-mountainman",
-        "approvedAt": "2026-09-25T07:05:17.845Z",
-        "version": "1.7.0",
-        "contentSha256": "sha256:dade49836bc622e93559d3e03c2ef2db3cf324cd0945c3f4c01f2e48a9ebee47",
+        "approvedAt": "2026-09-26T05:57:00.629Z",
+        "version": "1.8.0",
+        "contentSha256": "sha256:bdbe7b0d85463059c9c2aedb0d3372d4edac60aa97f82ab3b8a5be698dcfe8bd",
         "attestedBy": "human-verified"
       }
     },
@@ -207,9 +207,9 @@
       },
       "approval": {
         "reviewer": "sam-mountainman",
-        "approvedAt": "2026-09-25T07:05:17.904Z",
-        "version": "1.4.0",
-        "contentSha256": "sha256:1d924eac04748df0932750b5030c2f218a43c6679c821a0139ac2898d26847b7",
+        "approvedAt": "2026-09-26T05:57:00.695Z",
+        "version": "1.5.0",
+        "contentSha256": "sha256:f99704813658b0528f1f4903f7f833ebea8529512692fb2888d1a8a3bd248657",
         "attestedBy": "human-verified"
       }
     },
