@@ -347,7 +347,7 @@ node scripts/koya-manga-video.mjs video-substitute --episode-id <episode-id> --c
 - STT結果は、認識時に保存したdecoded PCM SHA-256と順序付き発話本文digestが現在値へ完全一致するときだけ再利用する。同じMP4パスを再抽出して旧STT結果を正当化しない。
 - ユーザーの実聴・目視指摘は機械監査より上位。同型不具合を既知のまま再提出しない。
 - generator自身、同じ会話contextの別名reviewer、rubricの一部だけの採点、hashのない証拠で品質合格を出さない。generatorとreviewerは実Codex task IDまたはClaude session IDを記録し、別contextでなければ停止する。品質閾値、最大2round、最大時間、最大費用、停滞上限を別々に判定する。
-- 品質の合格は、機械ゲート全部pass・rubricの加重平均が目標以上・どの項目も下限以上の3つが揃ったときだけ。下限は同一性・台本との意味の一致・声が80、ほかが60。平均が目標に届いても1項目の下限割れは不合格にする（同一性47点・他は満点の平均92.05が合格していた）。
+- 品質の合格は、機械ゲート全部pass・rubricの加重平均が目標以上・どの項目も下限以上の3つが揃ったときだけ。平均が目標に届いても1項目の下限割れは不合格にする（同一性だけが大きく低く、ほかが満点の回が、平均だけで合格していた）。目標点・項目ごとの下限・重みは品質契約（`lib/mangaQualityHarness.mjs`）とループのコードだけが持ち、評価者には見せない。評価者として採点するときは、rubricの項目と実物だけで採点し、目標点・下限・前のroundの点数を探しに行かない（見ると採点がそれに寄る）。どの項目が下限を割ったかは不合格の記録に残る。
 - 2回目以降のroundは、前回の失敗指紋に対して何を直したかが要る。`audit --revision-delta "直した内容"`か`audits/koya-final/revision-delta.json`（`previousFailureFingerprint`と`revisionDelta`）で渡す。無ければauditは例外ではなく人待ちで止まる。直した版は新しいcontextのreviewerでsignoffし直し、同じcontextのsignoffで再auditしても回は進めない。
 
 ## 最終監査

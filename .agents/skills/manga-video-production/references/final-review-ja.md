@@ -27,7 +27,7 @@
 
 ## レビュー記録JSON
 
-各項目の値は8文字以上の具体的な日本語メモにする。`true`だけの自己申告は不可。hash、尺、絶対パスはレビュー対象の実ファイルから計算し、例の値を転記しない。`reviewedAt`は実際に確認し終えた時刻にする。
+各項目の値は8文字以上の具体的な日本語メモにする。`true`だけの自己申告は不可。hash、尺、絶対パスはレビュー対象の実ファイルから計算し、例の値を転記しない。`rubricScores`は各項目を0〜100の整数で、実物を見て付ける（例の`<0-100>`は置き換える場所の印で、目安の点ではない。目標点・下限は評価者に見せない）。`reviewedAt`は実際に確認し終えた時刻にする。
 
 ```json
 {
@@ -40,17 +40,17 @@
     "id": "codex:実タスクID",
     "contextId": "実タスクID"
   },
-  "summary": "全尺、全監査証拠、代表フレーム、音声区間を確認し完成品質に達している",
+  "summary": "全尺、全監査証拠、代表フレーム、音声区間を確認した所見（良い点と直す点）",
   "rubricScores": {
-    "semantic-scene-fit": 95,
-    "character-continuity": 95,
-    "camera-composition": 95,
-    "editorial-grammar": 95,
-    "bubble-typography": 95,
-    "voice-performance": 95,
-    "audio-technical": 95,
-    "timing-continuity": 95,
-    "final-playback": 95
+    "semantic-scene-fit": "<0-100>",
+    "character-continuity": "<0-100>",
+    "camera-composition": "<0-100>",
+    "editorial-grammar": "<0-100>",
+    "bubble-typography": "<0-100>",
+    "voice-performance": "<0-100>",
+    "audio-technical": "<0-100>",
+    "timing-continuity": "<0-100>",
+    "final-playback": "<0-100>"
   },
   "video": {
     "path": "/ABSOLUTE/PATH/final.mp4",

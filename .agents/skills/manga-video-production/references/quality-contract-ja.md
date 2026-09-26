@@ -60,6 +60,6 @@
 - rubricで比較できる低リスク判断だけ、freshな独立evaluatorによるblind Best-of-Nを使う。generator自身と同じ会話contextは別名でもevaluatorにしない。
 - rubricは開始前に固定し、全項目を採点する。一項目だけの高得点、空メモ、実ファイルと一致しないSHA-256、Merkle manifestへ含まれない証拠を拒否する。
 - 不合格roundには安定したfailure fingerprintを付ける。再試行は直前fingerprintと具体的な修正差分を参照し、同じ出力を言い換えて再提出しない。
-- 停止条件は品質92点、最大2review round、最大360分、最大費用100単位、最低改善1点、停滞1roundを別々に判定する。上限到達を成功扱いせず、人間判断またはblockedへ遷移する。
+- 停止条件は目標点、最大review round数、最大時間、最大費用、最低改善幅、停滞round数を別々に判定する。値は品質契約（`lib/mangaQualityHarness.mjs`、Channel Packの`qualityLoopLimits`で上書き）が持つ。目標点と項目ごとの下限は評価者に見せない（見ると採点がそれに寄る）。上限到達を成功扱いせず、人間判断またはblockedへ遷移する。
 - 同型事故は永続incident ledgerへ記録し、初回をchecklist、2回目を恒久指示、高影響かつ機械判定可能ならhard gateへ昇格する。新規episodeの品質contractへ既知事故を取り込む。
 - 知覚レビューが決定論的に検出できる欠陥（例: 表示末尾`。`）を見つけたら、その場の修正だけで閉じない。同じ変更で公式生成経路、全件機械監査、回帰テスト、既存episode再生成、新規canaryへhard gateを反映する。
