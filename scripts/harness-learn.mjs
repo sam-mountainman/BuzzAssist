@@ -69,6 +69,11 @@ import {
   normalizeVocabularyTerm,
 } from "../lib/packageTarballAudit.mjs";
 import { buildPublicProposalCatalog, renderPublicProposalCatalog } from "../lib/harnessLearningCurator.mjs";
+import {
+  AUTO_FAILURE_PROMOTION_CREATOR,
+  AUTO_FAILURE_PROMOTION_SOURCE,
+  normalizeFailurePromotionMetadata,
+} from "../lib/qualityFailurePromotionShape.mjs";
 import { loadSensitiveVocabulary, SENSITIVE_VOCABULARY_DIGEST_PATH } from "./audit-package-tarball.mjs";
 import { collectSensitiveSignals } from "./audit-public-surface.mjs";
 import { loadReceipts } from "./harness-receipts.mjs";
@@ -1786,13 +1791,17 @@ export function assertPromotableProposal(entry, note = "", { homeRoot = homedir(
 // 自由文を入れさせないよう、キーごとに形を固定する。
 const SHA256_HEX = /^[a-f0-9]{64}$/u;
 const METADATA_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u;
-export const PROPOSAL_METADATA_CREATORS = new Set(["auto-receipt", "auto-script-quality"]);
-export const PROPOSAL_RECEIPT_SOURCES = new Set(["run-receipt", "adapter-run-receipt", "job-state", "script-quality-round"]);
+// auto-failure-promotion: 品質ループの状態で同じ失敗が別の版に2回以上出たもの（被害の大きい種類は1回目）を、
+// 機械の検査・関門へ上げる提案として積む経路（lib/qualityFailurePromotion.mjs）。
+export const PROPOSAL_METADATA_CREATORS = new Set(["auto-receipt", "auto-script-quality", AUTO_FAILURE_PROMOTION_CREATOR]);
+export const PROPOSAL_RECEIPT_SOURCES = new Set([
+  "run-receipt", "adapter-run-receipt", "job-state", "script-quality-round", AUTO_FAILURE_PROMOTION_SOURCE,
+]);
 
 export function normalizeProposalMetadata(metadata) {
   if (metadata === undefined || metadata === null) return {};
   if (typeof metadata !== "object" || Array.isArray(metadata)) throw new Error("metadata は object にしてください");
-  const allowed = new Set(["createdBy", "receiptDigest", "receiptSource", "skillShaAtCapture", "gateIds", "harness"]);
+  const allowed = new Set(["createdBy", "receiptDigest", "receiptSource", "skillShaAtCapture", "gateIds", "harness", "failurePromotion"]);
   const unknown = Object.keys(metadata).filter((key) => !allowed.has(key));
   if (unknown.length > 0) throw new Error(`metadata に未知のキーがあります: ${unknown.join(", ")}`);
   const out = {};
@@ -1828,6 +1837,10 @@ export function normalizeProposalMetadata(metadata) {
       throw new Error("metadata.harness は { id, version } にしてください");
     }
     out.harness = { id: String(id), ...(version !== undefined ? { version: String(version) } : {}) };
+  }
+  if (metadata.failurePromotion !== undefined) {
+    // 形は lib/qualityFailurePromotionShape.mjs が決める（決まった語彙・id・短い sha だけ。自由文は入れない）。
+    out.failurePromotion = normalizeFailurePromotionMetadata(metadata.failurePromotion);
   }
   return out;
 }
@@ -2121,6 +2134,12 @@ function printHelp() {
       評価項目 id・落ちた機械ゲート id・止まった理由のコードを、台本の非公開台帳
       （channel-pack:narrated-story-script）へ createdBy=auto-script-quality として積む（本文なし・
       同じ回からは二重に積まない）。BUZZASSIST_LEARNING_AUTO_CAPTURE=0 で止まる
+    - 失敗の格上げ: scripts/harness-promote-failures.mjs（scan は dry-run、enqueue で積む）が品質ループ
+      （台本・途中の成果物・企画ブリーフ・完成動画の署名済みレビュー）の状態を読み、同じ失敗が別の版で2回以上
+      出たもの（被害の大きい種類は1回目）を、次の段（注意書き → 検査スクリプト → 通過必須の関門、関門で
+      止まっていれば前倒し）へ上げる提案として createdBy=auto-failure-promotion で積む。再発の回数・版・
+      被害の区分・機械で判定できるか・今の段と次の段は metadata.failurePromotion に残る（本文は id と段の名前だけ。
+      同じ失敗・同じ段の提案は二重に積まない）。漫画は事故台帳（recordMangaQualityIncident）で先に格上げしている
   台本の直し・訂正を人から受けたら、--target channel-pack:narrated-story-script で capture する。
   ユーザーの訂正らしい発言は、プラグインの UserPromptSubmit フック（scripts/harness-learn-hook.mjs）が
   見つけてエージェントに capture を促す。フックは何も書き換えず、発言本文も保存しない。

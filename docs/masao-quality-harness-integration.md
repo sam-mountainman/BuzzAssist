@@ -170,6 +170,39 @@ v3ではさらに、全rubric項目、generatorと異なる実Codex task/Claude 
 
 一般化済み事故はtracked seed `config/koya-manga-quality-incidents.json`へ同梱し、無視対象の実行時台帳とマージする。強い昇格状態を弱いローカル記録で上書きしない。例として表示末尾句点は2回の再発でhard gateへ昇格済みである。
 
+### 漫画以外の品質ループの失敗の格上げ（2026-09-27）
+
+漫画の事故台帳と同じ考え（同じ失敗が2回起きたら、注意書きでなく仕組みにする）を、台本・途中の成果物・企画ブリーフ・
+完成動画の署名済みレビュー（ナレーション物語・解説動画）の品質ループへ広げた。入口は
+`node scripts/harness-promote-failures.mjs`、実装は `lib/qualityFailurePromotion.mjs`。
+
+```bash
+# 読むだけ（既定）。作業フォルダの quality/ と quality/assets/ の状態を全部読み、格上げの候補を出す
+node scripts/harness-promote-failures.mjs scan --work-dir <作業フォルダ> [--work-dir <dir>]... [--state <状態ファイル>]...
+# 候補を学習の提案台帳へ積む（ループの自動捕捉と同じチャンネルの非公開台帳。正本は書き換えない）
+node scripts/harness-promote-failures.mjs enqueue --work-dir <作業フォルダ> [--channel <id>] [--job <Job の ID>]
+```
+
+段は4つ: 口頭（評価者の採点・所見だけ）→ 注意書き（作る側のスキルの Gotcha）→ 検査スクリプト → 通過必須の関門。
+
+- 数えるのは状態ファイルの失敗指紋・落ちた機械ゲート・下限を割った評価項目・採用したのに直らなかった指摘
+  （台本）・人の確認の否（途中の成果物）・止まる条件のコード（費用の単位の食い違いなど）。始め直す前のループ
+  （history）と、前の Job から引き継いだ回も読む。
+- 再発は「別の版」で数える。同じ成果物（同じ sha256）の採点し直しは1回（漫画の `sameRevisionReaudits` と同じ）。
+- 別の版で2回出たら1つ上げる。機械で判定できる評価項目（尺・差し替え印・吹き出しの字数など）は注意書きを
+  飛ばして検査スクリプトへ。人の目が要るもの（同一性・手指・意味の保存など）は注意書き、その次は人の確認の欄を
+  必須にする関門。
+- 被害の大きい種類（公開面の安全・人物の取り違え・課金・署名や承認の詐称）は1回目でも関門へ飛ばす。
+  ただし、すでに通過必須の関門（機械ゲート・人の確認の欄）で止まっている失敗は出荷を防げているので、
+  再発してから「関門の前倒し」（同じ検査を生成の直後へ移し、作る側の指示にも足す）を提案する。
+- 提案は `harness-learn status` に出る（`createdBy=auto-failure-promotion`）。本文は id と段の名前だけで、
+  再発の回数・版の短い sha・被害の区分・機械で判定できるか・今の段と次の段は `metadata.failurePromotion` に残る。
+  同じ失敗・同じ段の提案は二重に積まない。提案が反映されたら、反映より後の再発だけを数えて次の段を提案する。
+- 上げたら同じ中身の注意書きは消す（提案の本文にも書く）。
+- 子エージェント（`BUZZASSIST_LEARNING_WRITE_FORBIDDEN`）からの enqueue は拒否する。ループの記録の直後から
+  自動で呼ぶ形（`autoPromoteQualityLoopFailures`）は `BUZZASSIST_LEARNING_AUTO_CAPTURE=0` でも積まず、例外を投げない。
+- 漫画の最終の品質ループは読まない（上の事故台帳で先に格上げしていて、二重に数えないため）。
+
 ### 制作DAG
 
 `lib/mangaProductionDag.mjs` をv4へ更新し、`lib/koyaMangaDagRuntime.mjs`の組み込みhandlerをCLI/MCPの既定へ接続した。handlerのないproduction nodeを成功扱いせず、画像、音声、cut MP4、最終MP4、最終監査の実ファイルを再検証する。
