@@ -504,7 +504,7 @@ test("the generic verifier rejects a Koya attestation against a narrated expecta
   assert.ok(reversed.failures.includes("reviewer-attestation-subject-mismatch:harnessId"));
   // 未知の harness は subject を組めない（黙って汎用形にしない）。
   await assert.rejects(createReviewAttestation({ subject: { ...narratedSubject, harnessId: "future-harness" }, privateKeyPem: REVIEWER.privateKeyPem, trust: TRUST }), /reviewer-attestation-subject-noncanonical:harnessId/u);
-  assert.deepEqual([...REVIEW_ATTESTATION_HARNESS_IDS].sort(), ["koya-manga-video", "narrated-story-video"]);
+  assert.deepEqual([...REVIEW_ATTESTATION_HARNESS_IDS].sort(), ["explainer-video", "koya-manga-video", "narrated-story-video"]);
 });
 
 test("the shared trust list is read from the generic environment name, the legacy KOYA name means the same list, and conflicting values are refused", async () => {
