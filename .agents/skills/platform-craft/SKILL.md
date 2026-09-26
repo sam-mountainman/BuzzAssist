@@ -17,8 +17,7 @@ BuzzAssist は3層に分かれている。
 | **genre harness** | ジャンル共通の工程とゲート（漫画動画／ナレーション物語） | そのジャンルの全チャンネル |
 | **channel pack** | キャスト、番組規則、承認記録 | そのチャンネルだけ |
 
-ここはいちばん下の層の正本。**ジャンル固有の話も、チャンネル固有の話も
-ここには書かない**——書いた瞬間、全ハーネスがそれを引き受けることになる。
+ここはいちばん下の層の正本。**ジャンル固有の話も、チャンネル固有の話もここには書かない**——書いた瞬間、全ハーネスがそれを引き受けることになる。
 
 ## なぜこの層が要るのか
 
@@ -84,8 +83,7 @@ const job = await broker.start({
 });
 ```
 
-既存の 429 の扱いを変えないこと。ジャンル側が 429 で **park**（残枠を焼かない
-ために実行を止める）している箇所がある。そこを再送に変えると意図が壊れる。
+既存の 429 の扱いを変えないこと。ジャンル側が 429 で **park**（残枠を焼かないために実行を止める）している箇所がある。そこを再送に変えると意図が壊れる。
 
 **端末全体の枠。** 有料の音声・画像の送信は、端末全体の枠（`lib/machineSlots.mjs`。既定は
 paid-speech 4・paid-image 16、`BUZZASSIST_MACHINE_SLOTS_PAID_SPEECH` / `BUZZASSIST_MACHINE_SLOTS_PAID_IMAGE`
@@ -164,6 +162,13 @@ harness-deployments.json（配布物の `config/harness-deployments.example.json
 - 同じ内容の再レンダーは resume だけ。start のときのブリーフが変わっていれば resume も止まる
   （`strategy-brief-changed-since-start`）ので、新しい Job として start する。start と resume の関門は
   `lib/channelStartGate.mjs` の1か所（CLI と MCP が同じ判定になる）
+
+**解説動画（`explainer-video`）** は、チャンネルの既存のローカル制作を作り直さずに取り込む。`import-delivery`（既定）は
+有料の呼び出しの関所の中で、納品の記録（`DELIVERY.json`）の成果物と台本の SHA を照合して取り込み、監査する。`produce` は
+Pack の制作の工程を3つのパス（`--production-dir` / `--visuals-dir` / `--output-dir`）を明示して起動する。人の確認（全編の
+試聴と初見の評価）は署名つきの signoff（`explainer-video.mjs signoff` / MCP `signoff_video_harness_job`。`fullLengthViewed: true`・
+`reviewerId` が要る）で記録し、機械の監査・サムネの品質ループ・signoff が揃うと completed に確定する。説明は
+`docs/explainer-video-harness-ja.md`。
 
 ## 実行の記録（RunReceipt）
 
@@ -272,7 +277,7 @@ snapshot の読み取り側だけを書く。漫画は `lib/koyaMangaProgressSna
 
 | 対象 | 入口 | 本体 | 使う前の照合 |
 |---|---|---|---|
-| 完成動画 | 各ジャンルの signoff と最終監査 | `lib/mangaQualityHarness.mjs` / `lib/narratedStoryQualityLoop.mjs` | 最終監査・RunReceipt |
+| 完成動画 | 各ジャンルの signoff と最終監査 | `lib/mangaQualityHarness.mjs` / `lib/narratedStoryQualityLoop.mjs` / `lib/explainerQualityLoop.mjs`（署名済みの signoff を回にするのはナレーション物語と解説動画で共通の `lib/signedReviewQualityLoop.mjs`） | 最終監査・RunReceipt |
 | 途中の成果物（人物の設定画・背景・本編の画・サムネ・声のテイク・動画クリップ） | `node scripts/asset-quality-loop.mjs` | `lib/assetQualityLoop.mjs` | `lib/assetQualityUseGate.mjs` |
 | 台本 | `node scripts/script-quality-loop.mjs` | `lib/scriptQualityLoop.mjs` | `lib/scriptQualityUseGate.mjs` |
 | 企画（戦略ブリーフ） | `node scripts/strategy-brief.mjs` | `lib/strategyBriefQualityLoop.mjs` | `lib/channelStartGate.mjs`（start / resume） |
@@ -281,7 +286,8 @@ snapshot の読み取り側だけを書く。漫画は `lib/koyaMangaProgressSna
 判定（どの契約の版から効くか）だけで、照合する側はループの issues や状態名を読まない。2つ目の照合を作らない。
 
 - 途中の成果物: 人物の同一性と、公開面に出る画の手指の安全は、対話端末＋`--human-verified` の人の確認が
-  無いと合格にならない（対象ごと。batch では記録できない）。評価者に渡すシートには合格点・下限・重み・
+  無いと合格にならない（対象ごと。batch では記録できない。対象が多いときは `verify-pages` で数枚ずつのページ画像に
+  して人が見て答える。決まりは references/quality-loops-ja.md「人の確認」）。評価者に渡すシートには合格点・下限・重み・
   前の回の点数を載せない。動画クリップは `measure-video` で測ってから記録する
 - 台本: 制作の Job は、有料の処理の前に、使う台本（Job に保存した写しのバイト列の SHA）を
   `scriptQualityVerdict` に問う。ループが合格した版か、人がそのまま使うと認めた版（`accept-human
@@ -296,14 +302,14 @@ snapshot の読み取り側だけを書く。漫画は `lib/koyaMangaProgressSna
 
 ## 独立レビューの署名（reviewer attestation）
 
-`lib/koyaReviewAttestation.mjs`。漫画動画とナレーション物語の**両ハーネスが同じ1つの
+`lib/koyaReviewAttestation.mjs`。漫画動画・ナレーション物語・解説動画の**3つのハーネスが同じ1つの
 実装**を使う。ハーネスごとに違うのは署名対象（subject）の形だけで、鍵・信頼リスト・
 失効・検証の規則はここに1回だけ書く。ジャンルSkillはコマンド例を置き、規則はここを参照する。
 
 **何を解くか。** signoff JSON の `reviewer` / `reviewerContextId` は自己申告で、生成側と
 違う文字列を書けば「独立」に見えてしまう。そこで、運営者が**別経路で信頼した reviewer 公開鍵**
 が、Job識別子・実MP4 SHA・contact sheet SHA・申告した reviewer context（Koya は加えて外側
-Job binding・契約digest・review notes SHA、narrated は signoff 本文 SHA）を1つの subject
+Job binding・契約digest・review notes SHA、narrated は signoff 本文 SHA、explainer は加えて納品の記録の SHA）を1つの subject
 として Ed25519 で署名したことを、**最終監査と RunReceipt の両方**で再検証する。
 
 規則:
@@ -335,20 +341,12 @@ Job binding・契約digest・review notes SHA、narrated は signoff 本文 SHA�
 - 秘密鍵は **file から読む**（`--reviewer-key-path`）。argv・環境変数・MCP 引数・Job
   options・Channel Pack・signoff 本文に鍵素材を載せない
 
-**運用モデル（これを崩すと自己承認へ退化する）:**
-
-- **信頼リストは、生成を行う端末・エージェントとは別の主体（owner）だけが設定する。**
-  同じ端末上の同じ主体が信頼リストと reviewer 秘密鍵の両方を書ける構成では、
-  生成側が自分で鍵を作り、自分で信頼リストに登録し、自分で署名できる。署名は
-  成立するが「独立レビュー」ではない。だから env が唯一のアンカーであり、要求側の
-  path・Job options・MCP 引数はアンカーになれない
-- **reviewer 秘密鍵はリポジトリ外に置く**（`/secure/...` のような repo 外 path）。
-  `canvas/`、`channel-packs/`、Job workspace、Canvas asset に置かない。
-  `reviewer-key-create` はリポジトリ内・`--project-dir` 内・git 作業木内の path を拒否する
-- 公開鍵（trustEntry）だけを owner へ別経路で渡し、owner が信頼リストへ追記して `BUZZASSIST_REVIEWER_TRUST` として
-  配る。失効も owner が `status: "revoked"` へ変えて配り直す（entry を消すより、失効理由が残る方が後から追える）
-- generator と reviewer の context（Codex task ID / Claude session ID）は別でなければ
-  ならず、鍵が信頼済みでも同一 context の signoff は不合格
+**運用モデル（これを崩すと自己承認へ退化する）:** 信頼リストは、生成を行う端末・エージェントとは別の主体（owner）
+だけが設定する——同じ主体が信頼リストと reviewer 秘密鍵の両方を書ければ、自分で鍵を作り、登録し、署名できる。
+reviewer 秘密鍵はリポジトリ・`canvas/`・`channel-packs/`・Job workspace・Canvas asset の外に置き、公開鍵（trustEntry）
+だけを owner へ渡す。登録と失効（`status: "revoked"`）は owner が配り直す。generator と reviewer の context
+（Codex task ID / Claude session ID）は別でなければならず、鍵が信頼済みでも同一 context の signoff は不合格。
+理由の詳細は references の「運用モデル」。
 
 信頼リストの形、鍵の作成、CLI と MCP の入口の対応表、MCP host（Claude Code / Codex）へ信頼リストを
 届ける方法（env の名前だけを設定 file に書き、値は host を起動する環境に置く）、owner・reviewer・生成側の
@@ -362,8 +360,8 @@ reviewer 鍵を扱うコードや手順を触るとき、Receipt の確定が re
 再試行し、何も再生成・再課金しない。確定待ちの間に成果物 SHA が変わっていれば
 `run-receipt-artifact-drift` で再び止まり、production を勝手に再実行しない。
 
-Koya の subject は `koya-review-attestation-v1`、narrated は `narrated-story-review-attestation-v1`。
-別ハーネスの署名を持ち込んでも schema が違うので通らない。
+Koya の subject は `koya-review-attestation-v1`、narrated は `narrated-story-review-attestation-v1`、explainer は
+`explainer-video-review-attestation-v1`。別ハーネスの署名を持ち込んでも schema が違うので通らない。
 
 ## 並列制御
 
@@ -391,6 +389,10 @@ Koya の subject は `koya-review-attestation-v1`、narrated は `narrated-story
   `windows-work-path-too-long` で有料の処理の前に止め、共通の doctor の `windows-work-path` が両ハーネスで測る。子を
   作業フォルダ指定で起動する工程を足したら、ハーネスの見積もり（`narratedStoryChildWorkDirs` など）にも足す——
   見積もりに無い作業フォルダは検査されず、Windows で有料の処理の後に落ちる。足し忘れは試験では気付けない
+- 自動更新の最後の確かめ（`scripts/verify-plugin-runtime.mjs`）は、プラグインの置き場に依存が無いとき、一時の写しに
+  同じ版の Release の依存（`--deps-root`、無ければ `~/.buzzassist/releases/v<版>/source`）をつないで確かめる。置き場に
+  node_modules を作らない（ホストのキャッシュが依存を丸写しする）。置き場やホストのキャッシュで起動される script は、
+  先頭で npm の依存を静的 import しない（必須の依存の一覧は `lib/pluginRuntimeDependencies.mjs`）
 - 運営者の画・動画の取り込みは上の `lib/operatorImageImport.mjs` / `lib/operatorVideoImport.mjs`
 
 ## UI を触ったら、起動して確かめる

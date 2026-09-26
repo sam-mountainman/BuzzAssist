@@ -133,6 +133,16 @@
         "長さの判定は lib/windowsWorkPath.mjs の1か所を使い、2つ目の判定を作らない",
         "Windows で 238 字を越えると windows-work-path-too-long で有料の処理の前に止まることを前提に、見積もりに無いと有料の処理の後で落ちると説明する"
       ]
+    },
+    {
+      "id": "explainer-import-and-human-signoff",
+      "prompt": "チャンネルがもう手元で作った解説動画を BuzzAssist の公式の記録に載せたい。作り直さずに完成扱いにして。",
+      "shouldTrigger": true,
+      "invariants": [
+        "explainer-video の import-delivery で、納品の記録（DELIVERY.json）の成果物と台本の SHA を照合して取り込む（作り直さない）",
+        "人の確認は、全編を見た人の署名つき signoff（explainer-video.mjs signoff または signoff_video_harness_job。fullLengthViewed: true と reviewerId）で記録する",
+        "機械の監査・サムネの品質ループ・signoff が揃うまで completed と報告しない"
+      ]
     }
   ]
 }

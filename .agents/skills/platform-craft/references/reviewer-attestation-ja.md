@@ -1,8 +1,8 @@
 # 独立レビューの署名 — 信頼リスト・鍵・入口・届け方・復旧
 
 `../SKILL.md` の「独立レビューの署名（reviewer attestation）」の続き。何を信頼し何を拒否するかの規則と
-運用モデルは SKILL.md にあり、ここはそれを運用するための形・コマンド・入口の対応・MCP host への
-届け方・失敗コードと復旧をまとめる。署名・信頼リスト・signoff・reviewer 鍵を扱うコードや手順を
+運用モデルの要約は SKILL.md にあり、ここはそれを運用するための運用モデルの理由・形・コマンド・入口の対応・
+MCP host への届け方・失敗コードと復旧をまとめる。署名・信頼リスト・signoff・reviewer 鍵を扱うコードや手順を
 触るとき、Receipt の確定が reviewer 系の理由で止まったときに読む。
 
 ## 信頼リストの形
@@ -54,9 +54,10 @@ path は拒否する。標準出力には `keyId` と信頼リストへ貼る `t
 | 工程 | CLI | MCP（`lib/videoHarnessMcp.mjs` / `lib/koyaMcpAdapter.mjs`） |
 |---|---|---|
 | production Job の start / resume（照合用 path） | `run-video-harness.mjs start\|resume [--reviewer-trust-path JSON]` | `run_video_harness` / `resume_video_harness_job` の `reviewerTrustPath` |
-| reviewer 鍵の作成 | `koya-manga-video.mjs reviewer-key-create` / `narrated-story-video.mjs reviewer-key-create` | `create_video_harness_reviewer_key`（`reviewerKeyPath`, 任意 `reviewerPublicKeyPath` / `reviewerLabel`, `confirmed: true`） |
+| reviewer 鍵の作成 | `koya-manga-video.mjs reviewer-key-create` / `narrated-story-video.mjs reviewer-key-create` / `explainer-video.mjs reviewer-key-create` | `create_video_harness_reviewer_key`（`reviewerKeyPath`, 任意 `reviewerPublicKeyPath` / `reviewerLabel`, `confirmed: true`） |
 | Koya Job の signoff | `koya-manga-video.mjs signoff --reviewer-key-path PEM [--reviewer-trust-path JSON]` | `run_koya_manga_pipeline action=signoff`（`reviewerKeyPath`, `reviewerContextId`, 任意 `reviewerTrustPath`） |
 | narrated Job の signoff | `narrated-story-video.mjs signoff --reviewer-key-path PEM --review-path REVIEW.json --pass\|--fail [--reviewer-trust-path JSON]` | `signoff_video_harness_job`（同じ引数名に `reviewPath`・`pass: true\|false`。Koya Job を渡すと拒否） |
+| explainer Job の signoff | `explainer-video.mjs signoff --reviewer-id NAME --reviewer-context-id ID --reviewer-key-path PEM --review-path REVIEW.json --full-length-viewed --pass\|--fail [--reviewer-trust-path JSON]` | `signoff_video_harness_job`（`fullLengthViewed: true`・`reviewerId` 必須。subject は納品の記録の SHA も結ぶ） |
 
 上位 `run-video-harness.mjs` の `--reviewer-trust-path`（MCP `reviewerTrustPath`）は Job identity に
 入らず `job.json` にも保存されない実行時引数。env と一致した path だけを service がジャンル子 CLI
@@ -111,6 +112,22 @@ owner がすること:
 - Codex で plugin `.mcp.json` の `env_vars` が転送されなかった場合の fallback（**未実測**）:
   `~/.codex/config.toml` の `[mcp_servers.buzzassist_mcp]` に `env_vars = [...]`（名前のみ）を置く。
   ここにも値は書かない
+
+## 運用モデル（これを崩すと自己承認へ退化する）
+
+- **信頼リストは、生成を行う端末・エージェントとは別の主体（owner）だけが設定する。** 同じ端末上の同じ主体が
+  信頼リストと reviewer 秘密鍵の両方を書ける構成では、生成側が自分で鍵を作り、自分で信頼リストに登録し、自分で
+  署名できる。署名は成立するが「独立レビュー」ではない。だから env が唯一のアンカーであり、要求側の path・
+  Job options・MCP 引数はアンカーになれない
+- **reviewer 秘密鍵はリポジトリ外に置く**（`/secure/...` のような repo 外 path）。`canvas/`、`channel-packs/`、
+  Job workspace、Canvas asset に置かない。`reviewer-key-create` はリポジトリ内・`--project-dir` 内・git 作業木内の
+  path を拒否する
+- 公開鍵（trustEntry）だけを owner へ別経路で渡し、owner が信頼リストへ追記して監査・Receipt 実行側へ
+  `BUZZASSIST_REVIEWER_TRUST` として配る
+- 失効は owner が `status: "revoked"` へ変えて配り直す。entry を削除して「知らない鍵」にするより、失効理由が
+  残る方が後から追える
+- generator と reviewer の context（Codex task ID / Claude session ID）は別でなければならず、鍵が信頼済みでも
+  同一 context の signoff は不合格
 
 ## runbook（owner が行うこと / 生成側・reviewer が行うこと）
 

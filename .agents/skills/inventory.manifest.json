@@ -12,8 +12,8 @@
     {
       "id": "buzzassist:platform-craft",
       "name": "platform-craft",
-      "version": "1.7.0",
-      "contentSha256": "sha256:95c82c225574e1402565fcb7093fab5b44098caa47fc44523f6c399f167c86ff",
+      "version": "1.8.0",
+      "contentSha256": "sha256:cb37663e6d7bc62b5ffb62469834237ca85397033111628053f8f1001f985c7a",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",

@@ -13,7 +13,7 @@
 - 工程は character / location / scene-image / thumbnail / voice-take / video-clip で、ハーネスごとに使える
   工程が決まっている（`--harness`）。BuzzAssist の外で映像を組む解説動画の制作から使う口は harness id
   `explainer-video` で、scene-image・voice-take・thumbnail だけを受ける（人物の設定画・場所・動画クリップは
-  拒否する）。学習の宛先がまだ無いので、その不合格の回は台帳へ積まない
+  拒否する）。不合格の回は解説動画のチャンネルの非公開台帳（`channel-pack:explainer`）へ積む
 - 人物の同一性と、公開面に出る画の手指の安全は、対話端末＋`--human-verified` の人の確認（`verify`）が無いと
   合格にならない。人の確認は対象ごとで、batch では記録できない。対象が多いときは `verify-pages`（下の節）
 - 評価者に渡すシート（`sheet`）には合格点・下限・重み・前の回の点数を載せない。見ると採点がそれに寄る
