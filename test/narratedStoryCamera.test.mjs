@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
+import { execFile as execFileCallback } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 
 import { resolveFfmpegToolchain } from "../lib/harnessRuntimeResolver.mjs";
 import {
@@ -17,6 +19,7 @@ import {
   cameraShotChains,
   composeSimilarities,
   estimateSimilarity,
+  expectedCameraView,
   groupNarratedCameraShots,
   measureNarratedCameraMotion,
   normalizeNarratedCameraConfig,
@@ -26,6 +29,7 @@ import {
 } from "../lib/narratedStoryCamera.mjs";
 import { ff, makeTexturedStill } from "./fixtures/narratedVisualFixture.mjs";
 
+const execFile = promisify(execFileCallback);
 const toolchain = await resolveFfmpegToolchain();
 const RENDER = { width: 640, height: 360, fps: 24 };
 
@@ -146,6 +150,49 @@ async function renderShots(dir, shots, name) {
   await ff(toolchain, [...inputs, "-filter_complex", `${chains.join(";")};${labels.join("")}concat=n=${labels.length}:v=1:a=0[v]`, "-map", "[v]", "-frames:v", String(frames), "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", output]);
   return output;
 }
+
+async function grayFrame(videoPath, frame, width, height) {
+  const { stdout } = await execFile(toolchain.ffmpeg.command, [...(toolchain.ffmpeg.args || []),
+    "-hide_banner", "-loglevel", "error", "-ss", ((frame - 0.25) / RENDER.fps).toFixed(6), "-i", videoPath,
+    "-frames:v", "1", "-vf", `scale=${width}:${height}:flags=area,format=gray`, "-f", "rawvideo", "-",
+  ], { encoding: "buffer", windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
+  return Float32Array.from(stdout.subarray(0, width * height));
+}
+
+test("描いたフレームは計画の同じフレームの見せ方: ショットの最初のフレームは始まりの見せ方（perspective の on は 1 始まり）", {
+  skip: toolchain.ok ? false : "ffmpeg is unavailable",
+}, async () => {
+  const dir = await mkdtemp(join(os.tmpdir(), "narrated-camera-frames-"));
+  try {
+    const still = join(dir, "still.png");
+    await makeTexturedStill(toolchain, still, RENDER);
+    const camera = normalizeNarratedCameraConfig(PACK_CAMERA).config;
+    const segments = [
+      { id: "p", imageKey: "p", imagePath: still, startFrame: 0, frames: 36, cameraMove: "slow-push-in" },
+      { id: "q", imageKey: "q", imagePath: still, startFrame: 36, frames: 36, cameraMove: "pan-right" },
+    ];
+    const plan = planNarratedCameraShots({ segments, camera, fps: RENDER.fps });
+    const video = await renderShots(dir, plan.shots, "frames.mp4");
+    const width = 384;
+    const height = 216;
+    const compare = async (shot, local, planned) => {
+      const expected = await expectedCameraView({ ffmpeg: toolchain.ffmpeg, imagePath: still, rect: cameraRectAt(shot, planned), render: RENDER, width, height });
+      const measured = estimateSimilarity(expected, await grayFrame(video, shot.startFrame + local, width, height), width, height);
+      return { shift: Math.hypot(measured.dx, measured.dy), scale: Math.abs(measured.scale - 1) };
+    };
+    for (const shot of plan.shots) {
+      for (const local of [0, Math.floor(shot.frames / 2), shot.frames - 2]) {
+        const same = await compare(shot, local, local);
+        assert.ok(same.shift < 0.2 && same.scale < 0.0005, `${shot.move} frame ${local}: ${JSON.stringify(same)}`);
+        // 1フレーム先の見せ方とは見分けられる（以前の描き方は、描いた k フレーム目が計画の k+1 フレーム目だった）。
+        const ahead = await compare(shot, local, local + 1);
+        assert.ok(ahead.shift > 0.3 || ahead.scale > 0.0006, `${shot.move} frame ${local} vs plan ${local + 1}: ${JSON.stringify(ahead)}`);
+      }
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
 
 for (const easing of [{ kind: "linear" }, { kind: "ease-in-out", linearShare: 0.5 }]) {
   test(`カメラの実測（${easing.kind}）: 完成 MP4 のフレームで、全部の型の動きが計画どおりに測れ、止めた・逆にした・文の境目で始め直した版は落ちる`, {
