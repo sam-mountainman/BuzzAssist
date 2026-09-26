@@ -282,6 +282,15 @@
         "win32"
       ],
       "justification": "実物の claude CLI を偽の API サーバーへ向けて書き込みの道具を要求させる試験で、CI runner には claude CLI を入れない（入れるとログイン状態に依存する）。読み取り専用の引数の組み立て・--help による版の判定・選択の経路は test/harnessParallelAgentsPortability.test.mjs が全 OS で見る。"
+    },
+    {
+      "name": "古い更新の仕組みが時間切れで SIGTERM を送っても、npm install を止めて一時フォルダを消してから終わる",
+      "reason": "Windows の kill は TerminateProcess で後片付けの処理が走らない（消し残しは次の検証が掃除する）",
+      "category": "platform-limitation",
+      "platforms": [
+        "win32"
+      ],
+      "justification": "SIGTERM を受けたときの後片付けの試験で、Windows のプロセスの終了にはシグナルの受け口が無い。Windows での消し残しは、次の検証が 1 時間を過ぎた一時フォルダから掃除する（test/verifyPluginRuntime.test.mjs の別の試験で見る）。macOS と Linux の CI で走る。"
     }
   ]
 }
