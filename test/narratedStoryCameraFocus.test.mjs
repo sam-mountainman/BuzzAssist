@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-// 場面ごとの焦点（台本パッケージの本編の場面の cameraFocus）: 計画・余白・食い違い・完成 MP4 の実測。
+// 場面ごとの焦点（取り込みの記録の行・台本パッケージの本編の場面の cameraFocus）: 決まる順・計画・余白・食い違い・
+// 完成 MP4 の実測。
 // 画は合成の模様（test/fixtures/narratedVisualFixture.mjs）。どのチャンネルの値でもない。
 
 import assert from "node:assert/strict";
@@ -13,6 +14,8 @@ import { resolveFfmpegToolchain } from "../lib/harnessRuntimeResolver.mjs";
 import {
   CAMERA_FOCUS_SCALE_TOLERANCE,
   CAMERA_FOCUS_SHIFT_TOLERANCE_PX,
+  NARRATED_CAMERA_FOCUS_SOURCES,
+  applyNarratedSceneCameraFocus,
   cameraRectAt,
   cameraShotChains,
   groupNarratedCameraShots,
@@ -73,7 +76,7 @@ test("焦点の欄: 0〜1 の数の x・y だけを受け、文字列・範囲�
   ]) assert.equal(normalizeNarratedCameraFocus(value).problem, problem, JSON.stringify(value));
 });
 
-test("後方互換: 焦点の無い場面は、今までどおり Pack の型ごとの焦点で動く（計画も生成記録の形も変わらない）", () => {
+test("後方互換: 焦点の無い場面は、今までどおり Pack の型ごとの焦点で動く（動きは変わらず、焦点の欄は足さない。出どころは pack と残す）", () => {
   const camera = normalizeNarratedCameraConfig({
     moves: {
       "slow-push-in": { zoomPerSecond: 0.02, maxZoom: 1.08, focusX: 0.4, focusY: 0.35 },
@@ -99,8 +102,69 @@ test("後方互換: 焦点の無い場面は、今までどおり Pack の型ご
   for (const shot of plan.shots) {
     assert.equal("focus" in shot, false);
     assert.equal("requestedFocus" in shot, false);
+    assert.equal(shot.focusSource, "pack");
   }
-  for (const entry of narratedCameraManifestEntry(plan, camera).shots) assert.equal("focus" in entry, false);
+  for (const entry of narratedCameraManifestEntry(plan, camera).shots) {
+    assert.equal("focus" in entry, false);
+    assert.equal(entry.focusSource, "pack");
+  }
+});
+
+test("焦点の決まる順: 取り込みの記録 → 台本パッケージ → Pack の型ごとの焦点。両方に書いて値が違えば止め、同じなら通る。計画のどのショットにも出どころが残る", () => {
+  assert.deepEqual(NARRATED_CAMERA_FOCUS_SOURCES, ["image-manifest", "script-package", "pack"]);
+  const camera = normalizeNarratedCameraConfig(PACKS.large).config;
+  const segments = [
+    // p1: 取り込みの記録だけ（話者・文ごとに分けた2つの文。どちらにも同じ焦点が付く）
+    { id: "p1.t1", sourceSegmentId: "p1", imageKey: "p1", part: "story" },
+    { id: "p1.t2", sourceSegmentId: "p1", imageKey: "p1", part: "story" },
+    // p2: 台本パッケージだけ
+    { id: "p2", sourceSegmentId: "p2", imageKey: "p2", part: "story", cameraFocus: { x: 0.7, y: 0.75 } },
+    // p3: 両方に同じ値（先に決まる取り込みの記録を出どころにする）
+    { id: "p3", sourceSegmentId: "p3", imageKey: "p3", part: "story", cameraFocus: { x: 0.25, y: 0.6 } },
+    // p4: どちらにも無い
+    { id: "p4", sourceSegmentId: "p4", imageKey: "p4", part: "story" },
+  ];
+  const imageFocus = new Map([["p1", { x: 0.2, y: 0.3 }], ["p3", { x: 0.25, y: 0.6 }]]);
+  assert.deepEqual(applyNarratedSceneCameraFocus({ segments, imageFocus }).issues, []);
+  assert.deepEqual(segments.map((segment) => [segment.id, segment.cameraFocus || null, segment.cameraFocusSource || null]), [
+    ["p1.t1", { x: 0.2, y: 0.3 }, "image-manifest"],
+    ["p1.t2", { x: 0.2, y: 0.3 }, "image-manifest"],
+    ["p2", { x: 0.7, y: 0.75 }, "script-package"],
+    ["p3", { x: 0.25, y: 0.6 }, "image-manifest"],
+    ["p4", null, null],
+  ]);
+  // 同じ場面の文は同じ焦点のまま（有料生成の前の食い違いの検査に掛からない）。
+  assert.deepEqual(narratedCameraFocusConflicts(segments), []);
+  const timed = segments.map((segment, index) => ({ ...segment, startFrame: index * 24, frames: 24 }));
+  const plan = planNarratedCameraShots({ segments: timed, camera, fps: 24 });
+  assert.deepEqual(plan.problems, []);
+  assert.deepEqual(plan.shots.map((shot) => [shot.imageKey, shot.focusSource, shot.focus || null]), [
+    ["p1", "image-manifest", { x: 0.2, y: 0.3, source: "image-manifest" }],
+    ["p2", "script-package", { x: 0.7, y: 0.75, source: "script-package" }],
+    ["p3", "image-manifest", { x: 0.25, y: 0.6, source: "image-manifest" }],
+    ["p4", "pack", null],
+  ]);
+  // 取り込みの記録の焦点も、台本パッケージの焦点と同じ計算で動きを決める。
+  const [p1] = plan.shots;
+  assert.deepEqual(p1.to, planCameraMove(p1.move, camera.moves[p1.move], p1.frames / 24, { x: 0.2, y: 0.3 }).to);
+  assert.deepEqual(narratedCameraManifestEntry(plan, camera).shots.map((shot) => shot.focusSource), ["image-manifest", "script-package", "image-manifest", "pack"]);
+  // 出どころの無い焦点（場面の焦点を足した当初の呼び方）は台本パッケージの値として扱う。
+  assert.equal(planNarratedCameraShots({ segments: [{ id: "s", imageKey: "s", startFrame: 0, frames: 24, cameraFocus: { x: 0.4, y: 0.4 } }], camera, fps: 24 }).shots[0].focusSource, "script-package");
+
+  // 両方に書いて値が違う場面・感想パートの場面に記録が焦点を書いた場面は止め、その場面の文は書き換えない。
+  const stopped = [
+    { id: "p2", imageKey: "p2", part: "story", cameraFocus: { x: 0.7, y: 0.75 } },
+    { id: "r1", imageKey: "r1", part: "review" },
+  ];
+  const result = applyNarratedSceneCameraFocus({ segments: stopped, imageFocus: new Map([["p2", { x: 0.7, y: 0.7 }], ["r1", { x: 0.5, y: 0.5 }]]) });
+  assert.deepEqual(result.issues, ["camera-focus-conflict:p2:image-vs-package", "camera-focus-review-scene:r1"]);
+  assert.deepEqual(stopped[0].cameraFocus, { x: 0.7, y: 0.75 });
+  assert.equal("cameraFocusSource" in stopped[0], false);
+  assert.equal("cameraFocus" in stopped[1], false);
+  // 取り込みの記録が無い（broker の Pack）なら、今までどおり台本パッケージの値と Pack の型ごとの焦点。
+  const packageOnly = [{ id: "p2", imageKey: "p2", part: "story", cameraFocus: { x: 0.7, y: 0.75 } }, { id: "p4", imageKey: "p4", part: "story" }];
+  assert.deepEqual(applyNarratedSceneCameraFocus({ segments: packageOnly }).issues, []);
+  assert.deepEqual(packageOnly.map((segment) => segment.cameraFocusSource || null), ["script-package", null]);
 });
 
 test("焦点の効き方: 寄り・引きは寄った端の中心、パンは縦の中心と道のりの中ほど、static は中心。生成記録に焦点が残る", () => {
