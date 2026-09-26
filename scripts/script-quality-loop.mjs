@@ -29,7 +29,7 @@ import {
   recordScriptQualityRound,
   resetScriptQualityCumulative,
   scriptQualityGenre,
-  scriptQualityReviewSheet,
+  scriptQualityContractSummary,
   scriptQualityReviewTemplate,
   scriptQualityStatus,
   scriptQualityVerdict,
@@ -220,7 +220,7 @@ export async function runScriptQualityCli(argv = process.argv.slice(2), {
         print(stdout, { issues: blockers.map((blocker) => `script-quality-channel-config-invalid:${blocker}`), detail: "Channel Pack の script-quality.json に直せない値がある" }, args.json);
         return { exitCode: 3 };
       }
-      stdout.write(`${JSON.stringify(scriptQualityReviewSheet(contract), null, 2)}\n`);
+      stdout.write(`${JSON.stringify(scriptQualityContractSummary(contract), null, 2)}\n`);
       return { exitCode: 0, contract };
     }
     case "start": {

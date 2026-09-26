@@ -53,6 +53,13 @@ test("解説動画の図解と説明の対応とテンポは下限つきで、�
   assert.equal(Math.round(contract.rubric.reduce((sum, entry) => sum + entry.weight, 0)), 100);
   const sheet = scriptQualityReviewSheet(contract);
   assert.deepEqual(sheet.commonPerspectives.map((entry) => entry.id), ["interest", "opening", "clarity", "tempo", "consistency"]);
+  // 評価者のシートには合格点・重み・下限を載せない（見ると採点がそれに寄る）。
+  assert.equal(Object.hasOwn(sheet, "targetScore"), false);
+  for (const row of sheet.rubric) {
+    assert.equal(Object.hasOwn(row, "weight"), false, `${row.id} の重みが評価者のシートに出ている`);
+    assert.equal(Object.hasOwn(row, "minimumScore"), false, `${row.id} の下限が評価者のシートに出ている`);
+  }
+  assert.doesNotMatch(JSON.stringify(sheet), /targetScore|minimumScore|"weight"/u);
   // 観点は契約の digest に入れない（ナレーション物語の契約の digest は変わらない）。
   assert.equal(createScriptQualityContract().contract.digest, "0f641861c34e3e9bcb0e9c63464a8f3d8e755d493823944e1d83741e6afde6d0");
 });
