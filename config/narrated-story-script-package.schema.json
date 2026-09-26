@@ -51,12 +51,12 @@
     },
     "review": {
       "type": "array",
-      "description": "感想パート。Channel Pack が bookends.review を宣言しているときだけ使える",
+      "description": "感想パート。Channel Pack が bookends.review を宣言しているときだけ使える。Pack が bookends.review.voice: none（声なし）を宣言していれば、感想の文は全部字幕だけ（声を作らない）になり、秒数の書かれていない文は語りと同じ規則で文に分けて文ごとに字幕を1枚、読む速さ（1秒4文字、最短 1.5 秒）の秒数で出す。1文が 30 秒（120 字）を越えれば有料生成の前に止まる",
       "items": { "$ref": "#/$defs/reviewSegment" }
     },
     "readings": {
       "type": "array",
-      "description": "字幕の表記と声の読みを分ける。表記（display）は字幕にそのまま出し、声には読み（spoken）を渡す",
+      "description": "字幕の表記と声の読みを分ける。表記（display）は字幕にそのまま出し、声には読み（spoken）を渡す。声なしの感想パート（Pack の bookends.review.voice: none）の文には書けない（声が無いので、書けば宣言との食い違いとして有料生成の前に止まる）",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -96,7 +96,11 @@
       "properties": {
         "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
         "text": { "$ref": "#/$defs/segmentText" },
-        "speaker": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "speaker": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "description": "この文を読む話者（無ければ narrator）。声なしの感想パート（Pack の bookends.review.voice: none）では書かない（書けば宣言との食い違いとして有料生成の前に止まる）"
+        },
         "sceneIntent": { "type": "string", "maxLength": 2000 },
         "operatorReplacementRequired": {
           "type": "boolean",
@@ -116,7 +120,7 @@
           "type": "number",
           "minimum": 0.5,
           "maximum": 30,
-          "description": "声を作らずに字幕だけを出す文の秒数（その間は BGM だけが鳴る）。感想パートの最初の文には使えない"
+          "description": "声を作らずに字幕だけを出す文の秒数（その間は BGM だけが鳴る。この文は分けずに字幕1枚）。声のある感想パートでは、最初の文には使えない（境目の監査が lead-in の終わりで語りと最初の字幕が同時に始まることを測るため）。声なしの感想パート（Pack の bookends.review.voice: none）では全部の文が字幕だけで、最初の文にも書ける。書かなければ読む速さの既定の秒数"
         }
       }
     },
