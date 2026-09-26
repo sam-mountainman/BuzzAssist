@@ -48,8 +48,10 @@ jobs:
         run: python -m pip install "opencv-python-headless<5" numpy pillow
       # 動画のレンダーと実MP4の監査は ffmpeg / ffprobe に、カット差し替えの監査は
       # tesseract（jpn+eng）に乗っている（cross-platform.yml と同じ理由）。
+      # fonts-noto-cjk は焼き込み字幕・重ね物・縦書きの吹き出しを描く日本語フォント。関門（cross-platform.yml）
+      # と同じものを入れる（無いと公開前の全試験だけが字幕の試験で落ち、Release が出ない。0.1.28 で起きた）。
       - name: Install media and OCR tools
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg tesseract-ocr tesseract-ocr-jpn
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg tesseract-ocr tesseract-ocr-jpn fonts-noto-cjk
       - name: Verify tag and plugin versions
         run: npm run release:verify -- "$GITHUB_REF_NAME"
       # 本番スキルは既定で「人の承認が今の版・今の SHA に付いていなければ止まる」。
