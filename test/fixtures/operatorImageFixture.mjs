@@ -80,7 +80,9 @@ async function put(path, bytes) {
 
 /**
  * 取り込みの記録と、それが指す画・プロンプトを folder に書く。
- * scenes: [{ sceneId, width, height, seed?, route?, reuseOf?, reuseReason?, referenceSha256s?, conversationUrl?, ... }]
+ * scenes: [{ sceneId, width, height, seed?, bytes?, route?, reuseOf?, reuseReason?, referenceSha256s?, conversationUrl?,
+ *   cameraFocus?, ... }]
+ * bytes は用意済みの PNG（width・height はその寸法を書く）。無ければグラデーションの PNG を作る。
  * 返り値の manifest を書き換えて writeManifest で書き直せる。
  */
 export async function writeOperatorImageFolder(folder, scenes, { generatedAt = "2026-09-20T10:00:00+09:00" } = {}) {
@@ -90,6 +92,7 @@ export async function writeOperatorImageFolder(folder, scenes, { generatedAt = "
     const imageRel = `images/${scene.sceneId}.png`;
     let bytes;
     if (scene.reuseOf) bytes = images.get(scene.reuseOf);
+    else if (scene.bytes) bytes = scene.bytes;
     else bytes = makeGradientPng(scene.width, scene.height, scene.seed ?? entries.length + 1);
     images.set(scene.sceneId, bytes);
     await put(join(folder, ...imageRel.split("/")), bytes);
@@ -108,6 +111,7 @@ export async function writeOperatorImageFolder(folder, scenes, { generatedAt = "
       generatedAt,
       ...(scene.conversationUrl === null ? {} : { conversationUrl: scene.conversationUrl || fixtureConversationUrl(scene.sceneId) }),
       ...(scene.reuseReason ? { reuseReason: scene.reuseReason } : {}),
+      ...(scene.cameraFocus !== undefined ? { cameraFocus: scene.cameraFocus } : {}),
     });
   }
   const manifest = { version: OPERATOR_IMAGE_MANIFEST_VERSION, scenes: entries };

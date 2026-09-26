@@ -7,6 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { resolveFfmpegToolchain } from "../lib/harnessRuntimeResolver.mjs";
+import { normalizeNarratedCameraFocus } from "../lib/narratedStoryCamera.mjs";
 import {
   OPERATOR_IMAGE_COST_BASIS,
   OPERATOR_IMAGE_FIT,
@@ -157,6 +158,45 @@ test("読む: 実測の sha256 と寸法を持った行を返し、会話の URL
   const after = await readOperatorImageManifest({ manifestPath: join(folder, "operator-images.json") });
   assert.notEqual(after.digest, before);
   assert.ok(after.problems.includes("operator-image-sha256-mismatch:s002"));
+});
+
+test("焦点: 行の cameraFocus（0〜1 の x・y）を台本パッケージと同じ検査で読み、公開の記録には数だけ。直すと記録の SHA と digest が変わり、画の取り込みの鍵は変わらない", async (t) => {
+  const folder = await tempFolder(t, "operator-image-focus-");
+  const { manifestPath, manifest } = await writeOperatorImageFolder(folder, [
+    { sceneId: "s001", width: 320, height: 180, cameraFocus: { x: 0.32, y: 0.41 } },
+    { sceneId: "s002", width: 320, height: 180 },
+  ]);
+  const first = await check(folder);
+  assert.equal(first.manifest.ok, true, first.manifest.problems.join(", "));
+  assert.deepEqual(first.manifest.rows.map((row) => row.cameraFocus), [{ x: 0.32, y: 0.41 }, null]);
+  assert.equal(first.checked.ok, true, first.checked.issues.join(", "));
+  assert.deepEqual(first.checked.publicScenes[0].cameraFocus, { x: 0.32, y: 0.41 });
+  assert.equal("cameraFocus" in first.checked.publicScenes[1], false, "書いていない行には欄を足さない");
+  // 焦点を直すと、記録の本文の SHA と digest（入力の指紋）が変わる。画の取り込みの鍵（作り直すかどうか）は変わらない。
+  const keyOf = ({ checked }) => operatorImageImportKey({ sceneId: "s001", sourceSha256: checked.scenes[0].row.image.sha256, fit: checked.scenes[0].fit });
+  manifest.scenes[0].cameraFocus = { x: 0.7, y: 0.25 };
+  await writeManifest(manifestPath, manifest);
+  const moved = await check(folder);
+  assert.equal(moved.checked.ok, true, moved.checked.issues.join(", "));
+  assert.notEqual(moved.manifest.manifestSha256, first.manifest.manifestSha256);
+  assert.notEqual(moved.manifest.digest, first.manifest.digest);
+  assert.equal(keyOf(moved), keyOf(first));
+  // 形の誤りは、台本パッケージと同じ欄の名前（lib/narratedStoryCamera.mjs の normalizeNarratedCameraFocus）で止める。
+  for (const [value, problem] of [
+    [{ x: 0.3, y: 1.2 }, "cameraFocus.y"],
+    [{ x: "0.3", y: 0.4 }, "cameraFocus.x"],
+    [{ x: 0.3 }, "cameraFocus.y"],
+    [[0.3, 0.4], "cameraFocus"],
+    [null, "cameraFocus"],
+    [{ x: 0.3, y: 0.4, zoom: 1.1 }, "cameraFocus.zoom-unknown"],
+  ]) {
+    assert.equal(normalizeNarratedCameraFocus(value).problem, problem, JSON.stringify(value));
+    manifest.scenes[1].cameraFocus = value;
+    await writeManifest(manifestPath, manifest);
+    const broken = await check(folder);
+    assert.ok(broken.manifest.problems.includes(`operator-image-manifest-invalid:scenes[1].${problem}`), `${JSON.stringify(value)}: ${broken.manifest.problems.join(", ")}`);
+    assert.equal(broken.checked.ok, false, "形の誤った焦点は取り込まない");
+  }
 });
 
 test("検査: sha256 の不一致・場面の過不足・理由の無い使い回し・未承認の参照・寸法・来歴の欠けを理由コードで止める", async (t) => {
