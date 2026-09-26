@@ -38,9 +38,10 @@
       },
       "approval": {
         "reviewer": "sam-mountainman",
-        "approvedAt": "2026-09-26T05:57:00.420Z",
-        "version": "1.7.0",
-        "contentSha256": "sha256:95c82c225574e1402565fcb7093fab5b44098caa47fc44523f6c399f167c86ff",
+        "approvedAt": "2026-09-26T18:06:01.492Z",
+        "version": "1.8.0",
+        "contentSha256": "sha256:cb37663e6d7bc62b5ffb62469834237ca85397033111628053f8f1001f985c7a",
+        "bundleSha256": "sha256:2eeb2f1594a382f37f005293a9b898c788079f65af93e7e78b0712512aa32bc3",
         "attestedBy": "human-verified"
       }
     },
@@ -73,9 +74,10 @@
       },
       "approval": {
         "reviewer": "sam-mountainman",
-        "approvedAt": "2026-09-26T05:57:00.498Z",
+        "approvedAt": "2026-09-26T18:06:01.775Z",
         "version": "1.2.0",
         "contentSha256": "sha256:f6c6432dd6f6b2b2e4721fae2ac3384187e1911e340640a71fddc8e93814c2f4",
+        "bundleSha256": "sha256:29d9e2c36a9063ff4cc2b2a587dd1954a3e7d948b7b113ba51854f8b01eafadc",
         "attestedBy": "human-verified"
       }
     },
@@ -108,9 +110,10 @@
       },
       "approval": {
         "reviewer": "sam-mountainman",
-        "approvedAt": "2026-09-26T05:57:00.561Z",
+        "approvedAt": "2026-09-26T18:06:01.857Z",
         "version": "1.5.0",
         "contentSha256": "sha256:9cfc5246ee1cbab42d0e3334e278b6196fe0d5a5597bb436f64d1e7f50ce08e7",
+        "bundleSha256": "sha256:15fb8c092a1959e7199678c861079053028a02dd7518a30babf3fb4592858fbb",
         "attestedBy": "human-verified"
       }
     },
@@ -143,9 +146,10 @@
       },
       "approval": {
         "reviewer": "sam-mountainman",
-        "approvedAt": "2026-09-26T06:29:32.709Z",
+        "approvedAt": "2026-09-26T18:06:02.054Z",
         "version": "1.8.1",
         "contentSha256": "sha256:96d115c2fab5e7802ad8c68fb871146792f46ec98c7339cf973aec1b2d76d2e7",
+        "bundleSha256": "sha256:d4ad7574691ac83e237ff17d20a64a52511ef6bf3acb1e226ccc9bd1fa82fb5d",
         "attestedBy": "human-verified"
       }
     },
@@ -178,9 +182,10 @@
       },
       "approval": {
         "reviewer": "sam-mountainman",
-        "approvedAt": "2026-09-24T09:09:24.369Z",
+        "approvedAt": "2026-09-26T18:06:01.946Z",
         "version": "1.0.1",
         "contentSha256": "sha256:ee956794fe0c67481452e7c2248f1043d9670b49f665f1b7ff628e50bfdcd0f2",
+        "bundleSha256": "sha256:5ebf47214f1fe59fcbd12c75bc30597915f848b84bd0527c6ff70b5ca936c58d",
         "attestedBy": "human-verified"
       }
     },
@@ -213,9 +218,10 @@
       },
       "approval": {
         "reviewer": "sam-mountainman",
-        "approvedAt": "2026-09-26T05:57:00.695Z",
-        "version": "1.5.0",
-        "contentSha256": "sha256:f99704813658b0528f1f4903f7f833ebea8529512692fb2888d1a8a3bd248657",
+        "approvedAt": "2026-09-26T18:06:01.679Z",
+        "version": "1.6.0",
+        "contentSha256": "sha256:5676c011b1648fda0853c7fe2c8e84972e4c96bb853c07f1bdec7d2da1f6078d",
+        "bundleSha256": "sha256:4838405913a557784600ffec15d4430ad1cd77d861a11c3e38d22adbea5888c2",
         "attestedBy": "human-verified"
       }
     },
