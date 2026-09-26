@@ -269,6 +269,14 @@ node scripts/strategy-brief.mjs applicability --brief <ブリーフ> --evidence 
 9. `node scripts/run-video-harness.mjs plan-request --channel <id> ... --strategy-brief <ブリーフ>` で合否と根拠の状態を確かめ、
    `start --channel <id> ... --strategy-brief <ブリーフ>` で制作 Job に渡す（ブリーフの SHA が Job の識別子に入る）
 
+7 の途中で企画の方向を変えると決めた・評価項目が改定された（契約が変わって `record` が `strategy-brief-contract-changed`
+で止まる）ときは、次の版を古い契約で採点せずに、決めた人が自分の対話端末から
+`node scripts/strategy-brief.mjs stop --work-dir <作業フォルダ> --reason "何を決めたか" --reviewer <名前> --human-verified`
+でループを止め、`start --restart --reason "..."` で始め直します。止めても回・時間は数えず、合格にもなりません
+（`verdict` は `strategy-brief-loop-not-passed:blocked` で制作へ渡しません）。止めた人・理由・時刻は状態の `humanStop` と、
+始め直した後の `history` に残ります。`--agent-attested` や対話端末でない実行では止まりません（機械は止めの記録を作れない）。
+台本（`script-quality-loop.mjs`）と途中の成果物（`asset-quality-loop.mjs`）のループにも同じ `stop` があります。
+
 公開後は `node scripts/strategy-brief.mjs next --from <ブリーフ> --metrics <指標の集計>` で数字を照らし、次の版の下書きへ進みます。
 
 ### 7.1 チャンネルの台帳と、次の工程の決め方
