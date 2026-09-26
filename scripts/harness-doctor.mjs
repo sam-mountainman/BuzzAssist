@@ -253,14 +253,16 @@ async function resolveProductionRouteProbe(declaration, harnessId, { job, runtim
   if (typeof runtime.resolveProductionRoute === "function") {
     return runtime.resolveProductionRoute({ declaration, harnessId, job, projectDir: runtime.projectDir });
   }
-  if (harnessId === "narrated-story-video") {
+  // 配備の中の runner（宣言の deploymentEntrypoint）を持つハーネスは、配置表の root と entrypoint を起動して確かめる
+  // （ナレーション物語・解説動画）。上位の入口だけを起動しても、実際に Job の中で動く runner が無いことに気付けない。
+  if (String(declaration?.deploymentEntrypoint || "").trim()) {
     const deployment = job?.deployment && typeof job.deployment === "object"
       ? job.deployment
       : configuredHarnessDeployment(harnessId, runtime);
     const rootValue = String(deployment.root || "").trim();
     const declaredEntrypoint = String(deployment.entrypoint || "").trim();
     if (!rootValue || !declaredEntrypoint || /<[^>]+>/u.test(declaredEntrypoint)) {
-      throw new Error("ナレーションハーネスの実配備root / entrypointが未完成");
+      throw new Error(`${harnessId} の実配備root / entrypointが未完成`);
     }
     const route = resolveHarnessDeploymentCommand(deployment, { additionalArgs: ["help"] });
     if (!existsSync(route.entrypointPath)) throw new Error(`配備済みの正規internal entrypointが無い: ${declaredEntrypoint}`);
@@ -387,6 +389,20 @@ async function probeFfmpegCapability({ ffmpeg, ffprobe, runCommand = defaultRunC
   } finally {
     await rm(probeDir, { recursive: true, force: true });
   }
+}
+
+/**
+ * ハーネスの宣言が「使わない」と明記した部品（runtimeRequirements の paidMedia: false / voiceQualityGate: false）。
+ * 理由の書かれていない宣言は受けない（黙って外さない）。宣言が無い・読めないときは何も外さない。
+ */
+export function declaredRuntimeNotUsed(declaration) {
+  const requirements = declaration?.runtimeRequirements;
+  const reason = typeof requirements?.reason === "string" ? requirements.reason.trim() : "";
+  if (!requirements || typeof requirements !== "object" || !reason) return { paidMedia: "", voiceQualityGate: "" };
+  return {
+    paidMedia: requirements.paidMedia === false ? reason : "",
+    voiceQualityGate: requirements.voiceQualityGate === false ? reason : "",
+  };
 }
 
 function configuredImageModel(harnessId = "") {
@@ -863,6 +879,10 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "",
     fix: windowsWorkPathFix(workPath),
   });
 
+  // 宣言が「使わない」と明記したもの（runtimeRequirements）。ハーネスを名指ししたときだけ読む。使わないものを
+  // 必須にすると、その部品の無い端末で ready と言えず、使うものを見落とすのと同じく選ぶ側を誤らせる。
+  const notUsed = declaredRuntimeNotUsed(harnessId ? declaration : null);
+
   // --- 音声品質ゲート ---
   // 本体と同じ解決器に聞く。doctor だけ PATH の python3 に固定すると、
   // Windows の `py -3`、project venv、VOICE_QA_PYTHON と違う interpreter を
@@ -870,70 +890,82 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "",
   // 必須にするのは、正規入口が音声品質ゲートを既定で有効にしていて、
   // QA環境が無いと有償生成の手前で止まるため——ready と言った直後に
   // 止まるなら、それは ready ではない。
-  const pythonRuntime = runtime.pythonRuntime ?? await resolvePythonRuntime({
-    env: runtimeEnv,
-    platform: runtime.platform ?? process.platform,
-    projectDir,
-    purposeEnv: "VOICE_QA_PYTHON",
-    requiredModules: VOICE_QA_REQUIRED_MODULES,
-    runCommand,
-  });
-  const voiceQa = pythonRuntime.ok
-    ? await (runtime.voiceQualityProbe
-        ? runtime.voiceQualityProbe(pythonRuntime)
-        : voiceQualityAvailable(pythonRuntime)).then((value) => value === true, () => false)
-    : false;
-  const pythonLabel = formatRuntimeCommand(pythonRuntime);
-  add({
-    id: "voice-quality-python",
-    required: true,
-    ok: voiceQa,
-    detail: voiceQa
-      ? `利用可能（${pythonLabel} / Python ${pythonRuntime.version || "version確認済み"}）`
-      : `利用不可（${pythonLabel}${pythonRuntime.detail ? ` / ${pythonRuntime.detail}` : ""}）`,
-    fix: voiceQa ? "" : `音声品質ゲートが動かない。正規入口はこのゲートを既定で有効にしているので、有償生成の手前で止まる。利用するPythonに ${VOICE_QA_REQUIRED_MODULES.join(" / ")} を入れ、UTMOSキャッシュ（~/.cache/torch/hub）と、faster-whisper の kotoba-tech/kotoba-whisper-v2.0-faster と small（Hugging Face キャッシュ。監査中はダウンロードしない）を用意する。別のinterpreterは VOICE_QA_PYTHON で指定できる（Windowsは py -3 / python.exe も自動探索）`,
-  });
+  if (notUsed.voiceQualityGate) {
+    add({ id: "voice-quality-python", required: false, ok: true, status: "not-used", detail: `このハーネスは音声品質ゲートを使わない（宣言 runtimeRequirements: ${notUsed.voiceQualityGate}）`, fix: "" });
+  }
+  if (!notUsed.voiceQualityGate) {
+    const pythonRuntime = runtime.pythonRuntime ?? await resolvePythonRuntime({
+      env: runtimeEnv,
+      platform: runtime.platform ?? process.platform,
+      projectDir,
+      purposeEnv: "VOICE_QA_PYTHON",
+      requiredModules: VOICE_QA_REQUIRED_MODULES,
+      runCommand,
+    });
+    const voiceQa = pythonRuntime.ok
+      ? await (runtime.voiceQualityProbe
+          ? runtime.voiceQualityProbe(pythonRuntime)
+          : voiceQualityAvailable(pythonRuntime)).then((value) => value === true, () => false)
+      : false;
+    const pythonLabel = formatRuntimeCommand(pythonRuntime);
+    add({
+      id: "voice-quality-python",
+      required: true,
+      ok: voiceQa,
+      detail: voiceQa
+        ? `利用可能（${pythonLabel} / Python ${pythonRuntime.version || "version確認済み"}）`
+        : `利用不可（${pythonLabel}${pythonRuntime.detail ? ` / ${pythonRuntime.detail}` : ""}）`,
+      fix: voiceQa ? "" : `音声品質ゲートが動かない。正規入口はこのゲートを既定で有効にしているので、有償生成の手前で止まる。利用するPythonに ${VOICE_QA_REQUIRED_MODULES.join(" / ")} を入れ、UTMOSキャッシュ（~/.cache/torch/hub）と、faster-whisper の kotoba-tech/kotoba-whisper-v2.0-faster と small（Hugging Face キャッシュ。監査中はダウンロードしない）を用意する。別のinterpreterは VOICE_QA_PYTHON で指定できる（Windowsは py -3 / python.exe も自動探索）`,
+    });
+  }
 
   // --- 有償API（必須。無いと生成が1つも通らない） ---
+  if (notUsed.paidMedia) {
+    for (const id of ["tts-key", "image-key"]) {
+      add({ id, required: false, ok: true, status: "not-used", detail: `このハーネスは BuzzAssist の有料の音声・画像の adapter を使わない（宣言 runtimeRequirements: ${notUsed.paidMedia}）`, fix: "" });
+    }
+  }
   const narratedMedia = harnessId === "narrated-story-video"
     ? await probeNarratedPaidMediaRuntime({ job, runtime, env: runtimeEnv })
     : null;
-  const tts = narratedMedia?.tts
-    ?? (harnessId === "koya-manga-video"
-      ? await probeKoyaDialoguePaidMediaRuntime({ runtime, env: runtimeEnv, projectDir: path.resolve(projectDir) })
-      : (runtime.ttsProbe
-        ? await runtime.ttsProbe()
-        : await probeSecretVia(() => requireElevenLabsApiKey({}), {
-            label: "音声合成",
-            fix: "ELEVENLABS_API_KEY を環境変数に置くか、音声ジェネレーターの設定から保存する。キーはファイルにもログにも書かない",
-          })));
-  add({
-    id: "tts-key",
-    required: true,
-    ...tts,
-    fix: tts.ok ? "" : harnessId === "narrated-story-video"
-      ? "署名Channel Packのruntime.ttsProvider / voice adapter identityを一致させ、BUZZASSIST_MEDIA_JOB_API_BASEの非課金capabilities probeがreadyを返す状態にする"
-      : harnessId === "koya-manga-video"
-        ? `BUZZASSIST_MEDIA_JOB_API_BASEを設定し、契約が指す ${[tts.kind, tts.provider, tts.model, tts.adapterVersion].filter(Boolean).join(" / ")} の非課金capabilities probeがreadyを返す状態にする。生の提供元APIキーだけではKoya本番経路の確認にならない`
-        : tts.fix,
-  });
+  if (!notUsed.paidMedia) {
+    const tts = narratedMedia?.tts
+      ?? (harnessId === "koya-manga-video"
+        ? await probeKoyaDialoguePaidMediaRuntime({ runtime, env: runtimeEnv, projectDir: path.resolve(projectDir) })
+        : (runtime.ttsProbe
+          ? await runtime.ttsProbe()
+          : await probeSecretVia(() => requireElevenLabsApiKey({}), {
+              label: "音声合成",
+              fix: "ELEVENLABS_API_KEY を環境変数に置くか、音声ジェネレーターの設定から保存する。キーはファイルにもログにも書かない",
+            })));
+    add({
+      id: "tts-key",
+      required: true,
+      ...tts,
+      fix: tts.ok ? "" : harnessId === "narrated-story-video"
+        ? "署名Channel Packのruntime.ttsProvider / voice adapter identityを一致させ、BUZZASSIST_MEDIA_JOB_API_BASEの非課金capabilities probeがreadyを返す状態にする"
+        : harnessId === "koya-manga-video"
+          ? `BUZZASSIST_MEDIA_JOB_API_BASEを設定し、契約が指す ${[tts.kind, tts.provider, tts.model, tts.adapterVersion].filter(Boolean).join(" / ")} の非課金capabilities probeがreadyを返す状態にする。生の提供元APIキーだけではKoya本番経路の確認にならない`
+          : tts.fix,
+    });
 
-  const imageModel = runtime.imageModel ?? configuredImageModel(harnessId);
-  const image = narratedMedia?.image ?? await probeConfiguredImageHost(imageModel, runtime);
-  add({
-    id: "image-key",
-    required: true,
-    ...image,
-    fix: image.ok ? "" : harnessId === "narrated-story-video"
-      ? "署名Channel Packのruntime.imageModel / image adapter identityを一致させ、BUZZASSIST_MEDIA_JOB_API_BASEの非課金capabilities probeがreadyを返す状態にする"
-      : image.host === "codex"
-      ? "本番モデルは Codex の GPT Image 2 経路。ChatGPTデスクトップアプリまたはCodex CLIを入れ、`codex login status` がログイン済みを返す状態にする"
-      : image.host === "lovart"
-        ? "LOVART_ACCESS_KEY と LOVART_SECRET_KEY を設定し、本番契約の画像モデルへアクセスできる状態にする"
-        : image.host === "grok"
-          ? "Grok CLIを入れて `grok login --device-auth` を完了する"
-          : "BuzzAssistへログインし、本番契約の画像モデルへアクセスできる状態にする",
-  });
+    const imageModel = runtime.imageModel ?? configuredImageModel(harnessId);
+    const image = narratedMedia?.image ?? await probeConfiguredImageHost(imageModel, runtime);
+    add({
+      id: "image-key",
+      required: true,
+      ...image,
+      fix: image.ok ? "" : harnessId === "narrated-story-video"
+        ? "署名Channel Packのruntime.imageModel / image adapter identityを一致させ、BUZZASSIST_MEDIA_JOB_API_BASEの非課金capabilities probeがreadyを返す状態にする"
+        : image.host === "codex"
+        ? "本番モデルは Codex の GPT Image 2 経路。ChatGPTデスクトップアプリまたはCodex CLIを入れ、`codex login status` がログイン済みを返す状態にする"
+        : image.host === "lovart"
+          ? "LOVART_ACCESS_KEY と LOVART_SECRET_KEY を設定し、本番契約の画像モデルへアクセスできる状態にする"
+          : image.host === "grok"
+            ? "Grok CLIを入れて `grok login --device-auth` を完了する"
+            : "BuzzAssistへログインし、本番契約の画像モデルへアクセスできる状態にする",
+    });
+  }
 
   if (harnessId === "narrated-story-video") {
     const music = narratedMedia?.music ?? {

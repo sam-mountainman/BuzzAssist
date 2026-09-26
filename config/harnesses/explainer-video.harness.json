@@ -1,0 +1,163 @@
+{
+  "id": "explainer-video",
+  "version": "1.0.0",
+  "displayName": "解説動画（既存のローカル制作の取り込み）",
+  "note": "クライアント名・チャンネル名はここに書かない。ここは『何が作れるか』の宣言であって、誰のためのものかの記録ではない。チャンネル固有の場所・版の SHA・制作のコマンドは署名済み Channel Pack（非公開）に置く。",
+  "produces": {
+    "kind": "explainer-video",
+    "description": "チャンネルが手元で持っている解説動画の制作（HTML/CSS/JS の映像・ローカルの音声・レンダーのスクリプト）を作り直さずに、完成版の納品を照合して取り込み、完成 MP4 で監査して Job と RunReceipt に残す",
+    "aspectRatios": [
+      "16:9"
+    ],
+    "typicalLengthSeconds": [
+      300,
+      1500
+    ]
+  },
+  "requiresFromOperator": [
+    {
+      "id": "script",
+      "what": "完成版と同じ台本のファイル（Job に写した台本の SHA が、納品の記録・台本のファイル・Pack の版の SHA と同じでなければ止まる）",
+      "blocking": true
+    },
+    {
+      "id": "signed-channel-pack",
+      "what": "解説動画用の署名済み Channel Pack（payloadKind explainer-channel-pack）。制作のフォルダ、制作のスクリプトへ必ず明示して渡す3つのパス（productionDir / visualsDir / outputDir）、納品の記録の場所、取り込む版の SHA、台本と途中の成果物の品質ループの作業フォルダ、表示の決まりのうち機械で確かめられるもの、制作のコマンドの雛形（argv の配列）を持つ。台本の本文・研究の資料・声の参照音声は写さない（パスと SHA だけ）",
+      "blocking": true
+    },
+    {
+      "id": "delivery-manifest",
+      "what": "チャンネルの制作が書いた納品の記録（DELIVERY.json の形: script_sha256・video の file / sha256 / bytes / duration_seconds / width / height / fps・captions と captions_sha256・thumbnail と thumbnail_sha256・upload_metadata）。取り込み（import-delivery）ではこれと実ファイルの SHA が一致しなければ止まる",
+      "blocking": true
+    },
+    {
+      "id": "script-quality-acceptance",
+      "what": "使う台本が、台本の品質ループ（ジャンル explainer。作業フォルダは Job の options.scriptQualityWorkDir、無ければ Pack の scriptQuality.workDir）で合格した版か、人がそのまま使うと認めた版（accept-human --human-verified）であること。無ければ理由コード script-quality-required:<理由> で人待ちに止まる",
+      "blocking": true
+    },
+    {
+      "id": "asset-quality-loop-reviews",
+      "what": "Pack が assetQuality.stages に宣言した完成品（今はサムネ）が、途中の成果物の品質ループ（harness explainer-video）で合格した版と同じファイルであること（node scripts/asset-quality-loop.mjs）。無ければ asset-quality-required:<工程>:<対象>:<理由> で人待ちに止まる",
+      "blocking": true
+    },
+    {
+      "id": "human-review",
+      "what": "人の全編の試聴・初見の評価。機械の監査の外で、記録の口がまだ無いので、Job はいつも explainer-human-review-pending を残して awaiting-human-review で止まる（点数を作らない）",
+      "blocking": false
+    }
+  ],
+  "guarantees": [
+    {
+      "id": "delivery-bound",
+      "what": "納品の記録を読み、Job に写した台本の SHA が納品の記録・台本のファイル（・Pack の版）と同じで、動画・字幕・サムネ・投稿用情報の実ファイルの SHA が納品の記録（・Pack の版）と一致する。一致しなければ取り込まずに理由コードで止める。制作のスクリプトは起動しない（取り込み）",
+      "evidenceAuditIds": [
+        "deliveryManifestBound",
+        "scriptBoundToDelivery",
+        "deliveryArtifactsBound"
+      ],
+      "inForceSince": "buzzassist-explainer-audit-v1"
+    },
+    {
+      "id": "final-video-decodes",
+      "what": "SHA の一致した完成 MP4 を、共通の実デコード（ffprobe で映像と音声の stream を確かめ、ffmpeg -xerror で最後までデコードし、読み直した SHA が変わっていない）にかける",
+      "evidenceAuditIds": [
+        "finalVideoFullDecode"
+      ],
+      "inForceSince": "buzzassist-explainer-audit-v1"
+    },
+    {
+      "id": "duration-conformance",
+      "what": "完成 MP4 の尺（±0.05 秒）・幅・高さ・フレームレート・フレーム数が納品の記録と一致する",
+      "evidenceAuditIds": [
+        "durationMatchesDelivery"
+      ],
+      "inForceSince": "buzzassist-explainer-audit-v1"
+    },
+    {
+      "id": "captions-in-range",
+      "what": "字幕のファイルがあり、全部の字幕の時刻が読めて、始まりが終わりより前・0 秒以上・動画の終わり以内で、始まりが順に並ぶ",
+      "evidenceAuditIds": [
+        "captionsTimingInRange"
+      ],
+      "inForceSince": "buzzassist-explainer-audit-v1"
+    },
+    {
+      "id": "thumbnail-present",
+      "what": "サムネのファイルがあり、画として読める（PNG / JPEG / WebP の見出しから幅と高さが読める）",
+      "evidenceAuditIds": [
+        "thumbnailPresent"
+      ],
+      "inForceSince": "buzzassist-explainer-audit-v1"
+    },
+    {
+      "id": "script-quality-accepted",
+      "what": "使う台本（Job に保存した写しのバイト列の SHA）を台本の品質ループの答え（lib/scriptQualityUseGate.mjs、ジャンル explainer）に問い、合格した版か人がそのまま使うと認めた版のときだけ合格にする。台本の文・所見は残さない",
+      "human": "台本をそのまま使うかは人が決める（accept-human --human-verified は確認した人が自分の端末から打つ）",
+      "evidenceAuditIds": [
+        "scriptQualityAccepted"
+      ],
+      "inForceSince": "buzzassist-explainer-audit-v1"
+    },
+    {
+      "id": "asset-quality-loop",
+      "what": "Pack が宣言した完成品（今はサムネ）が、途中の成果物の品質ループ（lib/assetQualityUseGate.mjs、harness explainer-video）で合格した版と同じファイルである",
+      "human": "採点は作った文脈とは別の評価者が行う。公開面の画の手指の安全は対話端末から人が確認する",
+      "evidenceAuditIds": [
+        "assetQualityLoopsPassed"
+      ],
+      "inForceSince": "buzzassist-explainer-audit-v1"
+    },
+    {
+      "id": "display-rules",
+      "what": "Channel Pack が宣言した表示の決まりのうち、機械で確かめられるものを測る: 数の書き方（display.numerals: arabic なら、字幕に漢数字で書いた数量・年が無い）と BGM の有無（display.bgm: none なら、完成 MP4 の音に語りの間の無音の区間があり、音の途切れない区間が 60 秒を越えず、納品の記録も BGM ありと書いていない）",
+      "human": "常時の左上タイトルが無いことなど、画の決まりは人の試聴・視聴で確かめる（機械では合否を決めない）",
+      "evidenceAuditIds": [
+        "displayNumeralsArabic",
+        "bgmAbsentMeasured"
+      ],
+      "inForceSince": "buzzassist-explainer-audit-v1"
+    },
+    {
+      "id": "no-new-paid-calls",
+      "what": "取り込み（import-delivery）では制作のスクリプトを起動せず、子プロセスに有料の呼び出しの関所（lib/paidCallGuard.mjs）を入れる。BuzzAssist の有料の送り口を通る呼び出しは送る前に止まり、止めた呼び出しが1件でもあれば合格にしない",
+      "evidenceAuditIds": [
+        "noBuzzAssistPaidCalls"
+      ],
+      "inForceSince": "buzzassist-explainer-audit-v1"
+    }
+  ],
+  "entrypoint": "node scripts/run-video-harness.mjs",
+  "deploymentEntrypoint": "scripts/explainer-video.mjs",
+  "entrypointNote": "上位入口は Claude Code / Codex 共通の run-video-harness。配備内では deploymentEntrypoint を使い、Job の束縛が無ければ止まる。",
+  "runtimeRequirements": {
+    "paidMedia": false,
+    "voiceQualityGate": false,
+    "reason": "このハーネスは BuzzAssist の有料の音声・画像・音楽の adapter も音声品質ゲートも使わない（声と映像はチャンネルの既存の制作が作る）。doctor はこれらを not-used として見ない"
+  },
+  "canonicalSkills": [
+    ".agents/skills/platform-craft/SKILL.md"
+  ],
+  "learningTargets": [],
+  "status": "implementation-in-progress",
+  "statusNote": "既存のローカル制作の納品の取り込み（照合・実デコード・監査・RunReceipt・Canvas の投影）は動く。人の試聴・初見の評価を完成 MP4 に結び付けて記録する口と、共通の RunReceipt で completed へ確定する検証器（reviewAttestation の subject）がまだ無いので、Job は awaiting-human-review で止まる",
+  "completion": {
+    "status": "pending",
+    "reason": "完成（completed）と呼ぶには、人の試聴・初見の評価を完成 MP4 の SHA に結び付けた署名つきの記録と、それを共通の RunReceipt（lib/videoHarnessReceipt.mjs の SIGNOFF_BINDING_VALIDATORS）で検証する口が要る。まだ無いので、取り込みの機械の監査が全部通っても explainer-human-review-pending が残る",
+    "requiredWork": "reviewAttestation の subject explainer-video（lib/koyaReviewAttestation.mjs）と、その signoff の検証器・contact sheet の作り方を足し、宣言に reviewAttestation.subject を書いて版を上げる"
+  },
+  "keywords": [
+    "解説",
+    "図解",
+    "仕組み",
+    "しくみ",
+    "explainer"
+  ],
+  "keywordsNote": "依頼文からこのハーネスを言い当てるための短い手掛かり。チャンネルの台帳で決まる依頼（--channel）では使わない。",
+  "receiptAdapter": {
+    "status": "ready",
+    "implementation": "lib/harnessRunReceipt.mjs#recordGatesFromAuditChecks",
+    "input": "checks object",
+    "failClosed": true
+  },
+  "gateEvidenceNote": "各保証は evidenceAuditIds が全て pass のときだけ pass にできる。人の評価は保証に入れず knownRemainingIssues に残す（記録の口が無いものを保証として並べない）。"
+}

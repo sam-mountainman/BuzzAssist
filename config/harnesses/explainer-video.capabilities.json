@@ -1,0 +1,76 @@
+{
+  "schema": "buzzassist-harness-capabilities-v1",
+  "harnessId": "explainer-video",
+  "note": "能力カード。ハーネスを選ぶ側（ホストの LLM と run-video-harness plan-request）が読む。宣言（*.harness.json）とは別のファイルに置く——宣言の SHA は Job の識別子と RunReceipt の declarationDigest に入るので、説明を直しただけで走行中の Job を作り直させないため。保証の一覧は宣言の guarantees から、運営者に要る素材は requiresFromOperator から自動で作るのでここに書かない。実績（RunReceipt・skill evals）も書かない——選ぶときに記録から読む。クライアント名・チャンネル名は書かない。",
+  "inputs": {
+    "scriptFormats": [
+      {
+        "id": "markdown",
+        "what": "完成版と同じ Markdown の台本（script.md など）。取り込みでは中身を読まず、SHA が納品の記録と同じかだけを見る"
+      },
+      {
+        "id": "raw-text",
+        "what": "完成版と同じ生テキストの台本。取り込みでは中身を読まず、SHA が納品の記録と同じかだけを見る"
+      }
+    ],
+    "startOptions": [
+      {
+        "key": "explainerMode",
+        "cliFlag": "--explainer-mode",
+        "requiredWhen": "完成済みの納品の取り込み（既定の import-delivery）ではなく、Channel Pack の制作のコマンドを走らせるとき（produce）",
+        "what": "実行の型（import-delivery / produce）"
+      },
+      {
+        "key": "explainerRendererUrl",
+        "cliFlag": "--explainer-renderer-url",
+        "requiredWhen": "produce で、Channel Pack の制作のコマンドが {rendererUrl} を使うとき（手元の HTTP サーバーは運営者が起動する）",
+        "what": "手元の HTTP サーバーの URL（http://127.0.0.1:<port>/...）"
+      },
+      {
+        "key": "scriptQualityWorkDir",
+        "cliFlag": "--script-quality-work-dir",
+        "requiredWhen": "台本の品質ループの作業フォルダが Channel Pack の scriptQuality.workDir と違うとき",
+        "what": "台本の品質ループ（node scripts/script-quality-loop.mjs --work-dir）の作業フォルダ"
+      }
+    ]
+  },
+  "outputs": [
+    { "id": "imported-delivery", "what": "照合した完成版の納品（動画・字幕・サムネ・投稿用情報）の SHA と大きさ。ファイルは写さず、チャンネルのフォルダを指す" },
+    { "id": "audit-report", "what": "完成 MP4 の実デコード・尺・字幕の時刻・サムネ・表示の決まり・品質ループの照合をまとめた監査の報告（Job の run フォルダの explainer/）" },
+    { "id": "run-receipt", "what": "保証ごとの判定と証拠の指紋を持つ RunReceipt（人の評価が残る間は outcome fail で、knownRemainingIssues に理由が残る）" },
+    { "id": "canvas-projection", "what": "BuzzAssist Canvas への Job の投影（状態と監査の報告。完成動画のファイルは写さない）" }
+  ],
+  "suitedFor": [
+    "手元の制作で完成した解説動画を、作り直さずに共通の Job と記録へつなぐ",
+    "HTML/CSS/JS の映像とローカルの音声で作る解説動画の、完成 MP4 の実測監査",
+    "制作のスクリプトへ3つのパスを必ず明示して渡して、同じ手順で作り直す"
+  ],
+  "notSuitedFor": [
+    "台本から画・声・BGM を有料で生成して作る動画（ナレーション物語のハーネス）",
+    "吹き出しとコマで見せる漫画動画（漫画動画のハーネス）",
+    "チャンネルの制作がまだ無い・納品の記録を書かない制作",
+    "人の試聴を済ませた完成（completed）の確定（記録の口が未実装）"
+  ],
+  "estimates": {
+    "cost": {
+      "status": "unknown",
+      "reason": "取り込みは有料の呼び出しをしない（関所で止める）。produce の費用はチャンネルの制作のスクリプトしだいで、このハーネスは数えない"
+    },
+    "duration": {
+      "status": "unknown",
+      "reason": "取り込みの時間は完成 MP4 の実デコードと音の測定の長さ（動画の尺）で決まる。本番の尺の記録がまだ少ない"
+    }
+  },
+  "prerequisites": [
+    { "doctorCheckId": "harness-production-route", "checkedAt": "before-job", "what": "配備先の正規入口（scripts/explainer-video.mjs）が実際に起動する" },
+    { "doctorCheckId": "node", "checkedAt": "before-job", "what": "Node 20 以上" },
+    { "doctorCheckId": "ffmpeg", "checkedAt": "before-job", "what": "ffmpeg が起動する（実デコードと音の測定）" },
+    { "doctorCheckId": "ffprobe", "checkedAt": "before-job", "what": "ffprobe が起動する（尺・寸法・stream の確認）" },
+    { "doctorCheckId": "ffmpeg-capability", "checkedAt": "before-job", "what": "libx264 と aac を含む ffmpeg で、1本作って読み返せる" },
+    { "doctorCheckId": "disk-space", "checkedAt": "before-job", "what": "作業フォルダーの空き容量" },
+    { "doctorCheckId": "windows-work-path", "checkedAt": "before-job", "what": "Windows では、子プロセスを起動する作業フォルダが上限（238 字）に収まる（Windows 以外は見ない）" },
+    { "doctorCheckId": "reviewer-trust", "checkedAt": "before-job", "what": "運営者の reviewer 信頼リスト（環境変数 BUZZASSIST_REVIEWER_TRUST。resume の前に共通の入口が確かめる）" },
+    { "doctorCheckId": "channel-pack", "checkedAt": "job-prepare", "what": "署名済み Channel Pack の検証の記録（Job の prepare が残す）" },
+    { "doctorCheckId": "host-skill-sync", "checkedAt": "before-job", "conditional": true, "what": "ホストが読むスキルの写しが配布元と同じ版（ずれているときだけ止まる）" }
+  ]
+}

@@ -2,7 +2,8 @@
   "note": "ハーネス宣言（config/harnesses/）と実際の配置先の対応。実ファイル config/harness-deployments.json は運営者固有なので追跡しない（.gitignore 済み）。これを写して使う。channelLearning はチャンネルの学習（要求台帳・提案・反映記録）の保存先で、配備 root とは別の設定。運営者の私有プロジェクトを { \"target\": \"channel-pack:<id>\", \"root\": \"<dir>\" } で宣言する。宣言が無ければ Channel Pack（channel-packs/<id>）に置く。リポジトリの作業木の直下や共有台帳と重なる root は拒否される。この宛先単位の行はチャンネルの無い Job の保存先で、channels のチャンネルで作った Job と、そのチャンネルの場所で回した品質ループの学習はチャンネルごとの保存先に分ける（同じハーネスのチャンネルどうしでも混ざらない。BUZZASSIST_CHANNEL_REGISTRY で台帳を別のファイルにしたら channelLearning もそのファイルに書く）: { \"target\": \"channel-pack:<id>\", \"channel\": \"<チャンネルの id>\", \"root\": \"<dir>\" } で宣言し、無ければ学習の置き場（~/.buzzassist/learning か BUZZASSIST_LEARNING_DIR）の channels/<チャンネルの id>。見るときは node scripts/harness-learn.mjs status --channel <id>。チャンネルの保存先が別のチャンネルの場所・保存先に重なる台帳と、同じ宛先を使うチャンネルが2つ以上あるのにチャンネルの無い Job の保存先に重なる台帳は拒否される。channels はチャンネルの台帳（lib/channelRegistry.mjs が読む）で、plan-request / start の --channel <id> がここから作業フォルダ・署名済み Channel Pack・制作の仕組み・戦略の作業フォルダ・台本の品質ループの設定を決める。書き方は channelTemplate（読み込みでは使わない）。production は { kind: harness, harnessId } か { kind: external, note }。チャンネルどうしで projectDir・channelPack・strategy.workDir が重なる台帳と、公開リポジトリの作業木の直下・追跡される場所を指す path は拒否される。",
   "deployments": [
     { "harnessId": "koya-manga-video", "root": ".", "entrypoint": "node scripts/koya-manga-video.mjs" },
-    { "harnessId": "narrated-story-video", "root": ".", "entrypoint": "node scripts/narrated-story-video.mjs" }
+    { "harnessId": "narrated-story-video", "root": ".", "entrypoint": "node scripts/narrated-story-video.mjs" },
+    { "harnessId": "explainer-video", "root": ".", "entrypoint": "node scripts/explainer-video.mjs" }
   ],
   "channelLearning": [],
   "channels": [],
