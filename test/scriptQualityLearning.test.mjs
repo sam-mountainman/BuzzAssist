@@ -201,14 +201,27 @@ test("品質ループの record は、合格しなかった回でだけ学習の
   assert.equal(called, false);
 });
 
-test("学習の宛先が決まっていない台本のジャンル（解説動画）は、推測で別の台帳へ積まない", async () => {
+test("解説動画の台本の不合格の回は、解説動画のハーネスのチャンネルの非公開台帳へ積む（共有層へ流さない）", async () => {
+  const route = HARNESS_LEARNING_ROUTES["explainer-video"].channel;
+  assert.equal(SCRIPT_LEARNING_ROUTES.explainer, route);
+  const definition = loadTargets()[route];
+  assert.equal(definition.scope, "channel-pack");
+  assert.equal(definition.mode, "review-only");
+  assert.equal(definition.confidential, true);
+  assert.deepEqual([...HARNESS_LEARNING_ROUTES["explainer-video"].genres], [], "ジャンルの正本が無いので genre の宛先を持たない");
   const harness = captureHarness();
   const { contract } = createScriptQualityContract({ genre: "explainer" });
-  const input = failingRound({ state: { script: { genre: "explainer" } } });
+  const input = failingRound({
+    state: { script: { genre: "explainer" } },
+    round: { floorFailures: ["visual-narration-alignment"], failedGateIds: [] },
+    version: { rubricScores: { "visual-narration-alignment": 50 } },
+  });
   const result = await captureScriptRoundLearning({ ...input, contract, env: {}, now, captureOptions: harness.options });
-  assert.equal(result.skippedReason, "unknown-genre-route");
-  assert.equal(SCRIPT_LEARNING_ROUTES.explainer, undefined, "宛先を作らない");
-  assert.equal(harness.rows.length, 0);
+  assert.equal(result.target, route);
+  assert.equal(result.captured, 1);
+  assert.equal(harness.rows[0].target, route);
+  assert.equal(harness.rows[0].harness.id, "explainer-video", "台本の契約に harnessId が無くても、宛先のハーネスで記録する");
+  assert.equal(JSON.stringify(harness.rows[0]).includes("合成の"), false, "本文・所見が台帳へ運ばれた");
 });
 
 test("漫画の台本の不合格の回は、漫画のハーネスの既存のチャンネルの宛先（新しい台帳を作らない）へ積む", async () => {
@@ -238,7 +251,7 @@ test("コードの台本の学習の宛先は、docs/learning/targets.json の s
   const document = JSON.parse(await readFile(join(process.cwd(), "docs", "learning", "targets.json"), "utf8"));
   assert.deepEqual({ ...SCRIPT_LEARNING_ROUTES }, document.scriptQualityRoutes.routes);
   for (const target of Object.values(SCRIPT_LEARNING_ROUTES)) assert.ok(document.targets[target], `${target} は targets に既にある宛先`);
-  assert.deepEqual(Object.keys(document.scriptQualityRoutes.deferred), ["explainer"]);
+  assert.equal(document.scriptQualityRoutes.deferred, undefined, "宛先の決まっていない台本のジャンルは残っていない");
 });
 
 test("台本の直し・訂正は、人が harness-learn capture で台本の非公開台帳へ積める", () => {

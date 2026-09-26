@@ -279,21 +279,33 @@ test("doctor: 使わないと宣言した有料の adapter と音声品質ゲー
   }
 });
 
-test("チャンネルの台帳: 解説動画のハーネスと explainer の台本のジャンルで登録できる", async () => {
+test("チャンネルの台帳: 解説動画のチャンネルの学習は、そのチャンネルだけの非公開の保存先へ行く（共有層へ流さない）", async () => {
   const base = await mkdtemp(path.join(tmpdir(), "explainer-registry-"));
   try {
-    const channels = validateChannelRegistry({
-      channels: [{
-        id: CHANNEL,
-        projectDir: path.join(base, "project"),
-        channelPack: path.join(base, "pack"),
-        production: { kind: "harness", harnessId: "explainer-video" },
-        strategy: { workDir: path.join(base, "project", "strategy"), requireBrief: false },
-        scriptQuality: { genre: "explainer" },
-      }],
-    }, { repoRoot: root, harnessIds: loadHarnesses().map((harness) => harness.id), genres: ["narrated-story", "manga", "explainer"], learningState: null });
+    const learningDir = path.join(base, "learning-state");
+    const row = (id) => ({
+      id,
+      projectDir: path.join(base, id, "project"),
+      channelPack: path.join(base, id, "pack"),
+      production: { kind: "harness", harnessId: "explainer-video" },
+      strategy: { workDir: path.join(base, id, "project", "strategy"), requireBrief: false },
+      scriptQuality: { genre: "explainer" },
+    });
+    const channels = validateChannelRegistry({ channels: [row(CHANNEL), row("sample-explainer-2")] }, {
+      repoRoot: root,
+      harnessIds: loadHarnesses().map((harness) => harness.id),
+      genres: ["narrated-story", "manga", "explainer"],
+      env: { BUZZASSIST_LEARNING_DIR: learningDir },
+    });
     assert.equal(channels[0].production.harnessId, "explainer-video");
-    assert.deepEqual(channels[0].learning, [], "解説動画には学習の宛先がまだ無いので、推測で別の台帳へ積まない");
+    // 制作と台本の宛先は同じ channel-pack:explainer（1つにまとまる）。保存先はチャンネルごとに別。
+    assert.deepEqual(channels[0].learning, [{
+      area: "production",
+      target: "channel-pack:explainer",
+      store: { source: "channel-default", root: path.join(learningDir, "channels", CHANNEL) },
+      sameTargetChannels: ["sample-explainer-2"],
+    }]);
+    assert.notEqual(channels[0].learning[0].store.root, channels[1].learning[0].store.root);
   } finally {
     await rm(base, { recursive: true, force: true });
   }

@@ -60,6 +60,14 @@
       "packId": "narrated-story",
       "confidential": true
     },
+    "channel-pack:explainer": {
+      "mode": "review-only",
+      "canonical": "docs/explainer-requirements-ledger.md",
+      "reason": "解説動画（explainer-video）のチャンネルの要求台帳。Job の確定時の捕捉・人の確認（完成動画の品質ループ）・途中の成果物と台本の品質ループの不合格から自動で拾った候補を積む。承認と監査の記録そのものなので機械は書き足さない。保存先はチャンネルごと（運営者の配置表の channelLearning、無ければ学習の置き場の channels/<チャンネルの id>）で、チャンネルの無い Job だけが Channel Pack の既定の置き場（channel-packs/explainer）を使う。チャンネル固有の事実は共有層へ流さない。",
+      "scope": "channel-pack",
+      "packId": "explainer",
+      "confidential": true
+    },
     "platform:platform-craft": {
       "mode": "auto-guidance",
       "canonical": ".agents/skills/platform-craft/SKILL.md",
@@ -71,15 +79,13 @@
     "note": "台本の品質ループ（lib/scriptQualityLoop.mjs）のジャンルごとに、不合格の回から自動で拾った候補を積む宛先（コードの SCRIPT_LEARNING_ROUTES と同じ。試験が一致を見る）。宛先は上の targets の既存のものだけで、ここで新しい宛先を作らない。",
     "routes": {
       "narrated-story": "channel-pack:narrated-story-script",
-      "manga": "channel-pack:koya"
-    },
-    "deferred": {
-      "explainer": "解説動画のハーネスもチャンネルの台帳もまだ無いので宛先を作らない。自動の捕捉は unknown-genre-route で積まずに返す（推測で別の台帳へ積まない）"
+      "manga": "channel-pack:koya",
+      "explainer": "channel-pack:explainer"
     }
   },
   "scopes": {
     "platform": "運営者・ジャンルに依らない craft（有償APIの扱い、証跡、並列制御など）。全ハーネスへ効く",
-    "genre": "ジャンル共通のハーネス（漫画動画、ナレーション物語）。そのジャンルの全チャンネルへ効く",
+    "genre": "ジャンル共通のハーネス（漫画動画、ナレーション物語。解説動画はジャンルの正本スキルがまだ無いので genre の宛先を持たない）。そのジャンルの全チャンネルへ効く",
     "channel-pack": "個々のチャンネル固有（キャスト名、番組規則、語彙ポリシー）。共有層へ流してはいけない"
   }
 }
