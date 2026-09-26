@@ -33,7 +33,8 @@ yt-analytics 等）は運営者ハーネスの同梱物ではない**。同梱�
 
 project adapterは実装ではなく `sourceRole: project-adapter` として正本へ結び付ける。
 adapter本文のhashが正本と違うことはcollisionではない。正本参照が切れている、同じ
-qualified IDに異なる実装hashがある、manifest SHAと実ファイルが違う場合は失敗。
+qualified IDに異なる実装hashがある、manifest SHA（`contentSha256`）か束のdigest（`bundleSha256`、
+下の「人の承認と束の digest」）と実ファイルが違う場合は失敗。
 別scopeの同名は `crossScopeSameNames`、global mirrorの内容差は
 `externalDivergentHashes` として分離し、BuzzAssist正本の0-collisionを偽らない。端末側の
 導入状態は `staleInstalledCopies`（存在するが違う）と `missingInstalledCopies`（無い）に分け、
@@ -102,6 +103,73 @@ Operatorの動画生成hot pathへ管理権限を持ち込まない。
 ### General Work
 
 Office、Finance、HR、Legal、Sales、Cowork系を置く。正式動画Harnessとは分離する。
+
+## 人の承認と束の digest（bundleSha256、2026-09-26）
+
+在庫の各 Skill は2つの指紋を持つ。
+
+| 欄 | 覆う範囲 | 使い道 |
+|---|---|---|
+| `contentSha256` | `SKILL.md` のバイト列だけ | 後方互換。eval の記録（`skill-evals`）と Job の `canonicalSkills` はこれに結び付く |
+| `bundleSha256` | Skill のディレクトリ全体（下の除外を除く） | 人の承認・リリースの関門・制作の承認判定・doctor |
+
+`contentSha256` だけでは、`references/` だけを変えた版（品質ループの決まり、署名の運用など、AI の動きを
+決める文書）でも承認が「今の版」のままに見え、人が見ないまま運営者の端末へ届いた（9/26 に references だけを
+変えたコミットが2つあった）。そこで承認を束の digest にも束縛する。
+
+**覆うもの**: `SKILL.md`、`references/`、`scripts/`、`agents/`、直下の付属物（例: `reference-sheet-prompts.md`）など、
+Skill のディレクトリの中で配布されるファイル全部（`setup-agents` と npm の `files` はディレクトリを丸ごと写す）。
+
+**外すもの**と理由:
+
+- 直下の `evals/`: `skill-evals` が採点に使う入力で、ホストは制作中に読まない。eval の結果は版と `contentSha256` に
+  別に束縛される（`--require-evals`）。入れると eval を1件足すたびに、運営者へ届く指示が変わらないまま承認が外れる
+- `references/learned-auto.md`・`references/learned-archive.md`: 自己改善の `sync`・setup・自動更新が機械で書き直す
+  overlay と退避。正本の SKILL.md に「監査・承認・合否の証跡には使えない」とあり、運営者の写しでは端末ごとに
+  中身が違う（配った後に届け直す）。入れると sync のたびに承認が外れ、配布された写しの制作が止まる。RunReceipt の
+  tree 指紋（`SKILL_TREE_MACHINE_OWNED_FILES`）も同じ2つを外している（試験で一致を確かめる）
+- OS が置く `.DS_Store`・`Thumbs.db`・`desktop.ini`・`._*`: 運営者の端末でフォルダーを開いただけで承認が外れないように
+- symlink は数えずに止める（配布物にも入れない）
+
+**数え方**（`lib/skillInventory.mjs` の `computeSkillBundle`、版 `buzzassist-skill-bundle-v1`）: 相対パスは `/` 区切り・
+NFC、テキスト（NUL を含まない）は CRLF を LF にそろえてから sha256 を取り、`<sha256> "<パス>"` の行をコード単位の
+順に並べ、先頭に版の文字列を置いた全体の sha256。Windows の改行・パスの区切り・macOS のファイル名の正規化で
+値は変わらない（`test/skillBundleDigest.test.mjs` が固定値で確かめる）。
+
+**承認の状態**: 承認（`--approve`）は `version`・`contentSha256`・`bundleSha256` を記録し、在庫の値が実物と違えば
+書かない。全部が今の正本と一致したときだけ `current`。そうでなければ `stale` で、理由を出す:
+
+| 理由 | 意味 |
+|---|---|
+| `version-changed` | 承認した版から版が変わった |
+| `content-changed` | 承認した SKILL.md から中身が変わった |
+| `bundle-not-covered` | `bundleSha256` の無い古い承認（2026-09-26 までの記録）。references・付属物を覆っていない |
+| `bundle-changed` | 承認した後に references・付属物が変わった |
+| `not-human-verified` | 人の承認ではない記録 |
+
+**どこで効くか**:
+
+- `npm run skills:check`: 在庫の `bundleSha256` の書き忘れ・食い違いを manifest の問題として落とし（exit 2）、
+  実物の値を出す。references だけを変えて在庫を更新していないものもここで見つかる
+- `npm run skills:check:release`（`--require-approval`）: 本番の正本スキルの承認が束まで一致しなければ exit 4。
+  古い承認（`bundle-not-covered`）もここで止まる
+- 制作の入口（`lib/videoHarnessProductionProfile.mjs`）と doctor の `skill-approval`: 実物の束の digest で判定する。
+  配布された写しは承認が今の版・内容・束に付いていなければ止め、開発用チェックアウトは止めずに Job と RunReceipt の
+  `skillApproval` に「承認前の正本で作った」と残す（決まりは変えていない）。Job の同一性（`declaredSkills`）にも
+  束の digest を入れ、計画の後に references だけが変わっても気づく。RunReceipt の `skillApproval` の行の形は
+  変えていない（references の中身は `harnessBuild` の tree 指紋が記録している）
+- チャンネル専用の私有の在庫も同じ規則（欄は任意で、無ければ在庫の検査が落とし、承認は `bundle-not-covered`）
+
+**Skill を直したとき**: references や付属物だけを変えたときも、在庫の `bundleSha256` を更新する（値は `skills:check`
+の食い違いの行に出る）。配った版・承認の付いた版からの変更なら semver を上げる（`skill-creator` の手順7）。
+人の承認は承認者本人の端末で打ち、エージェントは打たない:
+
+```bash
+node scripts/skill-inventory.mjs --approve <id> --reviewer <名前> --human-verified
+```
+
+未解決: eval の記録と `--require-evals` は `contentSha256` に結び付いたままなので、references だけの変更では
+「その版の eval 結果が無い」とは言わない。
 
 ## コマンド
 
@@ -179,8 +247,8 @@ Codex system Skill、global Skill、Cowork版、plugin cacheは編集しない�
 | Skill改善用の機能 | `buzzassist:skill-creator`、`excalidraw-benchmark-manga-style`、Best-of-N、独立監査 | BuzzAssist Development のみ。Operator の hot path には出さない |
 
 skill-creator は「不要だから外す」のではなく「本番動画Jobから隔離する」。正本を更新する
-ときは skill-creator、eval、inventoryのversion/content SHA、adapter検査（Claude Code の `.claude/skills` と
-共有の adapter）をまとめて行う。
+ときは skill-creator、eval、inventoryのversion/content SHA/束のdigest（references・付属物だけの変更でも）、
+adapter検査（Claude Code の `.claude/skills` と共有の adapter）をまとめて行う。
 
 
 ## 同名 Skill の棚卸し（2026-09-25）
