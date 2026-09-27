@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join, win32 } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import {
   ASSET_QUALITY_DIR,
@@ -304,6 +305,11 @@ test("status を見ただけ・ツールの結果に出た案内・置き字の�
       claudeBash("cat notes.txt", { cwd: fx.dir, output: `next: node scripts/script-quality-loop.mjs record --work-dir "${workDir}" --review r.json` }),
       [{ type: "user", cwd: fx.dir, message: { role: "user", content: "node scripts/script-quality-loop.mjs start --work-dir <台本の作業フォルダ> --generator-context <会話ID>" } }],
       [{ type: "user", cwd: fx.dir, toolUseResult: { stdout: `node scripts/script-quality-loop.mjs start --work-dir ${workDir}` } }],
+      // 文章で書いただけのコマンド（人の依頼・作る係の説明・Codex の会話と圧縮した履歴）は、実行ではない。
+      [{ type: "user", cwd: fx.dir, message: { role: "user", content: `node scripts/script-quality-loop.mjs start --work-dir "${workDir}" で回して` } }],
+      [{ type: "assistant", cwd: fx.dir, message: { role: "assistant", content: [{ type: "text", text: `次は node scripts/script-quality-loop.mjs record --work-dir "${workDir}" --review r.json で記録します` }] } }],
+      [{ type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: `node scripts/script-quality-loop.mjs record --work-dir ${workDir}` }] } }],
+      [{ type: "compacted", payload: { message: "", replacement_history: [{ type: "message", role: "user", content: [{ type: "input_text", text: `node scripts/script-quality-loop.mjs start --work-dir ${workDir}` }] }] } }],
     ];
     for (const entries of cases) {
       writeLines(fx.transcript, entries);
@@ -380,6 +386,51 @@ test("Codex 形式（function_call の arguments・workdir・語の配列）と 
   }
 });
 
+test("Codex のいまの記録の形（実行の記録 item_completed・file:// の cwd・コード実行 exec の中の exec_command）からもループを見つける", async () => {
+  const fx = fixture();
+  try {
+    const base = join(fx.dir, "project");
+    const scriptState = await startScript(join(base, "scripts-w", "ep2"));
+    const assetState = await startAsset(join(base, "assets-x"), "thumb-02");
+    const other = join(fx.dir, "elsewhere");
+    const codex = [
+      { type: "session_meta", payload: { id: "synthetic", cwd: fx.dir } },
+      // 実行したコマンドの記録。cwd は file:// の URL。出力（stdout など）の中のコマンドは数えない。
+      {
+        type: "event_msg",
+        payload: {
+          type: "item_completed",
+          item: {
+            type: "CommandExecution",
+            command: ["/bin/zsh", "-lc", "node scripts/script-quality-loop.mjs record --work-dir scripts-w/ep2 --review r.json"],
+            cwd: pathToFileURL(base).href,
+            stdout: `next: node scripts/script-quality-loop.mjs start --work-dir ${other}`,
+            aggregated_output: `next: node scripts/script-quality-loop.mjs start --work-dir ${other}`,
+            exit_code: 0,
+          },
+        },
+      },
+      // コード実行: JavaScript の中の tools.exec_command({ cmd, workdir })。
+      {
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call",
+          name: "exec",
+          input: `const x = 1;\ntext(await tools.exec_command(${JSON.stringify({ workdir: base, cmd: "node scripts/asset-quality-loop.mjs record --work-dir 'assets-x' --stage thumbnail --subject thumb-02 --asset a.png --review r.json" })}));`,
+        },
+      },
+    ];
+    writeLines(fx.transcript, codex);
+    const refs = collectQualityLoopReferences(readFileSync(fx.transcript, "utf8").split("\n"), { cwd: fx.dir });
+    assert.deepEqual(refs.map((ref) => ref.statePath).sort(), [assetState, scriptState].sort());
+    const decision = await decideStop(stopInput(fx, { last_assistant_message: "記録しました。" }), { env: fx.env });
+    assert.equal(decision.action, "block");
+    assert.equal(decision.loopMarks.length, 2);
+  } finally {
+    fx.cleanup();
+  }
+});
+
 test("同じコマンド文の中で代入した変数（W=...; --work-dir $W）を展開し、展開できない値は手がかりにしない", async () => {
   const fx = fixture();
   try {
@@ -420,6 +471,27 @@ test("途中の成果物の batch: 対象の一覧から対象を読み、続い
     assert.equal(decision.action, "block");
     assert.match(decision.reason, /thumbnail \/ thumb-01/u);
     assert.doesNotMatch(decision.reason, /thumb-02/u);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test("続いているループが多いとき: 6件まで詳しく書き、残りは件数と名前だけ。全部に付箋を貼り、次に止まるときに残りで差し戻さない", async () => {
+  const fx = fixture();
+  try {
+    const workDir = join(fx.dir, "work", "many");
+    const subjects = Array.from({ length: 8 }, (_, index) => `scene-${String(index + 1).padStart(2, "0")}`);
+    for (const subjectId of subjects) await startAsset(workDir, subjectId);
+    const manifest = join(workDir, "batch.json");
+    writeFileSync(manifest, JSON.stringify({ stage: "thumbnail", items: subjects.map((subjectId) => ({ subjectId, asset: `${subjectId}.png`, version: "v1" })) }));
+    writeLines(fx.transcript, claudeBash(`node scripts/asset-quality-loop.mjs record --work-dir "${workDir}" --stage thumbnail --batch "${manifest}" --review r.json`, { cwd: fx.dir }));
+    const input = stopInput(fx);
+    const output = JSON.parse((await runCli(input, { env: fx.env })).stdout);
+    assert.equal(output.decision, "block");
+    assert.equal((output.reason.match(/^・途中の成果物の品質ループ/gmu) || []).length, 6);
+    assert.match(output.reason, /・ほかに 2 件のループも続いている（thumbnail\/scene-0[0-9], thumbnail\/scene-0[0-9]）/u);
+    assert.equal(Object.keys(JSON.parse(sessionState(fx)).loops).length, 8, "残りの2件にも付箋を貼る");
+    assert.equal((await runCli(input, { env: fx.env })).stdout, "", "残りの分で改めて差し戻さない");
   } finally {
     fx.cleanup();
   }
