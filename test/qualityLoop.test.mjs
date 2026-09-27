@@ -7,14 +7,23 @@ import test from "node:test";
 import { prepareKoyaQualityRound } from "../lib/koyaMangaFinalAudit.mjs";
 import { createMangaFinalQualityDecision, createMangaQualityContract } from "../lib/mangaQualityHarness.mjs";
 import {
+  CURRENT_QUALITY_LIMIT_DEFAULTS,
+  DEFAULT_MINIMUM_IMPROVEMENT,
+  QUALITY_GOAL_CHECK_STATUS,
+  QUALITY_LIMIT_DEFAULT_GENERATIONS,
   createQualityLoopState,
   deriveFailureFingerprint,
   findStaleQualityFeedback,
   normalizeQualityAcceptance,
   normalizeQualityRubric,
+  normalizeRubricAnchors,
   HUMAN_STOP_REASON,
+  qualityLimitDefaults,
+  qualityLoopOpenFailureFingerprint,
+  recordQualityGoalCheck,
   recordQualityRound,
   rubricFloorFailures,
+  selectQualityContractForLoop,
   stopQualityLoopByHuman,
 } from "../lib/qualityLoop.mjs";
 
@@ -415,4 +424,132 @@ test("人が採点なしで止めると、回・費用・時間を足さずに b
   assert.equal(empty.status, "blocked");
   assert.equal(empty.humanStop.roundsAtStop, 0);
   assert.equal(Object.hasOwn(empty, "bestRound"), false);
+});
+
+test("最小改善の既定は 5 点で、既定の世代ごとの契約から、走っているループが始めたときの世代を選ぶ", () => {
+  assert.equal(DEFAULT_MINIMUM_IMPROVEMENT, 5);
+  assert.equal(CURRENT_QUALITY_LIMIT_DEFAULTS, QUALITY_LIMIT_DEFAULT_GENERATIONS[0].id);
+  const base = { targetScore: 90, minimumImprovement: 1, maximumStagnantRounds: 2 };
+  assert.equal(qualityLimitDefaults(base).minimumImprovement, 5);
+  assert.equal(qualityLimitDefaults(base, "minimum-improvement-1").minimumImprovement, 1);
+  assert.equal(qualityLimitDefaults(base).targetScore, 90, "世代は最小改善だけを重ねる");
+  assert.throws(() => qualityLimitDefaults(base, "no-such-generation"), /Unknown quality limit defaults generation/u);
+  const build = (generation) => ({ generation, digest: `digest-${generation}` });
+  // 新しいループ（知っている digest が無い）は今の既定。
+  assert.equal(selectQualityContractForLoop(build, []).generation, "minimum-improvement-5");
+  // 既定を変える前に始めたループは、始めたときの世代の契約で続ける。
+  assert.equal(selectQualityContractForLoop(build, ["digest-minimum-improvement-1"]).generation, "minimum-improvement-1");
+  assert.equal(selectQualityContractForLoop(build, ["digest-minimum-improvement-5"]).generation, "minimum-improvement-5");
+  // どの世代にも合わなければ今の世代（呼び出し側の「契約が変わった」がそのまま効く）。
+  assert.equal(selectQualityContractForLoop(build, ["digest-of-another-pack"]).generation, "minimum-improvement-5");
+  // 作れない世代（null）は飛ばす。
+  assert.equal(selectQualityContractForLoop(() => null, ["x"]), null);
+});
+
+test("採点の目安（anchors）は点の高い順に正規化し、持つ項目にだけ置く（持たない契約の評価項目の形は変えない）", () => {
+  assert.deepEqual(normalizeRubricAnchors([{ score: 60, state: "並の状態" }, { score: 95, state: "申し分ない状態" }, { score: 60, state: "重複" }, { score: 101, state: "範囲外" }, { score: 70.5, state: "整数でない" }]), [
+    { score: 95, state: "申し分ない状態" },
+    { score: 60, state: "並の状態" },
+  ]);
+  assert.equal(normalizeRubricAnchors([]), null);
+  assert.equal(normalizeRubricAnchors("x"), null);
+  const rows = normalizeQualityRubric([
+    { id: "a", label: "A", weight: 1, minimumScore: 50, description: "説明", anchors: [{ score: 90, state: "よい状態の説明" }] },
+    { id: "b", label: "B", weight: 1, minimumScore: 50, description: "説明" },
+  ]);
+  assert.deepEqual(rows[0].anchors, [{ score: 90, state: "よい状態の説明" }]);
+  assert.equal(Object.hasOwn(rows[1], "anchors"), false);
+});
+
+// 目的の判定を求める契約（中核の試験用。digest は状態との照合に使うだけ）。
+const goalContract = { ...contract, acceptance: { goalCheck: true }, digest: `goal-${contract.digest}` };
+
+function goalRound(state, { context, reviewScores = scores(), extra = {} } = {}) {
+  return recordQualityRound({
+    contract: goalContract,
+    state,
+    hardGateReport: { pass: true, failedGateIds: [], contractDigest: goalContract.digest },
+    reviews: [{ evaluatorId: "evaluator", evaluatorContextId: context, scores: reviewScores, notes: `全尺を見て所見を書いた（${context}）`, evidence: EVIDENCE, artifactSha256: "c".repeat(64) }],
+    artifactSha256: "c".repeat(64),
+    evidence: EVIDENCE,
+    observedAt: "2026-09-24T01:00:00Z",
+    ...extra,
+  });
+}
+
+test("goalCheck の契約は合格点に届いた回をすぐ合格にせず目的の判定を待ち、not-achieved は理由の指紋で差し戻し、achieved で合格", () => {
+  assert.equal(normalizeQualityAcceptance({ goalCheck: true }).goalCheck, true);
+  assert.equal(normalizeQualityAcceptance(undefined).goalCheck, false);
+  assert.throws(() => normalizeQualityAcceptance({ goalCheck: "yes" }), /goalCheck/u);
+  const start = createQualityLoopState({ contract: goalContract, generatorId: "gen", generatorContextId: "generator-context", startedAt: "2026-09-24T00:00:00Z" });
+  const reached = goalRound(start, { context: "review-context-1" });
+  assert.equal(reached.status, QUALITY_GOAL_CHECK_STATUS);
+  assert.equal(reached.nextAction, "goal-check");
+  assert.equal(Object.hasOwn(reached, "bestRound"), false, "判定待ちは止まった状態ではない");
+  // 判定待ちのループには回を足せない（判定が先）。
+  assert.throws(() => goalRound(reached, { context: "review-context-2", extra: { revisionDelta: "直した" } }), /already awaiting-goal-check/u);
+  const judge = (state, extra = {}) => recordQualityGoalCheck({
+    state,
+    contract: goalContract,
+    verdict: "not-achieved",
+    reason: "依頼の読者に届く結論が無い",
+    evaluatorId: "goal-judge",
+    evaluatorContextId: "goal-context-1",
+    artifactSha256: "c".repeat(64),
+    checkedAt: "2026-09-24T02:00:00Z",
+    ...extra,
+  });
+  // 作った文脈・採点に使った文脈・作る係の名乗り・別の成果物・理由の無い判定は受けない。
+  assert.throws(() => judge(reached, { evaluatorContextId: "generator-context" }), /Fresh evaluator context/u);
+  assert.throws(() => judge(reached, { evaluatorContextId: "review-context-1" }), /Fresh evaluator context/u);
+  assert.throws(() => judge(reached, { evaluatorContextId: "author-helper", excludedContextIds: ["author-helper"] }), /Fresh evaluator context/u);
+  assert.throws(() => judge(reached, { evaluatorId: "gen" }), /generator/u);
+  assert.throws(() => judge(reached, { artifactSha256: "d".repeat(64) }), /artifactSha256/u);
+  assert.throws(() => judge(reached, { reason: "" }), /reason/u);
+  assert.throws(() => judge(reached, { verdict: "maybe" }), /verdict/u);
+  assert.throws(() => judge(start), /awaiting/u);
+
+  const reopened = judge(reached);
+  assert.equal(reopened.status, "active");
+  assert.equal(reopened.nextAction, "revise-for-goal");
+  assert.equal(reopened.rounds.length, 1, "判定は回に数えない");
+  assert.equal(reopened.goalChecks[0].verdict, "not-achieved");
+  const fingerprint = reopened.goalChecks[0].failureFingerprint;
+  assert.match(fingerprint, /^goal-check:[a-f0-9]{24}$/u);
+  assert.equal(qualityLoopOpenFailureFingerprint(reopened), fingerprint);
+  // 次の回は、判定の指紋を「直した失敗」として指す。回の指紋（合格点に届いた回は空）では受けない。
+  assert.throws(() => goalRound(reopened, { context: "review-context-2", extra: { revisionDelta: "結論を足した", previousFailureFingerprint: "" } }), /previous failure/u);
+  const again = goalRound(reopened, { context: "review-context-2", extra: { revisionDelta: "結論を足した", previousFailureFingerprint: fingerprint } });
+  assert.equal(again.status, QUALITY_GOAL_CHECK_STATUS);
+  // 前の判定の文脈は次の判定に使えない。
+  assert.throws(() => judge(again, { verdict: "achieved", evaluatorContextId: "goal-context-1" }), /Fresh evaluator context/u);
+  const passed = judge(again, { verdict: "achieved", reason: "依頼の結論が読者に届く", evaluatorContextId: "goal-context-2" });
+  assert.equal(passed.status, "passed");
+  assert.equal(passed.stopReason, "target-reached");
+  assert.equal(passed.goalChecks.length, 2);
+  assert.equal(Object.isFrozen(passed), true);
+});
+
+test("目的の判定で差し戻しても、回数の上限に届いていれば上限の止まり方で止め、判定待ちのループは人が止められる", () => {
+  const limited = { ...goalContract, limits: { ...goalContract.limits, maximumReviewRounds: 1 }, digest: "goal-limited" };
+  const start = createQualityLoopState({ contract: limited, generatorId: "gen", generatorContextId: "generator-context", startedAt: "2026-09-24T00:00:00Z" });
+  const reached = recordQualityRound({
+    contract: limited,
+    state: start,
+    hardGateReport: { pass: true, failedGateIds: [], contractDigest: limited.digest },
+    reviews: [{ evaluatorId: "evaluator", evaluatorContextId: "review-context-1", scores: scores(), notes: "全尺を見て所見を書いた", evidence: EVIDENCE }],
+    evidence: EVIDENCE,
+    observedAt: "2026-09-24T01:00:00Z",
+  });
+  assert.equal(reached.status, QUALITY_GOAL_CHECK_STATUS, "合格点に届けば、回数の上限でも判定を待つ");
+  const stopped = recordQualityGoalCheck({
+    state: reached, contract: limited, verdict: "not-achieved", reason: "依頼の目的から外れた", evaluatorId: "goal-judge", evaluatorContextId: "goal-context-1",
+  });
+  assert.equal(stopped.status, "needs-human-approval");
+  assert.equal(stopped.stopReason, "round-limit");
+  assert.equal(stopped.bestRound.passed, false);
+  // 判定待ちのループも、人が採点なしで止められる。
+  const human = stopQualityLoopByHuman({ state: reached, reason: "依頼そのものを変えると決めた", reviewer: "operator", attestedBy: "human-verified" });
+  assert.equal(human.status, "blocked");
+  assert.equal(human.stopReason, HUMAN_STOP_REASON);
 });

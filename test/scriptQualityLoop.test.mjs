@@ -797,7 +797,13 @@ test("漫画のジャンルでもループを回せ、評価項目はそのジ�
 });
 
 test("受け入れ方を宣言しない契約の digest は今までと同じ値（進行中のループを契約の変更で止めない）", () => {
-  assert.equal(DEFAULT_CONTRACT.digest, "0f641861c34e3e9bcb0e9c63464a8f3d8e755d493823944e1d83741e6afde6d0");
+  // 2026-09-27 より前の上限の既定の世代（最小改善 1 点）の契約は、それより前から走っているループと同じ digest。
+  const legacy = createScriptQualityContract({ limitDefaults: "minimum-improvement-1" }).contract;
+  assert.equal(legacy.digest, "0f641861c34e3e9bcb0e9c63464a8f3d8e755d493823944e1d83741e6afde6d0");
+  assert.equal(legacy.limits.minimumImprovement, 1);
+  // 新しく始めるループの既定（最小改善 5 点）の契約。
+  assert.equal(DEFAULT_CONTRACT.digest, "6539066e2a3051870c1c51a4f7a5c22919784ad9da186b79198d7086a1f18391");
+  assert.equal(DEFAULT_CONTRACT.limits.minimumImprovement, 5);
   assert.equal(Object.hasOwn(DEFAULT_CONTRACT, "acceptance"), false);
 });
 

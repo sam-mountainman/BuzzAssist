@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 台本の品質ループ（Claude Code / Codex 共通）
 //
-//   node scripts/script-quality-loop.mjs start  --work-dir <台本の作業フォルダ> --generator-context <初稿を書いた会話ID>
+//   node scripts/script-quality-loop.mjs start  --work-dir <台本の作業フォルダ> --generator-context <初稿を書いた会話ID> [--request <元の依頼>]
 //   node scripts/script-quality-loop.mjs sheet  --work-dir <dir> --script <版のファイル> --stage <工程>
 //   node scripts/script-quality-loop.mjs record --work-dir <dir> --script <版のファイル> --version <版の名前> \
 //        --stage <draft|external-rewrite|meaning-check|revision> --review <採点ファイル> [--external-call <id>]... \
@@ -11,6 +11,8 @@
 //   node scripts/script-quality-loop.mjs accept-human --work-dir <dir> --script <台本> --reviewer <名前> --reason "..." --human-verified
 //   node scripts/script-quality-loop.mjs reset-cumulative --work-dir <dir> --reviewer <名前> --reason "..." --human-verified
 //   node scripts/script-quality-loop.mjs stop --work-dir <dir> --reviewer <名前> --reason "..." --human-verified
+//   node scripts/script-quality-loop.mjs goal-sheet --work-dir <dir>
+//   node scripts/script-quality-loop.mjs goal-check --work-dir <dir> --review <判定ファイル>
 //
 // 版ごとに、その版を作った文脈とは別の評価文脈の採点を1回として記録する。実装の正本は
 // lib/scriptQualityLoop.mjs（中核は lib/qualityLoop.mjs）。状態は作業フォルダの quality/ に書く。
@@ -26,10 +28,12 @@ import {
   acceptScriptAsHumanVerified,
   createScriptQualityContract,
   loadScriptChannelConfig,
+  recordScriptGoalCheck,
   recordScriptQualityRound,
   resetScriptQualityCumulative,
   scriptQualityGenre,
   scriptQualityContractSummary,
+  scriptQualityGoalCheckSheet,
   scriptQualityReviewTemplate,
   scriptQualityStatus,
   scriptQualityVerdict,
@@ -41,7 +45,7 @@ const VALUE_OPTIONS = new Set([
   "--work-dir", "--genre", "--generator-context", "--generator-host", "--channel-pack", "--channel-config",
   "--reason", "--script", "--version", "--stage", "--review", "--base-version", "--revision-delta",
   "--blocking-condition", "--cost", "--ledger", "--reviewer", "--finding-dispositions", "--script-sha256",
-  "--channel", "--job",
+  "--channel", "--job", "--request",
 ]);
 const REPEATABLE_OPTIONS = new Set(["--producer-context", "--external-call"]);
 const FLAG_OPTIONS = new Set(["--json", "--restart", "--require-pass", "--human-verified", "--agent-attested", "--help", "-h"]);
@@ -75,7 +79,8 @@ export function parseScriptQualityArgs(argv) {
 export function scriptQualityHelp() {
   return `台本の品質ループ（版ごとに、作った文脈とは別の評価文脈の採点を1回として記録する）
 
-  contract  採点表（評価項目・下限・機械ゲート・上限）を出す。何も書かない
+  contract  運営者向けの採点表（評価項目・重み・下限・採点の目安・機械ゲート・目標点・最小改善・目的の判定の有無）を
+            出す。何も書かない（評価者には渡さない。評価者へは sheet）
     [--genre ${Object.keys(SCRIPT_QUALITY_GENRES).join("|")}] [--channel-pack <署名済みPack> | --channel-config <file>]
 
   start     ループを始める（状態は <work-dir>/quality/script-quality-loop.json）
@@ -88,12 +93,22 @@ export function scriptQualityHelp() {
                                   評価項目を足し、下限を上げられる（下げられない）。検証の公開鍵は
                                   BUZZASSIST_CHANNEL_PACK_PUBLIC_KEY
     [--channel-config <file>]     署名の無い設定（手元の試行用。契約に unsigned-file と刻まれる）
+    [--request <file>]            元の依頼（企画ブリーフの JSON など。作業フォルダの中のファイル）を SHA で固定する。
+                                  毎回の評価シート（sheet）に「元の依頼（目的）」として本文ごと載せ、採点ファイルに
+                                  requestSha256 を書かせる。途中でファイルが変わったら record しない（元に戻すか、
+                                  止めてから --restart --request で始め直す）。Pack の acceptance.goalCheck が
+                                  true のときは必須（目的の判定の物差し）。始め直しで省くと前のループの依頼を持ち越す
     [--restart --reason "..."]    止まったループだけ始め直せる（前の状態は history に残る。続いているループは、
                                   人が stop で止めてから）。同じ作業フォルダの
                                   回数・費用・時間の累計は持ち越し、止まる条件は累計でも判定する。累計が上限に
                                   届いていれば、新しいループは始めた時点で止まっている（終了コード 3）
+            停滞: 前の最高点から最小改善（既定 5 点。Pack の limits.minimumImprovementPoints で変えられる）だけ
+            伸びない回を停滞に数える（LLM の採点の約 10 点のぶれより小さい伸びを改善と数えない）。
+            2026-09-27 より前に始めたループは、始めたときの既定（1 点）のまま続く
 
-  sheet     評価者へ渡す採点ファイルの雛形を出す（scriptSha256 / baseScriptSha256 を計算して埋める）
+  sheet     評価者へ渡す採点ファイルの雛形を出す（scriptSha256 / baseScriptSha256 / requestSha256 を計算して埋める）。
+            シートには評価項目・採点の目安（Pack の anchors: 何点ならどういう状態か）・元の依頼（--request で固定した
+            もの）を載せ、合格点・重み・下限は載せない。評価者は元の依頼と評価項目を主軸に、この版だけを見て絶対評価する
     --work-dir <dir> --script <版のファイル> --stage <${SCRIPT_STAGES.join("|")}> [--base-version <版>]
 
   record    1つの版を1回として記録する。合格しなかった回は、評価項目 id・機械ゲート id・止まった
@@ -132,6 +147,22 @@ export function scriptQualityHelp() {
             別の版の採点・作った文脈・前の回や組の中で使った文脈・宣言外の評価者・2件目は組に入れない。
             合否は acceptance.mode で決まる: average（既定。評価者の平均）/ each-evaluator（評価者それぞれの
             総合点が minimumEvaluatorScore（無ければ目標点）以上で、各自の項目の下限も満たす）
+            Pack の acceptance.goalCheck が true なら、合格点に届いた回はすぐ合格にならず awaiting-goal-check
+            （目的の判定待ち）で止まる。goal-sheet → goal-check へ進む
+
+  goal-sheet  目的の判定のシートと判定ファイルの雛形を出す（awaiting-goal-check のときだけ。何も書かない）。
+            載せるのは元の依頼（本文）と、合格点に届いた版の台本の置き場と SHA だけ。点数・合格点・評価項目・
+            前の回の指摘は載せない
+    --work-dir <dir>
+
+  goal-check  目的の判定を記録する。判定は、このループ（と前のループ）の作成・採点・前の判定に使っていない
+            新しい文脈の評価者が、点数ではなく「元の依頼の目的を果たしたか」で行う
+    --work-dir <dir> --review <判定ファイル>
+                                  { evaluatorId, evaluatorContextId, evaluatorHost, scriptSha256, requestSha256,
+                                    verdict: "achieved|not-achieved", reason }
+                                  achieved なら合格。not-achieved なら理由を指摘（r<回>-f<番号>）としてループに戻し
+                                  active に戻る（次の版はその指摘の採否と、判定の指紋 goal-check:... を直した失敗として
+                                  書く）。回数・費用・時間の上限に届いていれば人待ちで止まる
 
   status    今の状態。deliverable は合格して、その版の台本が今も同じバイト列のときだけ。
             check.cumulative にこの作業フォルダの累計（ループ数・回数・費用・時間・費用の不明な件数）が出る
@@ -141,7 +172,8 @@ export function scriptQualityHelp() {
     --work-dir <dir> (--script <台本のファイル> | --script-sha256 <sha>) [--genre <id>] [--json]
                                   使ってよい（終了コード 0）: script-quality-passed（ループが合格した版と同じ SHA）/
                                   script-quality-human-accepted（人がそのまま使うと認めた SHA）。
-                                  使えない（終了コード 4）: script-changed-after-pass・script-quality-not-passed など。
+                                  使えない（終了コード 4）: script-changed-after-pass・script-quality-not-passed・
+                                  script-quality-goal-check-pending（合格点の後の目的の判定待ち）など。
                                   --genre を付けると、別ジャンルの採点表での合格は script-quality-genre-mismatch
                                   （制作の Job は自分のジャンルを付けて問う: ナレーション物語 narrated-story・漫画 manga）
 
@@ -155,7 +187,7 @@ export function scriptQualityHelp() {
                                   確認した人が自分の対話端末から打つ。--agent-attested は数えず何も変えない。
                                   戻す前の累計は cumulativeResets に残る
 
-  stop      続いているループを、採点なしで止める（評価項目の改定を決めた・方向を変えると決めた、など）。
+  stop      続いているループ（目的の判定待ちを含む）を、採点なしで止める（評価項目の改定を決めた・方向を変えると決めた、など）。
             次の版を古い契約で採点して --blocking-condition で止めると、同じ版を新しい契約でもう一度採点する
             ことになり、回数の上限を1回無駄にする。Pack が変わって record が contract-changed で止まるループの
             出口でもある
@@ -231,6 +263,7 @@ export async function runScriptQualityCli(argv = process.argv.slice(2), {
         generatorHost: args.generatorHost,
         channelPack: args.channelPack,
         channelConfig: args.channelConfig,
+        requestPath: args.request,
         restart: args.restart === true,
         restartReason: args.reason,
         env,
@@ -292,6 +325,16 @@ export async function runScriptQualityCli(argv = process.argv.slice(2), {
       stdout.write(`${JSON.stringify(result, null, 2)}\n`);
       return { exitCode: 0, result };
     }
+    case "goal-sheet": {
+      const result = await scriptQualityGoalCheckSheet({ workDir: args.workDir });
+      stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+      return { exitCode: 0, result };
+    }
+    case "goal-check": {
+      const result = await recordScriptGoalCheck({ workDir: args.workDir, reviewPath: args.review, env, ...injected });
+      print(stdout, result, args.json);
+      return { exitCode: result.recorded || result.alreadyRecorded ? 0 : 3, result };
+    }
     case "record": {
       // 学習を積むチャンネルの明示（--channel / --job）。台帳に無いチャンネル・見つからない Job は、回を記録する前に止める。
       const hints = await learningChannelCliHints({ channelId: args.channel, jobId: args.job, env });
@@ -341,7 +384,7 @@ export async function runScriptQualityCli(argv = process.argv.slice(2), {
       return { exitCode: args.requirePass && !result.deliverable ? 4 : 0, result };
     }
     default:
-      throw new Error(`不明なアクション: ${args.action}（contract / start / sheet / record / status / verdict / accept-human / reset-cumulative / stop）`);
+      throw new Error(`不明なアクション: ${args.action}（contract / start / sheet / record / goal-sheet / goal-check / status / verdict / accept-human / reset-cumulative / stop）`);
   }
 }
 

@@ -60,8 +60,9 @@ test("解説動画の図解と説明の対応とテンポは下限つきで、�
     assert.equal(Object.hasOwn(row, "minimumScore"), false, `${row.id} の下限が評価者のシートに出ている`);
   }
   assert.doesNotMatch(JSON.stringify(sheet), /targetScore|minimumScore|"weight"/u);
-  // 観点は契約の digest に入れない（ナレーション物語の契約の digest は変わらない）。
-  assert.equal(createScriptQualityContract().contract.digest, "0f641861c34e3e9bcb0e9c63464a8f3d8e755d493823944e1d83741e6afde6d0");
+  // 観点は契約の digest に入れない（ナレーション物語の契約の digest は変わらない。2026-09-27 より前の上限の既定の
+  // 世代で作った契約が、それより前から走っているループの digest と同じ値になる）。
+  assert.equal(createScriptQualityContract({ limitDefaults: "minimum-improvement-1" }).contract.digest, "0f641861c34e3e9bcb0e9c63464a8f3d8e755d493823944e1d83741e6afde6d0");
 });
 
 test("合成のチャンネル設定（ジャンル explainer・受け入れ方は既定の average）: 評価者の組も each-evaluator も使わず1件で1回", async (t) => {
@@ -72,7 +73,7 @@ test("合成のチャンネル設定（ジャンル explainer・受け入れ方�
   const { contract, blockers } = createScriptQualityContract({ genre: "explainer", channelConfig: config, channelSource: { kind: "unsigned-file", configSha256: sha(bytes) } });
   assert.deepEqual(blockers, []);
   assert.equal(Object.hasOwn(contract, "acceptance"), false);
-  assert.deepEqual(normalizeQualityAcceptance(contract.acceptance), { declared: false, mode: "average", evaluators: [], minimumEvaluatorScore: null });
+  assert.deepEqual(normalizeQualityAcceptance(contract.acceptance), { declared: false, mode: "average", evaluators: [], minimumEvaluatorScore: null, goalCheck: false });
   assert.equal(contract.rubric.find((row) => row.id === "evidence-scope").minimumScore, 90);
   assert.equal(contract.rubric.find((row) => row.id === "visual-narration-alignment").minimumScore, 85);
   assert.equal(contract.limits.targetScore, 90);
