@@ -247,3 +247,37 @@ test("verdict の genre: 知らないジャンルは例外、ループの合格�
   assert.equal((await scriptQualityVerdict({ workDir: root, scriptPath, genre: "narrated-story" })).reasonCode, "script-quality-genre-mismatch");
   await assert.rejects(scriptQualityVerdict({ workDir: root, scriptPath, genre: "unknown-genre" }), /未知の台本ジャンル/u);
 });
+
+test("制作に使う Pack を渡すと、ループが採点した採点表（script-quality.json）と違うときは合格を通さない（人の受け入れは照らさない）", async (t) => {
+  const root = await workspace(t);
+  const scriptPath = join(root, "script.md");
+  await writeFile(scriptPath, SCRIPT);
+  const payload = join(root, "payload");
+  await mkdir(payload, { recursive: true });
+  const config = "{\"version\":\"synthetic\"}\n";
+  await writeFile(join(payload, "script-quality.json"), config);
+  const passed = (channelConfigSha256, acceptedBy = "quality-loop") => async () => ({
+    pass: true, reasonCode: acceptedBy === "human" ? SCRIPT_QUALITY_VERDICT_CODES.humanAccepted : SCRIPT_QUALITY_VERDICT_CODES.passed,
+    acceptedBy, scriptSha256: sha(SCRIPT), status: "passed", channelConfigSha256,
+  });
+  const ask = (verdict, channelPayloadDir = payload) => checkScriptQualityBeforeProduction({ workDir: root, scriptPath, genre: "narrated-story", channelPayloadDir, verdict });
+
+  // 同じ採点表で合格 → 通す。
+  assert.equal((await ask(passed(sha(config)))).pass, true);
+  // 採点表が変わった（または採点表なしで採点した）→ 止めて、今の Pack で採点し直す手順を出す。
+  for (const scored of [sha("{\"version\":\"older\"}\n"), null]) {
+    const gate = await ask(passed(scored));
+    assert.equal(gate.pass, false);
+    assert.equal(gate.reasonCode, SCRIPT_QUALITY_VERDICT_CODES.channelContractChanged);
+    assert.deepEqual(gate.issues, [`${SCRIPT_QUALITY_REQUIRED_ISSUE}:${SCRIPT_QUALITY_VERDICT_CODES.channelContractChanged}`]);
+    assert.match(gate.next.join("\n"), /--restart --reason "Pack の採点表が変わった" --channel-pack/u);
+  }
+  // 人がそのまま使うと認めた台本は、採点表に依らないので通す。
+  assert.equal((await ask(passed(null, "human"))).pass, true);
+  // Pack を渡さない呼び出し（今までどおり）は照らさない。
+  assert.equal((await ask(passed(null), "")).pass, true);
+  // Pack に採点表が無く、ループも採点表なしで採点した → 同じなので通す。
+  const bare = join(root, "bare-payload");
+  await mkdir(bare, { recursive: true });
+  assert.equal((await ask(passed(null), bare)).pass, true);
+});
