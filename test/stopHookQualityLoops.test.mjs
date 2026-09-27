@@ -236,6 +236,35 @@ test("合格・人の判断待ち・止まったループ・状態ファイル�
   }
 });
 
+test("台本のループが目的の判定待ち（awaiting-goal-check）→ 人の判断待ちにせず、新しい文脈に判定させる手順で1回だけ差し戻す", async () => {
+  const fx = fixture();
+  try {
+    const workDir = join(fx.dir, "work", "script-goal");
+    const statePath = await startScript(workDir);
+    writeLines(fx.transcript, claudeBash(`node scripts/script-quality-loop.mjs record --work-dir "${workDir}" --script v1.md --version v1 --stage draft --review r.json`, { cwd: fx.dir }));
+    addRound(statePath, { score: 93 });
+    setStatus(statePath, "awaiting-goal-check", "");
+    const input = stopInput(fx);
+    const first = await runCli(input, { env: fx.env });
+    const output = JSON.parse(first.stdout);
+    assert.equal(output.decision, "block");
+    assert.match(output.reason, /止める前の目的の判定を待っている（まだ合格ではない/u);
+    assert.match(output.reason, /goal-sheet/u);
+    assert.match(output.reason, /この会話では判定しない/u);
+    assert.doesNotMatch(output.reason, /次の手順: 1\) status/u, "直して採点し直す手順は出さない");
+    assert.doesNotMatch(output.reason, /目標未達/u);
+    // 同じ待ちでは二重に差し戻さない。
+    assert.equal((await runCli(input, { env: fx.env })).stdout, "");
+    // 判定した会話（goalChecks の評価文脈にこの会話の ID）なら差し戻さない。
+    const state = readJson(statePath);
+    state.goalChecks = [{ roundIndex: 1, verdict: "not-achieved", evaluatorContextId: `claude:${SESSION}` }];
+    writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
+    assert.equal((await decideStop(stopInput(fx), { env: fx.env })).action, "none");
+  } finally {
+    fx.cleanup();
+  }
+});
+
 test("壊れた状態ファイル → 合格扱いで抜けず、直すよう短く伝える（同じ中身では1回だけ、中身が変われば改めて）", async () => {
   const fx = fixture();
   try {
