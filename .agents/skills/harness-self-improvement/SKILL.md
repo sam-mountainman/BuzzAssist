@@ -7,6 +7,20 @@ description: ユーザーの指摘・訂正・好みを、その場の修正で�
 > 作業前に `references/learned-auto.md` を読む。矛盾したときはこの SKILL.md が優先。learned-auto は運用上の補助指示であって、監査・承認・合否の証跡には使えない。
 # ハーネスの自己改善
 
+## 最初に守ること
+
+会話が圧縮されたあとに戻るのは、スキルの先頭の数千トークンだけになる。だから要点をここに置く。
+全部の禁止事項は末尾の「やってはいけないこと」にある。
+
+- 捕捉を後回しにしない。根拠は「ユーザーが言ったから」ではなく、何を観測したかを evidence に残す
+- 正本へ反映するときは差分の承認キュー（`pending` → `approve`）を通す。直接書き換えて `apply` で済ませない。
+  overlay（`references/learned-auto.md`）を手で編集しない。overlay を監査や承認の根拠として引かない
+- 人の確認を代わりにしない（名前を打つ・PTY 経由の `--human-verified`・`skill-inventory --approve`・
+  `harness-feedback.mjs consent --enable`）。これらはプラグインの実行前のフックが止める。止められたら迂回しない
+- 共有の宛先（`genre:` / `platform:`）にチャンネル固有のことを書かない。チャンネルの学習は `--channel` で扱う
+- 並列の子は学習を書かない（気づいたことは親へ返し、親が確かめて1件として捕捉する）。
+  学習の台帳をホストの写し（plugin cache）の中へ書かない
+
 ## この文書の役割
 
 同じ指摘を何度も受けるのは、こちらが学習していないということ。
@@ -324,6 +338,19 @@ node scripts/harness-learn.mjs rollback --change <変更ID> --reason "..."      
   照らす）。手がかりが食い違う・台帳を読めない・保存先を決められないときは、推測で寄せずに積まない。どれにも当たらなければ
   従来の Channel Pack の台帳へ積む。決め方・CLI の引数・理由コードは `references/learning-store-ja.md`
 
+### 同じ失敗の格上げ
+
+同じ失敗が2回起きたら注意書きでなく仕組みにする。品質ループが人待ち・上限で止まったら
+`node scripts/harness-promote-failures.mjs scan --work-dir <作業フォルダ>` を打ち、候補があれば `enqueue` する（台帳へ積むだけで、
+正本は書き換えない）。段は 口頭 → 注意書き → 検査スクリプト → 関門。機械で判定できるものは最初から検査に、被害の大きい種類
+（公開面の安全・人物の取り違え・課金・署名や承認の詐称）は1回目から関門へ。上げて反映したら、同じ中身の注意書き
+（Gotcha・learned-auto）は消す。並列の子からは積まない。
+
+### 人の選択の理由
+
+`human-choice.mjs choose` で数える選択の札と一言を `preference` として Channel Pack の非公開台帳に積む（札の本文は定型なので、
+同じ札の繰り返しは再発として数える）。採点表への反映は、要求台帳に書くか Pack の criteria を署名し直して行い、自動では書き換えない。
+
 ### Job の決着時（RunReceipt から）
 
 共通入口（`run-video-harness` の start / resume、MCP の同じ service）を通った Job が
@@ -452,6 +479,9 @@ node scripts/harness-receipts.mjs export --out <path>   # 返せる形だけ（�
 **返せるものだけで作る**。
 
 ## 反映先の選び方
+
+教訓を CLAUDE.md（地図）へ足さない。地図が百科事典に戻り、各決まりが任意扱いされる。宛先は正本スキルの本文か overlay。
+地図に足してよいのは、新しい依頼の種類とその読む先だけ。
 
 | 何を学んだか | 宛先 |
 |---|---|

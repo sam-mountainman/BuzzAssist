@@ -7,6 +7,25 @@ description: 運営者にもジャンルにも依らない共通技法（課金A
 
 # プラットフォーム共通技法（platform craft）
 
+## 最初に守ること
+
+会話が圧縮されたあとに戻るのは、スキルの先頭の数千トークンだけになる。だから要点をここに置く。
+全部の禁止事項は末尾の「やってはいけないこと」、直す前に思い出す型は「この層で繰り返し見つかった不具合の型」にある。
+
+- 完成と呼ぶのは Job が合格で決着したとき（`completed`・RunReceipt `pass`・`knownRemainingIssues` が空）だけ。
+  `awaiting-human-review` は待ちとして報告する。Stop フックに差し戻されなかったことを合格の根拠にしない
+- 人の操作を代わりに打たない: `--human-verified`、`skill-inventory --approve`、品質ループの `accept-human`・
+  `reset-cumulative`・`stop`（決めた人が自分の端末で打つ）
+- 承認前の正本で作ったこと（Receipt の `skillApproval`）を伏せない。`skills:check:release` の関門を外さない
+- 評価者に合格点・重み・下限・前の回の点を見せない。採点を頼むとき、ループのソースを開かせない
+- 課金 API は共通の関所を通す。新しい `fetch` とリトライを直に書かない
+- 2つ目の実装を作らない（先に `harness-registry.mjs list`）。この層にジャンル・チャンネル固有の規則を書かない
+- CLAUDE.md / AGENTS.md は手で直さず、テンプレートから生成する。`src/` を触ったら起動して確かめる
+- 実行前のフック（`scripts/harness-guard-hook.mjs`）が止めたら、変数や別ファイルで迂回しない。決めてほしいことと
+  打つコマンドを人に渡す。署名済みの封筒（`channel-pack.json` の目録がある階層・`*-signed-*`）の中は書き換えず、
+  署名前の元の束を直して、署名する人が新しい出力先へ作る
+- 「会話が圧縮されました」と知らされたら、挙がった正本を最後まで読み直してから続ける。要約と正本が食い違えば正本に従う
+
 ## この文書の役割
 
 BuzzAssist は3層に分かれている。
@@ -228,6 +247,13 @@ RunReceipt の `invocation` 欄へ digest つきで写る。判定は `lib/harne
   Job の同一性に入れない（env で Job が分かれないように、記録は写しの種類と未承認のスキルだけ）
 - 承認前の正本で作ったことは Receipt の合否を変えない。成果物を報告するときは `skillApproval` を伏せない
 
+### 配った版が届いたかを確かめる
+
+模擬の置き場で通った更新器の試験は、運営者の端末に届いた証拠ではない（0.1.26〜0.1.29 は確認の段の不具合で一度も
+届いていなかった）。Release のあと、実機で `npm run update:now` → `npm run release:accept`（読むだけ。本体
+`scripts/release-acceptance.mjs`）を回し、両ホストの version・hooks・mcp が合格（exit 0）になってから配ったと言う。
+未確定（exit 2）は合格ではない。フックが本当に発火するかは、新しいセッションの `/hooks` で人が見る。
+
 ### 完成と言う前に（Stop フック）
 
 Claude Code と Codex のプラグインは Stop フック（`scripts/harness-stop-hook.mjs`）を持つ。最後の発言が
@@ -242,6 +268,11 @@ RunReceipt が pass で確かめられない、blockers・`knownRemainingIssues`
   **差し戻されなかったことは合格の証拠ではない**——合格の根拠は Job と RunReceipt だけ
 - Codex は `/hooks` でフックを信頼するまで動かさない。Antigravity にはフックが無いので、
   `node scripts/run-video-harness.mjs status` で自分で Job を確かめてから報告する
+- 品質ループの回し忘れ: この会話で start / record した台本・途中の成果物・企画ブリーフのループが active のまま
+  止まろうとすると、同じ周回で1回だけ差し戻され、周回と点数・次に読むファイル・次の手順が返る（本体
+  `lib/stopHookQualityLoops.mjs`）。状態を読み、直した版を別の評価文脈で採点して record する。有料の生成や人の判断が
+  要るなら、周回・点数・次の手順を報告して止まる。評価者として動いている会話なら版を直さない。状態ファイルが壊れて
+  いると言われたら、手で合格に書き換えず原因を直す。完成動画のループは人の署名待ちなので差し戻されない
 
 ## Canvas への投影
 
@@ -263,6 +294,14 @@ snapshot の読み取り側だけを書く。漫画は `lib/koyaMangaProgressSna
 - 合格は、機械ゲート全部pass・加重平均が目標以上・どの評価項目も下限以上の3つ。
   平均だけで判定すると、1つの項目の致命的な低さが他の満点で薄まる
 - 止まる条件を複数持つ: 目標到達、人の判断が要る状態、費用、時間、回数、改善の停滞
+- 停滞の判定の最小改善は、2026-09-27 から新しく始めるループで 5 点（LLM の採点の約10点のぶれより小さい伸びを改善と
+  数えない）。走っているループは始めたときの値のまま。点が伸びないときは、ダイヤル（合格点・最小改善）をいじる前に
+  採点軸を疑う。上限の既定を変えるときは `lib/qualityLoop.mjs` の `QUALITY_LIMIT_DEFAULT_GENERATIONS` に新しい世代を
+  先頭に足し、古い世代は消さない（走っているループの契約の digest を再現するため）
+- 回の外では、人が採点なしで止める（`stopQualityLoopByHuman`。blocked・`human-stopped`）。回・費用・時間は数えず、
+  合格にもならない。入口は台本・途中の成果物・企画ブリーフの `stop --reason … --reviewer … --human-verified`
+  （止めると決めた人が自分の対話端末から打つ）。評価項目の改定を決めたとき、次の版を古い契約で採点して
+  `--blocking-condition` で止めない（同じ版を新しい契約でもう一度採点し、回数を 1 回無駄にする）
 - 合格しなかった回には失敗指紋を付け、次の回は「どの失敗を、どう直したか」を必須にする。
   修正内容が無いときは例外で落とさず、人待ちで止める
 - 時計はループの中で観測した最も早い時刻から最も遅い時刻までで数える。レビューの署名が監査より先でも
@@ -284,6 +323,15 @@ snapshot の読み取り側だけを書く。漫画は `lib/koyaMangaProgressSna
 
 使う前の照合と「状態 → 理由コード」の対応は、ループの種類ごとに1か所だけに置く。ジャンルが足すのは効力の
 判定（どの契約の版から効くか）だけで、照合する側はループの issues や状態名を読まない。2つ目の照合を作らない。
+
+人が候補から選ぶ判断は `node scripts/human-choice.mjs`（本体 `lib/humanChoice.mjs`）。聞き方は3つに分ける——
+どれがいいかは並べて選ぶ（2〜5案・設計の軸を分ける）、これでいいかは1案に赤を入れる（verify・accept-human・signoff）、
+機械が確かめられることは人に聞かない。工程ごとの表は `routes` と `docs/human-choice-ja.md`。選んだ理由は採点表の候補として
+承認キューへ積まれる（Pack は自動で書き換えない）。2つ目の選択記録を作らない。
+
+同じ失敗が別の版で2回出たら、注意書きでなく検査・関門へ上げる提案を積む（`node scripts/harness-promote-failures.mjs`、
+本体 `lib/qualityFailurePromotion.mjs`）。再発は成果物の sha で数え、採点し直しの回数では上げない。機械で判定できるものは
+最初から検査に、被害の大きい種類は1回目から関門へ。上げて反映したら、同じ中身の注意書きは消す。
 
 - 途中の成果物: 人物の同一性と、公開面に出る画の手指の安全は、対話端末＋`--human-verified` の人の確認が
   無いと合格にならない（対象ごと。batch では記録できない。対象が多いときは `verify-pages` で数枚ずつのページ画像に
@@ -492,9 +540,12 @@ BuzzAssist正本は`.agents/skills`に置く。Claude Code は `.claude/skills` 
   テストで見えるようにする**（`receiptAdapter: { status: "pending", reason, requiredWork }`）
 - CLAUDE.md / AGENTS.md / GEMINI.md を手で直す。リポジトリの config/host-instructions.template.md を直して
   `node scripts/generate-host-instructions.mjs` で作る（CI が `npm run instructions:check` で照合する）
+- 地図（CLAUDE.md / AGENTS.md / GEMINI.md）を百科事典に戻す。地図は60行以下（超えると生成が止まる）。決まりを足すときは
+  正本スキルか `docs/host-instructions-detail-ja.md` に置き、地図には「どの依頼で何を読むか」の1行と要点だけを足す。
+  地図が指す docs は `package.json` の `files` と setup の写しの一覧の両方に入れる
 - 4つ目の Canvas 投影器、2つ目の取り込み口・品質ループの照合・ホストの判定・有料の呼び出しの関所を作る
-- エージェントが人の代わりに `accept-human`・`reset-cumulative` を `--human-verified` で打つ
-  （台本を認めたこと・累計を戻したことは、確認した人の端末でだけ記録する）
+- エージェントが人の代わりに `accept-human`・`reset-cumulative`・`stop` を `--human-verified` で打つ
+  （台本を認めたこと・累計を戻したこと・ループを止めたことは、確認した人の端末でだけ記録する）
 - Stop フックに差し戻されなかったことを、合格の根拠として報告する
 - 承認前の正本スキルで作ったこと（Receipt の `skillApproval`）を伏せて完成を報告する。
   エージェントが `skill-inventory --approve` を打つ・`skills:check:release` の関門を外す

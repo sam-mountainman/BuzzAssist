@@ -30,6 +30,8 @@ Operator Production の動画生成経路からは呼ばない。端末にある
 4. `.agents/skills` の正本を日本語で変更する。条件別の詳細だけを `references/` へ分ける。
 5. `evals/evals.json` に現実的な正例と近接した負例を置き、観測可能な不変条件をテストする。
 6. Claude Code の adapter（`.claude/skills`）は正本への相対参照だけに保ち、手順を複製しない。Codex 用の adapter は作らない。
+   新しい正本スキルを作ったら、`config/host-instructions.template.md` の「依頼ごとに先に読む正本」に1行足し、
+   `node scripts/generate-host-instructions.mjs` で地図を作り直す（地図は60行以下）。
 7. inventory manifestのsemver、言語、owner、由来、対応host、内容SHA（`contentSha256`）、束のdigest
    （`bundleSha256`）を更新する。束のdigestは SKILL.md と、一緒に配る `references/`・`scripts/`・`agents/` などの
    付属物を覆う（`evals/` と、機械が書き直す `references/learned-auto.md`・`learned-archive.md` は外す）。
@@ -49,6 +51,11 @@ Operator Production の動画生成経路からは呼ばない。端末にある
 10. 人の承認は、運営者へ配る版（GitHub Release）を出すときの1回。変更の要約と評価結果を人へ渡し、
     承認者本人が自分の端末で `node scripts/skill-inventory.mjs --approve <id> --reviewer <名前> --human-verified`
     を打つ。エージェントは代わりに打たない。承認の無い版は配らない（`npm run skills:check:release` が止める）。
+    Release を公開したら、運営者の実機で `npm run update:now` → `npm run release:accept` を回し、両ホストの version・hooks・mcp が
+    合格（exit 0）になってから配ったと報告する。
+11. 棚卸しは月に1回ほど（doctor の `skill-usage-review` が知らせる）。`node scripts/skill-usage.mjs report` で使われ方を見る →
+    `review-sheet` でシートを作る → 数えた文脈とは別の新しい文脈が要否を判定 → 外す・まとめるは人が決める → 正本の変更は
+    この手順で → 最後に `record-review`。使用回数だけで外さない（リリースのときだけ使うもの、CLAUDE.md から直接読むものがある）。
 
 ## プロファイル境界
 

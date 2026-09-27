@@ -10,6 +10,18 @@ description: 日本語の生台本から、画像・ナレーション・字幕�
 これはClaude CodeとCodexが共用する日本語正本である。運営者名、チャンネル名、
 Voice ID、画風、承認記録はここへ書かず、署名済みChannel Packへ置く。
 
+## 最初に守ること
+
+会話が圧縮されたあとに戻るのは、スキルの先頭の数千トークンだけになる。だから要点をここに置く。
+
+- 入口は `node scripts/run-video-harness.mjs`（MCP は `run_video_harness`）だけ。個別の生成・音声・字幕を手でつながない。
+  `--confirmed` が無い start は有料の生成をしない。先に `preflight.blockers` を読み、空でなければ運営者へ示す
+- 有料の処理の前に、台本が台本の品質ループに合格した版か、人がそのまま使うと認めた版かを問う（「台本の関門」）。
+  `accept-human` は確認した人が自分の端末で打つ。エージェントは代わりに打たない
+- 完成と呼ぶのは末尾の「完了条件」が全部そろったときだけ（実MP4の全デコード・全 gate の実測 pass・
+  署名つきの独立 signoff・`knownRemainingIssues` が空 など）。`awaiting-human-review` は待ちとして報告する
+- YouTube Analytics などの公開後の指標を制作の経路に混ぜない
+
 ## 唯一の上位入口
 
 新規制作と再開は、どちらのホストでも共通入口だけを使う。
@@ -230,6 +242,9 @@ Fish Audio、ElevenLabs、字幕、retime、finalize用scriptを手で順番に�
 `lib/thumbnailPlan.mjs`）。決まりは署名済み Pack の `narrated-story.json` の `thumbnail` 節に置き、
 節が無い Pack ではサムネを計画しない（チャンネル固有の値を推測で埋めない）。手順・final の条件は
 `references/thumbnail-ja.md` にある。サムネを計画・検査するときに読む。
+
+サムネと要の場面の画は、決める前に `node scripts/human-choice.mjs create` で設計の軸を分けた4案ほどを並べて人に
+選んでもらい、`status` の guidance を次の生成の指示に入れる。本編の画を1枚ずつ人に選ばせない。
 
 ## 並列実行
 

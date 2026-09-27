@@ -5,6 +5,9 @@
 照合の置き場は SKILL.md にあり、ここでは繰り返さない。ループを回すとき、ループの記録や使う前の照合を読む
 コードを触るとき、企画ブリーフを組み立てるときに読む。
 
+
+ループを始めた・記録した会話は、止まる前に Stop フックが状態を読む。続きは会話の自己申告でなく状態ファイルで決まる（`lib/stopHookQualityLoops.mjs`）。
+
 ## 途中の成果物（`node scripts/asset-quality-loop.mjs`）
 
 人物の設定画・背景・本編の画・サムネ・声のテイク・動画クリップを、使う前に同じ中核でループにかける。
@@ -28,6 +31,9 @@
 - 状態 → 理由コードの対応は `lib/assetQualityLoop.mjs` の `assetQualityReasonCode` の1か所（before-use /
   loop-state の語彙）。使う前の照合は `lib/assetQualityUseGate.mjs` の1か所で、ジャンルは効力の判定だけを
   足す（漫画は契約の版で効力を決めてからここを呼ぶ）
+- 採点なしで止めるのは `stop --work-dir <dir> --stage <工程> --subject <id> --reason … --reviewer … --human-verified`
+  （1 つのループずつ。理由コードは `loop-stopped:blocked`、使う前の照合は not-passed。始め直しても人の確認の記録は
+  引き継ぐ）
 
 ### 人の確認（verify と verify-pages）
 
@@ -57,6 +63,14 @@
   - 途中でやめても（`q`・Ctrl-C・Ctrl-D）答えたページまでは記録に残り、同じコマンドで残りの対象だけのページから続く
   - 動画クリップはページで見ない（静止画では動いている途中の手や顔の崩れを見落とす）。通しで再生して `verify`
 
+### 人の選択（human choice）
+
+- 候補を並べて人に選んでもらうのは `node scripts/human-choice.mjs create`（1枚の HTML、外部の読み込み・保存なし）→ `choose`。
+  数えるのは選んだ人の対話端末＋`--human-verified` だけで、`--agent-attested` は記録に残るが数えず、学習にも積まない
+- 決め手の札（3つまで）か一言が要る。お任せ（`--delegate`）は推奨の案だけで、理由が無いので学習に積まない
+- 候補のファイルが並べた後で変わったら記録しない。選んだ案を直すときは別のファイルに書く
+- 次の生成には `status` の guidance（選んだ案と理由の一文）を入れる
+
 ### 動画クリップ（工程 video-clip）
 
 - 先に `measure-video --work-dir <dir> --asset <動画> --declaration <宣言.json>` で ffprobe / ffmpeg の測定
@@ -81,6 +95,21 @@ BuzzAssist 独自のもの。チャンネル固有の型は、署名済み Chann
 - 始め直しても、同じ作業フォルダの回数・費用・時間は持ち越し、止まる条件は累計でも判定する。始め直しで
   上限を消せると、止まる条件が効かなくなるため。累計を戻せるのは、人が自分の端末から打つ
   `reset-cumulative --reason "..." --reviewer <名前> --human-verified` だけ
+- 評価項目の改定などで続いているループを採点なしで止めるのは、決めた人が自分の端末から打つ
+  `stop --work-dir <dir> --reason "..." --reviewer <名前> --human-verified` だけ。状態は blocked（`human-stopped`）で、
+  止めた人・理由・時刻は `humanStop` に残る（始め直すと history にも残る）。回・費用・時間は数えず、開いている評価の組は
+  閉じずに破棄した記録（`script.discardedPanel`）を残す（採点のファイルは消さない。組の費用は累計に入れない）。
+  止めても合格にはならず、verdict は `script-quality-stopped`。続けるなら `start --restart --reason "..."`（累計は持ち越す）
+- 評価の組の `--blocking-condition` は、組のどの record に付けても、組が閉じた時点で効く（record に付けた値が
+  採点ファイルの値より先）
+- `start --request <作業フォルダの中の依頼>` で元の依頼（企画ブリーフ）を SHA で固定する。sheet は毎回、元の依頼を本文ごと載せ、
+  採点ファイルに `requestSha256` を求める。途中で依頼が変わると record・sheet は `script-quality-request-changed` で止まる。
+  評価者は元の依頼と評価項目を主軸に、その版だけを見て絶対評価する（前の版と比べない）
+- Pack の `script-quality.json` で評価項目ごとに採点の目安（チャンネルの項目は `criteria[].anchors`、ジャンルの項目は
+  `anchors.<id>` に `[{score, state}]`）を書ける。評価シートに載り、契約の digest に入る。合否の線（合格・下限など）は書かない
+- Pack の `acceptance.goalCheck: true` なら、合格点に届いても `awaiting-goal-check` で止まる。作成・採点に使っていない新しい
+  文脈に `goal-sheet`（元の依頼と台本だけ。点数は載らない）を渡し、目的を果たしたかを `goal-check` で記録する
+  （not-achieved は理由が次の版の指摘になる）。判定待ちの台本は制作の関門を `script-quality-goal-check-pending` で通らない
 - `--cost` を書かない回は、参照した外部モデルの呼び出しを0円ではなく「費用不明」の件数に数える
 - 2回目以降の版は、前回の失敗をどう直したか（`--revision-delta`）と、前の回の指摘ごとの採否と理由
   （`--finding-dispositions`）が要る。採用した指摘が次の回でも出たら「直っていない指摘」として停滞に数える
@@ -90,6 +119,10 @@ BuzzAssist 独自のもの。チャンネル固有の型は、署名済み Chann
 
 - 制作側が見るのは `verdict`（ライブラリでは `scriptQualityVerdict`）だけ。使ってよいのは、ループが合格した
   版と同じ SHA（`script-quality-passed`）か、人がそのまま使うと認めた SHA（`script-quality-human-accepted`）
+- ループの合格は、採点に使った Pack の採点表（`script-quality.json` のバイト列の SHA）と、制作に使う Pack の採点表が
+  同じときだけ通る（ナレーション物語は Job の Pack を関門へ渡す）。Pack の採点表だけを変えたら、古い採点表の合格は
+  `script-quality-channel-contract-changed` で止まるので、今の Pack で `start --restart --channel-pack` から採点し直す。
+  人がそのまま使うと認めた台本（accept-human）は採点表に依らないので照らさない
 - 運営者・依頼者が書いた台本をそのまま使うときは、確認した人が自分の端末で
   `node scripts/script-quality-loop.mjs accept-human --work-dir <台本のフォルダ> --script <台本> --reviewer <名前> --reason "…" --human-verified`
   を打つ。AI の点で人の台本を止めない。エージェントは代わりに打たない
@@ -118,6 +151,8 @@ status / verdict で版ごとに別の評価文脈の採点を記録する（本
 - 視聴者の分析の run は、`report-manifest.json` が今の結果と一致するものだけを根拠にする
 - 公開後は `next --from <前のブリーフ> --metrics <集計> [--referrals <JSON>] [--audience-run <run>]` で次の
   下書きを作る。無い数字は missing、一部だけの数字は partial として、比べない
+- 採点なしで止めるのは、決めた人が自分の端末から打つ `stop --work-dir <dir> --reason … --reviewer … --human-verified`
+  だけ（verdict は `strategy-brief-loop-not-passed:blocked`）
 - `verdict --require-pass` が通るまで制作へ渡さない。制作を止める未確認事項（`blocksProduction`）が open の
   ブリーフも渡さない（`strategy-brief-open-question-blocks-production`）
 - 制作へは `run-video-harness.mjs plan-request|start --strategy-brief FILE`。SHA は `options.strategyBriefSha256`
