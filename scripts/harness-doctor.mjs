@@ -46,6 +46,7 @@ import { fetchLatestStableRelease } from "../lib/pluginAutoUpdate.mjs";
 import { probeReleaseCurrency, readUpdaterRecords } from "../lib/releaseAcceptance.mjs";
 import { SKILL_APPROVAL_REQUIREMENT_ENV, probeSkillApproval } from "../lib/videoHarnessProductionProfile.mjs";
 import { describeSkillApprovalStaleReason } from "../lib/skillInventory.mjs";
+import { skillReviewAgeCheck } from "../lib/skillUsage.mjs";
 import { channelPackRuntimeAdapterSpecs } from "../lib/harnessChannelPackRuntime.mjs";
 import {
   resolveHarnessDeployment,
@@ -1107,6 +1108,16 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "",
     ? await runtime.skillApprovalProbe({ declaration })
     : await probeSkillApproval({ repoRoot: REPO_ROOT, env: runtimeEnv, declaration });
   add(skillApprovalCheck(skillApproval, { harnessId }));
+
+  // スキルの棚卸しの間隔（止めない）。公式機能が出て自作のスキルが要らなくなっても残り続けるので、
+  // 棚卸しのタイミングを意図的に作る。記録（~/.buzzassist/learning/skill-reviews.jsonl）が無ければ
+  // 何も言わない（棚卸しをしない運営者にまで毎回出すと、読まれない項目が増えるだけになる）。
+  const skillReview = skillReviewAgeCheck({
+    env: runtimeEnv,
+    homeDir: runtime.homeDir || runtimeEnv.BUZZASSIST_SETUP_HOME || homedir(),
+    now: typeof runtime.now === "function" ? runtime.now() : new Date(),
+  });
+  if (skillReview) add(skillReview);
 
   // Codex は /hooks で信頼されたフックだけを動かす。信頼が無いと学習フックは黙って飛ばされる。
   const hookTrustHome = runtime.homeDir || runtimeEnv.BUZZASSIST_SETUP_HOME || homedir();

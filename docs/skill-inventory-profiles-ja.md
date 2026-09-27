@@ -6,6 +6,7 @@
 - Profile policy: `.agents/skills/profiles.manifest.json`
 - Inventory実装: `lib/skillInventory.mjs`
 - CLI: `node scripts/skill-inventory.mjs`
+- 使われ方の棚卸し: `node scripts/skill-usage.mjs`（本体 `lib/skillUsage.mjs`。下の「使われ方の棚卸し」）
 
 inventoryはすべてのrecordへ次の4区分を明示する。
 
@@ -250,6 +251,49 @@ node scripts/skill-evals.mjs report          # 版ごと・ホストごとの合
 （manifest の版と `contentSha256`）について、本番の正本スキルごとに両ホストの結果がそろっているか、
 片方のホストだけ落ちた eval が無いかを**警告として**出す。止めるかどうかは運営者が決めるので、
 `--require-evals` を付けたときだけ exit 5 で止める。別の SHA の結果は数えない。
+
+## 使われ方の棚卸し（定量と定性、2026-09-27）
+
+スキルは放っておくと増え続け、ホストの公式機能が出て自作のものが要らなくなっても残る。
+棚卸しは2系統で行い、その日を手元に残して、次の棚卸しのタイミングを doctor が知らせる。
+入口は `node scripts/skill-usage.mjs`（本体 `lib/skillUsage.mjs`）。
+
+```bash
+node scripts/skill-usage.mjs                        # 直近30日の使われ方（読むだけ）
+node scripts/skill-usage.mjs report --days 90 --json
+node scripts/skill-usage.mjs review-sheet --output <file>   # 要不要の判定を頼むシート
+node scripts/skill-usage.mjs record-review --note "..."     # 棚卸しをした日を残す
+```
+
+- **定量（report）**: 端末の会話の記録から、在庫のスキル（`inventory.manifest.json` の skills と、
+  在庫に載っていない `.agents/skills` の中身）ごとに、使った会話の数・回数・最後に使った日を
+  ホスト別に数える
+  - Claude Code（`CLAUDE_CONFIG_DIR` か `~/.claude` の `projects`）: Skill の道具の呼び出し、人の /コマンド、
+    Read・Bash・Grep で SKILL.md を読んだ呼び出し
+  - Codex（`CODEX_HOME` か `~/.codex` の `sessions` と `archived_sessions`）: コマンドの実行（exec など）の中で
+    SKILL.md を読んだ呼び出し
+  - スキルの一覧（Codex の skills_instructions、Claude Code の skill_listing・道具の定義）に名前やパスが
+    出ただけのもの、子への伝言、書き換え（Edit・apply_patch・リダイレクト）は数えない
+  - 素の名前が端末全体の汎用スキルとぶつかるもの（`skill-creator`）は、名前空間付き・アダプター名で
+    呼ばれたとき、または BuzzAssist のチェックアウト・配布物の中の SKILL.md を読んだときだけ数える。
+    `~/.agents/skills`・`~/.claude/skills`・`~/.codex/skills` と、BuzzAssist 以外の plugin の置き場は数えない。
+    確かめられない読み込みは「帰属できなかった」件数として出す
+  - 同じ呼び出しが複数の記録に写っているとき（会話の再開・分岐）は1回と数える
+- **読む量と時間の上限**: Codex の記録は数十GB、1ファイル数百MBもある。更新日時で期間の外のファイルを外し、
+  新しい順に、行を rg（無ければ Node の逐次読み）で絞ってから JSON を読む。ホストごとに既定 16GiB・120秒、
+  1行 16MiB を上限にし（`--max-gib`・`--max-seconds`）、当たったら「数え切れていない」と出して数を下限として扱う。
+  どの日時より後の使用なら数え切れているか（`fullyCountedSince`）も出す。1行が数MBの道具の呼び出しもあるので、
+  SKILL.md のパスは出現から前へ区切りまでたどって抜き出す（区切りの無い塊を正規表現で探すと長さの2乗の時間がかかる）
+- **本文は保存しない**: 出すのはスキル名・回数・最後に使った日・ホストだけ。会話の記録には何も書かない
+- **定性（review-sheet）**: 「このハーネスの中でこのスキルは要るか」を LLM に判定させるためのシートを作る。
+  スキルごとに区分・束ねるハーネス・実行 Profile・使われ方・description を並べ、判定の選択肢（残す・統合・外す・
+  書き直す）と観点、答えの形（1スキル1行の JSON）を書く。外部モデルは呼ばない。判定は、シートを作った会話とは
+  別の新しい文脈で行う。判定は提案で、外す・統合するかは人が決め、正本の変更は skill-creator の手順で行う
+- **棚卸しの日（record-review）**: 学習の状態の置き場（`BUZZASSIST_LEARNING_DIR`、既定 `~/.buzzassist/learning/`）の
+  `skill-reviews.jsonl` に、日時・在庫の版・スキルの id と版・任意のメモ・判定シートの sha256 を1行残す。
+  リポジトリの外なのでコミットされない
+- **doctor の `skill-usage-review`**: 前の棚卸しから30日以上たつと、止めずに（任意の項目として）知らせる。
+  記録が無ければ項目を出さない
 
 ## Skill Creator
 
