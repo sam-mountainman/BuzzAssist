@@ -277,6 +277,30 @@ node scripts/strategy-brief.mjs applicability --brief <ブリーフ> --evidence 
 始め直した後の `history` に残ります。`--agent-attested` や対話端末でない実行では止まりません（機械は止めの記録を作れない）。
 台本（`script-quality-loop.mjs`）と途中の成果物（`asset-quality-loop.mjs`）のループにも同じ `stop` があります。
 
+合格したブリーフから台本を書くときは、台本の品質ループの `start` にそのブリーフを元の依頼として渡します
+（`node scripts/script-quality-loop.mjs start --work-dir <台本の作業フォルダ> --generator-context <会話の ID> --request <作業フォルダに写したブリーフ>`）。
+ブリーフは SHA で固定され、毎回の評価シート（`sheet`）に「元の依頼（目的）」として本文ごと載ります。評価者は元の依頼と
+評価項目を主軸に、その版だけを見て絶対評価し、採点ファイルに依頼の SHA（`requestSha256`）を書きます。ループの途中で
+ブリーフのファイルが変わると `record` は `script-quality-request-changed` で止まります（元に戻すか、止めてから
+`start --restart --request` で始め直す）。回を重ねるほど元の目的が埋もれる（目標のずれ）のを、毎回渡し直すことで防ぐためです。
+
+チャンネルの Channel Pack の `script-quality.json` が `acceptance.goalCheck: true` を立てていれば、台本が合格点に届いても
+すぐ合格にはならず、`awaiting-goal-check`（目的の判定待ち）で止まります。それまでの作成・採点に使っていない新しい文脈の
+評価者に `goal-sheet` の出力（元の依頼と台本だけ。点数・合格点・評価項目は載せない）を渡し、点数ではなく「元の依頼の目的を
+果たしたか」を `achieved` / `not-achieved` と理由で判定させて `goal-check --review <判定ファイル>` で記録します。
+`not-achieved` の理由は次の版の指摘としてループに戻ります。判定が済むまで、制作の台本の関門は
+`script-quality-goal-check-pending` で止まります。このときは `start` に `--request` が要ります（判定の物差しになるため）。
+
+評価項目ごとの採点の目安（何点ならどういう状態か）も `script-quality.json` に書けます。チャンネルが足す項目は
+`criteria[].anchors`、ジャンルの項目は `anchors.<項目 id>` に `[{ "score": 90, "state": "その点の台本の状態" }]` の形で
+1項目 1〜7 個書きます（ジャンルの側に目安がある項目は上書きできません）。目安は評価シートの項目の行に載り、契約の
+digest に入ります（走っているループの途中では変えられない）。合格・下限・足切り・目標点の言葉は目安に書けません
+（評価シートに合否の線を載せない決まりと同じ理由）。
+
+品質ループの停滞の判定（前の最高点から伸びない回を数える）は、2026-09-27 から新しく始めるループの最小改善が 5 点です
+（LLM の評価者の点は同じ版でも 10 点ほどぶれるので、1〜2 点の伸びは改善と数えない）。それより前に始めたループは、
+始めたときの 1 点のまま続きます。Channel Pack の `limits.minimumImprovementPoints` で変えられるのは今までどおりです。
+
 公開後は `node scripts/strategy-brief.mjs next --from <ブリーフ> --metrics <指標の集計>` で数字を照らし、次の版の下書きへ進みます。
 
 ### 7.1 チャンネルの台帳と、次の工程の決め方

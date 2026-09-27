@@ -242,12 +242,16 @@ test("直した出力が別の Job になったときは、revision-delta.json �
 
 test("回数の上限・止まったループ・契約の違う前の Job は、人の判断を待つ", async (t) => {
   const ws = await workspace(t);
-  const low = scores({ "character-identity": 40 });
+  const low = scores({ "character-identity": 40, "narration-voice": 40 });
   let result = await advance(ws, JOB_A, signoffFor("review-ctx-001", low));
   for (let round = 2; round <= contract.limits.maximumReviewRounds; round += 1) {
     await writeDelta(ws, JOB_A, { previousFailureFingerprint: result.check.failureFingerprint, revisionDelta: `修正 ${round}` });
-    // 毎回はっきり良くなっている（停滞では止まらない）が、同一性の下限 80 には届かない。
-    result = await advance(ws, JOB_A, signoffFor(`review-ctx-00${round}`, scores({ "character-identity": 40 + round * 10 })));
+    // 毎回はっきり良くなっている（総合点が最小改善の既定 5 点より大きく伸び、停滞では止まらない）が、
+    // 同一性の下限 80 には届かない。
+    result = await advance(ws, JOB_A, signoffFor(`review-ctx-00${round}`, scores({
+      "character-identity": 40 + round * 10,
+      "narration-voice": 40 + (round - 1) * 25,
+    })));
     assert.equal(result.recorded, true);
   }
   assert.equal(result.state.status, "needs-human-approval");

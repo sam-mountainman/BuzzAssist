@@ -141,6 +141,9 @@ export function assetQualityHelp() {
     [--channel-config <file>]     署名の無い設定（手元の試行用。契約に unsigned-file と刻まれる）
     [--restart --reason "..."]    止まったループ・人の確認で否とされたループだけ始め直せる（前の状態は history に残る。
                                   続いているループは、人が stop で止めてから）
+            停滞: 前の最高点から最小改善（既定 5 点。Pack の limits.minimumImprovementPoints で変えられる）だけ
+            伸びない回を停滞に数える（LLM の採点の約 10 点のぶれより小さい伸びを改善と数えない）。
+            2026-09-27 より前に始めたループは、始めたときの既定（1 点）のまま続く
 
   sheet     評価者へ渡す評価シートと採点ファイルの雛形（合格点・下限・重み・前の回の点数は載せない）
     --work-dir <dir> --stage <工程> --subject <id> --asset <file> [--reference <file|sha>]...

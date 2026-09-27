@@ -90,7 +90,9 @@ export function scriptQualityHelp() {
                                   既定は narrated-story。manga は漫画の台本、explainer は解説動画の台本
                                   （どちらも BuzzAssist 独自の評価基準。contract --genre <id> で採点表を見る）
     [--channel-pack <dir>]        署名済み Channel Pack。payload/script-quality.json でチャンネル固有の
-                                  評価項目を足し、下限を上げられる（下げられない）。検証の公開鍵は
+                                  評価項目を足し、下限を上げられる（下げられない）。項目ごとの採点の目安
+                                  （criteria[].anchors、ジャンルの項目は anchors.<項目 id>: [{ score, state }]）と、
+                                  合格点の後の目的の判定（acceptance.goalCheck: true）も書ける。検証の公開鍵は
                                   BUZZASSIST_CHANNEL_PACK_PUBLIC_KEY
     [--channel-config <file>]     署名の無い設定（手元の試行用。契約に unsigned-file と刻まれる）
     [--request <file>]            元の依頼（企画ブリーフの JSON など。作業フォルダの中のファイル）を SHA で固定する。
@@ -117,7 +119,8 @@ export function scriptQualityHelp() {
             本文は入れない。BUZZASSIST_LEARNING_AUTO_CAPTURE=0 で止まる）
     --work-dir <dir> --script <版のファイル> --version <版の名前> --stage <${SCRIPT_STAGES.join("|")}>
     --review <採点ファイル>        { evaluatorId, evaluatorContextId, evaluatorHost, scriptSha256,
-                                    baseScriptSha256（初稿以外）, rubricScores, notes, findings }
+                                    baseScriptSha256（初稿以外）, requestSha256（start --request のループ）,
+                                    rubricScores, notes, findings }
                                   findings は文か { text, criterionId, recurrenceOf } の一覧。回ごとに
                                   r<回>-f<番号> の id が付く。前の回の指摘がまだ当てはまるなら recurrenceOf に id
     [--finding-dispositions <file>]  2回目以降、前の回に指摘があれば必須。前の回の指摘ごとの採否と理由
