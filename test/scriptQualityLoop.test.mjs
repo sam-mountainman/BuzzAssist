@@ -1116,6 +1116,18 @@ test("CLI は人待ちを終了コード 3、未合格の --require-pass を 4 �
   );
   assert.equal(recorded.exitCode, 0);
   assert.equal(recorded.result.learning.skippedReason, "disabled");
+  // 同じ失敗の格上げも、回を記録した直後に呼ばれる。自動捕捉を止めた環境では台帳へ積まない。
+  assert.equal(recorded.result.failurePromotion?.captured ?? 0, 0);
+  // 差し替えた格上げには、その作業フォルダが渡る（人待ちで記録しなかった回では呼ばれない）。
+  const calls = [];
+  const promoteFailures = async (input) => { calls.push(input); return { captured: 0, duplicates: 0 }; };
+  const second = await writeReview(root, "r3", review({ context: "ctx-eval-2", script: DRAFT, rubricScores: scores({ "narration-voice": 10 }) }));
+  const again = await runScriptQualityCli(
+    ["record", "--work-dir", root, "--script", "drafts/draft.md", "--version", "v1", "--stage", "draft", "--review", second, "--json"],
+    { stdout, now, env: { BUZZASSIST_LEARNING_AUTO_CAPTURE: "0" }, promoteFailures },
+  );
+  assert.equal(calls.length, again.result.recorded || again.result.panelAccepted ? 1 : 0);
+  for (const call of calls) assert.equal(call.workDir, root);
   assert.equal((await runScriptQualityCli(["status", "--work-dir", root, "--require-pass"], { stdout })).exitCode, 4);
   out.length = 0;
   assert.equal((await runScriptQualityCli(["contract"], { stdout })).exitCode, 0);

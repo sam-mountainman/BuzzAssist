@@ -31,6 +31,7 @@
 // 終了コード: 0 = 済んだ / 3 = 人待ち・直しが要る（記録していない、または人の確認に数えない）/
 //             4 = --require-pass で未合格 / 2 = 入力の誤り
 
+import { autoPromoteQualityLoopFailures } from "../lib/qualityFailurePromotion.mjs";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
@@ -252,12 +253,27 @@ function interactiveTerminal() {
   return process.stdin.isTTY === true && process.stdout.isTTY === true;
 }
 
+/**
+ * 回を記録した直後に、同じ失敗が別の版で2回出ていないかを見て、検査・関門へ上げる提案を学習の台帳へ積む
+ * （lib/qualityFailurePromotion.mjs。例外は投げず、BUZZASSIST_LEARNING_AUTO_CAPTURE=0 と子エージェントでは積まない）。
+ * 試験などで学習の捕捉を差し替えたときは、格上げも既定では動かさない（台帳を書かない）。
+ */
+async function promoteAfterRecord({ promote, workDir, captureInput, stdout, json }) {
+  if (!promote || !workDir) return null;
+  const promotion = await promote({ workDir, ...captureInput });
+  if (!json && promotion && promotion.captured > 0) {
+    stdout.write(`同じ失敗の格上げの提案 ${promotion.captured} 件を学習の台帳へ積みました（node scripts/harness-learn.mjs で確かめる）\n`);
+  }
+  return promotion;
+}
+
 export async function runAssetQualityCli(argv = process.argv.slice(2), {
   env = process.env,
   stdout = process.stdout,
   now,
   loadChannel,
   captureLearning,
+  promoteFailures,
   isInteractive = interactiveTerminal(),
   // measure-video・verify-pages の ffmpeg / ffprobe（{ ffmpeg: { command, args }, ffprobe: {...} }）。無ければ解決する。
   toolchain = null,
@@ -283,6 +299,7 @@ export async function runAssetQualityCli(argv = process.argv.slice(2), {
   const hints = learnsChannel ? await learningChannelCliHints({ channelId: args.channel, jobId: args.job, env }) : { captureInput: {} };
   const capture = captureLearning || ((input) => captureAssetLearning({ ...input, env }));
   const learn = (input) => capture({ ...input, ...hints.captureInput });
+  const promote = promoteFailures || (captureLearning ? null : (input) => autoPromoteQualityLoopFailures({ ...input, env }));
   if (args.batch) {
     if (args.action === "verify" || args.action === "verify-pages") {
       throw new Error("人の確認は対象ごと（--batch は使えない）。確認した人が対象ごとに verify --subject <id> --asset <file> を打つか、"
@@ -368,6 +385,9 @@ export async function runAssetQualityCli(argv = process.argv.slice(2), {
           }
           stdout.write(`${lines.join("\n")}\n`);
         }
+        if (result.results.some((row) => row.recorded)) {
+          result.failurePromotion = await promoteAfterRecord({ promote, workDir: args.workDir, captureInput: hints.captureInput, stdout, json: args.json });
+        }
         return { exitCode: result.waiting === 0 && result.results.length > 0 ? 0 : 3, result };
       }
       const result = await recordAssetQualityRound({
@@ -397,6 +417,9 @@ export async function runAssetQualityCli(argv = process.argv.slice(2), {
         stdout.write(result.learning.skippedReason
           ? `学習候補は積んでいません（${result.learning.skippedReason}）\n`
           : `学習候補 ${result.learning.captured} 件を ${result.learning.target}${result.learning.channelId ? `（チャンネル ${result.learning.channelId} の保存先）` : ""} へ積みました（既にあったもの ${result.learning.duplicates} 件）\n`);
+      }
+      if (result.recorded) {
+        result.failurePromotion = await promoteAfterRecord({ promote, workDir: args.workDir, captureInput: hints.captureInput, stdout, json: args.json });
       }
       return { exitCode: result.recorded || result.alreadyRecorded ? 0 : 3, result };
     }
