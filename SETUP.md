@@ -13,6 +13,7 @@ https://github.com/sam-mountainman/BuzzAssist
 ## 基本
 
 エージェントはリポジトリを clone/open し、自分自身のホストだけを設定してから、ローカルキャンバスURLをまずそのホストの in-app browser で開きます。そのBrowser機能が利用できない場合だけChrome（またはOSの既定ブラウザー）へフォールバックします。
+エージェントが従う全手順は [docs/agent-setup.md](docs/agent-setup.md) です（`CLAUDE.md`・`AGENTS.md`・`GEMINI.md` の地図から指しています）。
 
 導入後は、別プロジェクトで `@BuzzAssist` を呼び出してもセットアップ時の
 保存先を使い回しません。MCP workspace rootから現在のプロジェクトを解決し、

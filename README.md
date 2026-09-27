@@ -522,6 +522,10 @@ GEMINI.md
 skills/
 ```
 
+`AGENTS.md`・`CLAUDE.md`・`GEMINI.md` は、どの依頼でどの正本を読むかだけを書いた短い地図（各60行以下）です。
+`config/host-instructions.template.md` から `npm run instructions:generate` で作ります。セットアップの全手順は
+[docs/agent-setup.md](docs/agent-setup.md)、地図から移した決まりの全文は [docs/host-instructions-detail-ja.md](docs/host-instructions-detail-ja.md) にあります。
+
 プラグイン本体のリポジトリにはユーザーのキャンバスデータを保存しません。必ず作業中プロジェクトの `canvas/` に保存します。
 
 ## 開発

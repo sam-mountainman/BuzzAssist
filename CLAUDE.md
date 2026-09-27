@@ -1,100 +1,57 @@
-# Koya manga video — mandatory Claude route
+# BuzzAssist — Claude Code の地図
 
-For any request that produces, changes, reviews, repairs, renders, or audits a Japanese manga video, Claude must first read these canonical skills completely:
+これは地図。依頼に当たる行の先を**最後まで読んでから**動く。ここから移した決まりの全文は `docs/host-instructions-detail-ja.md`、
+直すときは `config/host-instructions.template.md` を直して `node scripts/generate-host-instructions.mjs` で作り直す（手で直さない）。
 
-- `.agents/skills/manga-video-production/SKILL.md`
-- `.agents/skills/manga-page-camera/SKILL.md`
+## 完成と言わない条件（最優先）
 
-The `.claude/skills` entries are host adapters to that shared source. The operator-facing top-level entrypoint is `node scripts/run-video-harness.mjs`; it owns the durable Job, signed Channel Pack, doctor, resume/cancel, RunReceipt, and Canvas projection. Inside the selected Koya adapter, `node scripts/koya-manga-video.mjs` is the only production runner for a new episode. The historical `scripts/build-manga-video.mjs` and versioned `apply/finalize/generate-manga-v*` scripts are benchmark-only migrations and must not be used for a new episode. Do not claim completion until the official final audit passes, the MP4-derived contact-sheet signoff is valid, `knownRemainingIssues` is empty, and the real MP4 fully decodes.
+- 動画を完成・完了・納品できると言えるのは、Job が `completed`、RunReceipt が `pass`、`blockers` と `knownRemainingIssues` が空のときだけ。
+  漫画はさらに、公式の最終監査が pass、MP4 から作った contact-sheet のサインオフが有効、実際の MP4 が最後までデコードできること。
+- Stop フック（`scripts/harness-stop-hook.mjs`）は、Job が合格で決着していないのに完成と言うと差し戻す。言い直さずに Job の
+  実際の状態を報告する。
+- `awaiting-human-review` は正当な停止。確認待ちであることと、誰が何を確認すれば進むかを報告する。
 
-For new episodes, identify the protagonist before paid generation and pass `--protagonist-speaker-id`. Square narration boxes remain visually distinct, but every narration line must use the protagonist's exact approved voice; do not create a dedicated narrator.
+## フックに止められたとき・圧縮のあと
 
-# Raw script to finished video — shared route
+- 実行前のフック（harness-guard-hook）が止めたのは、人が自分の端末で打つ操作（`--human-verified`・`skill-inventory --approve`・
+  品質ループの人専用の操作・署名済みの封筒の書き換え）。迂回せず、決めてほしいことと打つコマンドを人に渡す。
+- 圧縮されたと知らされたら（harness-compact-hook）、挙がった正本スキルと docs を最後まで読み直してから続ける。
+- Codex はプラグインのフックを、新しく足されたものも `/hooks` で信頼するまで動かさない（更新で定義が変わったら信頼し直す）。
 
-For any operator request that turns a raw Japanese script into a finished video, first read
-`.agents/skills/platform-craft/SKILL.md` and the selected genre skill completely. For narrated
-story videos that genre skill is `.agents/skills/narrated-story-video/SKILL.md`; manga continues
-to use the two mandatory skills above. Start through `node scripts/run-video-harness.mjs` (or the
-equivalent `run_video_harness` MCP tool), require a signed Channel Pack, and keep the default
-plan-only behavior unless paid execution was explicitly confirmed. Claude Code and Codex must
-use the same Harness declaration, Skill SHA, Channel Pack fingerprint, quality gates, RunReceipt,
-and BuzzAssist Canvas projection; a globally installed plugin or skill is not an implicit fallback.
-The plugin's Stop hook (`scripts/harness-stop-hook.mjs`) sends a stop back when the last reply claims the video is
-finished while the Job this conversation handled is not settled as pass (`completed`, RunReceipt `pass`, empty
-`knownRemainingIssues`). Report the Job's actual state instead; `awaiting-human-review` is a legitimate stop, so say it is waiting for review.
-Codex runs plugin hooks only after they are trusted in `/hooks`.
+## 依頼ごとに先に読む正本（最後まで読む）
 
-解説動画（ハーネス `explainer-video`。チャンネルの手元の制作が作った完成版の納品を取り込む）はジャンルの正本スキルが
-まだ無いので、platform-craft と `docs/explainer-video-harness-ja.md` を最後まで読んでから同じ入口で始める。人の全編の
-試聴と初見の評価は、Job を動かした文脈とは別の文脈で `node scripts/explainer-video.mjs signoff`（MCP の
-`signoff_video_harness_job`）から記録し、それまでの `awaiting-human-review` は正当な停止として報告する。
+- 漫画動画を作る・直す・レビュー・修復・書き出し・監査 → `.agents/skills/manga-video-production/SKILL.md` と
+  `.agents/skills/manga-page-camera/SKILL.md`。`.claude/skills` の項目はこの正本へのアダプター。
+- 生の日本語台本から完成動画 → `.agents/skills/platform-craft/SKILL.md` とジャンルのスキル
+  （ナレーション物語は `.agents/skills/narrated-story-video/SKILL.md`、漫画は上の2本）。
+- 解説動画（ハーネス `explainer-video`。ジャンルの正本スキルはまだ無い）→ platform-craft と `docs/explainer-video-harness-ja.md`。
+  人の全編の試聴と初見の評価は、Job を動かした文脈とは別の文脈で `node scripts/explainer-video.mjs signoff` から記録する。
+- 複数の作業を同時に流す（「並列で」「一気に」「最短で」、同種の作業が並ぶ）→ `.agents/skills/harness-parallel-execution/SKILL.md`。
+  推測で並列化しない。入口は `node scripts/harness-parallel-run.mjs`（決定論層）と `node scripts/harness-parallel-agents.mjs`（LLM判断層）。
+- 訂正・好み・禁止を受けた、こちらの誤りが判明した、実測で新しい事実が分かった → その場の修正で終わらせず
+  `.agents/skills/harness-self-improvement/SKILL.md`。入口は `node scripts/harness-learn.mjs`。
+- このリポジトリの URL を渡されてセットアップを頼まれた → `docs/agent-setup.md` を最後まで読み、端から端まで行う。
+  入口は `node scripts/setup-agents.mjs --agent claude --project-dir <作業中のプロジェクト>`（Codex も入っていれば `--agents claude,codex`）。
 
-# 並列実行 — 両ハーネス共通ルート
+## 制作の決まり（どのホストも同じ）
 
-複数の作業を同時に流すとき（「並列で」「同時に」「一気に」「最短で」、
-また11人分のキャラゲートや30セグメントのTTSのように同種の作業が並ぶとき）は、
-先にこの正本を最後まで読む:
+- 運営者の入口は `node scripts/run-video-harness.mjs`（MCP `run_video_harness`）。署名済み Channel Pack を必須にし、
+  有料の実行が明示で確かめられるまで既定の plan だけで止める。どのホストも同じハーネス宣言・Skill SHA・Channel Pack の
+  指紋・品質ゲート・RunReceipt・Canvas 投影を使い、端末全体に入ったプラグインやスキルを暗黙の代わりにしない。
+- 漫画の新作の内部 runner は `scripts/koya-manga-video.mjs` だけ。`scripts/build-manga-video.mjs` と版つきの
+  `apply/finalize/generate-manga-v*` はベンチマークの移行専用で、新作に使わない。
+- 漫画の新作は有料生成の前に主人公を決めて `--protagonist-speaker-id` を渡す。ナレーション枠の声も主人公の承認済みの声にする
+  （枠の見た目は分けたまま、専用のナレーターを作らない）。
+- 正本スキルへの反映は `pending` → `approve`（1件ずつ `rollback` できる）。人が確かめるのは配る版（GitHub Release）を出すときの
+  1回だけ（`npm run skills:check:release` と承認者本人の端末の `skill-inventory --approve`。エージェントは打たない）。
+  開発用チェックアウトの制作は承認前の正本でも止めず、その事実を Job と RunReceipt に残す。
+- 外部モデル（Antigravity 経由の Gemini など）を呼んだら、呼んだこのホストが呼び出しのたびに
+  `node scripts/harness-external-call.mjs record --host <antigravity|codex|claude> ...` で記録する（本文は保存しない）。返った id は
+  `node scripts/script-quality-loop.mjs record --external-call <id>` へ渡し、その版は別の文脈で採点する。
 
-- `.agents/skills/harness-parallel-execution/SKILL.md`
+## キャンバス
 
-実測した並列上限、並列にしてよい工程と直列必須の工程、同時書き込みで壊れる
-共有状態ファイルの一覧がそこにある。推測で並列化しないこと。入口は
-`node scripts/harness-parallel-run.mjs`（決定論層）と
-`node scripts/harness-parallel-agents.mjs`（LLM判断層）で、
-Claude Code と Codex のどちらから実行しても同じ結果になる。
-
-# 自己改善 — 指摘を次のセッションへ残す
-
-ユーザーから訂正・好み・禁止事項を受けたとき、こちらの誤りが判明したとき、
-実測で新しい事実が分かったときは、その場の修正で終わらせずに先にこれを読む:
-
-- `.agents/skills/harness-self-improvement/SKILL.md`
-
-入口は `node scripts/harness-learn.mjs`。捕捉は何も書き換えず、統合は既定で
-dry-run。エージェントは overlay（learned-auto.md）だけでなく正本スキル（SKILL.md・
-references）も直してよい。提案を正本へ反映するときは `pending` → `approve` を通し、
-変更前後の sha256・元の提案・時刻・誰が当てたかを残して、1件ずつ `rollback` できる形にする。
-人が確かめるのは、運営者へ配る版（GitHub Release）を出すときの1回だけ
-（`npm run skills:check:release` と、承認者本人の端末の `skill-inventory --approve`。
-機械はこの承認を記録できない）。関門をそこに残すのは、人が見ないまま他人のパソコンへ
-届き、有料 API を動かす指示になるのを防ぐため。開発用チェックアウトでの制作は承認前の
-正本でも止めず、その事実を Job と RunReceipt に残す。
-
-# 外部モデル呼び出しの記録 — 呼んだ側が残す
-
-Antigravity 経由の Gemini など外部モデルを呼んだら、呼び出し元のこのホストが、呼び出しのたびに
-`node scripts/harness-external-call.mjs record --host <antigravity|codex|claude> --model <id> --purpose "<用途>" --input <渡した本文のファイル> --output <返った本文のファイル> --work-dir <台本の作業フォルダ> --session <この会話のID>`
-で記録する。Antigravity にはフックの仕組みが無く、呼ばれた側では記録できないため。台帳には入出力の
-SHA・モデル・時刻・呼び出し元の会話 ID だけが残り、本文は保存しない。空返答・途中切れは
-`--status empty|truncated` で未完として残す（出力が空なら自動で empty になる）。返った id は台本の品質ループ
-（`node scripts/script-quality-loop.mjs record --external-call <id>`）へ渡し、その版は呼んだ文脈とは別の文脈で採点する。
-
-# BuzzAssist Agent Setup
-
-When the user gives this repository URL and asks to set it up, do the setup end to end.
-
-1. Clone or open this repository. If the machine has no Node.js 20+, use the one-line installer instead of cloning: macOS/Linux `curl -fsSL https://raw.githubusercontent.com/sam-mountainman/BuzzAssist/main/install.sh | bash`, Windows `powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -UseBasicParsing https://raw.githubusercontent.com/sam-mountainman/BuzzAssist/main/install.ps1 -OutFile $env:TEMP\buzzassist-install.ps1; & $env:TEMP\buzzassist-install.ps1"`. It verifies Node, the Release, and every download, configures every installed host (Claude Code and Codex), and lists remaining video-harness prerequisites as next steps.
-2. Run `node scripts/setup-agents.mjs --agent claude --project-dir <active-user-project-dir>` from the repository root. If Codex is also installed on this machine (the `codex` command exists), run `--agents claude,codex` instead so both hosts read the same skill version. If there is no separate active project, use this repository root as the project dir. On Windows, run the same command from PowerShell; do not use the `.sh` wrappers.
-3. Configure Claude Code, plus Codex only when it is already installed on this machine. Both hosts must read the same canonical skills, so do not leave one of them on an older plugin. Do not configure Claude Desktop, Cursor, or Antigravity unless the user explicitly asks for those hosts too. `BUZZASSIST_AUTO_UPDATE_HOSTS` may list the other host even when you configured one; that is expected, because auto-update also refreshes every host that already has the BuzzAssist plugin.
-4. Setup also installs pinned ffmpeg/ffprobe and a Python venv (opencv-python-headless<5, numpy, pillow) into `~/.buzzassist/tools/` without administrator rights (opt out with `--no-install-prerequisites`), and creates `config/harness-deployments.json` from the example when it is missing. If setup stops with exit 2 because video-harness prerequisites are missing (for example the voice-quality Python stack, paid API keys, or a Codex login), fix them and rerun; when the user only needs the canvas and media tools now, rerun with `--allow-harness-not-ready` and report the remaining items as next steps. Paid production still stops at the doctor gate when a Job starts.
-5. Treat setup as complete only when Claude Code is reported as `configured`, and the script prints `BUZZASSIST_CANVAS_URL=...`, `BUZZASSIST_CANVAS_CHECK=ok`, and `BUZZASSIST_AUTO_UPDATE=enabled`. The updater checks only stable GitHub Releases, validates a staged build and real MCP call, backs up the active plugin, and rolls back on failure. Operators set up before 0.1.27 must rerun setup once: their scheduler entry lacks the login-time catch-up and the PATH that the updater needs, so scheduled updates could not install new Releases. Do not disable it unless the user explicitly requests `--no-auto-update`. If host installation or verification fails, fix that error and rerun the same command; do not claim setup succeeded. Then first open that URL with Claude Code's browser tool when it is exposed. This is mandatory when the tool is available. Only when the current host's in-app Browser capability is unavailable may you use Chrome/the OS browser fallback; with the installed MCP, call `open_buzzassist_canvas` again with `openExternalBrowser: true`. Tell the user to start a new Claude Code session after setup so the installed skills and MCP tools are loaded.
-6. If the user wants phone/mobile access or says they want the exact same Excalidraw UI outside the machine, use Canvas Tunnel: run setup with `--tunnel` or run `npm run tunnel:start -- --project-dir <active-user-project-dir>`. The tunnel uses Cloudflare (`cloudflared`) by default — no account is needed for a quick tunnel. If a system copy is not installed, BuzzAssist downloads the pinned official release into the user's `~/.buzzassist/tools/` cache, verifies its SHA-256 checksum, and runs it without administrator privileges. Use `--no-auto-download` or `BUZZASSIST_CLOUDFLARED_AUTO_DOWNLOAD=0` to opt out. For a fixed `canvas.buzzassist.ai` URL, they run `cloudflared tunnel login` once then start with `--cf-hostname canvas.buzzassist.ai`. To use ngrok instead, pass `--provider ngrok --ngrok-authtoken <token>`. Give the printed `BUZZASSIST_TUNNEL_ACCESS_URL` for the phone; keep using the local `BUZZASSIST_CANVAS_URL` in Claude Code's in-app browser for desktop work.
-7. Claude Code itself does not render MCP Apps widgets. Always use the local canvas URL plus MCP tools in Claude Code.
-8. The native `render_buzzassist_canvas_widget` entrypoint is experimental fallback only. Do not use it for Claude Code unless the user explicitly asks to test the widget.
-
-Canvas media attachment rule:
-
-- To attach selected canvas images, videos, SRT, XML, audio, or text files to the current Claude Code chat, use the plugin MCP tools `prepare_canvas_attachments`, `read_canvas_attachment_bundle`, and `list_canvas_attachment_bundles`.
-- Do not use OS GUI automation (`open -a`, AppleScript, clipboard keystrokes) as the primary media attachment path. That route is macOS-only and can target the wrong chat or a new Cowork chat. The MCP tools work on macOS and Windows because the current chat pulls the prepared bundle from `canvas/.agent-attachments/`.
-
-Manual fallback:
-
-```bash
-node scripts/setup-agents.mjs --agent claude --project-dir <active-user-project-dir> --no-launch
-claude plugin marketplace add ~/plugins/buzzassist --scope user
-claude plugin install buzzassist@buzzassist --scope user
-node scripts/serve-canvas.mjs <active-user-project-dir>
-npm run tunnel:start -- --project-dir <active-user-project-dir>
-```
-
-Use the live URL from `canvas/.server.json` when a requested port is busy.
+- キャンバスの URL はまず Claude Code の in-app browser（ブラウザーツールが出ていれば必ず）で開く。その Browser 機能が利用できない（unavailable）ときだけ
+  Chrome／OS のブラウザーへ（MCP `open_buzzassist_canvas` を `openExternalBrowser: true` で呼び直す）。
+- Claude Code は MCP Apps のウィジェットを描かないので、ローカルのキャンバス URL と MCP ツールを使う。`render_buzzassist_canvas_widget` は実験用の代替で、試すよう頼まれたときだけ使う。
+- 素材をこのチャットへ添付するときは MCP の `prepare_canvas_attachments` 系を使い、OS の GUI 自動操作を使わない（詳しくは `docs/agent-setup.md`）。

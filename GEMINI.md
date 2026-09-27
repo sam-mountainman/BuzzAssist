@@ -1,112 +1,57 @@
-# Koya manga video — mandatory Antigravity route
+# BuzzAssist — Antigravity の地図
 
-For any request that produces, changes, reviews, repairs, renders, or audits a Japanese manga video, Antigravity must first read these canonical skills completely:
+これは地図。依頼に当たる行の先を**最後まで読んでから**動く。ここから移した決まりの全文は `docs/host-instructions-detail-ja.md`、
+直すときは `config/host-instructions.template.md` を直して `node scripts/generate-host-instructions.mjs` で作り直す（手で直さない）。
 
-- `.agents/skills/manga-video-production/SKILL.md`
-- `.agents/skills/manga-page-camera/SKILL.md`
+## 完成と言わない条件（最優先）
 
-The operator-facing top-level entrypoint is `node scripts/run-video-harness.mjs`; it owns the durable Job, signed Channel Pack, doctor, resume/cancel, RunReceipt, and Canvas projection. Inside the selected Koya adapter, `node scripts/koya-manga-video.mjs` is the only production runner for a new episode. The historical `scripts/build-manga-video.mjs` and versioned `apply/finalize/generate-manga-v*` scripts are benchmark-only migrations and must not be used for a new episode. The quality gates documented in those skills (voice quality, character attribute gate, blind comparison) are host-agnostic and apply here identically. Do not claim completion until the official final audit passes, the MP4-derived contact-sheet signoff is valid, `knownRemainingIssues` is empty, and the real MP4 fully decodes.
+- 動画を完成・完了・納品できると言えるのは、Job が `completed`、RunReceipt が `pass`、`blockers` と `knownRemainingIssues` が空のときだけ。
+  漫画はさらに、公式の最終監査が pass、MP4 から作った contact-sheet のサインオフが有効、実際の MP4 が最後までデコードできること。
+- Antigravity にはフックが無い。完成と書く前に自分で `node scripts/run-video-harness.mjs status --job-id <Job ID> --project-dir <プロジェクト>`
+  を打ち、RunReceipt（`canvas/harness-runs/<Job ID>/run-receipt.json` の `outcome`）まで確かめる。欠けていれば今の状態と残りを報告する。
+- `awaiting-human-review` は正当な停止。確認待ちであることと、誰が何を確認すれば進むかを報告する。
 
-For new episodes, identify the protagonist before paid generation and pass `--protagonist-speaker-id`. Square narration boxes remain visually distinct, but every narration line must use the protagonist's exact approved voice; do not create a dedicated narrator.
+## 依頼ごとに先に読む正本（最後まで読む）
 
-# Raw script to finished video — shared route
+- 漫画動画を作る・直す・レビュー・修復・書き出し・監査 → `.agents/skills/manga-video-production/SKILL.md` と
+  `.agents/skills/manga-page-camera/SKILL.md`。そこに書かれた品質ゲート（声の品質・キャラの属性ゲート・ブラインド比較）は Antigravity でも同じに効く。
+- 生の日本語台本から完成動画 → `.agents/skills/platform-craft/SKILL.md` とジャンルのスキル
+  （ナレーション物語は `.agents/skills/narrated-story-video/SKILL.md`、漫画は上の2本）。
+- 解説動画（ハーネス `explainer-video`。ジャンルの正本スキルはまだ無い）→ platform-craft と `docs/explainer-video-harness-ja.md`。
+  人の全編の試聴と初見の評価は、Job を動かした文脈とは別の文脈で `node scripts/explainer-video.mjs signoff` から記録する。
+- 複数の作業を同時に流す（「並列で」「一気に」「最短で」、同種の作業が並ぶ）→ `.agents/skills/harness-parallel-execution/SKILL.md`。
+  推測で並列化しない。入口は `node scripts/harness-parallel-run.mjs`（決定論層）と `node scripts/harness-parallel-agents.mjs`（LLM判断層）。
+- 訂正・好み・禁止を受けた、こちらの誤りが判明した、実測で新しい事実が分かった → その場の修正で終わらせず
+  `.agents/skills/harness-self-improvement/SKILL.md`。入口は `node scripts/harness-learn.mjs`。
+  Antigravity にはフックの仕組みが無いので誰も捕捉を促さない。訂正・禁止・繰り返しの指摘を受けたら、その場で自分で
+  `node scripts/harness-learn.mjs capture --kind <correction|constraint|preference|fact> --target <宛先> --text "何をどう直すか" --evidence "何を観測したか" --session "<この会話のID>"`
+  を打つ（台本の直しの宛先は `channel-pack:narrated-story-script`。発言は逐語で写さず、何を直すかの形に書く）。
 
-For any operator request that turns a raw Japanese script into a finished video, first read
-`.agents/skills/platform-craft/SKILL.md` and the selected genre skill completely. For narrated
-story videos that genre skill is `.agents/skills/narrated-story-video/SKILL.md`; manga continues
-to use the two mandatory skills above. Start through `node scripts/run-video-harness.mjs` (or the
-equivalent `run_video_harness` MCP tool), require a signed Channel Pack, and keep the default
-plan-only behavior unless paid execution was explicitly confirmed. Claude Code and Codex must
-use the same Harness declaration, Skill SHA, Channel Pack fingerprint, quality gates, RunReceipt,
-and BuzzAssist Canvas projection; a globally installed plugin or skill is not an implicit fallback.
+## 制作の決まり（どのホストも同じ）
 
-解説動画（ハーネス `explainer-video`。チャンネルの手元の制作が作った完成版の納品を取り込む）はジャンルの正本スキルが
-まだ無いので、platform-craft と `docs/explainer-video-harness-ja.md` を最後まで読んでから同じ入口で始める。人の全編の
-試聴と初見の評価は、Job を動かした文脈とは別の文脈で `node scripts/explainer-video.mjs signoff`（MCP の
-`signoff_video_harness_job`）から記録し、それまでの `awaiting-human-review` は正当な停止として報告する。
-
-# 並列実行 — 両ハーネス共通ルート
-
-複数の作業を同時に流すとき（「並列で」「同時に」「一気に」「最短で」、
-また11人分のキャラゲートや30セグメントのTTSのように同種の作業が並ぶとき）は、
-先にこの正本を最後まで読む:
-
-- `.agents/skills/harness-parallel-execution/SKILL.md`
-
-実測した並列上限、並列にしてよい工程と直列必須の工程、同時書き込みで壊れる
-共有状態ファイルの一覧がそこにある。推測で並列化しないこと。入口は
-`node scripts/harness-parallel-run.mjs`（決定論層）と
-`node scripts/harness-parallel-agents.mjs`（LLM判断層）で、
-Claude Code と Codex のどちらから実行しても同じ結果になる。
-
-# 自己改善 — 指摘を次のセッションへ残す
-
-ユーザーから訂正・好み・禁止事項を受けたとき、こちらの誤りが判明したとき、
-実測で新しい事実が分かったときは、その場の修正で終わらせずに先にこれを読む:
-
-- `.agents/skills/harness-self-improvement/SKILL.md`
-
-**Antigravity にはフックの仕組みが無い。** Claude Code と Codex では、訂正らしい発言を
-フック（UserPromptSubmit）が見つけて捕捉を促すが、Antigravity では誰も促さない。
-訂正・禁止・繰り返しの指摘を受けたら、その場で自分で次を打つ:
-
-```bash
-node scripts/harness-learn.mjs capture --kind <correction|constraint|preference|fact> \
-  --target <宛先> --text "何をどう直すか" --evidence "何を観測したか" --session "<この会話のID>"
-```
-
-台本の直し・訂正の宛先は `channel-pack:narrated-story-script`（チャンネルの非公開台帳）。
-発言を逐語で写さず、何を直すかの形に書き直す。訂正に当たらなければ何もしなくてよい。
-
-入口は `node scripts/harness-learn.mjs`。捕捉は何も書き換えず、統合は既定で
-dry-run。エージェントは overlay（learned-auto.md）だけでなく正本スキル（SKILL.md・
-references）も直してよい。提案を正本へ反映するときは `pending` → `approve` を通し、
-変更前後の sha256・元の提案・時刻・誰が当てたかを残して、1件ずつ `rollback` できる形にする。
-人が確かめるのは、運営者へ配る版（GitHub Release）を出すときの1回だけ
-（`npm run skills:check:release` と、承認者本人の端末の `skill-inventory --approve`。
-機械はこの承認を記録できない）。関門をそこに残すのは、人が見ないまま他人のパソコンへ
-届き、有料 API を動かす指示になるのを防ぐため。開発用チェックアウトでの制作は承認前の
-正本でも止めず、その事実を Job と RunReceipt に残す。
-
-# 完成と言う前に Job の状態を自分で確かめる
-
-Claude Code と Codex では、Job が合格で決着していないのに「完成しました」と言って止まると、
-Stop フック（`scripts/harness-stop-hook.mjs`）が差し戻す。**Antigravity にはフックが無い**ので、
-完成・完了・納品できると書く前に、自分で
-`node scripts/run-video-harness.mjs status --job-id <Job ID> --project-dir <プロジェクト>` を打ち、
-`status` が `completed`、`blockers` と `knownRemainingIssues` が空、Job の RunReceipt
-（`canvas/harness-runs/<Job ID>/run-receipt.json`）の `outcome` が `pass` であることを確かめる。
-どれかが欠けていれば完成と書かず、今の状態と残りの項目を報告する。`awaiting-human-review` は
-正当な停止なので、確認待ちであることと、誰が何を確認すれば進むかを報告する。
-
-# 外部モデルの呼び出しの記録
-
-外部モデルの呼び出しは、**呼び出し元のホストが**
-`node scripts/harness-external-call.mjs record` で記録する（入出力の SHA・モデル・時刻・
-呼び出し元の会話 ID だけで、本文は保存しない）。Antigravity にはフックが無く、呼ばれた側では
-記録できないため。Claude Code / Codex から台本の手直しなどを頼まれて Antigravity が答えるときは、
-呼んだ側が記録するので、ここでは記録しない（二重に数えない）。Antigravity 自身が別のモデルを
-呼んだときは、Antigravity が呼び出し元として `--caller-host antigravity` で記録する。
-返った id は台本の品質ループ（`node scripts/script-quality-loop.mjs record --external-call <id>`）が参照する。
+- 運営者の入口は `node scripts/run-video-harness.mjs`（MCP `run_video_harness`）。署名済み Channel Pack を必須にし、
+  有料の実行が明示で確かめられるまで既定の plan だけで止める。どのホストも同じハーネス宣言・Skill SHA・Channel Pack の
+  指紋・品質ゲート・RunReceipt・Canvas 投影を使い、端末全体に入ったプラグインやスキルを暗黙の代わりにしない。
+- 漫画の新作の内部 runner は `scripts/koya-manga-video.mjs` だけ。`scripts/build-manga-video.mjs` と版つきの
+  `apply/finalize/generate-manga-v*` はベンチマークの移行専用で、新作に使わない。
+- 漫画の新作は有料生成の前に主人公を決めて `--protagonist-speaker-id` を渡す。ナレーション枠の声も主人公の承認済みの声にする
+  （枠の見た目は分けたまま、専用のナレーターを作らない）。
+- 正本スキルへの反映は `pending` → `approve`（1件ずつ `rollback` できる）。人が確かめるのは配る版（GitHub Release）を出すときの
+  1回だけ（`npm run skills:check:release` と承認者本人の端末の `skill-inventory --approve`。エージェントは打たない）。
+  開発用チェックアウトの制作は承認前の正本でも止めず、その事実を Job と RunReceipt に残す。
+- 外部モデルの呼び出しは、呼び出し元のホストが `node scripts/harness-external-call.mjs record` で記録する（本文は保存しない）。
+  Claude Code / Codex に頼まれて答えるときは呼んだ側が記録するので、ここでは記録しない。Antigravity 自身が別のモデルを呼んだら
+  `--caller-host antigravity` で記録する。
 
 <!-- BUZZASSIST:START -->
 # BuzzAssist Agent Setup
 
 When the user gives this repository URL and asks to set it up, do the setup end to end for Antigravity only.
 
-1. Clone or open this repository.
-2. Run `node scripts/setup-agents.mjs --agent antigravity --project-dir <active-user-project-dir>` from the repository root. If there is no separate active project, use this repository root as the project dir.
-3. The script must configure Antigravity only. Do not configure Codex, Claude Code, or Cursor unless the user explicitly asks for those hosts too.
-4. After the script prints `BUZZASSIST_CANVAS_URL=...` and `BUZZASSIST_CANVAS_CHECK=ok`, first open that URL in Antigravity's in-app browser. Only if that capability is unavailable, use Chrome/the external-browser fallback.
-5. If the user wants phone/mobile access or says they want the exact same Excalidraw UI outside the machine, use Canvas Tunnel: run setup with `--tunnel` or run `npm run tunnel:start -- --project-dir <active-user-project-dir>`. The tunnel uses Cloudflare (`cloudflared`) by default — no account is needed. If a system copy is not installed, BuzzAssist downloads the pinned official release into the user's `~/.buzzassist/tools/` cache, verifies its SHA-256 checksum, and runs it without administrator privileges. Use `--no-auto-download` or `BUZZASSIST_CLOUDFLARED_AUTO_DOWNLOAD=0` to opt out. Give the printed `BUZZASSIST_TUNNEL_ACCESS_URL` for the phone.
+1. Clone or open this repository, then run `node scripts/setup-agents.mjs --agent antigravity --project-dir <active-user-project-dir>` from the repository root. If there is no separate active project, use this repository root as the project dir.
+2. The script must configure Antigravity only. Do not configure Codex, Claude Code, or Cursor unless the user explicitly asks for those hosts too.
+3. After the script prints `BUZZASSIST_CANVAS_URL=...` and `BUZZASSIST_CANVAS_CHECK=ok`, first open that URL in Antigravity's in-app browser. Only if that capability is unavailable, use Chrome/the external-browser fallback.
+4. For phone/mobile access or the exact same Excalidraw UI outside the machine, use Canvas Tunnel: run setup with `--tunnel` or run `npm run tunnel:start -- --project-dir <active-user-project-dir>`, and give the printed `BUZZASSIST_TUNNEL_ACCESS_URL` for the phone.
 
-Manual fallback:
-
-```bash
-node scripts/setup-agents.mjs --agent antigravity --project-dir <active-user-project-dir> --no-launch
-node scripts/serve-canvas.mjs <active-user-project-dir>
-npm run tunnel:start -- --project-dir <active-user-project-dir>
-```
-
-Use the live URL from `canvas/.server.json` when a requested port is busy.
+Use the live URL from `canvas/.server.json` when a requested port is busy. The full procedure (tunnel download and opt-out, manual fallback) is `docs/agent-setup.md` in the BuzzAssist repository and in the installed plugin (`~/plugins/buzzassist/plugin/docs/agent-setup.md`).
 <!-- BUZZASSIST:END -->

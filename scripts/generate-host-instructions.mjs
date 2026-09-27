@@ -6,6 +6,8 @@
 //
 // 指示ファイルを直すときはテンプレートを直してから、これを走らせる。3つを手で直すと、
 // 次の --check が落ちる（手で直した1つだけが先へ進み、ほかのホストが古い規則のまま残るのを防ぐ）。
+// 指示ファイルは「地図」で、どれかが 60 行（HOST_INSTRUCTION_MAX_LINES）を超えると書く前に止まる。
+// 詳細は docs/host-instructions-detail-ja.md（決まりの全文）か docs/agent-setup.md（セットアップ）へ置く。
 
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";

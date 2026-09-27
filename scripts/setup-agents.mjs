@@ -506,6 +506,7 @@ async function ensureDeploymentMap() {
 export const DISTRIBUTABLE_CONFIG_ENTRIES = Object.freeze([
   "harness-deployments.example.json",   // 例。実体（harness-deployments.json）は運営者固有
   "harnesses",                          // ハーネス宣言。名前を含まない
+  "host-instructions.template.md",      // 指示ファイル（地図）の元。地図が「直すときはこれを」と指す
   "koya-manga-legacy-migrations.json",
   "koya-manga-production-contract.json",
   "koya-manga-production-contract.schema.json",
@@ -747,6 +748,10 @@ export const PLUGIN_SOURCE_FILES = Object.freeze([
   "docs/explainer-video-harness-ja.md",
   // 判断の振り分けと、並べて選ぶ手順（human-choice.mjs のヘルプが指す）。
   "docs/human-choice-ja.md",
+  // 指示ファイル（地図）が指す先。セットアップの全手順と、地図から移した決まりの全文。
+  // 地図だけが届いて指す先が無いと、運営者の端末で行き止まりになる。
+  "docs/agent-setup.md",
+  "docs/host-instructions-detail-ja.md",
   "docs/learning/targets.json",
   // 本文つき台帳（proposals.jsonl）は配布しない。公開版 catalog だけ。
   "docs/learning/proposals.public.jsonl",

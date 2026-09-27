@@ -26,7 +26,7 @@ test("Claude Code reaches the canonical skill through its adapter and Codex read
 test("project instructions force both hosts onto the official fail-closed route", async () => {
   for (const file of ["AGENTS.md", "CLAUDE.md"]) {
     const source = await read(file);
-    assert.match(source, /operator-facing top-level entrypoint is `node scripts\/run-video-harness\.mjs`/u);
+    assert.match(source, /運営者の入口は `node scripts\/run-video-harness\.mjs`/u);
     assert.match(source, /scripts\/koya-manga-video\.mjs/u);
     assert.match(source, /knownRemainingIssues/u);
     assert.match(source, /contact-sheet/u);
