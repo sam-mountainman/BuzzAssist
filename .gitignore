@@ -8,6 +8,8 @@ canvas/
 !.claude/
 .claude/*
 !.claude/skills/
+# このリポジトリの開発用の禁止リスト（git add -A・main への force push）。個人の設定は settings.local.json（追跡しない）。
+!.claude/settings.json
 # Codex はリポジトリの .agents/skills を直接読む。.codex/skills のアダプターは外した（2026-09-26）。
 .codex/
 Downloads/

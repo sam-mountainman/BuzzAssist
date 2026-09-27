@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "deny": [
+      "Bash(git add -A *)",
+      "Bash(git add --all *)",
+      "Bash(git add . *)",
+      "Bash(git add -- . *)",
+      "Bash(git -C * add -A)",
+      "Bash(git -C * add -A *)",
+      "Bash(git -C * add --all)",
+      "Bash(git -C * add --all *)",
+      "Bash(git -C * add .)",
+      "Bash(git -C * add . *)",
+      "Bash(git *push *--force* main)",
+      "Bash(git *push *--force* main *)",
+      "Bash(git *push *--force* *:main)",
+      "Bash(git *push *--force* *:main *)",
+      "Bash(git *push *--force* *:refs/heads/main)",
+      "Bash(git *push * main *--force*)",
+      "Bash(git *push * *:main *--force*)",
+      "Bash(git *push -f * main)",
+      "Bash(git *push -f * main *)",
+      "Bash(git *push -f * *:main)",
+      "Bash(git *push * -f * main)",
+      "Bash(git *push * -f * *:main)",
+      "Bash(git *push * main -f)",
+      "Bash(git *push * main -f *)",
+      "Bash(git *push * *:main -f)",
+      "Bash(git *push * +main)",
+      "Bash(git *push * +main *)",
+      "Bash(git *push * +*:main)",
+      "Bash(git *push * +*:main *)",
+      "Bash(git *push * +*:refs/heads/main)"
+    ]
+  }
+}
