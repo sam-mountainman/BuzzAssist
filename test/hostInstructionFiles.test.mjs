@@ -193,6 +193,17 @@ function pluginSourceIncludes(relativePath) {
   return true;
 }
 
+// setup が写す config の項目は、Release の tgz にも入っていなければならない。自動更新は tgz から入れるので、
+// 一覧にだけあって tgz に無いものは、配布の検証でスキルの参照が解決せず更新が止まる（2026-09-28）。
+test("setup が写す config の項目は、すべて package.json の files に入っている", async () => {
+  const packageFiles = JSON.parse(await read("package.json")).files;
+  // ディレクトリの項目は files に「config/<名前>/」と書くので、中の1ファイルとして確かめる。
+  const included = (entry) => packageFilesInclude(packageFiles, `config/${entry}`)
+    || packageFilesInclude(packageFiles, `config/${entry}/any.json`);
+  const missing = DISTRIBUTABLE_CONFIG_ENTRIES.filter((entry) => !included(entry));
+  assert.deepEqual(missing, [], `setup の一覧にあって Release の tgz に無い: ${missing.join(", ")}`);
+});
+
 test("地図が指す先は実在し、Release の tgz にも setup の写しにも入っている（行き止まりを配らない）", async () => {
   const packageFiles = JSON.parse(await read("package.json")).files;
   assert.ok(packageFilesInclude(packageFiles, "scripts/setup-agents.mjs"));

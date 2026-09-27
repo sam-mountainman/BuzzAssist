@@ -637,8 +637,9 @@ async function runHostSetup(host) {
     // `docs/...` のようなルート相対の参照と、references/ 配下の
     // Markdown を検査していなかった。**配布先には手順名だけが届き、
     // 手順の実体と測定根拠を読めない**状態がそれで残っていた。
-    // Channel Pack 側にあるものだけを明示的に除外する。
-    const packOnly = /channel-packs\/|koya-channel-requirements-ledger|koya-channel-governance-ja|koya-show-bible|koya-location-bible|koya-thumbnail-contract|koya-character-styling/u;
+    // Channel Pack 側にあるものと、運営者のプロジェクトの手元で「存在するときだけ読む」回ごとの上書き
+    // （koya-manga-episode-overrides。写しの中からは読まれない）だけを明示的に除外する。
+    const packOnly = /channel-packs\/|koya-channel-requirements-ledger|koya-channel-governance-ja|koya-show-bible|koya-location-bible|koya-thumbnail-contract|koya-character-styling|koya-manga-episode-overrides/u;
     for (const name of canonicalSkillNames) {
       const skillDir = path.join(pluginRoot, "skills", name);
       const markdowns = (await readdir(skillDir, { withFileTypes: true, recursive: true }))

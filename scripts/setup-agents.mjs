@@ -503,6 +503,10 @@ async function ensureDeploymentMap() {
 //
 // config/ の直下だけは列挙する。ここがチャンネル固有物の集まる場所で、
 // lib/ や scripts/ のように「全部ジャンル共通」と言い切れないため。
+// koya-manga-episode-overrides/ は入れない。回ごとの上書きは運営者のプロジェクト（projectDir）から読まれ、
+// 写しの中のものは一度も読まれない。中身も回の id・キャラ名・声の id でチャンネル固有（2026-09-28、
+// Release の tgz に無いのにこの一覧にだけあり、tgz から入れる更新が配布の検証で止まった）。
+// ここに足すものは package.json の files にも足す（試験 hostInstructionFiles が両方を突き合わせる）。
 export const DISTRIBUTABLE_CONFIG_ENTRIES = Object.freeze([
   "harness-deployments.example.json",   // 例。実体（harness-deployments.json）は運営者固有
   "harnesses",                          // ハーネス宣言。名前を含まない
@@ -511,7 +515,6 @@ export const DISTRIBUTABLE_CONFIG_ENTRIES = Object.freeze([
   "koya-manga-production-contract.json",
   "koya-manga-production-contract.schema.json",
   "koya-manga-quality-incidents.json",
-  "koya-manga-episode-overrides",       // モデル選択の上書き。固有情報を含まない
   "koya-reading-dictionary.json",
   "narrated-story-script-package.schema.json", // 台本パッケージの形。台本スキルが出力の形を確かめるのに読む
   "parallel-plans",
