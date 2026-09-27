@@ -36,9 +36,23 @@ function releaseFor(version) {
   return { tag_name: `v${version}`, draft: false, prerelease: false, zipball_url: `https://api.github.com/repos/${REPOSITORY}/zipball/v${version}` };
 }
 
+// フックの定義（hooks/*.json）が起動する script と、その export。フックを足したらここにも足す
+// （足し忘れると、偽の導入物に script が無いとして受け入れ確認が落ちる）。
+// Release のフックの定義にある出来事（PreToolUse・SessionStart・Stop・UserPromptSubmit など）。試験はこの一覧に合わせる。
+const RELEASE_HOOK_EVENTS = Object.freeze(Object.keys(JSON.parse(readFileSync(resolve("hooks", "codex-hooks.json"), "utf8")).hooks).sort());
+const trustFor = (value) => Object.fromEntries(RELEASE_HOOK_EVENTS.map((event) => [event, value]));
+
+const HOOK_SCRIPT_EXPORTS = Object.freeze({
+  "harness-learn-hook.mjs": "runHookCli",
+  "harness-stop-hook.mjs": "runStopHookCli",
+  "harness-guard-hook.mjs": "runGuardHookCli",
+  "harness-compact-hook.mjs": "runCompactHookCli",
+});
+
 function hookScripts(root) {
-  writeFile(join(root, "scripts", "harness-learn-hook.mjs"), "export async function runHookCli() {}\n");
-  writeFile(join(root, "scripts", "harness-stop-hook.mjs"), "export async function runStopHookCli() {}\n");
+  for (const [script, exportName] of Object.entries(HOOK_SCRIPT_EXPORTS)) {
+    writeFile(join(root, "scripts", script), `export async function ${exportName}() {}\n`);
+  }
 }
 
 function withoutStop(definition) {
@@ -108,7 +122,7 @@ function makeFixture(t, {
     hookScripts(codexRoot);
     // Windows のパスでも壊れないよう、marketplace の置き場は TOML のリテラル文字列（'...'）で書く。
     const trust = codexTrusted
-      ? ["user_prompt_submit", "stop"].map((event) => `[hooks.state."buzzassist@buzzassist:hooks/codex-hooks.json:${event}:0:0"]\ntrusted_hash = "${TRUSTED_HASH}"\n`).join("\n")
+      ? RELEASE_HOOK_EVENTS.map(codexHookEventKey).map((event) => `[hooks.state."buzzassist@buzzassist:hooks/codex-hooks.json:${event}:0:0"]\ntrusted_hash = "${TRUSTED_HASH}"\n`).join("\n")
       : "";
     writeFile(join(home, ".codex", "config.toml"), [
       "[marketplaces.buzzassist]",
@@ -175,8 +189,8 @@ test("両ホストに最新の Release が入り、フックと MCP が動けば
       assert.equal(check(report, host, id)?.ok, true, `${host} の ${id}: ${check(report, host, id)?.detail}`);
     }
   }
-  assert.deepEqual(check(report, "claude", "hooks").events, ["Stop", "UserPromptSubmit"]);
-  assert.deepEqual(check(report, "codex", "hooks").trust, { Stop: "trusted", UserPromptSubmit: "trusted" });
+  assert.deepEqual(check(report, "claude", "hooks").events, [...RELEASE_HOOK_EVENTS]);
+  assert.deepEqual(check(report, "codex", "hooks").trust, trustFor("trusted"));
   assert.equal(check(report, "claude", "mcp").toolCount, 3, "ページ送りの2ページ目の道具も数える");
   const launches = mcpLaunches(fixture);
   assert.equal(launches.length, 1, "両ホストが同じ MCP の定義を指すときは1回だけ起動する");
@@ -212,7 +226,7 @@ test("Codex の /hooks の信頼が無ければ hooks を落とし、信頼の�
   const report = await accept(fixture, { skipMcp: true });
   const hooks = check(report, "codex", "hooks");
   assert.equal(hooks.ok, false);
-  assert.deepEqual(hooks.trust, { Stop: "untrusted", UserPromptSubmit: "untrusted" });
+  assert.deepEqual(hooks.trust, trustFor("untrusted"));
   assert.match(hooks.fix, /\/hooks/u);
   assert.equal(check(report, "claude", "hooks").ok, true, "Claude Code は信頼の手順なしで動く");
   assert.equal(report.status, "fail");

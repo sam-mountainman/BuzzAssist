@@ -63,6 +63,8 @@ test("harness CLIs copied into a directory with spaces and Japanese run their ma
     await cp(resolve("lib", "harnessLearningGuard.mjs"), join(root, "lib", "harnessLearningGuard.mjs"));
     // harness-parallel-run は端末全体の枠（有料生成の同時数）を数えるために読む（2026-09-25）。
     await cp(resolve("lib", "machineSlots.mjs"), join(root, "lib", "machineSlots.mjs"));
+    // 並列実行の2つは claude -p を起動する前の課金の注意を読む（2026-09-27）。
+    await cp(resolve("lib", "claudeAutomationBilling.mjs"), join(root, "lib", "claudeAutomationBilling.mjs"));
     await cp(resolve("config", "harnesses"), join(root, "config", "harnesses"), { recursive: true });
     for (const name of scripts) await cp(resolve("scripts", name), join(root, "scripts", name));
 
@@ -153,6 +155,7 @@ test("real harness CLIs launched through a symlinked path (not realpath'd) run t
     await mkdir(join(real, "config"), { recursive: true });
     await cp(resolve("lib", "cliEntrypoint.mjs"), join(real, "lib", "cliEntrypoint.mjs"));
     await cp(resolve("lib", "machineSlots.mjs"), join(real, "lib", "machineSlots.mjs"));
+    await cp(resolve("lib", "claudeAutomationBilling.mjs"), join(real, "lib", "claudeAutomationBilling.mjs"));
     await cp(resolve("config", "harnesses"), join(real, "config", "harnesses"), { recursive: true });
     for (const name of scripts) await cp(resolve("scripts", name), join(real, "scripts", name));
 
