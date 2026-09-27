@@ -30,6 +30,14 @@
 //     打ち消してしまう）。出すのは `{ decision: "block", reason }` か、何も出さないかだけ
 //   - **子エージェントでは何もしない**（BUZZASSIST_LEARNING_WRITE_FORBIDDEN などの子の印）
 //   - **有料の再開を勧めない**。「次の工程を進める」は、運営者の明示の確認がある範囲だけ
+//
+// 2つ目の判定（lib/stopHookQualityLoops.mjs）: 品質ループの回し忘れ。完成の主張が無くても、この会話で
+// start / record した品質ループ（台本・途中の成果物・企画ブリーフ）がまだ active なら、同じ周回で1回だけ
+// 差し戻し、reason に周回と点数・次に読むファイル・次の手順を入れる。状態ファイルが壊れていれば合格扱いで
+// 抜けずに直すよう伝える（ナレーション物語・解説動画の完成動画のループは、続きが人の署名と新しい出力を待つ
+// ので、壊れた状態だけを見る）。人の判断待ちは差し戻さない。worktree の子では何もしない。付箋（周回の印）は
+// 差し戻し回数と同じ会話ごとの記録（loops）に残す。上の「しないこと」はこちらにも同じく効く。
+// 品質ループの判定は見張りの時計の LOOP_CHECK_MARGIN_MS 前に諦め、完成の主張の差し戻しを失わない。
 
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -39,6 +47,14 @@ import path from "node:path";
 import { writeJsonAtomic } from "../lib/atomicJsonFile.mjs";
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
 import { learningWritesForbidden } from "../lib/harnessLearningGuard.mjs";
+import {
+  JOB_BOUND_JOB_ID_PREFIXES,
+  LOOP_CHECK_DEADLINE_CODE,
+  evaluateQualityLoopStop,
+  jobBoundLoopKind,
+  jobBoundLoopRef,
+  withLoopMarks,
+} from "../lib/stopHookQualityLoops.mjs";
 
 /** 差し戻し回数の置き場。既定はリポジトリ外（~/.buzzassist/hooks/stop-guard/）。 */
 export const STOP_HOOK_STATE_DIR_ENV = "BUZZASSIST_STOP_HOOK_STATE_DIR";
@@ -484,12 +500,17 @@ export function stopHookStateFile(sessionKey, { env = process.env, home = homedi
   return path.join(stopHookStateDir(env, home), `${key}.json`);
 }
 
+// jobs は Job ごとの差し戻し回数、loops は品質ループの付箋（同じ周回で二重に差し戻さないための印）。
+// loops の無い前の版の記録は、付箋がまだ無いものとして読む。
 function readBlockState(file, fsApi = fs) {
   try {
     const parsed = JSON.parse(fsApi.readFileSync(file, "utf8"));
-    if (parsed && parsed.version === STATE_VERSION && parsed.jobs && typeof parsed.jobs === "object") return parsed;
+    if (parsed && parsed.version === STATE_VERSION && parsed.jobs && typeof parsed.jobs === "object") {
+      const loops = parsed.loops && typeof parsed.loops === "object" && !Array.isArray(parsed.loops) ? parsed.loops : {};
+      return { ...parsed, loops };
+    }
   } catch { /* 無い・壊れている＝まだ数えていない */ }
-  return { version: STATE_VERSION, jobs: {} };
+  return { version: STATE_VERSION, jobs: {}, loops: {} };
 }
 
 // ---------------------------------------------------------------------------
@@ -501,44 +522,66 @@ function hookSwitchedOff(env) {
   return value === "off" || value === "0" || value === "false";
 }
 
-/**
- * Stop フックの判定。副作用なし（回数の記録は呼び出し側が行う）。
- * 戻り値の action は "none" か "block"。none のときも why に理由の短い印を残す（試験・ログ用）。
- */
-export function evaluateStop(input, { env = process.env, home = homedir(), fsApi = fs, pathApi = path } = {}) {
-  if (!input || typeof input !== "object" || Array.isArray(input)) return { action: "none", why: "no-input" };
+/** どちらの判定より先に見る、何もしない条件。当たれば理由の印、当たらなければ空文字。 */
+function stopGuardWhy(input, env) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return "no-input";
   const event = String(input.hook_event_name ?? "Stop");
-  if (event !== "Stop") return { action: "none", why: "not-stop" };
-  if (hookSwitchedOff(env)) return { action: "none", why: "switched-off" };
-  if (learningWritesForbidden(env)) return { action: "none", why: "child-agent" };
-  if (input.agent_id) return { action: "none", why: "subagent" };
-  if (input.stop_hook_active === true || input.stop_hook_active === "true") return { action: "none", why: "stop-hook-active" };
+  if (event !== "Stop") return "not-stop";
+  if (hookSwitchedOff(env)) return "switched-off";
+  if (learningWritesForbidden(env)) return "child-agent";
+  if (input.agent_id) return "subagent";
+  if (input.stop_hook_active === true || input.stop_hook_active === "true") return "stop-hook-active";
+  if (!sessionKeyOf(input)) return "no-session";
+  return "";
+}
 
-  const sessionKey = String(input.session_id || input.transcript_path || "").trim();
-  if (!sessionKey) return { action: "none", why: "no-session" };
+function sessionKeyOf(input) {
+  return String(input.session_id || input.transcript_path || "").trim();
+}
 
-  let lines = [];
+function readInputTranscript(input, { home, fsApi }) {
   const transcriptPath = typeof input.transcript_path === "string" ? input.transcript_path : "";
-  if (transcriptPath) {
-    try { lines = readTranscriptLines(transcriptPath, { home, fsApi }); } catch { lines = []; }
-  }
-  const message = typeof input.last_assistant_message === "string" && input.last_assistant_message.trim()
+  if (!transcriptPath) return [];
+  try { return readTranscriptLines(transcriptPath, { home, fsApi }); } catch { return []; }
+}
+
+function lastMessageOf(input, lines) {
+  return typeof input.last_assistant_message === "string" && input.last_assistant_message.trim()
     ? input.last_assistant_message
     : lastAssistantMessageFromLines(lines);
-  const claim = detectCompletionClaim(message);
-  if (!claim.claimed) return { action: "none", why: "no-claim" };
+}
 
-  const cwd = typeof input.cwd === "string" ? input.cwd : "";
+/** 記録と最後の発言から Job とプロジェクトの候補を集める（両方の判定が同じ集め方を使う）。 */
+function collectJobReferences(lines, message, { cwd, env }) {
   const collector = createReferenceCollector({ cwd });
   for (const line of lines) collector.addLine(line);
-  const mentioned = createReferenceCollector({ cwd });
-  mentioned.addText(message);
   collector.addText(message);
   if (cwd) collector.addDir(cwd, 3);
   for (const name of ["CLAUDE_PROJECT_DIR", "EXCALIDRAW_PROJECT_DIR"]) {
     if (typeof env?.[name] === "string" && env[name].trim()) collector.addDir(env[name], 4);
   }
-  const { jobIds, projectDirs } = collector.result();
+  return collector.result();
+}
+
+/**
+ * Stop フックの判定（完成の主張の判定）。副作用なし（回数の記録は呼び出し側が行う）。
+ * 戻り値の action は "none" か "block"。none のときも why に理由の短い印を残す（試験・ログ用）。
+ * lines を渡せば記録を読み直さない（decideStop が品質ループの判定と記録を共有する）。
+ */
+export function evaluateStop(input, { env = process.env, home = homedir(), fsApi = fs, pathApi = path, lines: preread = null } = {}) {
+  const guard = stopGuardWhy(input, env);
+  if (guard) return { action: "none", why: guard };
+  const sessionKey = sessionKeyOf(input);
+
+  const lines = Array.isArray(preread) ? preread : readInputTranscript(input, { home, fsApi });
+  const message = lastMessageOf(input, lines);
+  const claim = detectCompletionClaim(message);
+  if (!claim.claimed) return { action: "none", why: "no-claim" };
+
+  const cwd = typeof input.cwd === "string" ? input.cwd : "";
+  const mentioned = createReferenceCollector({ cwd });
+  mentioned.addText(message);
+  const { jobIds, projectDirs } = collectJobReferences(lines, message, { cwd, env });
   if (jobIds.length === 0) return { action: "none", why: "no-job" };
 
   const located = [];
@@ -584,13 +627,97 @@ export function evaluateStop(input, { env = process.env, home = homedir(), fsApi
   };
 }
 
-/** 差し戻した回数を1つ足して書く。書けなければ false（呼び出し側は差し戻さない）。 */
+/**
+ * この会話で扱った Job のうち、完成動画の品質ループを持つもの（ナレーション物語・解説動画）の状態ファイル。
+ * 記録を見つけられた Job だけ（プロジェクトは Job の記録のある場所）。
+ */
+export function jobBoundLoopRefsFromTranscript(lines, message, { cwd = "", env = process.env, fsApi = fs, pathApi = path } = {}) {
+  // 応答のたびに記録を歩かないよう、完成動画のループを持つ Job の ID が記録に無ければ何もしない。
+  // 両方の頭に共通する "-video-" で先にふるう（1行を1回だけ走査する）。
+  const mentionsJobBound = (text) => typeof text === "string" && text.includes("-video-")
+    && JOB_BOUND_JOB_ID_PREFIXES.some((prefix) => text.includes(prefix));
+  if (!mentionsJobBound(message) && !lines.some(mentionsJobBound)) return [];
+  const { jobIds, projectDirs } = collectJobReferences(lines, message, { cwd, env });
+  const refs = [];
+  for (const jobId of jobIds) {
+    if (!jobBoundLoopKind(jobId)) continue;
+    const found = locateJob(jobId, projectDirs, { fsApi, pathApi });
+    if (!found || found.unreadable) continue;
+    const ref = jobBoundLoopRef({ jobId, projectDir: found.projectDir, runDir: found.runDir });
+    if (ref) refs.push(ref);
+  }
+  return refs;
+}
+
+/**
+ * 品質ループの判定に使ってよい時間の終わり（見張りの時計のこれだけ前）。完成の主張の判定を先に済ませ、
+ * 品質ループの判定が長引いたら、見張りの時計が鳴る前にそちらだけを諦める（完成の主張の差し戻しを失わない）。
+ */
+export const LOOP_CHECK_MARGIN_MS = 4_000;
+
+/**
+ * フックの判定の全体: 完成の主張の判定（evaluateStop）と、品質ループの回し忘れの判定
+ * （lib/stopHookQualityLoops.mjs）。どちらかが差し戻すなら、両方の reason をまとめて1回で差し戻す。
+ * 副作用なし（差し戻しの回数と付箋は recordBlocks が書く）。deadline を過ぎたら品質ループの判定だけを諦める。
+ */
+export async function decideStop(input, { env = process.env, home = homedir(), fsApi = fs, pathApi = path, loadLoopDetail = null, deadline = Infinity } = {}) {
+  const guard = stopGuardWhy(input, env);
+  if (guard) return { action: "none", why: guard };
+  const lines = readInputTranscript(input, { home, fsApi });
+  const job = evaluateStop(input, { env, home, fsApi, pathApi, lines });
+  const stateFile = stopHookStateFile(sessionKeyOf(input), { env, home });
+  const state = readBlockState(stateFile, fsApi);
+  let loops;
+  try {
+    const cwd = typeof input.cwd === "string" ? input.cwd : "";
+    if (Date.now() > deadline) throw Object.assign(new Error("deadline"), { code: LOOP_CHECK_DEADLINE_CODE });
+    loops = await evaluateQualityLoopStop({
+      cwd,
+      sessionId: String(input.session_id || ""),
+      lines,
+      home,
+      fsApi,
+      blockState: state,
+      jobLoopRefs: jobBoundLoopRefsFromTranscript(lines, lastMessageOf(input, lines), { cwd, env, fsApi, pathApi }),
+      deadline,
+      ...(loadLoopDetail ? { loadDetail: loadLoopDetail } : {}),
+    });
+  } catch (error) {
+    if (error?.code === LOOP_CHECK_DEADLINE_CODE) {
+      loops = { action: "none", why: "loop-check-timeout" };
+    } else {
+      // 品質ループの判定で落ちても、完成の主張の判定は生かす（止まらない理由を作らない）。
+      loops = { action: "none", why: "loop-check-failed" };
+    }
+  }
+  const jobBlock = job.action === "block";
+  const loopBlock = loops.action === "block";
+  if (!jobBlock && !loopBlock) return { action: "none", why: job.why, loopWhy: loops.why };
+  return {
+    action: "block",
+    why: jobBlock ? "job-unsettled" : loops.why,
+    loopWhy: loops.why,
+    reason: [jobBlock ? job.reason : "", loopBlock ? loops.reason : ""].filter(Boolean).join("\n"),
+    jobIds: jobBlock ? job.jobIds : [],
+    loopMarks: loopBlock ? loops.loopMarks : [],
+    stateFile,
+    state,
+  };
+}
+
+/** 差し戻した回数を1つ足し、品質ループの付箋を書く。書けなければ false（呼び出し側は差し戻さない）。 */
 export async function recordBlocks(decision, { now = () => new Date().toISOString() } = {}) {
   try {
-    const next = { version: STATE_VERSION, updatedAt: String(now()), jobs: { ...(decision.state?.jobs || {}) } };
-    for (const jobId of decision.jobIds) {
+    const at = String(now());
+    const next = {
+      version: STATE_VERSION,
+      updatedAt: at,
+      jobs: { ...(decision.state?.jobs || {}) },
+      loops: withLoopMarks(decision.state?.loops, decision.loopMarks, at),
+    };
+    for (const jobId of decision.jobIds || []) {
       const previous = Number(next.jobs[jobId]?.blocks || 0);
-      next.jobs[jobId] = { blocks: previous + 1, lastBlockedAt: String(now()) };
+      next.jobs[jobId] = { blocks: previous + 1, lastBlockedAt: at };
     }
     await writeJsonAtomic(decision.stateFile, next);
     return true;
@@ -636,11 +763,12 @@ export async function runStopHookCli({
 } = {}) {
   // 入力が閉じない・記録が大きすぎて遅いときは、何も出さずに打ち切る（止めない側に倒す）。
   const guard = setTimeout(() => exit(0), timeoutMs);
+  const deadline = Date.now() + Math.max(0, timeoutMs - LOOP_CHECK_MARGIN_MS);
   try {
     const raw = await readStdin(stdin);
     let input = null;
     try { input = raw.trim() ? JSON.parse(raw) : null; } catch { input = null; }
-    const decision = evaluateStop(input, { env, home });
+    const decision = await decideStop(input, { env, home, deadline });
     if (decision.action === "block" && await recordBlocks(decision)) {
       stdout.write(`${JSON.stringify({ decision: "block", reason: decision.reason })}\n`);
     }
