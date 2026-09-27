@@ -21,6 +21,30 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^(Bash|apply_patch|Edit|Write)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"import(require('url').pathToFileURL(require('path').join(process.env.PLUGIN_ROOT||process.env.CLAUDE_PLUGIN_ROOT||'','scripts','harness-guard-hook.mjs')).href).then((m)=>m.runGuardHookCli()).catch(()=>{})\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "^compact$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"import(require('url').pathToFileURL(require('path').join(process.env.PLUGIN_ROOT||process.env.CLAUDE_PLUGIN_ROOT||'','scripts','harness-compact-hook.mjs')).href).then((m)=>m.runCompactHookCli()).catch(()=>{})\"",
+            "timeout": 15
+          }
+        ]
+      }
     ]
   }
 }

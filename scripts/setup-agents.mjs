@@ -42,7 +42,13 @@ import {
   migrateLegacyLearningState,
   resolveLearningState,
 } from "../lib/harnessLearningState.mjs";
-import { CODEX_HOOK_TRUST_FIX, probeCodexLearningHookTrust, probeCodexStopHookTrust } from "../lib/codexHookTrust.mjs";
+import {
+  CODEX_HOOK_TRUST_FIX,
+  probeCodexCompactHookTrust,
+  probeCodexGuardHookTrust,
+  probeCodexLearningHookTrust,
+  probeCodexStopHookTrust,
+} from "../lib/codexHookTrust.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const pluginName = "buzzassist";
@@ -662,8 +668,14 @@ export const PLUGIN_HOOK_MANIFESTS = Object.freeze({
   ".claude-plugin/plugin.json": "hooks/claude-hooks.json",
   ".codex-plugin/plugin.json": "hooks/codex-hooks.json",
 });
-// UserPromptSubmit（学習の捕捉の促し）と Stop（合格前の完成報告の差し戻し）。
-const PLUGIN_HOOK_SCRIPTS = Object.freeze(["harness-learn-hook.mjs", "harness-stop-hook.mjs"]);
+// UserPromptSubmit（学習の捕捉の促し）、Stop（合格前の完成報告の差し戻し）、PreToolUse（人が打つ操作と
+// 署名済みの封筒の書き換えを実行前に止める）、SessionStart の compact（圧縮のあとに正本の読み直しを促す）。
+export const PLUGIN_HOOK_SCRIPTS = Object.freeze([
+  "harness-learn-hook.mjs",
+  "harness-stop-hook.mjs",
+  "harness-guard-hook.mjs",
+  "harness-compact-hook.mjs",
+]);
 
 export async function stagePluginHooks(sourceRoot, pluginRoot) {
   const staged = [];
@@ -1645,9 +1657,15 @@ export async function runSetupAgents() {
   if (results.codex || detectInstalledBuzzAssistHosts({ homeDir }).includes("codex")) {
     const hookTrust = probeCodexLearningHookTrust({ env: process.env, homeDir });
     const stopHookTrust = probeCodexStopHookTrust({ env: process.env, homeDir });
+    const guardHookTrust = probeCodexGuardHookTrust({ env: process.env, homeDir });
+    const compactHookTrust = probeCodexCompactHookTrust({ env: process.env, homeDir });
     console.log(`BUZZASSIST_LEARNING_HOOK_TRUST=${hookTrust.status}`);
     console.log(`BUZZASSIST_COMPLETION_HOOK_TRUST=${stopHookTrust.status}`);
-    if (!hookTrust.ok || !stopHookTrust.ok) console.log(`次にやること（Codex）: ${CODEX_HOOK_TRUST_FIX}`);
+    console.log(`BUZZASSIST_TOOL_GUARD_HOOK_TRUST=${guardHookTrust.status}`);
+    console.log(`BUZZASSIST_COMPACT_HOOK_TRUST=${compactHookTrust.status}`);
+    if (![hookTrust, stopHookTrust, guardHookTrust, compactHookTrust].every((trust) => trust.ok)) {
+      console.log(`次にやること（Codex）: ${CODEX_HOOK_TRUST_FIX}`);
+    }
   }
   // reviewer 信頼リストの MCP 経路（R6-F2）。設定ファイルには env 名だけを書いたこと、
   // 値は host を起動するシェルに置くことを、値を印字せずに報告する。

@@ -376,6 +376,15 @@ BuzzAssistを次の3層に固定する。
     発言本文を保存せず（リポジトリ外にsha256と時刻だけ）、常にexit 0で入力を止めない。
     捕捉するかはエージェントが決める（言い回しが当たっただけの誤検知を台帳へ積まない）
   - [ ] Codexのプラグインフックは信頼レビュー後にだけ動く。実機のCodexで一度通すこと
+  - [x] 両ホストのプラグインにPreToolUseフック（`scripts/harness-guard-hook.mjs`）を載せ、人が自分の端末で
+    打つ操作（`--human-verified`、`skill-inventory --approve`、品質ループの`stop`・`accept-human`・
+    `reset-cumulative`・`verify-pages`）と署名済みの封筒の書き換えを、道具の実行前に理由付きで止める。
+    文章のお願いとTTYの確認だけでは、エージェントが例外の理由を見つけた時点で効かなくなるため。
+    コマンドの文字列しか見ないので関門ではなく既定の経路から外す仕掛け。落ちた・時間切れのときは通す
+  - [x] 両ホストのプラグインにSessionStart（compact）フック（`scripts/harness-compact-hook.mjs`）を載せ、
+    会話の圧縮のあとに、その会話で読んでいた正本スキル・docsを最後まで読み直すよう促す
+  - [x] このリポジトリの`.claude/settings.json`の`permissions.deny`で、`git add -A`・`git add .`・
+    mainへのforce pushを止める（開発用。プラグインの配布物には入らない）
 - [x] Job決着時（completed / failed / awaiting-human-review）にRunReceiptから不合格ゲート・
   knownRemainingIssuesのコード・再試行と再開の回数を、Channel Pack宛のproposalへ自動で積む
   （`createdBy=auto-receipt`、Receipt digestをsessionにして冪等、本文はid・コード・件数だけ）

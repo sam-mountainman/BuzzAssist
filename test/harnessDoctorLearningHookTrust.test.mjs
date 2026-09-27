@@ -11,6 +11,8 @@ import {
   CODEX_HOOK_TRUST_FIX,
   inspectCodexHookTrust,
   parseCodexHookState,
+  probeCodexCompactHookTrust,
+  probeCodexGuardHookTrust,
   probeCodexLearningHookTrust,
   probeCodexStopHookTrust,
 } from "../lib/codexHookTrust.mjs";
@@ -161,4 +163,34 @@ test("doctor に advisory の learning-hook-trust が出て、止めずに直し
   assert.equal(stop.status, "untrusted");
   assert.ok(report.advisory.includes("completion-hook-trust"));
   assert.equal(report.blocking.includes("completion-hook-trust"), false, "信頼の欠落で本番を止めた");
+  // 人が打つ操作を止めるフック（PreToolUse）と、圧縮のあとの読み直しを促すフック（SessionStart）も同じく知らせるだけ。
+  for (const id of ["tool-guard-hook-trust", "compact-hook-trust"]) {
+    const entry = report.checks.find((candidate) => candidate.id === id);
+    assert.ok(entry, `${id} の検査が無い`);
+    assert.equal(entry.required, false);
+    assert.equal(entry.status, "untrusted");
+    assert.ok(report.advisory.includes(id));
+    assert.equal(report.blocking.includes(id), false, "信頼の欠落で本番を止めた");
+  }
+});
+
+test("PreToolUse と SessionStart のフックの信頼は、ほかのフックとは別に見分ける", (t) => {
+  const home = tempHome(t);
+  const guardKey = "buzzassist@buzzassist:hooks/codex-hooks.json:pre_tool_use:0:0";
+  const compactKey = "buzzassist@buzzassist:hooks/codex-hooks.json:session_start:0:0";
+  stageCodex(home, `${PLUGIN_ENABLED}\n[hooks.state."${KEY}"]\ntrusted_hash = "${HASH}"\n`);
+  const guard = probeCodexGuardHookTrust({ env: {}, homeDir: home });
+  assert.equal(guard.status, "untrusted", "学習フックの信頼を PreToolUse の信頼として数えた");
+  assert.match(guard.detail, /PreToolUse/u);
+  assert.match(guard.fix, /harness-guard-hook/u);
+  assert.equal(probeCodexCompactHookTrust({ env: {}, homeDir: home }).status, "untrusted");
+  assert.match(CODEX_HOOK_TRUST_FIX, /harness-compact-hook/u);
+
+  stageCodex(home, `${PLUGIN_ENABLED}\n[hooks.state."${guardKey}"]\ntrusted_hash = "${HASH}"\n[hooks.state."${compactKey}"]\ntrusted_hash = "${HASH}"\n`);
+  assert.equal(probeCodexGuardHookTrust({ env: {}, homeDir: home }).status, "trusted");
+  assert.equal(probeCodexCompactHookTrust({ env: {}, homeDir: home }).status, "trusted");
+  assert.equal(probeCodexLearningHookTrust({ env: {}, homeDir: home }).status, "untrusted");
+
+  stageCodex(home, `${PLUGIN_ENABLED}\n[hooks.state."${guardKey}"]\ntrusted_hash = "${HASH}"\nenabled = false\n`);
+  assert.equal(probeCodexGuardHookTrust({ env: {}, homeDir: home }).status, "disabled");
 });

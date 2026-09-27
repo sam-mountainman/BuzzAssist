@@ -65,7 +65,12 @@ import { resolveCodexCommand } from "./codex-image-bridge.mjs";
 import { appendManagedToolsToPath } from "../lib/prerequisiteTools.mjs";
 import { probeSvgRasterizerCached } from "../lib/svgRasterizer.mjs";
 import { probeYtQualityLoopHooks } from "../lib/ytQualityLoopHooks.mjs";
-import { probeCodexLearningHookTrust, probeCodexStopHookTrust } from "../lib/codexHookTrust.mjs";
+import {
+  probeCodexCompactHookTrust,
+  probeCodexGuardHookTrust,
+  probeCodexLearningHookTrust,
+  probeCodexStopHookTrust,
+} from "../lib/codexHookTrust.mjs";
 import {
   WINDOWS_WORK_PATH_TOO_LONG,
   checkWindowsWorkPaths,
@@ -1132,6 +1137,18 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "",
     id: "completion-hook-trust",
     required: false,
     ...probeCodexStopHookTrust({ env: runtimeEnv, homeDir: hookTrustHome }),
+  });
+  // 人が打つ操作（--human-verified など）と署名済みの封筒の書き換えを止めるフック（PreToolUse）と、
+  // 圧縮のあとに正本の読み直しを促すフック（SessionStart）も、Codex では信頼されるまで動かない。
+  add({
+    id: "tool-guard-hook-trust",
+    required: false,
+    ...probeCodexGuardHookTrust({ env: runtimeEnv, homeDir: hookTrustHome }),
+  });
+  add({
+    id: "compact-hook-trust",
+    required: false,
+    ...probeCodexCompactHookTrust({ env: runtimeEnv, homeDir: hookTrustHome }),
   });
 
   const blocking = checks.filter((c) => c.required && !c.ok);
