@@ -267,9 +267,12 @@ async function prepareReleaseSource(release, version) {
     await runNpm(["ci"], { cwd: extractedSource, timeoutMs: 10 * 60 * 1000 });
     if (!skipValidationTests) {
       log("Running cross-host distribution validation.");
+      // 中で両ホストへ setup を2回ずつ流す。負荷の高い端末では 4〜5 分かかった（2026-09-27）ので、
+      // 上限は固まったと言える長さに取る。
       await runNpm(["run", "test:setup"], {
         cwd: extractedSource,
-        timeoutMs: 10 * 60 * 1000,
+        timeoutMs: 25 * 60 * 1000,
+        killTree: true,
         env: { ...process.env, BUZZASSIST_AUTO_UPDATE_SKIP_REGISTER: "1" },
       });
     }

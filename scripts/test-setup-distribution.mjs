@@ -19,6 +19,11 @@ const reviewerTrustSentinel = "/secure/operator-only/reviewer-trust-sentinel-7d1
 // legitimately finish an unrelated background cache refresh during this test.
 // Cache isolation is asserted below by looking for this run's unique temp path
 // in every real BuzzAssist cache/source root.
+// 子の処理の上限は、固まったときに止めるためのもの（速さの検査ではない）。この検証は自動更新の中でも
+// 走り、会話が多く開いた端末では負荷が通常の数十倍になる。2026-09-27、load average 150 の端末で
+// 30 秒の上限にかかって落ちた。
+const CHILD_TIMEOUT_MS = 3 * 60 * 1000;
+const SETUP_TIMEOUT_MS = 10 * 60 * 1000;
 const realHome = os.homedir();
 const protectedRealHostConfigPaths = [
   path.join(realHome, ".agents", "plugins", "marketplace.json"),
@@ -27,6 +32,13 @@ const protectedRealHostConfigPaths = [
   path.join(realHome, ".claude", "plugins", "installed_plugins.json"),
   path.join(realHome, ".claude", "plugins", "known_marketplaces.json"),
 ];
+// ~/.claude.json は、開いている Claude Code の会話が起動回数や最後に開いたプロジェクトなどで
+// 常に書き直す。バイト単位で比べると、会話が開いている端末（自動更新が走るふつうの端末）では
+// 必ず落ちる（2026-09-27、この検証で 0.1.30 の更新が止まった）。誤って本物の `claude mcp add` /
+// `claude plugin ...` を打ったときに変わる MCP の登録の部分だけを比べる。
+const liveRewrittenHostFiles = new Map([
+  [path.join(realHome, ".claude.json"), projectClaudeUserMcpState],
+]);
 const protectedRealHostCachePaths = [
   path.join(realHome, ".codex", "plugins", "cache", "buzzassist"),
   path.join(realHome, ".claude", "plugins", "cache", "buzzassist"),
@@ -90,10 +102,49 @@ function realLaunchdUpdaterState() {
   return { loaded: true, plist };
 }
 
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
+// ~/.claude.json のうち、MCP の登録（利用者全体と、プロジェクトごと）だけを取り出す。
+function projectClaudeUserMcpState(data) {
+  const projects = {};
+  for (const [projectPath, project] of Object.entries(data?.projects ?? {})) {
+    const servers = project?.mcpServers;
+    if (servers && typeof servers === "object" && Object.keys(servers).length > 0) projects[projectPath] = servers;
+  }
+  return { mcpServers: data?.mcpServers ?? null, projects };
+}
+
+// 書き直しの途中を読むと JSON として読めないことがあるので、少し待って読み直す。
+async function snapshotLiveRewrittenFile(target, project) {
+  for (let attempt = 0; ; attempt += 1) {
+    let text;
+    try { text = await readFile(target, "utf8"); } catch (error) {
+      if (error?.code === "ENOENT") return { type: "missing" };
+      throw error;
+    }
+    try {
+      const projected = stableJson(project(JSON.parse(text)));
+      return { type: "file-projection", sha256: createHash("sha256").update(projected).digest("hex") };
+    } catch (error) {
+      if (!(error instanceof SyntaxError) || attempt >= 4) throw error;
+      await new Promise((resolveWait) => setTimeout(resolveWait, 200));
+    }
+  }
+}
+
 async function snapshotRealHostState() {
   return {
     ...Object.fromEntries(await Promise.all(
-      protectedRealHostConfigPaths.map(async (target) => [target, await snapshotPath(target, 0)]),
+      protectedRealHostConfigPaths.map(async (target) => {
+        const project = liveRewrittenHostFiles.get(target);
+        return [target, project ? await snapshotLiveRewrittenFile(target, project) : await snapshotPath(target, 0)];
+      }),
     )),
     launchdUpdater: realLaunchdUpdaterState(),
   };
@@ -267,7 +318,7 @@ async function assertLearningStateSurvivesSetup({ result, runSetup, env, homeDir
     path.join(pluginRoot, "scripts", "harness-learn.mjs"), "capture",
     "--kind", "fact", "--target", "platform:platform-craft",
     "--text", "配布された写しから合成の指摘を捕捉する", "--evidence", "配布経路の合成データ", "--session", "dist-capture",
-  ], { cwd: pluginRoot, env, encoding: "utf8", timeout: 30_000 });
+  ], { cwd: pluginRoot, env, encoding: "utf8", timeout: CHILD_TIMEOUT_MS });
   assert.equal(capture.status, 0, `${capture.stdout}\n${capture.stderr}`);
   assert.equal(existsSync(path.join(pluginRoot, "docs", "learning", "proposals.jsonl")), false, "写しの中に台帳を書いた（更新で消える）");
   const afterCapture = await readJsonlFile(sharedLedger);
@@ -373,7 +424,7 @@ async function runHostSetup(host) {
         "--no-launch",
         "--allow-harness-not-ready",
       ],
-      { cwd: repoRoot, env, encoding: "utf8", timeout: 120_000 },
+      { cwd: repoRoot, env, encoding: "utf8", timeout: SETUP_TIMEOUT_MS },
     );
     const result = runSetup();
     assert.equal(result.status, 0, `${host} setup failed:\n${result.stdout}\n${result.stderr}`);
@@ -471,7 +522,7 @@ async function runHostSetup(host) {
         + "console.log(JSON.stringify({ mode: s.mode, stateDir: s.stateDir,"
         + " narrated: m.ledgerPathFor('channel-pack:narrated-story', 'proposals'),"
         + " shared: m.ledgerPathFor('platform:platform-craft', 'proposals') }));",
-    ], { cwd: tempRoot, env, encoding: "utf8", timeout: 30_000 }).stdout.trim().split("\n").at(-1));
+    ], { cwd: tempRoot, env, encoding: "utf8", timeout: CHILD_TIMEOUT_MS }).stdout.trim().split("\n").at(-1));
     const canonicalPluginRoot = await realpath(pluginRoot);
     const canonicalStateDir = await canonicalPathOfPossiblyMissing(path.join(homeDir, ".buzzassist", "learning"));
     // 比べる両方を同じ形に揃える。Windows の一時ディレクトリは短い名前
@@ -495,7 +546,7 @@ async function runHostSetup(host) {
       cwd: narratedCommand.cwd,
       env,
       encoding: "utf8",
-      timeout: 30_000,
+      timeout: CHILD_TIMEOUT_MS,
     });
     assert.equal(narratedHelp.status, 0, `staged narrated runner help failed:\n${narratedHelp.stdout}\n${narratedHelp.stderr}`);
     const narratedCli = await import(
