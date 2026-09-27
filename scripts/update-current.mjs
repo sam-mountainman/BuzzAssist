@@ -113,20 +113,29 @@ async function run(command, args, options = {}) {
     allowFailure = false,
     inherit = true,
     timeoutMs = 0,
+    killTree = false,
   } = options;
+  // killTree: 時間切れのとき孫（setup が起動した codex / claude）まで止める。親だけ止めると
+  // 孫が導入を続け、直後の巻き戻しと同じ設定を同時に書き換える（2026-09-27）。POSIX だけ。
+  const groupKill = killTree && process.platform !== "win32";
   return new Promise((resolveRun, rejectRun) => {
     const child = spawn(command, args, {
       cwd,
       env,
       shell: options.shell ?? (process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command)),
       stdio: inherit ? "inherit" : ["ignore", "pipe", "pipe"],
+      detached: groupKill,
     });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
     const timer = timeoutMs > 0 ? setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
+      if (groupKill) {
+        try { process.kill(-child.pid, "SIGTERM"); } catch { child.kill("SIGTERM"); }
+      } else {
+        child.kill("SIGTERM");
+      }
     }, timeoutMs) : null;
     if (!inherit) {
       child.stdout.on("data", (chunk) => { stdout += chunk; });
@@ -392,6 +401,11 @@ async function reinstallRestoredHosts() {
  * 時間切れになり、0.1.25→0.1.26 の更新が丸ごと巻き戻された）。前提の状況は state と
  * 更新ログに警告として残す。plugin の導入と MCP の実呼び出し検証は今までどおり必須。
  */
+// 2026-09-27、負荷の高い端末（load average 55〜190）で setup の両ホスト導入が 8 分を超え、
+// Codex の plugin add の途中で打ち切られて 0.1.30 が巻き戻った。更新は裏で走り人は待たないので、
+// 上限は「止まったと言える長さ」に取る。
+const SETUP_AS_UPDATER_TIMEOUT_MS = 20 * 60 * 1000;
+
 async function runSetupAsUpdater(sourceDir, hosts, extraArgs = []) {
   const setupArgs = [
     join(sourceDir, "scripts", "setup-agents.mjs"),
@@ -407,7 +421,8 @@ async function runSetupAsUpdater(sourceDir, hosts, extraArgs = []) {
   ];
   const result = await run(process.execPath, setupArgs, {
     cwd: sourceDir,
-    timeoutMs: 8 * 60 * 1000,
+    timeoutMs: SETUP_AS_UPDATER_TIMEOUT_MS,
+    killTree: true,
     inherit: false,
     env: {
       ...envWithNodeOnPath(process.env),
@@ -435,7 +450,11 @@ async function installRelease(sourceDir) {
   log(`Installing the Release for ${hosts.join(" and ")}.`);
   const result = await runSetupAsUpdater(sourceDir, hosts);
   stableSourceTouched = true;
-  if (!result.ok) throw new Error(`Host plugin update failed with exit ${result.code}.`);
+  if (!result.ok) {
+    throw new Error(result.timedOut
+      ? `Host plugin update timed out after ${Math.round(SETUP_AS_UPDATER_TIMEOUT_MS / 60000)} minutes.`
+      : `Host plugin update failed with exit ${result.code}.`);
+  }
   logInstallWarnings(result.report);
   await verifyRuntime(config.pluginRoot, config.projectDir, config.canvasDir, { depsRoot: sourceDir });
   return result.report;
