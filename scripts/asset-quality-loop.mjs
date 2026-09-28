@@ -157,7 +157,9 @@ export function assetQualityHelp() {
     --producer-host <host>        この版を作ったホスト
     --route <経路>                生成の経路（上の一覧から）
     [--reference <file|sha>]...   参照に使った画の SHA かファイル（人物の設定画は必須。本編の画とサムネは
-                                  人物が写るなら必須、写らないなら --reference-exempt-reason "理由"）
+                                  人物が写るなら必須、写らないなら --reference-exempt-reason "理由"。名前のない人（群衆・
+                                  後ろ姿・遠景）だけが写る画も理由を書き、評価者が採点ファイルの unnamedPeopleOnly
+                                  { confirmed, note } で「全員が名前のない人」と理由つきで答えたときだけ参照なしで通る）
     [--approved-references <json>] 承認済みの参照の一覧（buzzassist-approved-references-v1）。参照があれば必須
     [--measurement <json>]        声のテイク: scripts/audit-voice-quality.py の報告（このテイクの SHA に結び付くもの）。
                                   動画クリップ: measure-video が書いた測定（このクリップの SHA に結び付くもの）

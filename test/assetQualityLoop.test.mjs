@@ -328,6 +328,27 @@ test("参照の承認・人物の写り・サムネの寸法・声の測定は�
     });
     assert.deepEqual(exempt.round.failedGateIds, ["reference-declared"]);
     assert.equal(exempt.version.referenceExemptReason, "人物の写らない風景のカット");
+    // 名前のない人（群衆・後ろ姿）だけが写る画: 作る側の理由と、評価者の理由つきの確認の両方がそろえば通す。
+    // 評価シートには参照の無い版だけ任意の欄を載せ、参照のある版には載せない。
+    const sheetNoRef = assetQualityReviewSheet(contract, { assetSha256: v1.sha, referenceSha256s: [] });
+    assert.deepEqual(sheetNoRef.optionalReviewFields.map((row) => row.id), ["unnamedPeopleOnly"]);
+    assert.equal(assetQualityReviewSheet(contract, { assetSha256: v1.sha, referenceSha256s: fx.refs }).optionalReviewFields, undefined);
+    // 続いているループは始め直せない（同じバイト列も採点し直せない）ので、場合ごとに別の対象で確かめる。
+    const crowd = async (subjectId, reviewName, context, unnamedPeopleOnly) => {
+      await startAssetQualityLoop({ workDir: root, harnessId: "narrated-story-video", stage: "scene-image", subjectId, generatorContextId: MAKER, now });
+      return recordAssetQualityRound({
+        workDir: root, stage: "scene-image", subjectId, assetPath: v1.rel, versionLabel: "v1", now, ...(await fx.recordExtra(v1)), references: [],
+        referenceExemptReason: "名前のない参列者だけが写る式典のカット",
+        reviewPath: await writeReview(root, reviewName, reviewFor({ stage: "scene-image", context, assetSha: v1.sha, contract, extra: { charactersVisible: true, unnamedPeopleOnly } })),
+      });
+    };
+    const tooShort = await crowd("synthetic-cut-2", "s2", "ctx-eval-2", { confirmed: true, note: "群衆" });
+    assert.deepEqual(tooShort.round.failedGateIds, ["reference-declared"], "理由の無い確認では通さない");
+    const unnamed = await crowd("synthetic-cut-3", "s3", "ctx-eval-3", { confirmed: true, note: "遠景の参列者の後ろ姿だけで、顔も服も描き分けられていない" });
+    assert.deepEqual(unnamed.round.failedGateIds, [], "作る側と評価者の両方がそろえば reference-declared を通す");
+    assert.deepEqual(unnamed.version.unnamedPeopleOnly, { confirmed: true, note: "遠景の参列者の後ろ姿だけで、顔も服も描き分けられていない" });
+    const namedAmong = await crowd("synthetic-cut-4", "s4", "ctx-eval-4", { confirmed: false, note: "手前の一人は顔が読め、服で特定の人物と見分けられる" });
+    assert.deepEqual(namedAmong.round.failedGateIds, ["reference-declared"], "評価者が否と答えれば、作る側の理由だけでは通さない");
   }
   // サムネの寸法。
   {
