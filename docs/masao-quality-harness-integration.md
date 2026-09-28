@@ -201,6 +201,9 @@ node scripts/harness-promote-failures.mjs enqueue --work-dir <作業フォルダ
 - 上げたら同じ中身の注意書きは消す（提案の本文にも書く）。
 - 子エージェント（`BUZZASSIST_LEARNING_WRITE_FORBIDDEN`）からの enqueue は拒否する。ループの記録の直後から
   自動で呼ぶ形（`autoPromoteQualityLoopFailures`）は `BUZZASSIST_LEARNING_AUTO_CAPTURE=0` でも積まず、例外を投げない。
+- 自動で積む時点: 台本・途中の成果物・企画ブリーフは各 CLI の record のあと。完成動画の署名済みレビューのループ
+  （ナレーション物語・解説動画）は record の CLI が無いので、Job が決着したとき（`captureSettledJobLearning`）に、
+  Job の作業場所とジャンルの Receipt の置き場から品質ループを探して積む（2026-09-28。本番の経路でだけ走る）。
 - 漫画の最終の品質ループは読まない（上の事故台帳で先に格上げしていて、二重に数えないため）。
 
 ### 制作DAG
