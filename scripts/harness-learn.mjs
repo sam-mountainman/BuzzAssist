@@ -1793,9 +1793,16 @@ const SHA256_HEX = /^[a-f0-9]{64}$/u;
 const METADATA_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u;
 // auto-failure-promotion: 品質ループの状態で同じ失敗が別の版に2回以上出たもの（被害の大きい種類は1回目）を、
 // 機械の検査・関門へ上げる提案として積む経路（lib/qualityFailurePromotion.mjs）。
-export const PROPOSAL_METADATA_CREATORS = new Set(["auto-receipt", "auto-script-quality", AUTO_FAILURE_PROMOTION_CREATOR]);
+// auto-asset-quality / auto-strategy-brief / human-choice: 途中の成果物・企画ブリーフの品質ループと、人が並べて選んだ
+// 理由からの捕捉（lib/assetQualityLearning.mjs・lib/strategyBriefLearning.mjs・lib/humanChoiceLearning.mjs）。
+// 各モジュールはこの一覧にあるときだけ印を付けるので、ここに無いと提案の出どころが消える（2026-09-28 に足した）。
+export const PROPOSAL_METADATA_CREATORS = new Set([
+  "auto-receipt", "auto-script-quality", AUTO_FAILURE_PROMOTION_CREATOR,
+  "auto-asset-quality", "auto-strategy-brief", "human-choice",
+]);
 export const PROPOSAL_RECEIPT_SOURCES = new Set([
   "run-receipt", "adapter-run-receipt", "job-state", "script-quality-round", AUTO_FAILURE_PROMOTION_SOURCE,
+  "asset-quality-round", "strategy-brief-round", "human-choice",
 ]);
 
 export function normalizeProposalMetadata(metadata) {
