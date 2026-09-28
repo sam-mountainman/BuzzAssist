@@ -60,6 +60,7 @@
 {"id":"b44eda8caab9","kind":"fact","target":"platform:platform-craft"}
 {"id":"b457b4f38845","kind":"fact","target":"platform:platform-craft"}
 {"id":"b775a8490d88","kind":"fact","target":"genre:manga-video-production"}
+{"id":"b7dadcad58f3","kind":"fact","target":"genre:narrated-story-video"}
 {"id":"b88f9357c1cb","kind":"correction","target":"genre:manga-video-production"}
 {"id":"bfccffc4ae54","kind":"fact","target":"genre:manga-video-production"}
 {"id":"c0f0c7b1ec69","kind":"correction","target":"platform:harness-parallel-execution"}
