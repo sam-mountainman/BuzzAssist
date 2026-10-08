@@ -165,6 +165,17 @@
         "受領証の鍵の指紋（--provider-key-fingerprint）が無ければ隔離へ置かれないことを踏まえる",
         "通ったものも verified-quarantine に置くだけで、集計へ入るのは owner が確かめて approve したあとだと伝える"
       ]
+    },
+    {
+      "id": "pattern-consolidation",
+      "prompt": "platform-craft 宛ての指摘がたくさん溜まって learned-auto.md が長くなってる。似たものをまとめて、作業前に読む量を減らしておいて。",
+      "shouldTrigger": true,
+      "invariants": [
+        "pattern coverage / suggest で、まとまっていない提案と禁止を先に見る",
+        "パターンには元の提案 id・原因の見立て（仮説か確かめたか）・当てはまる条件を書き、pattern upsert で追記する",
+        "禁止（constraint）の提案は原文のまま残し、learned-auto.md を手で編集しない",
+        "overlayMode を patterns へ切り替える前に、pattern preview の候補を skill-evals run --overlay で今の束と比べる"
+      ]
     }
   ]
 }

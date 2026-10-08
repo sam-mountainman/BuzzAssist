@@ -283,6 +283,18 @@ node scripts/harness-learn.mjs apply --id <提案ID> \
 TTYは人間性の証明にならないため、`--reviewer`だけ、または対話端末だったという事実だけでは
 人の確認に数えない。
 
+## パターン（まとめた規則）
+
+同じ宛先に提案が溜まったら、1件ずつ並べたままにせず、**原因の見立て・当てはまる条件・根拠と一緒に
+1つの規則へまとめる**（`node scripts/harness-learn.mjs pattern coverage | suggest | upsert --target <宛先>`）。
+パターンは提案の上に立つ別の台帳（`patterns.jsonl`）で、版を積むだけで消さず、元の提案 id・成功の例・反証・
+効く範囲（ホスト・モデル）を持つ。見立てが崩れたら `refuted` にして直し、古い知識を固定しない。
+
+学びの束（`learned-auto.md`）にパターンを使うかは宛先ごとの設定（`targets.json` の `overlayMode: "patterns"`）で、
+使っても禁止（constraint）の提案は原文のまま残る。**切り替える前に、`pattern preview` で作った候補を
+`skill-evals run --overlay` で今の束と両ホストで比べる**（比較は人が読む材料で、自動の採否ではない）。
+欄の書き方・決まり・比べ方は `references/patterns-ja.md`。
+
 ## 正本を書き換えるとき（差分の承認キュー）
 
 正本（SKILL.md・台帳）の書き換え案は、差分と「案を作るときに読んだ正本の sha256（base）」を

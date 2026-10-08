@@ -68,7 +68,14 @@ import {
   extractVocabularyTokens,
   normalizeVocabularyTerm,
 } from "../lib/packageTarballAudit.mjs";
-import { buildPublicProposalCatalog, renderPublicProposalCatalog } from "../lib/harnessLearningCurator.mjs";
+import { buildPublicProposalCatalog, renderPublicProposalCatalog, textSimilarity } from "../lib/harnessLearningCurator.mjs";
+import {
+  buildPatternRevision,
+  latestPatterns,
+  patternCoverage,
+  patternInspectionText,
+  renderPatternRuleLines,
+} from "../lib/harnessLearningPatterns.mjs";
 import {
   AUTO_FAILURE_PROMOTION_CREATOR,
   AUTO_FAILURE_PROMOTION_SOURCE,
@@ -624,13 +631,22 @@ function overlayEntryLines(entries, redaction) {
   return lines;
 }
 
-export function renderOverlay(entries, now, context = null) {
+export function renderOverlay(entries, now, context = null, { patterns = [] } = {}) {
   const lines = [OVERLAY_HEADER];
   // 語彙照合なしで生成した overlay は、空でもヘッダで見分けられるようにする。
   // 明示フラグ（vocabularyMissing === true）だけを見る。vocabulary: null は
   // テスト用の素通しコンテキストでも使うので、null だけでは印を付けない。
   if (context?.vocabularyMissing === true) lines.push(OVERLAY_VOCABULARY_MISSING_NOTE, "");
-  if (entries.length === 0) {
+  if (patterns.length > 0) {
+    // パターンの宛先（targets.json の overlayMode: "patterns"）: まとめた規則を先に置き、禁止（原文のまま）と
+    // まだまとまっていない指摘を後ろに並べる。パターンにまとめた提案は、規則の「元の提案」から辿れる。
+    const redaction = context ?? overlayRedactionContext();
+    lines.push(OVERLAY_PATTERN_SECTION, "");
+    lines.push(...renderPatternRuleLines(patterns, (value) => redactForOverlay(value, redaction)), "");
+    lines.push(OVERLAY_PATTERN_REST_SECTION, "");
+    if (entries.length === 0) lines.push("_ありません。_", "");
+    else lines.push(...overlayEntryLines(entries, redaction), "");
+  } else if (entries.length === 0) {
     lines.push("_まだ自動反映された項目はありません。_", "");
   } else {
     lines.push(...overlayEntryLines(entries, context ?? overlayRedactionContext()), "");
@@ -639,12 +655,25 @@ export function renderOverlay(entries, now, context = null) {
   return lines.join("\n");
 }
 
+const OVERLAY_PATTERN_SECTION = [
+  "## まとめた規則（パターン）",
+  "",
+  "同じ宛先の指摘を、原因の見立て・当てはまる条件と一緒にまとめたもの。台帳は",
+  "`node scripts/harness-learn.mjs pattern show --id <id>` で読める（根拠・反証・版の履歴）。",
+].join("\n");
+
+const OVERLAY_PATTERN_REST_SECTION = [
+  "## 禁止と、まだパターンにまとまっていない指摘",
+  "",
+  "禁止（constraint）は、パターンにまとめても原文のまま残す。",
+].join("\n");
+
 /**
  * 運営者の端末で積み上がった項目の区画。状態の置き場（overlays/<skill>/learned-auto.md）に
  * 置き、sync と setup のたびにホストが読む各写しの learned-auto.md の末尾へ届ける
  * （lib/harnessLearningState.mjs の deliverLearningOverlays）。同梱の項目には触らない。
  */
-export function renderLocalOverlayBlock(entries, now, context = null) {
+export function renderLocalOverlayBlock(entries, now, context = null, { patterns = [] } = {}) {
   const lines = [
     `${LOCAL_OVERLAY_BEGIN} この区画はこの端末の harness-learn sync が書きます。手で編集しないでください。 -->`,
     "",
@@ -655,16 +684,34 @@ export function renderLocalOverlayBlock(entries, now, context = null) {
     "",
   ];
   if (context?.vocabularyMissing === true) lines.push(OVERLAY_VOCABULARY_MISSING_NOTE, "");
-  lines.push(...overlayEntryLines(entries, context ?? overlayRedactionContext()));
+  const redaction = context ?? overlayRedactionContext();
+  if (patterns.length > 0) {
+    lines.push("### この端末でまとめた規則（パターン）", "");
+    lines.push(...renderPatternRuleLines(patterns, (value) => redactForOverlay(value, redaction)), "");
+  }
+  lines.push(...overlayEntryLines(entries, redaction));
   lines.push("", `_この端末での最終更新: ${now}_`, LOCAL_OVERLAY_END, "");
   return lines.join("\n");
+}
+
+/** 同梱の overlay に既に載っているパターンの id（運営者の区画へ二重に載せないため）。 */
+function shippedPatternIds(file) {
+  let text = "";
+  try { text = fs.readFileSync(file, "utf8"); } catch { return new Set(); }
+  return new Set([...stripLocalOverlayBlock(text).matchAll(/パターン: `(pat-[a-z0-9-]+)`/gu)].map((match) => match[1]));
 }
 
 /** 同梱の overlay に既に載っている提案 id（運営者の区画へ二重に載せないため）。 */
 function shippedOverlayIds(file) {
   let text = "";
   try { text = fs.readFileSync(file, "utf8"); } catch { return new Set(); }
-  return new Set([...stripLocalOverlayBlock(text).matchAll(/id: `([a-f0-9]{12})`/gu)].map((match) => match[1]));
+  const body = stripLocalOverlayBlock(text);
+  const ids = new Set([...body.matchAll(/id: `([a-f0-9]{12})`/gu)].map((match) => match[1]));
+  // パターンにまとめた提案は「元の提案: `id`, …」の行に載る（renderPatternRuleLines）。
+  for (const line of body.matchAll(/元の提案: ([^\n]+)/gu)) {
+    for (const match of line[1].matchAll(/`([a-f0-9]{12})`/gu)) ids.add(match[1]);
+  }
+  return ids;
 }
 
 /** `.agents/skills/<id>/references/learned-auto.md` から skill id を取り出す。 */
@@ -900,7 +947,13 @@ export function summarizeProposals(proposals, applied, readCanonical = null, has
  * 理由だけを返す——そこは承認と監査の記録そのものなので、機械が書き足すと
  * 何を人が決めたのかが分からなくなる。
  */
-export function planOverlaySync(summary, targets, { homeRoot = homedir(), archivedRecords = [] } = {}) {
+export function planOverlaySync(summary, targets, { homeRoot = homedir(), archivedRecords = [], patternRows = [] } = {}) {
+  const patternsByTarget = new Map();
+  for (const pattern of latestPatterns(patternRows).values()) {
+    const target = resolveTarget(pattern.target);
+    if (!patternsByTarget.has(target)) patternsByTarget.set(target, []);
+    patternsByTarget.get(target).push(pattern);
+  }
   const byTarget = new Map();
   const archivedByTarget = new Map();
   const blocked = [];
@@ -934,10 +987,14 @@ export function planOverlaySync(summary, targets, { homeRoot = homedir(), archiv
       continue;
     }
     if (!def.overlay) continue;
+    // パターンの宛先では、active のパターンにまとめた提案を規則として載せ、禁止とまとまっていない指摘だけを
+    // 1件ずつ並べる（lib/harnessLearningPatterns.mjs の patternCoverage）。
+    const coverage = def.overlayMode === "patterns" ? patternCoverage(entries, patternsByTarget.get(target) ?? []) : null;
     overlays.push({
       target,
       overlay: def.overlay,
-      entries,
+      entries: coverage ? [...coverage.mandatory, ...coverage.uncovered] : entries,
+      ...(coverage ? { patterns: coverage.active, coveredCount: coverage.covered.length } : {}),
       archive: archivePathForOverlay(def.overlay),
       archivedEntries: archivedByTarget.get(target) ?? [],
     });
@@ -998,9 +1055,9 @@ function writeMachineOwnedFile(full, text) {
  */
 export function writeOverlayFiles(plan, { now, redaction, repoRoot = REPO_ROOT } = {}) {
   const written = [];
-  for (const { overlay, entries, archive, archivedEntries = [] } of plan.overlays) {
-    if (writeMachineOwnedFile(path.join(repoRoot, overlay), renderOverlay(entries, now, redaction))) {
-      written.push({ file: overlay, count: entries.length });
+  for (const { overlay, entries, patterns = [], archive, archivedEntries = [] } of plan.overlays) {
+    if (writeMachineOwnedFile(path.join(repoRoot, overlay), renderOverlay(entries, now, redaction, { patterns }))) {
+      written.push({ file: overlay, count: entries.length, ...(patterns.length > 0 ? { patterns: patterns.length } : {}) });
     }
     if (!archive) continue;
     const archiveFull = path.join(repoRoot, archive);
@@ -1026,12 +1083,14 @@ export function writeOverlayFiles(plan, { now, redaction, repoRoot = REPO_ROOT }
  */
 export function writeLocalOverlayFiles(plan, { now, redaction, state, repoRoot = REPO_ROOT } = {}) {
   const written = [];
-  for (const { overlay, entries, archive, archivedEntries = [] } of plan.overlays) {
+  for (const { overlay, entries, patterns = [], archive, archivedEntries = [] } of plan.overlays) {
     const skill = skillIdFromOverlay(overlay);
     if (!skill) continue;
     const shipped = shippedOverlayIds(path.join(repoRoot, overlay));
     const local = entries.filter((entry) => !shipped.has(entry.id));
-    const block = local.length > 0 ? renderLocalOverlayBlock(local, now, redaction) : "";
+    const shippedPatterns = shippedPatternIds(path.join(repoRoot, overlay));
+    const localPatterns = patterns.filter((pattern) => !shippedPatterns.has(pattern.id));
+    const block = local.length > 0 || localPatterns.length > 0 ? renderLocalOverlayBlock(local, now, redaction, { patterns: localPatterns }) : "";
     if (writeStateOverlayFile(state.overlaysDir, skill, OVERLAY_STATE_FILE, block)) {
       written.push({ file: path.join("overlays", skill, OVERLAY_STATE_FILE), count: local.length });
     }
@@ -1111,7 +1170,7 @@ export function runOverlaySync({
     ?? (path.resolve(repoRoot) === REPO_ROOT ? (kind) => learningLedgerPaths(kind).flatMap(readJsonl) : stateLedgerReader(state, targetMap));
   const { readCanonical, hashCanonical } = createCanonicalReaders({ repoRoot, targets: targetMap });
   const summary = summarizeProposals(read("proposals"), read("applied"), readCanonical, hashCanonical);
-  const plan = planOverlaySync(summary, targetMap, { homeRoot: homeDir, archivedRecords: read("archived") });
+  const plan = planOverlaySync(summary, targetMap, { homeRoot: homeDir, archivedRecords: read("archived"), patternRows: read("patterns") });
   const synced = syncOverlaysForState(plan, { now, redaction, state, repoRoot, homeDir });
   return { plan, synced };
 }
@@ -2019,18 +2078,22 @@ function printCurateReport(report) {
 }
 
 /** 台帳・overlay・正本側の記録を書く操作。子エージェントの印があれば拒否する。 */
-export const LEARNING_WRITE_ACTIONS = new Set(["capture", "sync", "promote", "apply", "curate", "pending", "approve", "reject", "rollback"]);
+export const LEARNING_WRITE_ACTIONS = new Set(["capture", "sync", "promote", "apply", "curate", "pending", "approve", "reject", "rollback", "pattern"]);
 
 /** 読むだけの呼び方（curate の一覧、pending の一覧と表示）は子エージェントからも通す。 */
 export function isLearningWriteInvocation(args) {
   if (!LEARNING_WRITE_ACTIONS.has(args.action)) return false;
   if (args.action === "curate") return args.archive === true;
   if (args.action === "pending") return typeof args.proposed === "string";
+  // pattern は upsert だけが書く（list・show・coverage・suggest・preview は読むだけ。preview は台帳でなく --out へ書く）。
+  if (args.action === "pattern") return args.subaction === "upsert";
   return true;
 }
 
 function parseArgs(argv) {
   const out = { action: argv[0] };
+  // pattern のように、2語目で中の操作を選ぶ命令（pattern upsert --file ...）。
+  if (argv[1] && !argv[1].startsWith("--")) out.subaction = argv[1];
   for (let i = 1; i < argv.length; i += 1) {
     const arg = argv[i];
     if (!arg.startsWith("--")) continue;
@@ -2083,6 +2146,20 @@ function printHelp() {
             候補に出た項目だけを learned-archive.md へ退避する（削除しない。再発すれば戻る）。
             人の確認（human-verified）が無い退避記録は効力を持たない——再発しないのは
             その規則が効いているからかもしれず、機械には見分けられないため
+
+  pattern   同じ宛先の提案を、原因の見立て・当てはまる条件と一緒にまとめた「パターン」の台帳（patterns.jsonl。
+            版を積むだけで消さない）。本体は lib/harnessLearningPatterns.mjs
+    pattern list [--target <宛先>] [--json]    最新の版の一覧
+    pattern show --id <pat-…>                 1件の全欄と版の履歴
+    pattern coverage --target <宛先> [--json] まとめた提案・禁止（原文のまま残す）・まとまっていない提案
+    pattern suggest --target <宛先>           まとまっていない提案を、文の近さで下書きの材料に分ける（書かない）
+    pattern upsert --file <JSON（1件か配列）>  検証して1版を追記する（書き込み。子エージェントからは拒否）。
+                                              id・target・title・rule・problem・appliesWhen・causeHypotheses・proposalIds・
+                                              status・note が要る。1件でも直すところがあれば、どれも書かない
+    pattern preview --target <宛先> --out <file>  パターンで作った学びの束の候補を --out へ書く（正本は書き換えない。
+                                              skill-evals run --overlay <id>=<file> で今の束と比べる）
+            学びの束に載るのは、targets.json で overlayMode: "patterns" にした宛先の active のパターンだけ。
+            禁止（constraint）の提案は、パターンにまとめても原文のまま残る
 
   promote   overlay の項目を人の規則へ格上げする（reviewer 必須）。
             正本にその文言が実在しないと通らない。blocked の提案と、検査に当たる --note は通さない
@@ -2191,6 +2268,194 @@ function printHelp() {
   （skills:check:release の関門と、承認者の端末の skill-inventory --approve）。人が見ないまま他人の端末へ
   届き、有料 API を動かす指示になるのを防ぐのはそこ。提案ゼロは正常で、毎回何かを書かせる圧はかけない。
 `);
+}
+
+// ---------------------------------------------------------------------------
+// パターン（lib/harnessLearningPatterns.mjs）
+
+const PATTERN_SUBACTIONS = new Set(["list", "show", "coverage", "suggest", "upsert", "preview"]);
+
+function pendingEntriesForTarget(summary, target) {
+  return summary.filter((entry) => !entry.applied && resolveTarget(entry.target) === target && learningBlockReasons(entry).length === 0);
+}
+
+function patternsForTarget(latest, target) {
+  return [...latest.values()].filter((pattern) => resolveTarget(pattern.target) === target);
+}
+
+function requirePatternTarget(args) {
+  if (typeof args.target !== "string") throw new Error("--target <宛先> が要ります（例: platform:platform-craft）");
+  const target = resolveTarget(args.target);
+  if (!Object.prototype.hasOwnProperty.call(loadTargets(), target)) throw new Error(`宛先の一覧にありません: ${args.target}`);
+  return target;
+}
+
+/** 同じ宛先のまとまっていない提案を、文の近さで下書きの材料に分ける（書かない。下書きは人かエージェントが書く）。 */
+export function suggestPatternGroups(entries, { threshold = 0.32 } = {}) {
+  const groups = [];
+  const ordered = [...entries].sort((a, b) => b.occurrences - a.occurrences || String(a.firstSeenAt).localeCompare(String(b.firstSeenAt)));
+  for (const entry of ordered) {
+    const group = groups.find((candidate) => candidate.entries.some((member) => textSimilarity(member.text, entry.text) >= threshold));
+    if (group) group.entries.push(entry);
+    else groups.push({ entries: [entry] });
+  }
+  return groups.sort((a, b) => b.entries.length - a.entries.length);
+}
+
+function patternActor(args) {
+  if (args.reviewer === undefined && !args.humanVerified) return { actor: "agent" };
+  const verdict = attestationFor({
+    reviewer: typeof args.reviewer === "string" ? args.reviewer : "",
+    isInteractive: Boolean(process.stdin.isTTY),
+    agentAttested: Boolean(args.agentAttested),
+    humanVerified: Boolean(args.humanVerified),
+  });
+  if (!verdict.ok) throw new Error(verdict.message);
+  // 人の記録は二手（対話端末＋印）だけ。名前だけ・対話端末だけは人の記録にしない。
+  if (verdict.attestation.attestedBy !== HUMAN_VERIFIED) {
+    throw new Error("パターンを人の記録として残すのは、その人の端末からの --reviewer <名前> --human-verified だけです。"
+      + "エージェントは何も付けずに書く（記録はエージェントが書いたものになる）。");
+  }
+  return { actor: "human", reviewer: verdict.attestation.reviewer };
+}
+
+function assertPatternSafe(record, { scope }) {
+  const target = resolveTarget(record.target);
+  if (scope && !isChannelPackTarget(target)) {
+    throw channelScopeError(CHANNEL_SCOPE_SHARED_TARGET_ERROR, `共有層の宛先（${target}）のパターンにチャンネル（${scope.channelId}）は付けません。`);
+  }
+  const probe = { target, text: patternInspectionText(record), evidence: null, kind: "fact" };
+  const channelVerdict = channelTermsInSharedEntry(probe, collectSensitiveSignals(REPO_ROOT));
+  if (!channelVerdict.ok) throw new Error(channelVerdict.message);
+  const privateVerdict = privateTermsInSharedEntry(probe, defaultPrivateVocabulary());
+  if (!privateVerdict.ok) throw new Error(privateVerdict.message);
+  // 提案なら blocked として残すが、パターンは整理した結果で、そのまま学びの束になって配られる。検査に当たれば書かない。
+  const reasons = inspectLearningProposal(probe, { homeRoot: homedir() });
+  if (reasons.length > 0) throw new Error(`パターンの本文が書き込み前の検査に当たりました: ${describeLearningBlockReasons(reasons)}`);
+}
+
+function readPatternInputs(file) {
+  if (typeof file !== "string") throw new Error("--file <パターンの JSON（1件か配列）> が要ります");
+  const parsed = JSON.parse(fs.readFileSync(path.resolve(file), "utf8"));
+  return Array.isArray(parsed) ? parsed : [parsed];
+}
+
+export function runPatternCli(args, { now, scope = null, summary = [], archived = [] } = {}) {
+  const sub = args.subaction || "list";
+  if (!PATTERN_SUBACTIONS.has(sub)) throw new Error(`pattern の操作は ${[...PATTERN_SUBACTIONS].join(" / ")} です`);
+  const rows = readLearningLedgerRows("patterns", { channel: scope });
+  const latest = latestPatterns(rows);
+  const json = args.json === true;
+  const write = (text) => process.stdout.write(text);
+
+  if (sub === "list") {
+    const target = typeof args.target === "string" ? requirePatternTarget(args) : null;
+    const items = [...latest.values()].filter((pattern) => !target || resolveTarget(pattern.target) === target)
+      .sort((a, b) => a.target.localeCompare(b.target) || a.id.localeCompare(b.id));
+    if (json) { write(`${JSON.stringify(items, null, 2)}\n`); return; }
+    if (items.length === 0) { write("パターンはまだありません。材料は pattern suggest --target <宛先>、書くのは pattern upsert --file <JSON>\n"); return; }
+    for (const pattern of items) {
+      write(`[${pattern.id}] ${pattern.target} 第${pattern.revision}版 ${pattern.status}  ${pattern.title}（元の提案 ${pattern.proposalIds.length} 件）\n`);
+    }
+    return;
+  }
+
+  if (sub === "show") {
+    if (typeof args.id !== "string") throw new Error("--id <パターンの id> が要ります");
+    const pattern = latest.get(args.id);
+    if (!pattern) throw new Error(`パターンがありません: ${args.id}`);
+    const history = rows.filter((row) => row?.id === args.id)
+      .map((row) => ({ revision: row.revision, status: row.status, updatedAt: row.updatedAt, updatedBy: row.updatedBy, note: row.note }))
+      .sort((a, b) => a.revision - b.revision);
+    write(`${JSON.stringify({ ...pattern, history }, null, 2)}\n`);
+    return;
+  }
+
+  if (sub === "coverage" || sub === "suggest") {
+    const target = requirePatternTarget(args);
+    const entries = pendingEntriesForTarget(summary, target);
+    const coverage = patternCoverage(entries, patternsForTarget(latest, target));
+    if (sub === "coverage") {
+      const report = {
+        target,
+        overlayMode: loadTargets()[target]?.overlayMode || "proposals",
+        pending: entries.length,
+        activePatterns: coverage.active.length,
+        covered: coverage.covered.length,
+        mandatory: coverage.mandatory.map((entry) => entry.id),
+        uncovered: coverage.uncovered.map((entry) => ({ id: entry.id, kind: entry.kind, occurrences: entry.occurrences, text: entry.text })),
+      };
+      if (json) { write(`${JSON.stringify(report, null, 2)}\n`); return; }
+      write(`${target}（学びの束の作り方: ${report.overlayMode}）: 未反映 ${report.pending} 件 / active のパターン ${report.activePatterns} / `
+        + `まとめた提案 ${report.covered} / 禁止（原文のまま残す）${report.mandatory.length} / まとまっていない ${report.uncovered.length}\n`);
+      for (const entry of report.uncovered) write(`  - [${entry.id}] ${entry.kind}${entry.occurrences > 1 ? ` ×${entry.occurrences}` : ""} ${entry.text.slice(0, 100)}\n`);
+      return;
+    }
+    const groups = suggestPatternGroups(coverage.uncovered);
+    if (json) {
+      write(`${JSON.stringify(groups.map((group) => group.entries.map((entry) => ({ id: entry.id, kind: entry.kind, occurrences: entry.occurrences, text: entry.text }))), null, 2)}\n`);
+      return;
+    }
+    write(`下書きの材料（${target}。何も書いていません）: まとまっていない提案 ${coverage.uncovered.length} 件を、文の近さで ${groups.length} 組に分けました。\n`
+      + "近さは文字の重なりで見ただけなので、組は目安です。同じ原因・同じ直し方のものだけを1つのパターンにし、根拠（evidence）と\n"
+      + "元の会話の記録を読んで原因の見立てを書く。禁止（constraint）は原文のまま学びの束に残るので、パターンに入れなくてよい。\n\n");
+    groups.forEach((group, index) => {
+      write(`▼ 組 ${index + 1}（${group.entries.length} 件）\n`);
+      for (const entry of group.entries) write(`  - [${entry.id}] ${entry.kind}${entry.occurrences > 1 ? ` ×${entry.occurrences}` : ""} ${entry.text}\n`);
+    });
+    return;
+  }
+
+  if (sub === "preview") {
+    // 学びの束の候補を、台帳でなく --out に書く（評価で比べるため: skill-evals run --overlay <id>=<file>）。
+    const target = requirePatternTarget(args);
+    if (typeof args.out !== "string") throw new Error("--out <書き出す先> が要ります（正本の learned-auto.md には書きません）");
+    const definition = loadTargets()[target];
+    if (!definition?.overlay) throw new Error(`${target} は学びの束を持たない宛先です`);
+    const out = path.resolve(args.out);
+    if (samePath(out, path.join(REPO_ROOT, definition.overlay))) {
+      throw new Error("--out に正本の learned-auto.md は指定できません（切り替えは targets.json の overlayMode で行う）");
+    }
+    const redaction = overlayRedactionContextForCli(args);
+    const plan = planOverlaySync(summary, { [target]: { ...definition, overlayMode: "patterns" } }, { homeRoot: homedir(), archivedRecords: archived, patternRows: rows });
+    const item = plan.overlays[0];
+    const text = renderOverlay(item.entries, now, redaction, { patterns: item.patterns || [] });
+    fs.mkdirSync(path.dirname(out), { recursive: true });
+    fs.writeFileSync(out, text);
+    const current = path.join(REPO_ROOT, definition.overlay);
+    const currentBytes = fs.existsSync(current) ? fs.statSync(current).size : 0;
+    write(`候補の学びの束を書きました: ${out}\n`
+      + `  パターン ${item.patterns?.length || 0} / まとめた提案 ${item.coveredCount || 0} / 1件ずつ残した提案 ${item.entries.length}\n`
+      + `  大きさ ${Buffer.byteLength(text)} バイト（今の正本 ${currentBytes} バイト）\n`
+      + `  比べる: node scripts/skill-evals.mjs run --execute --skill <id> --overlay <id>=${out}\n`);
+    return;
+  }
+
+  // upsert
+  const inputs = readPatternInputs(args.file);
+  const { actor, reviewer } = patternActor(args);
+  const knownTargets = Object.keys(loadTargets());
+  const proposalTargets = new Map(summary.map((entry) => [entry.id, resolveTarget(entry.target)]));
+  const ids = new Set([...latest.keys(), ...inputs.map((input) => String(input?.id || "").trim()).filter(Boolean)]);
+  const records = [];
+  const problems = [];
+  for (const input of inputs) {
+    const id = String(input?.id || "").trim();
+    const { record, problems: found } = buildPatternRevision(input, {
+      now, actor, resolveTarget, knownTargets, proposalTargets, previous: latest.get(id) || null, patternIds: ids,
+    });
+    if (found.length > 0) { problems.push(`${id || "（id なし）"}: ${found.join(" / ")}`); continue; }
+    assertPatternSafe(record, { scope });
+    records.push(reviewer ? { ...record, reviewer } : record);
+  }
+  // 1件でも直すところがあれば、どれも書かない（半分だけ書いた状態を残さない）。
+  if (problems.length > 0) throw new Error(`パターンを書きませんでした:\n${problems.map((line) => `  - ${line}`).join("\n")}`);
+  for (const record of records) {
+    const ledgerPath = ledgerPathFor(record.target, "patterns", { ...(scope ? { channel: scope } : {}) });
+    withLearningFileLock(ledgerPath, () => appendJsonl(ledgerPath, record));
+    write(`書きました: [${record.id}] ${record.target} 第${record.revision}版 ${record.status}（${record.updatedBy}）\n`);
+  }
+  write("学びの束に載るのは、宛先が overlayMode: \"patterns\" のときの active のパターンだけです（sync で反映）。\n");
 }
 
 async function main() {
@@ -2332,6 +2597,11 @@ async function main() {
       break;
     }
 
+    case "pattern": {
+      runPatternCli(args, { now, scope, summary, archived });
+      break;
+    }
+
     case "review": {
       // blocked は統合案に入れない（本文を出すと、注入らしい文をそのまま読ませることになる）。
       const reviewable = summary.filter((entry) => entry.applied || learningBlockReasons(entry).length === 0);
@@ -2373,7 +2643,7 @@ async function main() {
       // でだけ通し、その overlay にはヘッダで印が付く。
       const redaction = overlayRedactionContextForCli(args);
       // 本体は自動 sync（Job の決着時・setup）と同じ runOverlaySync。
-      const ledgers = { proposals, applied, archived };
+      const ledgers = { proposals, applied, archived, patterns: readLearningLedgerRows("patterns", { channel: scope }) };
       const { plan, synced } = runOverlaySync({ state, redaction, now, readLedger: (kind) => ledgers[kind] ?? [] });
       reportOverlaySync(plan, synced.written, { mode: synced.mode, delivery: synced.delivery, stateDir: state.stateDir });
       break;

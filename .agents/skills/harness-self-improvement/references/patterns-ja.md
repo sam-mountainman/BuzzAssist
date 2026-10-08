@@ -1,0 +1,79 @@
+# パターン（まとめた規則）の書き方と使い方
+
+同じ宛先に溜まった提案を、**原因の見立て・当てはまる条件・根拠と一緒に1つの規則へまとめた記録**。
+本体は `lib/harnessLearningPatterns.mjs`、入口は `node scripts/harness-learn.mjs pattern …`。
+提案台帳（`proposals.jsonl`）の上に立つ別の台帳（`patterns.jsonl`）で、置き場の決まりは提案と同じ
+（共有の宛先は開発用チェックアウトなら `docs/learning/`、チャンネルの宛先は非公開の保存先）。
+
+## なぜ足したか
+
+提案は観測を1件ずつ積む場所で、まとめる処理（`review`・curator）はあっても、まとめた結果を
+根拠・条件・原因と結び付けて更新し続ける置き場が無かった。そのため学びの束（`learned-auto.md`）は
+提案を並べただけになり、作業する側が毎回すべてを読んでいた（2026-10-09 時点で platform-craft は
+85項目・約4万バイト）。WikiSkill（arXiv 2608.27454）は「整理した知識の層を、提案を作る側が読む」構成で
+大きく伸びたと報告している。ただし、その論文は正解のある短い課題で、検証の点で自動採用している。
+BuzzAssist の制作は長く、正解が無く、採点もぶれるので、**考え方だけを既存の台帳へ小さく取り込み、
+効果は評価で確かめてから広げる**（同日の別文脈のレビューの結論）。
+
+## 1件のパターンに書くこと
+
+| 欄 | 書くこと |
+|---|---|
+| `id` | `pat-` で始まる英小文字・数字・ハイフン。版をまたいで同じ |
+| `target` | 宛先（提案と同じ3層）。版をまたいで変えない |
+| `title` / `rule` | 見出しと、作業する側が読む短い規則（12〜400字）。何をするかを書く |
+| `problem` | 何が起きたか（観測） |
+| `appliesWhen` / `notWhen` | 当てはまる条件と、当てはまらない条件 |
+| `causeHypotheses` | 原因の見立て。`hypothesis`（仮説）・`confirmed`（確かめた）・`refuted`（否定された）。観測と見立てを混ぜない |
+| `proposalIds` | 元の提案 id（1件以上。同じ宛先の提案だけ） |
+| `successEvidence` | うまくいった例。**直したあとで合格した例**を優先する（何を変えたかを比べられる）。1回の合格だけで普遍の規則にしない |
+| `counterEvidence` | 反証。規則が効かなかった例、条件が変わった例 |
+| `scope.hosts` / `scope.models` | 効く範囲。古いモデル向けの回避策は強いモデルを縛ることがある（論文の負の転移）ので、確かめたホスト・モデルを書く |
+| `changeIds` / `evalRefs` | 正本へ反映した変更 id、比べた評価の記録 |
+| `status` | `draft` → `active` → （`superseded` か `refuted`）。学びの束に載るのは `active` だけ |
+| `note` | この版で何を変えたか |
+
+決まり:
+
+- **版を積むだけで消さない**。直すときは同じ id で新しい版を書く（`pattern upsert`）。最新の版が今の姿で、
+  履歴は `pattern show --id` で読める
+- **否定されたら直す**。原因の見立てが崩れたら `refuted` にして反証を書き、規則も直す。古い知識を固定しない
+  （課金の前提を確かめずに注意文へ固定した 2026-09-27 の誤りと同じことを、パターンで繰り返さない）
+- **却下された案は、その時の条件での失敗の記録**であって、永久の禁止ではない。条件が変われば試し直してよい
+- **禁止（constraint）の提案は、パターンにまとめても学びの束に原文のまま残る**。短くした規則で必須の条件を落とさない
+- パターンは**運用上の補助指示**で、監査・承認・合否の証跡には使えない（overlay と同じ）
+- 共有の宛先のパターンは公開リポジトリに入る。捕捉と同じ検査（検査語彙・チャンネルの語・注入らしい文・資格情報・
+  端末のパス）に当たれば**書かない**（提案のように blocked で残すのではなく、断る）。チャンネル名・運営者名・キャラ名を書かない
+- 並列の子は書かない（`BUZZASSIST_LEARNING_WRITE_FORBIDDEN`）。書き込みは `upsert` だけで、ほかは読むだけ
+
+## 手順
+
+```bash
+node scripts/harness-learn.mjs pattern coverage --target <宛先>   # まとめた・禁止・まとまっていない
+node scripts/harness-learn.mjs pattern suggest  --target <宛先>   # まとまっていない提案を下書きの材料に（目安）
+# 材料と、提案の根拠（status で id から引ける）・元の記録（品質ループの状態・RunReceipt）を読んで、JSON を書く
+node scripts/harness-learn.mjs pattern upsert --file <パターンの JSON（1件か配列）>
+node scripts/harness-learn.mjs pattern list   --target <宛先>
+```
+
+`suggest` の組は文字の重なりで分けただけの目安。**同じ原因・同じ直し方のものだけ**を1つにまとめる。
+原因は根拠を読んで見立てを書き、確かめていなければ `hypothesis` のままにする。
+
+## 学びの束に使う（宛先ごとに切り替える）
+
+`docs/learning/targets.json` の宛先に `"overlayMode": "patterns"` を付けると、`sync` がその宛先の学びの束を
+「まとめた規則（active のパターン）」＋「禁止と、まだまとまっていない提案」で作る。付けない宛先は今までどおり。
+
+**切り替える前に、評価で比べる。** 候補の学びの束を正本に書かずに作り、同じ SKILL.md・同じ課題・同じホストで
+今の束と並べる:
+
+```bash
+node scripts/harness-learn.mjs pattern preview --target <宛先> --out <候補の learned-auto.md>
+node scripts/skill-evals.mjs run --execute --skill <id> --overlay <id>=<候補の learned-auto.md>
+node scripts/skill-evals.mjs compare --skill <id> --base <今の束の SHA> --candidate <候補の SHA>
+```
+
+候補の記録はリリースと反映の関門には数えない。比べる点は、必須の条件が残っているか（禁止が原文で残る）・
+評価の合格が両ホストで下がっていないか・読む量がどれだけ減ったか。件数が少なく採点もぶれるので、
+**結果は人が読む材料であって自動の採否ではない**。切り替えは `targets.json` の変更として commit し、配る版は
+Release のときに人が確かめる。

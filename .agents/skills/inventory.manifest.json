@@ -84,9 +84,9 @@
     {
       "id": "buzzassist:harness-self-improvement",
       "name": "harness-self-improvement",
-      "version": "1.6.0",
-      "contentSha256": "sha256:a2bc811b6d3860928a79d933bb24766a5099cddf3ede4155b1dbc775620290fc",
-      "bundleSha256": "sha256:3d37a3bc610b0b1ff631f5302bc1c199775bc51100a2d1f57fb1770129dfa2c0",
+      "version": "1.7.0",
+      "contentSha256": "sha256:5982bfb9f84ba8e065d29088bde2266efe16ef2afff5ef19881db4e681cf215e",
+      "bundleSha256": "sha256:5b203422a71372a81e530a1b3a4b216c0de4e507962c494dc970ee77cfeaab85",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",

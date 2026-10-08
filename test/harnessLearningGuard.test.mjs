@@ -49,7 +49,7 @@ test("印があれば capture は台帳へ書く前に止まる（Canvas / Recei
 });
 
 test("CLI の書き込み系は印があれば拒否し、読むだけの status は通す", () => {
-  assert.deepEqual([...LEARNING_WRITE_ACTIONS].sort(), ["apply", "approve", "capture", "curate", "pending", "promote", "reject", "rollback", "sync"]);
+  assert.deepEqual([...LEARNING_WRITE_ACTIONS].sort(), ["apply", "approve", "capture", "curate", "pattern", "pending", "promote", "reject", "rollback", "sync"]);
   const env = childAgentEnvironment(process.env);
   for (const args of [
     ["capture", "--kind", "fact", "--target", "platform:platform-craft", "--text", "子からの捕捉は拒否される", "--session", "child"],
@@ -62,6 +62,8 @@ test("CLI の書き込み系は印があれば拒否し、読むだけの status
     ["approve", "--change", "chg-000000000000", "--reviewer", "x", "--human-verified"],
     ["reject", "--change", "chg-000000000000", "--reviewer", "x", "--reason", "子からは却下しない"],
     ["rollback", "--change", "chg-000000000000", "--reviewer", "x", "--reason", "子からは戻さない"],
+    // パターン: upsert だけが書き込み（list・coverage などは読むだけ）。
+    ["pattern", "upsert", "--file", "pattern.json"],
   ]) {
     const result = spawnSync(process.execPath, [HARNESS_LEARN, ...args], { cwd: REPO_ROOT, env, encoding: "utf8" });
     assert.equal(result.status, 2, `${args[0]} が拒否されなかった: ${result.stdout}`);
@@ -71,4 +73,6 @@ test("CLI の書き込み系は印があれば拒否し、読むだけの status
   assert.equal(status.status, 0, status.stderr);
   const pending = spawnSync(process.execPath, [HARNESS_LEARN, "pending"], { cwd: REPO_ROOT, env, encoding: "utf8" });
   assert.equal(pending.status, 0, pending.stderr);
+  const patterns = spawnSync(process.execPath, [HARNESS_LEARN, "pattern", "list"], { cwd: REPO_ROOT, env, encoding: "utf8" });
+  assert.equal(patterns.status, 0, patterns.stderr);
 });
