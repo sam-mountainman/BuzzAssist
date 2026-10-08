@@ -589,8 +589,8 @@ export async function shutdownRunner(signal) {
 }
 
 /**
- * 計画のうち、claude を非対話（-p / --print）で直接起動するジョブ。2026-06-15 から claude -p は
- * サブスクの枠ではなく月額クレジットから引かれるので、dry-run に回数を出し、走らせる前に1回だけ注意を出す。
+ * 計画のうち、claude を非対話（-p / --print）で直接起動するジョブ。claude -p は対話と同じ契約の利用枠から
+ * 引かれる（多く並べると枠を短い時間で使い切る）ので、dry-run に回数を出し、走らせる前に1回だけ注意を出す。
  * （harness-parallel-agents.mjs・skill-evals.mjs を呼ぶジョブは、その中で注意を出す。）
  */
 export function claudePrintJobs(plan) {
@@ -771,7 +771,7 @@ function printHelp() {
   --report <path>        レポートJSONの出力先
   --log-dir <path>       各ジョブのログ出力先
   --dry-run              実行せず計画の検証と順序だけ確認する（claude を -p / --print で
-                         直接起動するジョブがあれば、その回数と課金の注意も出す）
+                         直接起動するジョブがあれば、その回数と利用枠の注意も出す）
 
   計画JSONの形:
     {

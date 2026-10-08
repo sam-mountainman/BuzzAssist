@@ -219,14 +219,15 @@ plugin cacheを含める場合だけ `--include-plugin-cache` を追加する。
 npm run skills:evals                         # 計画だけ（既定。モデルは呼ばない）
 node scripts/skill-evals.mjs run --execute \
   --skill buzzassist:skill-creator --eval 3 \
-  --claude-model <id> --codex-model <id>     # 実行（codex は利用枠、claude -p は月額クレジットを使う）
+  --claude-model <id> --codex-model <id>     # 実行（codex も claude -p も、それぞれの契約の利用枠を使う）
 node scripts/skill-evals.mjs report          # 版ごと・ホストごとの合格率
 ```
 
-- **課金**: 2026-06-15 から `claude -p`（Claude Agent SDK を含む自動実行）は、サブスクリプションの利用枠ではなく
-  別の月額クレジットから引かれる（API と同じ価格・繰り越しなし。使い切ると、追加課金を有効にしていれば API の価格で
-  請求、していなければ翌月まで止まる）。計画（plan）は claude の起動回数と課金の1行を出し、`run --execute` は
+- **利用枠**: `claude -p`（Claude Agent SDK を含む自動実行）は、対話の Claude Code と同じ契約の利用枠から引かれる
+  （2026-10-07 時点の公式案内。6/15 から別課金にする予告は 6/15 に止められ、Max・Team には月次の API クレジットも付いた）。
+  多く流すと対話の作業の枠も減るので、計画（plan）は claude の起動回数と利用枠の1行を出し、`run --execute` は
   claude を起動する前に1回だけ注意を標準エラーへ出す。claude を使わずに流すなら `--hosts codex --grader codex`
+  （2026-09-27〜10-09 は「6/15 から別の月額クレジット」と誤って書いていた。課金の前提は公式案内の更新日を確かめる）
 - **実行者**: `claude -p`（`--safe-mode --restricted --disable-slash-commands --strict-mcp-config
   --no-session-persistence`、道具は `Read,Glob,Grep` だけ、出力は `stream-json`）と
   `codex exec`（`--sandbox read-only --ephemeral --ignore-user-config --ignore-rules`、

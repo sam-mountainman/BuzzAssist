@@ -145,9 +145,10 @@ node scripts/harness-parallel-run.mjs --plan <plan.json> \
 
 ### ② LLM判断層 — レビュー・QA の並列
 
-**課金の注意**: 2026-06-15 から `claude -p` での自動実行は、サブスクの枠ではなく月額クレジット（API と同じ価格・繰り越しなし）
-から引かれる。エンジンは auto（codex が先）のままにし、claude を使う前に `--dry-run` で起動の見込みを見る。skill-evals は
-`--hosts codex --grader codex` で claude を使わずに流せる。
+**利用枠の注意**: `claude -p` での自動実行は、対話の Claude Code と同じ契約の利用枠から引かれる（2026-10-07 時点の
+公式案内。「6/15 から別の月額クレジット」と以前書いたのは、止められた予告を事実として扱った誤り）。子を多く並べると
+対話の作業の枠も短い時間で減るので、エンジンは auto（codex が先）のままにし、claude を使う前に `--dry-run` で起動の
+見込みを見る。skill-evals は `--hosts codex --grader codex` で claude を使わずに流せる。
 
 同一人物QA・混同防止レビュー・台本監査のように、モデルの判断が要る作業。
 

@@ -2,7 +2,7 @@
 // 正本スキルの evals を Claude Code と Codex の両方で流し、別ベンダーの新しい文脈で採点する。
 //
 //   node scripts/skill-evals.mjs [plan]        計画だけ（既定。モデルは呼ばない）
-//   node scripts/skill-evals.mjs run --execute  実行する（codex は利用枠、claude -p は月額クレジットを使う）
+//   node scripts/skill-evals.mjs run --execute  実行する（codex も claude -p も、それぞれの契約の利用枠を使う）
 //   node scripts/skill-evals.mjs report         版ごと・ホストごとの合格率を表にする
 //
 // 本体は lib/skillEvals.mjs。
@@ -45,8 +45,8 @@ const HELP = `正本スキルの evals を Claude Code と Codex で流して採
 
 実行:
   --execute                run のときに必須。無ければ計画を出すだけで何も起動しない。
-                           claude -p は 2026-06-15 からサブスクの枠ではなく月額クレジット（API と同じ価格・
-                           繰り越しなし）から引かれる。claude を起動する前に1回だけ注意を出す
+                           claude -p は対話の Claude Code と同じ契約の利用枠から引かれる（多く流すと対話の
+                           作業の枠も減る）。claude を起動する前に1回だけ注意を出す
   --concurrency <auto|n>   同時実行数（既定 auto: claude は min(10, max(2, コア-2))、codex は 8。上限 16）
   --timeout-ms <n>         実行者1回の時間切れ（既定 15 分。採点者は 10 分）
   --claude-bin <path>      claude の実行ファイル（既定は PATH）
@@ -128,7 +128,7 @@ function formatPlan(plan, { evalsDir, evalsDirSource, binaries }) {
     lines.push("", "注意:");
     for (const warning of plan.warnings) lines.push(`  - ${warning}`);
   }
-  lines.push("", "実行するには run --execute を付けます（codex は利用枠、claude -p は月額クレジットを使います）。");
+  lines.push("", "実行するには run --execute を付けます（codex も claude -p も、それぞれの契約の利用枠を使います）。");
   return `${lines.join("\n")}\n`;
 }
 

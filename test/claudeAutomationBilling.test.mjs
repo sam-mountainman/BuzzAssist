@@ -32,13 +32,18 @@ function tempDir(t, prefix) {
   return dir;
 }
 
-test("注意の文面は、いつから・何から引かれるか・使い切るとどうなるかを書く", () => {
+test("注意の文面は、何の枠から引かれるか・いつの公式案内か・多く並べるとどうなるかを書く", () => {
   const text = claudeAutomationBillingNotice({ plannedLaunches: 7, purpose: "試験", alternative: "codex で足りるなら --engine codex" });
-  for (const phrase of ["2026-06-15", "claude -p", "サブスクリプションの利用枠ではなく", "月額クレジット", "API と同じ価格", "繰り越しなし", "追加課金", "翌月まで止まる", "見込み 7 回", "--engine codex"]) {
+  for (const phrase of ["[利用枠の注意]", "claude -p", "対話の Claude Code と同じ契約の利用枠", "2026-10-07 時点の公式案内", "別課金への切り替えは止められ",
+    "短い時間で使い切り", "support.claude.com", "見込み 7 回", "--engine codex"]) {
     assert.ok(text.includes(phrase), `注意に「${phrase}」が無い: ${text}`);
   }
+  // 2026-09-27 に配った「6/15 から別の月額クレジット」は誤り（変更は止められた）。同じ文面に戻さない。
+  for (const wrong of ["月額クレジットから引かれる", "サブスクリプションの利用枠ではなく", "繰り越しなし"]) {
+    assert.ok(!text.includes(wrong), `止められた変更を事実として書いている: ${wrong}`);
+  }
   assert.equal(claudeAutomationPlanLine(0), "", "起動しない計画には課金の行を出さない");
-  assert.match(claudeAutomationPlanLine(12), /^claude -p の起動見込み: 12 回。.*月額クレジット/u);
+  assert.match(claudeAutomationPlanLine(12), /^claude -p の起動見込み: 12 回。.*同じ契約の利用枠/u);
 });
 
 test("注意は1回だけ出す（起動のたびには出さない）", () => {
@@ -90,12 +95,12 @@ test("harness-parallel-agents --dry-run はエンジンを1つも起動せず、
   assert.equal(auto.status, 0, auto.stderr);
   assert.match(auto.stdout, /エンジンを起動しません/u);
   assert.match(auto.stdout, /claude -p の起動見込み: codex が使えれば 0 回、使えなければ 3 回（プローブ 1 \+ タスク 2）/u);
-  assert.match(auto.stdout, /月額クレジット/u);
-  assert.doesNotMatch(auto.stderr, /\[課金の注意\]/u, "dry-run で起動前の注意を出した（起動していないのに）");
+  assert.match(auto.stdout, /同じ契約の利用枠/u);
+  assert.doesNotMatch(auto.stderr, /\[利用枠の注意\]/u, "dry-run で起動前の注意を出した（起動していないのに）");
   const codex = run("codex");
   assert.equal(codex.status, 0, codex.stderr);
   assert.match(codex.stdout, /claude -p の起動見込み: 0 回/u);
-  assert.doesNotMatch(codex.stdout, /月額クレジット/u);
+  assert.doesNotMatch(codex.stdout, /同じ契約の利用枠/u);
   const claude = run("claude");
   assert.match(claude.stdout, /claude -p の起動見込み: 3 回（プローブ 1 \+ タスク 2）/u);
 });
@@ -169,5 +174,5 @@ test("harness-parallel-run --dry-run は claude -p を直接起動するジョ�
   const run = spawnSync(process.execPath, [join(repoRoot, "scripts", "harness-parallel-run.mjs"), "--plan", plan, "--dry-run"], { encoding: "utf8" });
   assert.equal(run.status, 0, run.stderr);
   assert.match(run.stdout, /claude -p の起動見込み: 1 回（review-a）/u);
-  assert.doesNotMatch(run.stderr, /\[課金の注意\]/u, "dry-run で起動前の注意を出した");
+  assert.doesNotMatch(run.stderr, /\[利用枠の注意\]/u, "dry-run で起動前の注意を出した");
 });

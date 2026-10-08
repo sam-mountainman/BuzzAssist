@@ -227,7 +227,7 @@ export async function probeEngine(engineId, { timeoutMs = 60_000, readOnly = fal
   if (!engine) return { engineId, available: false, reason: `未知のエンジン: ${engineId}` };
   const binary = resolveBinary(engine, { env });
   if (!binary) return { engineId, available: false, reason: "実行ファイルが見つかりません" };
-  // プローブも claude -p の起動（月額クレジットから引かれる）。起動する前に1回だけ注意を出す。
+  // プローブも claude -p の起動（対話と同じ契約の利用枠から引かれる）。起動する前に1回だけ注意を出す。
   if (engineId === "claude") notifyClaudeLaunch({ plannedLaunches: 1, purpose: "エンジンの確認（プローブ）" });
 
   const probeTask = { prompt: "Reply with exactly: PROBE-OK" };
@@ -528,7 +528,7 @@ export async function runAgentTasks(tasks, options = {}) {
     concurrency,
     cpuCount: os.cpus().length,
     host: options.host ?? process.env.HARNESS_PARALLEL_HOST ?? "unspecified",
-    // claude -p の起動回数（タスクの分。プローブは入れない）。月額クレジットから引かれる回数の目安。
+    // claude -p の起動回数（タスクの分。プローブは入れない）。利用枠から引かれる回数の目安。
     claudePrintLaunches: engineInfo.engineId === "claude" ? ordered.filter((r) => r.status !== "failed").length : 0,
     // digest はタスクだけでなく、どのエンジン・どの設定で走ったかまで含める。
     // 同じ digest なのに engine が違えば「同じ実行」とは言えない。
@@ -619,8 +619,8 @@ function printHelp() {
   --dry-run            タスクを検証し、どのエンジンで何回起動する見込みかを出して終わる
                        （エンジンを1つも起動しない）
 
-  claude -p の起動は、2026-06-15 からサブスクの枠ではなく月額クレジット（API と同じ価格・
-  繰り越しなし）から引かれる。auto は codex を先に選ぶ。claude を起動する前に1回だけ注意を出す。
+  claude -p の起動は、対話の Claude Code と同じ契約の利用枠から引かれる（多く並べると対話の
+  作業の枠も減る）。auto は codex を先に選ぶ。claude を起動する前に1回だけ注意を出す。
 
   タスクJSONの形:
     { "tasks": [ { "id": "review-horo", "title": "もも同一性QA",
@@ -692,7 +692,7 @@ async function main() {
     if (billing) process.stdout.write(`${billing}\n`);
     process.exit(0);
   }
-  // claude を起動する直前に1回だけ、課金の注意を出す（auto で codex が使えれば出ない）。
+  // claude を起動する直前に1回だけ、利用枠の注意を出す（auto で codex が使えれば出ない）。
   const withClaude = `${tasks.length + 1} 回（プローブ 1 + タスク ${tasks.length}）`;
   const notifyClaudeLaunch = (notice = {}) => notifyClaudeLaunchOnce({
     ...notice,
@@ -751,7 +751,7 @@ async function main() {
       + (summary.counts.unjudged > 0 ? ` / 合否未判定 ${summary.counts.unjudged}` : "")
       + (summary.counts.verdictFail > 0 ? ` / 不合格 ${summary.counts.verdictFail}` : "")
       + ` / 同時 ${summary.concurrency} / 所要 ${(summary.totalDurationMs / 1000).toFixed(1)}秒`
-      + (summary.claudePrintLaunches > 0 ? ` / claude -p ${summary.claudePrintLaunches} 回（月額クレジット）` : "")
+      + (summary.claudePrintLaunches > 0 ? ` / claude -p ${summary.claudePrintLaunches} 回（対話と同じ利用枠）` : "")
       + `\n結果: ${summary.outDir}\n`,
   );
   process.exit(summary.ok ? 0 : 1);

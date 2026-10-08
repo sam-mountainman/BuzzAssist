@@ -18,6 +18,7 @@
 {"id":"2ff78e3c84b9","kind":"fact","target":"genre:manga-video-production"}
 {"id":"31bbccb29245","kind":"constraint","target":"platform:platform-craft"}
 {"id":"32614ba1944b","kind":"fact","target":"genre:manga-video-production"}
+{"id":"3b23b5489ecf","kind":"correction","target":"platform:platform-craft"}
 {"id":"4057b24c50ea","kind":"fact","target":"genre:manga-video-production"}
 {"id":"46aefc1b9b41","kind":"fact","target":"genre:manga-video-production"}
 {"id":"4d93db7bf25b","kind":"fact","target":"genre:manga-video-production"}
