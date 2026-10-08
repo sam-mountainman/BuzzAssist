@@ -81,6 +81,7 @@
 {"id":"86a0f746b4e5","kind":"fact","target":"genre:manga-video-production"}
 {"id":"86b858191c47","kind":"correction","target":"genre:manga-video-production"}
 {"id":"879bc5bb30ea","kind":"fact","target":"platform:platform-craft"}
+{"id":"891a340fd662","kind":"fact","target":"platform:harness-self-improvement"}
 {"id":"89f3d8589fb8","kind":"fact","target":"platform:platform-craft"}
 {"id":"8a0621b02d59","kind":"constraint","target":"platform:platform-craft"}
 {"id":"8be413c835e9","kind":"fact","target":"platform:harness-self-improvement"}

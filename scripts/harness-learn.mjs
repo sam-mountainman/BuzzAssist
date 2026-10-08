@@ -655,11 +655,15 @@ export function renderOverlay(entries, now, context = null, { patterns = [] } = 
   return lines.join("\n");
 }
 
+// 「まとめた規則」は正本の規則ではなく補助の指示。見出しで格を上げすぎると、SKILL.md と矛盾したときに
+// こちらを優先する回答が増えた（2026-10-09 の評価で learned-overlay-before-retry-change が 95%→80%）。
+// 作業する側をパターンの台帳へ案内しない。案内を書いた版では、評価の実行役が台帳の説明書まで読みに行き、
+// 頼まれた作業の代わりに雛形を返した（論文の「実行役に知識の層を読ませると下がる」と同じ形）。
 const OVERLAY_PATTERN_SECTION = [
   "## まとめた規則（パターン）",
   "",
-  "同じ宛先の指摘を、原因の見立て・当てはまる条件と一緒にまとめたもの。台帳は",
-  "`node scripts/harness-learn.mjs pattern show --id <id>` で読める（根拠・反証・版の履歴）。",
+  "同じ宛先の指摘を、原因の見立て・当てはまる条件と一緒にまとめた**補助の指示**。上のとおり、",
+  "隣の SKILL.md と矛盾したら SKILL.md が優先する。",
 ].join("\n");
 
 const OVERLAY_PATTERN_REST_SECTION = [
