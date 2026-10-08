@@ -10,8 +10,11 @@ import { fileURLToPath } from "node:url";
 import {
   GRADER_FORBIDDEN_WORDS,
   SKILL_EVAL_RECORD_SCHEMA,
+  buildSandboxTemplate,
   buildSkillEvalPlan,
   childEnvironmentFor,
+  compareSkillEvalOverlays,
+  isCandidateOverlayRecord,
   escapeCmdArgument,
   loadSkillEvalTargets,
   normalizeSkillEvalCases,
@@ -536,4 +539,73 @@ test("Windows の .cmd へ渡す引数は cmd.exe のメタ文字を逃がす", 
   assert.deepEqual(invocation.args.slice(0, 3), ["/d", "/s", "/c"]);
   assert.equal(invocation.windowsVerbatimArguments, true);
   assert.equal(existsSync(fakeAgent), true);
+});
+
+// 学びの束（references/learned-auto.md）だけを変えた前後を比べられるようにする（2026-10-09。別文脈のレビューで、
+// 版の見分けが SKILL.md の SHA だけで、学びの束だけを変えても同じ版として混ざると指摘された）。
+test("学びの束の SHA を版の見分けに入れ、候補は写しの中だけで差し替えて、本番の版の結果と混ぜない", async () => {
+  const fixture = makeFixture();
+  try {
+    const skillDir = join(fixture.project, ".agents", "skills", "alpha-skill");
+    const canonicalOverlay = join(skillDir, "references", "learned-auto.md");
+    writeFile(canonicalOverlay, "- 正本の学びの束\n");
+    const candidateOverlay = join(fixture.root, "candidate-learned-auto.md");
+    writeFile(candidateOverlay, "- 候補の学びの束（短い規則）\n");
+
+    const canonical = await loadSkillEvalTargets({ projectDir: fixture.project, skills: ["alpha-skill"] });
+    assert.equal(canonical.targets[0].overlayVariant, "canonical");
+    assert.equal(canonical.targets[0].overlaySha256, sha("- 正本の学びの束\n"));
+    const loaded = await loadSkillEvalTargets({ projectDir: fixture.project, skills: ["alpha-skill"], overlays: { "alpha-skill": candidateOverlay } });
+    assert.equal(loaded.targets[0].overlayVariant, "candidate");
+    assert.equal(loaded.targets[0].overlaySha256, sha("- 候補の学びの束（短い規則）\n"));
+    assert.equal(loaded.targets[0].contentSha256, canonical.targets[0].contentSha256, "SKILL.md は同じ");
+    await assert.rejects(loadSkillEvalTargets({ projectDir: fixture.project, skills: ["alpha-skill"], overlays: { "beta-skill": candidateOverlay } }), /--overlay の対象/u);
+
+    // 写しの中だけ差し替わり、正本の学びの束は書き換わらない。
+    const template = join(fixture.root, "template");
+    buildSandboxTemplate(loaded, template);
+    assert.equal(readFileSync(join(template, ".agents", "skills", "alpha-skill", "references", "learned-auto.md"), "utf8"), "- 候補の学びの束（短い規則）\n");
+    assert.equal(readFileSync(canonicalOverlay, "utf8"), "- 正本の学びの束\n");
+
+    // CLI: 候補で流した記録は overlayVariant=candidate で残る。
+    const run = await runCli(fixture, ["run", "--execute", "--project-dir", fixture.project, "--skill", "alpha-skill", "--eval", "1",
+      "--hosts", "codex", "--grader", "codex", "--overlay", `alpha-skill=${candidateOverlay}`]);
+    assert.equal(run.exitCode, 0, run.stdout + run.stderr);
+    const records = readSkillEvalRecords(join(fixture.learning, "evals")).records;
+    assert.equal(records.length, 1);
+    assert.equal(records[0].overlayVariant, "candidate");
+    assert.equal(records[0].overlaySha256, sha("- 候補の学びの束（短い規則）\n"));
+    assert.equal(isCandidateOverlayRecord(records[0]), true);
+    assert.equal(readFileSync(canonicalOverlay, "utf8"), "- 正本の学びの束\n", "流したあとも正本は同じ");
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("同じ SKILL.md で学びの束だけを変えた前後を eval × ホストで比べ、候補の記録は「最新の版」にしない", () => {
+  const content = sha("synthetic skill");
+  const base = sha("base overlay");
+  const candidate = sha("candidate overlay");
+  const record = (evalId, host, overlaySha256, overlayVariant, passed, total, recordedAt) => ({
+    skillId: "buzzassist:alpha-skill", skillName: "alpha-skill", skillVersion: "1.0.0", contentSha256: content,
+    overlaySha256, overlayVariant, evalId, host, status: "graded", passed, total, allPassed: passed === total, recordedAt, model: "m",
+  });
+  const records = [
+    record("1", "codex", base, "canonical", 2, 2, "2026-10-09T00:00:00Z"),
+    record("2", "codex", base, "canonical", 1, 2, "2026-10-09T00:00:01Z"),
+    record("3", "claude", base, "canonical", 2, 2, "2026-10-09T00:00:02Z"),
+    record("1", "codex", candidate, "candidate", 1, 2, "2026-10-09T01:00:00Z"),
+    record("2", "codex", candidate, "candidate", 2, 2, "2026-10-09T01:00:01Z"),
+  ].map((entry, index) => ({ ...entry, _order: index }));
+  const comparison = compareSkillEvalOverlays(records, { skill: "buzzassist:alpha-skill", base: base.slice(7, 19), candidate: candidate.slice(7, 19) });
+  assert.equal(comparison.contentSha256, content);
+  assert.deepEqual(comparison.pairs.map((pair) => [pair.evalId, pair.host, pair.change]), [["1", "codex", "worse"], ["2", "codex", "better"]]);
+  assert.deepEqual(comparison.byHost.codex, { evals: 2, baseAllPassed: 1, candidateAllPassed: 1, basePassed: 3, baseTotal: 4, candidatePassed: 3, candidateTotal: 4, better: 1, worse: 1 });
+  assert.deepEqual(comparison.missing, [{ evalId: "3", host: "claude", missingSide: "candidate" }], "片方にしか無い組は比べない（候補の側が欠けている）");
+  assert.throws(() => compareSkillEvalOverlays(records, { skill: "buzzassist:alpha-skill", base: "abc", candidate: candidate }), /8文字以上/u);
+
+  // 集計の表は学びの束ごとに行を分け、候補の試しは「前の版からの悪化」の比較に入れない。
+  const summary = summarizeSkillEvals(records);
+  assert.deepEqual([...new Set(summary.rows.map((row) => row.overlayVariant))].sort(), ["candidate", "canonical"]);
+  assert.deepEqual(summary.regressions, [], "候補の試しを最新の版として前の版と比べない");
 });

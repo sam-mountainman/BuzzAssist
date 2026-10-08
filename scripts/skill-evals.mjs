@@ -4,6 +4,7 @@
 //   node scripts/skill-evals.mjs [plan]        計画だけ（既定。モデルは呼ばない）
 //   node scripts/skill-evals.mjs run --execute  実行する（codex も claude -p も、それぞれの契約の利用枠を使う）
 //   node scripts/skill-evals.mjs report         版ごと・ホストごとの合格率を表にする
+//   node scripts/skill-evals.mjs compare        同じ SKILL.md で、学びの束（learned-auto.md）だけを変えた前後を比べる
 //
 // 本体は lib/skillEvals.mjs。
 
@@ -15,6 +16,8 @@ import { isDirectCli } from "../lib/cliEntrypoint.mjs";
 import {
   SKILL_EVAL_HOSTS,
   buildSkillEvalPlan,
+  compareSkillEvalOverlays,
+  formatSkillEvalOverlayComparison,
   formatSkillEvalReport,
   loadSkillEvalTargets,
   readSkillEvalRecords,
@@ -29,12 +32,15 @@ const HELP = `正本スキルの evals を Claude Code と Codex で流して採
   node scripts/skill-evals.mjs [plan] [options]      計画だけ出す（既定。モデルは呼ばない）
   node scripts/skill-evals.mjs run --execute [options] 実行して結果を記録する
   node scripts/skill-evals.mjs report [--skill <id>] [--json]
+  node scripts/skill-evals.mjs compare --skill <id> --base <学びの束の SHA> --candidate <学びの束の SHA> [--content <SKILL.md の SHA>] [--json]
 
 対象を絞る:
   --skill <id|name>        スキル（繰り返し可）。既定は .agents/skills の正本で evals を持つもの全部
   --eval <id>              eval（繰り返し可。<name>/<id> でも指定できる）
   --limit <n>              先頭から n 件の eval だけ（ホストの数だけ実行される）
   --hosts claude,codex     実行するホスト（既定は両方）
+  --overlay <id>=<file>    そのスキルの学びの束（references/learned-auto.md）を写しの中だけ候補のファイルに差し替えて流す
+                           （正本は書き換えない。記録は候補として残り、リリースと反映の関門には数えない。繰り返し可）
 
 モデルと採点:
   --claude-model <m>       claude -p の --model（既定は CLI の既定）
@@ -60,7 +66,7 @@ const HELP = `正本スキルの evals を Claude Code と Codex で流して採
 `;
 
 function parseArgs(argv) {
-  const args = { command: "plan", skills: [], evals: [], hosts: null, models: {}, efforts: {}, binaries: {}, grader: "cross", concurrency: "auto", limit: null, execute: false, json: false, keepWork: false, projectDir: null, timeoutMs: null, help: false };
+  const args = { command: "plan", skills: [], evals: [], overlays: {}, base: null, candidate: null, content: null, hosts: null, models: {}, efforts: {}, binaries: {}, grader: "cross", concurrency: "auto", limit: null, execute: false, json: false, keepWork: false, projectDir: null, timeoutMs: null, help: false };
   let index = 0;
   if (argv[0] && !argv[0].startsWith("-")) {
     args.command = argv[0];
@@ -80,6 +86,14 @@ function parseArgs(argv) {
     else if (token === "--keep-work") args.keepWork = true;
     else if (token === "--skill") args.skills.push(valueOf(token));
     else if (token === "--eval") args.evals.push(valueOf(token));
+    else if (token === "--overlay") {
+      const value = valueOf(token);
+      const at = value.indexOf("=");
+      if (at <= 0 || at === value.length - 1) throw new Error("--overlay は <スキル>=<ファイル> の形で渡してください");
+      args.overlays[value.slice(0, at)] = value.slice(at + 1);
+    } else if (token === "--base") args.base = valueOf(token);
+    else if (token === "--candidate") args.candidate = valueOf(token);
+    else if (token === "--content") args.content = valueOf(token);
     else if (token === "--hosts") args.hosts = valueOf(token).split(",").map((host) => host.trim()).filter(Boolean);
     else if (token === "--claude-model") args.models.claude = valueOf(token);
     else if (token === "--codex-model") args.models.codex = valueOf(token);
@@ -94,7 +108,7 @@ function parseArgs(argv) {
     else if (token === "--project-dir") args.projectDir = valueOf(token);
     else throw new Error(`不明な引数: ${token}`);
   }
-  if (!["plan", "run", "report"].includes(args.command)) throw new Error(`不明なコマンド: ${args.command}（plan / run / report）`);
+  if (!["plan", "run", "report", "compare"].includes(args.command)) throw new Error(`不明なコマンド: ${args.command}（plan / run / report / compare）`);
   if (args.timeoutMs !== null && (!Number.isSafeInteger(args.timeoutMs) || args.timeoutMs < 1000)) throw new Error("--timeout-ms は 1000 以上の整数にしてください");
   if (args.limit !== null && Number.isNaN(args.limit)) throw new Error("--limit は整数にしてください");
   return args;
@@ -109,7 +123,9 @@ function formatPlan(plan, { evalsDir, evalsDirSource, binaries }) {
   const graderLabel = plan.grader === "cross" ? "実行したのと別のホスト（別ベンダー・新しい文脈）" : `${plan.grader}（新しい文脈）`;
   lines.push(`対象 ${plan.skills.length} スキル / ${plan.evalCount} eval / 実行ホスト ${plan.hosts.join(", ")} / 採点 ${graderLabel}`, "");
   for (const skill of plan.skills) {
-    lines.push(`  ${skill.skillId} ${skill.version} (${shortSha(skill.contentSha256)})  eval ${skill.evals}${skill.manifestShaMatches ? "" : "  ※manifest の SHA と違う"}`);
+    const overlay = skill.overlayVariant === "candidate" ? `  学びの束: 候補 ${shortSha(skill.overlaySha256)}`
+      : skill.overlaySha256 ? `  学びの束 ${shortSha(skill.overlaySha256)}` : "";
+    lines.push(`  ${skill.skillId} ${skill.version} (${shortSha(skill.contentSha256)})${overlay}  eval ${skill.evals}${skill.manifestShaMatches ? "" : "  ※manifest の SHA と違う"}`);
   }
   lines.push("", "呼び出し回数の見込み");
   for (const host of SKILL_EVAL_HOSTS) {
@@ -149,7 +165,15 @@ export async function runSkillEvalsCli(argv = process.argv.slice(2), { env = pro
     return { exitCode: 0, summary };
   }
 
-  const loaded = await loadSkillEvalTargets({ projectDir, skills: args.skills, evals: args.evals });
+  if (args.command === "compare") {
+    const { records } = readSkillEvalRecords(evalsLocation.dir);
+    const comparison = compareSkillEvalOverlays(records, { skill: args.skills[0], base: args.base, candidate: args.candidate, contentSha256: args.content });
+    if (args.json) stdout.write(`${JSON.stringify({ evalsDir: evalsLocation.dir, ...comparison }, null, 2)}\n`);
+    else stdout.write(formatSkillEvalOverlayComparison(comparison));
+    return { exitCode: 0, comparison };
+  }
+
+  const loaded = await loadSkillEvalTargets({ projectDir, skills: args.skills, evals: args.evals, overlays: args.overlays });
   const plan = buildSkillEvalPlan(loaded, {
     hosts: args.hosts || SKILL_EVAL_HOSTS,
     grader: args.grader,

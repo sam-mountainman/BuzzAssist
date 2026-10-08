@@ -220,8 +220,17 @@ npm run skills:evals                         # 計画だけ（既定。モデル
 node scripts/skill-evals.mjs run --execute \
   --skill buzzassist:skill-creator --eval 3 \
   --claude-model <id> --codex-model <id>     # 実行（codex も claude -p も、それぞれの契約の利用枠を使う）
-node scripts/skill-evals.mjs report          # 版ごと・ホストごとの合格率
+node scripts/skill-evals.mjs report          # 版ごと・ホストごとの合格率（学びの束の SHA ごとに行を分ける）
+node scripts/skill-evals.mjs run --execute --skill <id> \
+  --overlay <id>=<候補の learned-auto.md>      # 学びの束だけを候補に差し替えて流す（写しの中だけ。正本は書き換えない）
+node scripts/skill-evals.mjs compare --skill <id> --base <学びの束の SHA> --candidate <候補の SHA>
 ```
+
+- **版の見分け**: 記録には SKILL.md の SHA（`contentSha256`）に加えて、学びの束（`references/learned-auto.md`）の SHA
+  （`overlaySha256`）と、正本か候補か（`overlayVariant`）が残る。学びの束だけを変えた前後を、同じ SKILL.md・同じ課題・
+  同じホストで並べて比べられる。候補で流した記録は、リリースの関門（`skills:check:release`）と反映の関門
+  （`harness-learn approve` の評価の比較）、`report` の「最新の版」「前の版からの悪化」には数えない。比較は件数が少なく
+  採点にもぶれがあるので、人が読む材料であって自動の採否には使わない（2026-10-09、別文脈のレビューの指摘で足した）
 
 - **利用枠**: `claude -p`（Claude Agent SDK を含む自動実行）は、対話の Claude Code と同じ契約の利用枠から引かれる
   （2026-10-07 時点の公式案内。6/15 から別課金にする予告は 6/15 に止められ、Max・Team には月次の API クレジットも付いた）。
