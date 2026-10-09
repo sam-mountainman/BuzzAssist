@@ -10,6 +10,7 @@ import {
   analyzeVerticalGlyphRaster,
   buildVerticalGlyphProbeSvg,
   chromeExecutableCandidates,
+  chromeScreenshotArgs,
   probeSvgRasterizer,
   probeSvgRasterizerCached,
   rasterizeSvgDetailed,
@@ -183,6 +184,21 @@ test("明示の指定が壊れていれば、描画の段階でも代替経路�
     rasterizeSvgDetailed("unused.svg", "unused.png", { env: { [CHROME_PATH_ENV]: path.join("nonexistent-dir", "chrome") }, log: () => {} }),
     new RegExp(CHROME_PATH_ENV, "u"),
   );
+});
+
+test("描画用の Chrome はアプリ本体の写しを作らない（止めると 1 枚ごとに写しが残る）", () => {
+  const args = chromeScreenshotArgs({
+    svgPath: path.join("work", "bubble.svg"),
+    pngPath: path.join("work", "bubble.png"),
+    profileDir: path.join("work", ".chrome-1-bubble.png"),
+    width: 320,
+    height: 180,
+  });
+  assert.ok(args.includes("--disable-features=MacAppCodeSignClone"));
+  assert.ok(args.includes("--headless"), "=new の headless は描き終えても終わらない");
+  assert.ok(!args.some((arg) => arg.startsWith("--run-all-compositor-stages-before-draw")), "終わり際に止まる");
+  assert.ok(args.includes("--window-size=320,180"));
+  assert.ok(args.at(-1).startsWith("file:"), "最後は描く SVG の file URL");
 });
 
 // --- 読み返しの判定 ------------------------------------------------------------
