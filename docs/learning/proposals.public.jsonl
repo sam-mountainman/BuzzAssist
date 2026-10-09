@@ -147,6 +147,7 @@
 {"id":"e09f3d781729","kind":"fact","target":"platform:platform-craft"}
 {"id":"e0d276c7bbfe","kind":"correction","target":"platform:platform-craft"}
 {"id":"e2064c6266a3","kind":"correction","target":"platform:platform-craft"}
+{"id":"e22c621e7b29","kind":"fact","target":"platform:harness-parallel-execution"}
 {"id":"e2b8c30a7fd5","kind":"correction","target":"platform:platform-craft"}
 {"id":"e4bfed5416e8","kind":"correction","target":"genre:manga-video-production"}
 {"id":"e5fc6bc0daff","kind":"correction","target":"genre:narrated-story-video"}
@@ -167,6 +168,7 @@
 {"id":"f6bfbae7f26c","kind":"correction","target":"platform:platform-craft"}
 {"id":"f74c7dfa9007","kind":"fact","target":"genre:manga-video-production"}
 {"id":"f7c8baefc7cc","kind":"fact","target":"genre:manga-page-camera"}
+{"id":"f851434f578f","kind":"fact","target":"platform:platform-craft"}
 {"id":"f8781dc1df39","kind":"fact","target":"platform:platform-craft"}
 {"id":"f8b11ac1431b","kind":"correction","target":"platform:harness-parallel-execution"}
 {"id":"f9544d0ba3ed","kind":"correction","target":"platform:platform-craft"}
