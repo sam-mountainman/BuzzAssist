@@ -74,10 +74,10 @@
       },
       "approval": {
         "reviewer": "sam-mountainman",
-        "approvedAt": "2026-09-27T17:41:06.018Z",
-        "version": "1.3.0",
-        "contentSha256": "sha256:0a8063c9bfc8e437c6a9a348e3dfe3c5d97d04e89a0bb0343e0f22015b0f7ed6",
-        "bundleSha256": "sha256:16e7fd836fd982af2e82ac912ed55d212cefc6bdc6e4000a9ef7b5cbc51701f2",
+        "approvedAt": "2026-10-09T04:09:16.361Z",
+        "version": "1.3.1",
+        "contentSha256": "sha256:56fe9e64c89a01513308288fd7fb8234439408f2acc6ac89b67d76ac287a177b",
+        "bundleSha256": "sha256:5c4e04f53664179db36a3db758086b88ae6c627d9752d0da27a36567197b9591",
         "attestedBy": "human-verified"
       }
     },
@@ -110,10 +110,10 @@
       },
       "approval": {
         "reviewer": "sam-mountainman",
-        "approvedAt": "2026-09-27T17:41:06.806Z",
-        "version": "1.6.0",
-        "contentSha256": "sha256:a2bc811b6d3860928a79d933bb24766a5099cddf3ede4155b1dbc775620290fc",
-        "bundleSha256": "sha256:3d37a3bc610b0b1ff631f5302bc1c199775bc51100a2d1f57fb1770129dfa2c0",
+        "approvedAt": "2026-10-09T04:09:16.434Z",
+        "version": "1.7.0",
+        "contentSha256": "sha256:5982bfb9f84ba8e065d29088bde2266efe16ef2afff5ef19881db4e681cf215e",
+        "bundleSha256": "sha256:ddf9b29ad2237344e7c07b1cbf628ea00d8b441b53ca8d8fc0ef1e669037fbd8",
         "attestedBy": "human-verified"
       }
     },
