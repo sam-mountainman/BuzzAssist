@@ -1,0 +1,3686 @@
+{
+  "$schema": "./catalog.schema.json",
+  "version": "optimal-config-catalog-v1",
+  "as_of": "2026-10-22",
+  "reproduced": false,
+  "benchmarked": false,
+  "note": "調査資料は公式の資料を読んだだけで、ここにある構成・ワークフロー・モデルは誰も実際には動かしていない（reproduced=false、ベンチマークなし）。日本語の文字描画・口パク・Mac での所要時間も未実測。だから正解を決め打ちせず、候補を2〜3案に絞って同じ10カットで試し、数字で決める。権利の判定は法的助言ではない。",
+  "generatedBy": "scripts/build-optimal-config-catalog.mjs",
+  "sourceDatasets": [
+    {
+      "id": "workflow_registry",
+      "title": "画像生成AI 全域調査一式 workflows_channels/workflow_registry.json",
+      "as_of": "2026-10-22",
+      "provides": "W01〜W40 の各欄"
+    },
+    {
+      "id": "rights_risk_matrix",
+      "title": "画像生成AI 全域調査一式 rights/rights_risk_matrix_ja.json",
+      "as_of": "2026-10-22",
+      "provides": "権利の6層（A〜F）と各モデルの危険度"
+    },
+    {
+      "id": "open_image_models_catalog",
+      "title": "画像生成AI 全域調査一式 models/open_image_models_catalog_20261022.json",
+      "as_of": "2026-10-22",
+      "provides": "重みの許諾の表記と公式の配布先"
+    },
+    {
+      "id": "acceleration_catalog",
+      "title": "画像生成AI 全域調査一式 acceleration_tools/catalog.json",
+      "as_of": "2026-10-22",
+      "provides": "高速化・低 VRAM の対応環境"
+    },
+    {
+      "id": "video_generation_guide",
+      "title": "動画生成 総合ガイド（全調査統合版）第2章・第3章・付録A",
+      "as_of": "2026-10-22",
+      "provides": "R01〜R18、10カット試験と記録の最小項目（p17-18）、LTX・Wan・MiniMax H3 の条件"
+    }
+  ],
+  "runtimePlaces": [
+    {
+      "id": "operator-mac",
+      "label": "運営者の Mac（手元）",
+      "operatorOwned": true,
+      "sendsDataExternally": false,
+      "mediaGenerationAllowed": true
+    },
+    {
+      "id": "operator-cuda",
+      "label": "運営者の NVIDIA GPU（手元）",
+      "operatorOwned": true,
+      "sendsDataExternally": false,
+      "mediaGenerationAllowed": true
+    },
+    {
+      "id": "operator-rented-gpu",
+      "label": "運営者が借りる GPU（使う日だけ動かし、終わったら止めて保存費を確かめる）",
+      "operatorOwned": true,
+      "sendsDataExternally": true,
+      "mediaGenerationAllowed": true
+    },
+    {
+      "id": "operator-service",
+      "label": "運営者が契約しているサービス（ChatGPT／Codex、Grok、Google など）",
+      "operatorOwned": true,
+      "sendsDataExternally": true,
+      "mediaGenerationAllowed": true
+    },
+    {
+      "id": "otoshigo-hosted",
+      "label": "オトシゴのサーバー（画像・動画の生成と中継はしない）",
+      "operatorOwned": false,
+      "sendsDataExternally": true,
+      "mediaGenerationAllowed": false
+    }
+  ],
+  "rightsLayers": [
+    {
+      "id": "A",
+      "key": "code",
+      "label": "コード",
+      "question": "UI・ノード・推論コードのライセンス。これだけで重みを商用に使えるとは言えない。"
+    },
+    {
+      "id": "B",
+      "key": "weights",
+      "label": "重みと全依存",
+      "question": "base・LoRA・VAE・text/face encoder まで全部の許諾。本番・売上・地域の条件を別々に見る。"
+    },
+    {
+      "id": "C",
+      "key": "outputs",
+      "label": "出力",
+      "question": "生成物を使う・売る・公開する許諾。地域の制限が出力に及ぶものもある。"
+    },
+    {
+      "id": "D",
+      "key": "hosting",
+      "label": "ホスト・再販",
+      "question": "個人の制作と、API やサービスとしての提供は別の用途。"
+    },
+    {
+      "id": "E",
+      "key": "assets",
+      "label": "素材と人物",
+      "question": "参照画像・既存キャラ・実在人物の権利と同意。モデルの許諾とは別。"
+    },
+    {
+      "id": "F",
+      "key": "data",
+      "label": "データの扱い",
+      "question": "送信先・保存・学習利用。ローカルでも拡張機能の通信を確かめる。"
+    }
+  ],
+  "videoConfigs": [
+    {
+      "id": "R01",
+      "name": "全編を生成しない（静止画＋カメラ＋声）",
+      "role": "base",
+      "pdfPages": "p10",
+      "summary": "解説・朗読・情報整理。静止画や図で意味が伝わり、人物が常に自然に動く必要はない。",
+      "targetTraits": {
+        "artStyles": [
+          "flat-2d-manga",
+          "anime",
+          "photoreal",
+          "diagram-mascot",
+          "live-footage"
+        ],
+        "identityLocks": [
+          "none",
+          "mascot",
+          "fixed-cast",
+          "person+wardrobe"
+        ],
+        "motions": [
+          "stills-camera"
+        ]
+      },
+      "motionLevel": "none",
+      "identityNeeds": "既存のキャラ絵や写真を使い回す。動きの一致は求めない。",
+      "runtimePlaces": [
+        "operator-mac",
+        "operator-cuda"
+      ],
+      "budgetBand": "zero",
+      "skillLevel": "L0-L1",
+      "failureModes": [
+        "動くこと自体を価値と考えて意味のない I2V を挟む",
+        "単調な読み上げの量産を低コストで収益化できると決めつける",
+        "静止画を数百枚手で扱う手間を費用に数えない"
+      ],
+      "migrateTo": [
+        {
+          "to": [
+            "R03",
+            "R09"
+          ],
+          "when": "静止画で説明できない動作が出たら、その部分だけ"
+        },
+        {
+          "to": [
+            "R04"
+          ],
+          "when": "毎回同じキャラを動かすなら rig への投資と比べる"
+        }
+      ]
+    },
+    {
+      "id": "R02",
+      "name": "安い雰囲気 B-roll を小型の無音 T2V で大量に試す",
+      "role": "clips",
+      "pdfPages": "p10",
+      "summary": "抽象背景・天候・遠景など、特定の人物や商品と一致させなくてよい素材。失敗は捨てられる。",
+      "targetTraits": {
+        "artStyles": [
+          "ai-footage",
+          "photoreal"
+        ],
+        "identityLocks": [
+          "none"
+        ],
+        "motions": [
+          "few-clips",
+          "mostly-video"
+        ]
+      },
+      "motionLevel": "medium",
+      "identityNeeds": "顔・ロゴ・細かい手作業は避ける設計にする。",
+      "runtimePlaces": [
+        "operator-cuda"
+      ],
+      "budgetBand": "low",
+      "skillLevel": "L1-L2",
+      "failureModes": [
+        "最速の T2V 重みを I2V として使う",
+        "480p の抽象背景での成功を顔の接写に一般化する",
+        "8GB に収まることを 8GB で速いと読む"
+      ],
+      "migrateTo": [
+        {
+          "to": [
+            "R03"
+          ],
+          "when": "構図や主人公を固定したくなったら"
+        }
+      ]
+    },
+    {
+      "id": "R03",
+      "name": "先頭画像を合格にしてから I2V（B-roll・数カット）",
+      "role": "clips",
+      "pdfPages": "p11",
+      "summary": "1カット2〜5秒。構図・色・世界観はそろえたいが、複雑な動作までは要らない。",
+      "targetTraits": {
+        "artStyles": [
+          "flat-2d-manga",
+          "anime",
+          "photoreal",
+          "diagram-mascot",
+          "ai-footage",
+          "live-footage"
+        ],
+        "identityLocks": [
+          "none",
+          "mascot",
+          "fixed-cast",
+          "person+wardrobe"
+        ],
+        "motions": [
+          "few-clips",
+          "mostly-video"
+        ]
+      },
+      "motionLevel": "low",
+      "identityNeeds": "先頭画像の段階で人物・画風を固定し、動画では1動作ずつ指定する。",
+      "runtimePlaces": [
+        "operator-cuda",
+        "operator-rented-gpu",
+        "operator-service"
+      ],
+      "budgetBand": "medium",
+      "skillLevel": "L1-L2",
+      "failureModes": [
+        "同じ画像でもモデルを変えると同じ動きが出るとは限らない",
+        "upscale で商品や文字の正しさは直らない",
+        "低解像度の試作と本生成の二重費用が削減分を上回る"
+      ],
+      "migrateTo": [
+        {
+          "to": [
+            "R06"
+          ],
+          "when": "毎回キャラが変わり、人物の連続性が要るなら"
+        }
+      ]
+    },
+    {
+      "id": "R04",
+      "name": "アニメ会話劇（台詞が先、キャラ固定、必要な所だけ生成）",
+      "role": "base",
+      "pdfPages": "p11",
+      "summary": "同じ数人が毎回話す掛け合い。台詞と話者が大事で、全身の複雑な動作は少ない。",
+      "targetTraits": {
+        "artStyles": [
+          "flat-2d-manga",
+          "anime"
+        ],
+        "identityLocks": [
+          "fixed-cast",
+          "mascot"
+        ],
+        "motions": [
+          "stills-camera",
+          "few-clips"
+        ]
+      },
+      "motionLevel": "low",
+      "identityNeeds": "設定画・表情差分・口形・背景をキャラ資産として持ち、話数で回収する。",
+      "runtimePlaces": [
+        "operator-mac",
+        "operator-cuda"
+      ],
+      "budgetBand": "low",
+      "skillLevel": "L1-L2",
+      "failureModes": [
+        "汎用の音声駆動モデルがどの2D絵にも自然な口形を出せると思う",
+        "複数話者を一度に生成して話者が混ざる"
+      ],
+      "migrateTo": [
+        {
+          "to": [
+            "R03"
+          ],
+          "when": "特別な身振りの数カットだけ動画にする"
+        },
+        {
+          "to": [
+            "R10"
+          ],
+          "when": "自然な芝居が必須の接写だけ、同じ音声で比べる"
+        }
+      ]
+    },
+    {
+      "id": "R05",
+      "name": "アニメのバトル・ダンス（動作を先に設計）",
+      "role": "base",
+      "pdfPages": "p11-12",
+      "summary": "動きのタイミング・手足・接触・カメラが主役。画風より動きの正確さ。",
+      "targetTraits": {
+        "artStyles": [
+          "anime",
+          "flat-2d-manga"
+        ],
+        "identityLocks": [
+          "fixed-cast",
+          "mascot"
+        ],
+        "motions": [
+          "mostly-video"
+        ]
+      },
+      "motionLevel": "high",
+      "identityNeeds": "動作リファレンス・簡易3D・ポーズ条件を先に作る。",
+      "runtimePlaces": [
+        "operator-cuda",
+        "operator-rented-gpu"
+      ],
+      "budgetBand": "high",
+      "skillLevel": "L2+",
+      "failureModes": [
+        "始点と終点を指定しても途中の接触が正しくなる保証はない",
+        "人間用の motion transfer を非人間キャラや高速戦闘に使う"
+      ],
+      "migrateTo": [
+        {
+          "to": [
+            "R09"
+          ],
+          "when": "接触が何度も破綻する部分は3Dか手付けで完成させる"
+        }
+      ]
+    },
+    {
+      "id": "R06",
+      "name": "実写調の連続物語（人物資産とショットの連続性を先に作る）",
+      "role": "identity",
+      "pdfPages": "p12",
+      "summary": "同じ主人公が複数の場面に出る。顔・衣装・舞台・時間帯の連続性が大事。",
+      "targetTraits": {
+        "artStyles": [
+          "photoreal",
+          "ai-footage"
+        ],
+        "identityLocks": [
+          "person+wardrobe",
+          "fixed-cast"
+        ],
+        "motions": [
+          "stills-camera",
+          "few-clips",
+          "mostly-video"
+        ]
+      },
+      "motionLevel": "medium",
+      "identityNeeds": "人物の正面・横顔、衣装、場所の基準画像とショット表を先に作る。",
+      "runtimePlaces": [
+        "operator-cuda",
+        "operator-rented-gpu",
+        "operator-service"
+      ],
+      "budgetBand": "medium",
+      "skillLevel": "L1-L2",
+      "failureModes": [
+        "最良の単発を並べても同じ作品に見えるとは限らない",
+        "参照対応を完全な人物固定と書く"
+      ],
+      "migrateTo": [
+        {
+          "to": [
+            "R04"
+          ],
+          "when": "人物の一致に費用がかかりすぎるなら、rig・3D化や許可済みの自前 LoRA と比べる"
+        }
+      ]
+    },
+    {
+      "id": "R07",
+      "name": "猫・犬などの物語ショート（個体の特徴と単純な動作）",
+      "role": "base",
+      "pdfPages": "p12-13",
+      "summary": "同じ動物キャラが毎回出る短い物語。毛色・模様・体型・小物を固定したい。",
+      "targetTraits": {
+        "artStyles": [
+          "anime",
+          "photoreal",
+          "ai-footage"
+        ],
+        "identityLocks": [
+          "mascot"
+        ],
+        "motions": [
+          "few-clips",
+          "mostly-video"
+        ]
+      },
+      "motionLevel": "medium",
+      "identityNeeds": "個体の設定シートと場面ごとの開始画像。人間の顔用の口パクを動物に当然のように使わない。",
+      "runtimePlaces": [
+        "operator-cuda",
+        "operator-rented-gpu"
+      ],
+      "budgetBand": "low",
+      "skillLevel": "L1-L2",
+      "failureModes": [
+        "物語の表情の弱さを映像モデルの画質不足と取り違える",
+        "似たテンプレートの大量投稿で価値も収益化も保証されると思う"
+      ],
+      "migrateTo": [
+        {
+          "to": [
+            "R04"
+          ],
+          "when": "個体の一致に失敗し続けるなら 2D/3D キャラへ"
+        }
+      ]
+    },
+    {
+      "id": "R08",
+      "name": "商品・建築・機構を正確に見せる（生成しない領域を決める）",
+      "role": "base",
+      "pdfPages": "p13",
+      "summary": "ロゴ・寸法・形状・表示など、誤りの損失が大きいもの。商品そのものは実写・3D・合成で固定する。",
+      "targetTraits": {
+        "artStyles": [
+          "live-footage",
+          "photoreal"
+        ],
+        "identityLocks": [
+          "none"
+        ],
+        "motions": [
+          "stills-camera",
+          "few-clips"
+        ]
+      },
+      "motionLevel": "low",
+      "identityNeeds": "商品は承認済みの素材で固定し、背景だけ生成する。",
+      "runtimePlaces": [
+        "operator-mac",
+        "operator-cuda"
+      ],
+      "budgetBand": "medium",
+      "skillLevel": "L1-L2",
+      "failureModes": [
+        "I2V でもロゴや輪郭は途中で変わりうる",
+        "生成した使用実演を性能の証拠として見せる"
+      ],
+      "migrateTo": [
+        {
+          "to": [
+            "R01"
+          ],
+          "when": "背景生成が不安定なら静止背景とカメラ移動だけで成立させる"
+        }
+      ]
+    },
+    {
+      "id": "R09",
+      "name": "図解・文字・正確なアニメーション（拡散動画よりタイムライン）",
+      "role": "base",
+      "pdfPages": "p13",
+      "summary": "仕組み・比較・ニュース説明など、値・文字・矢印・図形を正確に保ちたいもの。",
+      "targetTraits": {
+        "artStyles": [
+          "diagram-mascot"
+        ],
+        "identityLocks": [
+          "none",
+          "mascot",
+          "person+wardrobe"
+        ],
+        "motions": [
+          "stills-camera",
+          "few-clips"
+        ]
+      },
+      "motionLevel": "none",
+      "identityNeeds": "生成画像は装飾・背景・人物素材に限る。図と文字は生成しない。",
+      "runtimePlaces": [
+        "operator-mac",
+        "operator-cuda"
+      ],
+      "budgetBand": "zero",
+      "skillLevel": "L0-L2",
+      "failureModes": [
+        "アニメーションを作りたいを動画拡散モデルが必要と読み替える",
+        "正しい式や日本語字幕まで生成映像に焼き込む",
+        "クロスフェードで素材が二重に見える"
+      ],
+      "migrateTo": [
+        {
+          "to": [
+            "R02",
+            "R03"
+          ],
+          "when": "比喩的な数秒のイメージだけ補う"
+        }
+      ]
+    },
+    {
+      "id": "R10",
+      "name": "話す司会・アバター（音声を先に確定）",
+      "role": "base",
+      "pdfPages": "p13-14",
+      "summary": "同じ司会が解説し、台詞は一字一句重要。口と音の同期と本人らしさが優先。",
+      "targetTraits": {
+        "artStyles": [
+          "photoreal",
+          "anime"
+        ],
+        "identityLocks": [
+          "person+wardrobe"
+        ],
+        "motions": [
+          "few-clips",
+          "mostly-video"
+        ]
+      },
+      "motionLevel": "medium",
+      "identityNeeds": "許可を得た人物の画像か動画と、完成した台詞音声。",
+      "runtimePlaces": [
+        "operator-cuda",
+        "operator-service"
+      ],
+      "budgetBand": "medium",
+      "skillLevel": "L1-L2",
+      "failureModes": [
+        "TTS を併用しているのに動画モデルが日本語を正確に話すと説明する",
+        "人物向けの S2V の結果をアニメや動物に一般化する"
+      ],
+      "migrateTo": [
+        {
+          "to": [
+            "R04",
+            "R05"
+          ],
+          "when": "会話相手や全身が必要なら分解する"
+        }
+      ]
+    },
+    {
+      "id": "R11",
+      "name": "ASMR・環境映像・ループ（音を先に評価）",
+      "role": "base",
+      "pdfPages": "p14",
+      "summary": "長時間でも、全時間が新しい映像である必要はない。",
+      "targetTraits": {
+        "artStyles": [
+          "ai-footage",
+          "live-footage",
+          "photoreal"
+        ],
+        "identityLocks": [
+          "none"
+        ],
+        "motions": [
+          "few-clips",
+          "mostly-video"
+        ]
+      },
+      "motionLevel": "low",
+      "identityNeeds": "継ぎ目の少ない構図と周期的な動き。",
+      "runtimePlaces": [
+        "operator-mac",
+        "operator-cuda"
+      ],
+      "budgetBand": "low",
+      "skillLevel": "L1",
+      "failureModes": [
+        "逆再生で液体や炎が不自然になる",
+        "クロスフェードで物体が二重になる",
+        "周期的なクリック音が残る"
+      ],
+      "migrateTo": [
+        {
+          "to": [
+            "R01"
+          ],
+          "when": "継ぎ目が難しければ静止画＋軽い演出に戻す"
+        }
+      ]
+    },
+    {
+      "id": "R12",
+      "name": "ミュージックビデオ（音源を先に固定し、拍とフレーズで割る）",
+      "role": "base",
+      "pdfPages": "p14-15",
+      "summary": "楽曲が中心。拍・展開・歌詞に合わせた編集が大事で、長い一発生成は要らない。",
+      "targetTraits": {
+        "artStyles": [
+          "anime",
+          "photoreal",
+          "ai-footage"
+        ],
+        "identityLocks": [
+          "none",
+          "mascot",
+          "fixed-cast",
+          "person+wardrobe"
+        ],
+        "motions": [
+          "mostly-video"
+        ]
+      },
+      "motionLevel": "high",
+      "identityNeeds": "世界観の基準画像とショットリスト。",
+      "runtimePlaces": [
+        "operator-cuda",
+        "operator-rented-gpu",
+        "operator-service"
+      ],
+      "budgetBand": "medium",
+      "skillLevel": "L1-L2",
+      "failureModes": [
+        "音楽入力への対応を歌詞どおりの口パクと取り違える",
+        "全カットを同じプロンプトで作って展開が弱くなる"
+      ],
+      "migrateTo": [
+        {
+          "to": [
+            "R02",
+            "R11"
+          ],
+          "when": "抽象映像が中心なら寄せる"
+        }
+      ]
+    },
+    {
+      "id": "R13",
+      "name": "本数・枚数が多い（生成の列より先に合格条件を自動化）",
+      "role": "operations",
+      "pdfPages": "p15",
+      "summary": "継続制作で新しい素材が多い。人が承認する段階を残したまま機械検査を先に作る。",
+      "targetTraits": {
+        "artStyles": [
+          "flat-2d-manga",
+          "anime",
+          "photoreal",
+          "diagram-mascot",
+          "ai-footage",
+          "live-footage"
+        ],
+        "identityLocks": [
+          "none",
+          "mascot",
+          "fixed-cast",
+          "person+wardrobe"
+        ],
+        "motions": [
+          "stills-camera",
+          "few-clips",
+          "mostly-video"
+        ]
+      },
+      "appliesWhen": {
+        "minLengthMinutes": 40
+      },
+      "motionLevel": "medium",
+      "identityNeeds": "ショット表・画像・音声・比率を構造化して持つ。",
+      "runtimePlaces": [
+        "operator-mac",
+        "operator-rented-gpu",
+        "operator-service"
+      ],
+      "budgetBand": "medium",
+      "skillLevel": "L3",
+      "failureModes": [
+        "失敗を無限に再試行する",
+        "検品できない量を生成する",
+        "量産・反復的な内容の収益化リスクを無視する"
+      ],
+      "migrateTo": [
+        {
+          "to": [],
+          "when": "検品が詰まったら、生成速度ではなく候補数と合格基準を調整する"
+        }
+      ]
+    },
+    {
+      "id": "R14",
+      "name": "GPU なし・Google の既存契約あり（完成サービスと Colab の役割分担）",
+      "role": "runtime",
+      "pdfPages": "p15",
+      "summary": "契約内の Veo で主役の短いカット、量の補充は Colab 上のライセンス適合モデル。",
+      "targetTraits": {
+        "artStyles": [
+          "ai-footage",
+          "photoreal",
+          "anime"
+        ],
+        "identityLocks": [
+          "none",
+          "mascot",
+          "fixed-cast",
+          "person+wardrobe"
+        ],
+        "motions": [
+          "few-clips",
+          "mostly-video"
+        ]
+      },
+      "appliesWhen": {
+        "contractsAny": [
+          "google-ai"
+        ],
+        "motionNot": [
+          "stills-camera"
+        ]
+      },
+      "motionLevel": "medium",
+      "identityNeeds": "サービスで作るものと自分で動かすものの入力を分ける。",
+      "runtimePlaces": [
+        "operator-service"
+      ],
+      "budgetBand": "low",
+      "skillLevel": "L0-L2",
+      "failureModes": [
+        "契約で API が無料になる、GPU が確約されていると説明する",
+        "表示名やモデル ID を実際の利用先で確かめない"
+      ],
+      "migrateTo": [
+        {
+          "to": [
+            "R18"
+          ],
+          "when": "枠を使い切った・納期が迫ったら予算内の完成サービスか借り GPU へ"
+        }
+      ]
+    },
+    {
+      "id": "R15",
+      "name": "Mac が中心（CUDA 向けの軽量化をそのまま持ち込まない）",
+      "role": "runtime",
+      "pdfPages": "p16",
+      "summary": "Apple Silicon で GPU を買わずに試す。待ち時間は許容、長尺の量産はまだ要らない。",
+      "targetTraits": {
+        "artStyles": [
+          "flat-2d-manga",
+          "anime",
+          "photoreal",
+          "diagram-mascot",
+          "ai-footage",
+          "live-footage"
+        ],
+        "identityLocks": [
+          "none",
+          "mascot",
+          "fixed-cast",
+          "person+wardrobe"
+        ],
+        "motions": [
+          "few-clips",
+          "mostly-video"
+        ]
+      },
+      "appliesWhen": {
+        "macOnly": true,
+        "motionNot": [
+          "stills-camera"
+        ]
+      },
+      "motionLevel": "low",
+      "identityNeeds": "必要なモードがある Mac 対応の実行環境だけを比べる。",
+      "runtimePlaces": [
+        "operator-mac"
+      ],
+      "budgetBand": "low",
+      "skillLevel": "L0-L2",
+      "failureModes": [
+        "NVFP4 や CUDA 専用の kernel が Mac で使えると思う",
+        "最低メモリを満たせば高解像度・長尺も快適だと断定する"
+      ],
+      "migrateTo": [
+        {
+          "to": [
+            "R18"
+          ],
+          "when": "締切を守れないなら生成だけ借り GPU かサービス、編集は Mac"
+        }
+      ]
+    },
+    {
+      "id": "R16",
+      "name": "顧客秘密・未発表素材（外部送信ゼロの工程）",
+      "role": "confidential",
+      "pdfPages": "p16",
+      "summary": "顔・商品・図面・台本を外部へ送れない。生成を手元で完結させる。",
+      "targetTraits": {
+        "artStyles": [
+          "flat-2d-manga",
+          "anime",
+          "photoreal",
+          "diagram-mascot",
+          "ai-footage",
+          "live-footage"
+        ],
+        "identityLocks": [
+          "none",
+          "mascot",
+          "fixed-cast",
+          "person+wardrobe"
+        ],
+        "motions": [
+          "stills-camera",
+          "few-clips",
+          "mostly-video"
+        ]
+      },
+      "appliesWhen": {
+        "confidentialAssets": true
+      },
+      "motionLevel": "medium",
+      "identityNeeds": "許可済みの手元素材と手元の text encoder。",
+      "runtimePlaces": [
+        "operator-mac",
+        "operator-cuda"
+      ],
+      "budgetBand": "high",
+      "skillLevel": "L2+",
+      "failureModes": [
+        "クラウド GPU をローカルモデルだからデータは出ないと説明する",
+        "画像は手元でも声や upscale で外へ送ってしまう"
+      ],
+      "migrateTo": [
+        {
+          "to": [],
+          "when": "クラウドが必要なら、契約とデータ範囲の承認を先に変える（黙って外に出さない）"
+        }
+      ]
+    },
+    {
+      "id": "R17",
+      "name": "品質と納期が最優先（予算を見せ場と人の仕上げに配る）",
+      "role": "quality",
+      "pdfPages": "p17",
+      "summary": "案件・新番組・代表作。視聴者が注目するカットだけ上位の経路を使う。",
+      "targetTraits": {
+        "artStyles": [
+          "flat-2d-manga",
+          "anime",
+          "photoreal",
+          "diagram-mascot",
+          "ai-footage",
+          "live-footage"
+        ],
+        "identityLocks": [
+          "none",
+          "mascot",
+          "fixed-cast",
+          "person+wardrobe"
+        ],
+        "motions": [
+          "stills-camera",
+          "few-clips",
+          "mostly-video"
+        ]
+      },
+      "appliesWhen": {
+        "priority": "quality-deadline"
+      },
+      "motionLevel": "medium",
+      "identityNeeds": "カットごとに合格条件を決める。",
+      "runtimePlaces": [
+        "operator-cuda",
+        "operator-rented-gpu",
+        "operator-service"
+      ],
+      "budgetBand": "high",
+      "skillLevel": "L1-L3",
+      "failureModes": [
+        "解像度やモデルの価格を品質の代わりにする",
+        "冒頭だけきれいで残りがばらばらになる"
+      ],
+      "migrateTo": [
+        {
+          "to": [],
+          "when": "規定の試行費や時間を超えたカットは構図変更・撮影・3D・合成へ"
+        }
+      ]
+    },
+    {
+      "id": "R18",
+      "name": "GPU も既存契約もなく低頻度で試す（購入より短期比較）",
+      "role": "trial",
+      "pdfPages": "p17",
+      "summary": "ジャンルも量も決まっていない。買う前に同じ5〜10ショットで短期比較する。",
+      "targetTraits": {
+        "artStyles": [
+          "flat-2d-manga",
+          "anime",
+          "photoreal",
+          "diagram-mascot",
+          "ai-footage",
+          "live-footage"
+        ],
+        "identityLocks": [
+          "none",
+          "mascot",
+          "fixed-cast",
+          "person+wardrobe"
+        ],
+        "motions": [
+          "few-clips",
+          "mostly-video"
+        ]
+      },
+      "appliesWhen": {
+        "noGpuNoContract": true,
+        "motionNot": [
+          "stills-camera"
+        ]
+      },
+      "motionLevel": "low",
+      "identityNeeds": "同じ試験セットと合格基準で比べる。",
+      "runtimePlaces": [
+        "operator-rented-gpu",
+        "operator-service"
+      ],
+      "budgetBand": "low",
+      "skillLevel": "L0-L2",
+      "failureModes": [
+        "月1時間しか使わない人に GPU 購入を最安として勧める",
+        "GPU 時給だけ見て停止後の保存費を計算しない"
+      ],
+      "migrateTo": [
+        {
+          "to": [],
+          "when": "採用率が確認でき、需要が続き、手元実行で総費用か機密面が良くなるなら購入を比べる"
+        }
+      ]
+    }
+  ],
+  "imageWorkflows": [
+    {
+      "id": "W01",
+      "category": "サムネ・文字",
+      "name": "生成と組版を分けるサムネ",
+      "tools": "任意の画像モデル＋Krita/Photoshop等",
+      "workflow": "文字なしの背景・人物→切り抜き→レイヤー配置→日本語を編集可能な文字で入力→縮小確認",
+      "good_for": "誤字や文言変更が許されないYouTubeサムネ、シリーズの統一",
+      "caveats": "AI文字の精度とフォント・字間の再編集性は別。文字・ロゴの全再生成を避ける。",
+      "validation": "漢字・数字・日付の照合、スマホ縮小、顔の位置、トリミング、編集元の保存",
+      "sourceIds": [
+        "krita_text",
+        "krita_layers",
+        "adobe_composite"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W02",
+      "category": "サムネ・文字",
+      "name": "文字込み一括生成から局所修正",
+      "tools": "Qwen2.1、Tsubaki.3等の文字対応モデル",
+      "workflow": "短い見出しと配置指定→候補出し→誤字部分のみ編集→必要なら文字レイヤーで置換",
+      "good_for": "ポスターの方向性出し、装飾文字、ラフデザイン",
+      "caveats": "モデルが日本語に対応しても正字率100%ではない。長文・小字・ブランド書体は別検証。",
+      "validation": "長短2種類の日本語、固有名詞、ルビ、縦書き、同一構図での文字差し替え",
+      "sourceIds": [
+        "qwen21",
+        "pixai3",
+        "krita_text"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W03",
+      "category": "漫画・アニメ",
+      "name": "ページ単位生成と手動組版の併用",
+      "tools": "Tsubaki.3/Reference Pro＋任意の漫画編集アプリ",
+      "workflow": "キャラ設定画→脚本/コマ設計→ページまたはコマ生成→キャラ修正→吹き出し・台詞を編集可能に組む",
+      "good_for": "短編・漫画ネーム・Webtoon試作",
+      "caveats": "ページ一発生成は連続性、読み順、台詞の所属が崩れる。JSONは整理方法であって厳密制約ではない。",
+      "validation": "左右の読み順、話者、衣装の装飾、背景の接続、コマ間時系列、台詞全文",
+      "sourceIds": [
+        "pixai3",
+        "pixai_models",
+        "krita_text"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W04",
+      "category": "漫画・アニメ",
+      "name": "ネーム・線画をControlNetで清書",
+      "tools": "SDXL/アニメ系モデル＋対応ControlNet/AnyTest",
+      "workflow": "自作ネーム→線画/ポーズ/深度条件→低解像度で構図確認→必要コマのみ再生成→写植",
+      "good_for": "コマ割りと人物位置が先に決まっている漫画",
+      "caveats": "ControlNetは基盤モデルごとの対応が必要。線画の誤りを強く固定する場合がある。",
+      "validation": "線の対応、人物のサイズ、吹き出し空間、マスク外の変化、手足",
+      "sourceIds": [
+        "controlnet",
+        "krita_ai"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W05",
+      "category": "漫画・アニメ",
+      "name": "Anima＋LLLiteのラフ・部分編集",
+      "tools": "Anima Base v1＋Anima-LLLite",
+      "workflow": "ラフ/ポーズ参照→対応LLLite→強度・適用範囲の調整→必要箇所だけinpaint",
+      "good_for": "アニメ絵の描き直し、ラフの完成、背景の追加",
+      "caveats": "Animaは写真向けではない。Preview3向け制御重みとBase v1向けを混同しない。",
+      "validation": "全身とバストアップ、複数条件併用、強度違い、元絵から残したい部分",
+      "sourceIds": [
+        "anima",
+        "anima_lllite"
+      ],
+      "reproduced": false,
+      "requiresModels": [
+        "anima"
+      ]
+    },
+    {
+      "id": "W06",
+      "category": "漫画・アニメ",
+      "name": "絵柄・構図・キャラを別条件にする",
+      "tools": "IP-Adapter/LoRA＋ControlNet＋基盤モデル",
+      "workflow": "画風参照/キャラ参照/骨格を分離→各強度を小さく開始→一変数ずつ比較",
+      "good_for": "同じキャラで多様な構図、シリーズイラスト",
+      "caveats": "参照が競合する。LoRA、Adapter、ControlNetを無差別に重ねると成功率が下がることがある。",
+      "validation": "顔だけでなく髪型・シルエット・服・配色、他人の混入、参照コピーの過剰さ",
+      "sourceIds": [
+        "ipadapter",
+        "controlnet",
+        "sdscripts"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W07",
+      "category": "同一性",
+      "name": "学習なしの複数参照編集",
+      "tools": "Qwen2.1、FLUX2 klein、Reference Pro等",
+      "workflow": "基準顔・衣装・構図を別画像として役割指定→新しい場面→最初の基準画像へ戻りながら編集",
+      "good_for": "少数カット、衣装変更、商品合成",
+      "caveats": "モデル全体の参照上限と特定UIの入力枠数は別。繰り返し編集による劣化を避ける。",
+      "validation": "参照1/2の役割、横顔/後頭部、複数人物混線、服の柄、初回画像からの差分",
+      "sourceIds": [
+        "qwen21",
+        "klein_docs",
+        "pixai_models"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W08",
+      "category": "同一性",
+      "name": "IP-Adapterで画像特徴を追加",
+      "tools": "IP-Adapter（SD/SDXL対応版）",
+      "workflow": "画像エンコード→対応Adapter→テキスト条件と併用→必要ならControlNet",
+      "good_for": "一般被写体・画風・構図参照",
+      "caveats": "汎用版とFaceID版は別。別アーキテクチャに同じ重みを使えない。顔ID系の依存モデルライセンスを確認。",
+      "validation": "参照の重み、不要背景の混入、FaceID依存関係、プロンプト遵守",
+      "sourceIds": [
+        "ipadapter",
+        "insightface"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W09",
+      "category": "同一性",
+      "name": "PuLIDによる顔同一性制御",
+      "tools": "PuLID SDXL/FLUX専用版",
+      "workflow": "同意済みの顔写真→ID条件→場面生成→顔以外の特徴も評価",
+      "good_for": "実写人物の同一性を学習なしで試す",
+      "caveats": "顔が合っても衣装・体格・髪型が保証されるわけではない。12/16GB対応報告は版と最適化依存。",
+      "validation": "斜顔・強い表情・遠景・遮蔽物、顔の貼り付け感、重みとベースの組合せ",
+      "sourceIds": [
+        "pulid"
+      ],
+      "reproduced": false,
+      "requiresModels": [
+        "pulid"
+      ]
+    },
+    {
+      "id": "W10",
+      "category": "同一性",
+      "name": "InstantID単一顔参照",
+      "tools": "InstantID＋対応SDXL",
+      "workflow": "写真1枚→顔IDとランドマーク→画像生成",
+      "good_for": "人物IDの研究評価、ポーズ条件との比較",
+      "caveats": "コードApache2と配布チェックポイントの研究限定は別。InsightFaceの既成重みも別制限。標準実装は最大の顔を処理。",
+      "validation": "商用の実行可否、複数人物、ランドマーク依存、顔以外の維持",
+      "sourceIds": [
+        "instantid",
+        "insightface"
+      ],
+      "reproduced": false,
+      "requiresModels": [
+        "instantid"
+      ]
+    },
+    {
+      "id": "W11",
+      "category": "同一性",
+      "name": "PhotoMakerの複数ID写真",
+      "tools": "PhotoMaker V2＋SDXL系",
+      "workflow": "同一人物の複数写真→ID埋め込み→テキスト→必要なら対応制御",
+      "good_for": "学習データを増やさず人物の別場面を試す",
+      "caveats": "トリガーやモデル互換性が必要。顔ID維持と構図の自由度のバランスを評価。",
+      "validation": "写真枚数/角度、表情、手、違う衣装、複数ID混線",
+      "sourceIds": [
+        "photomaker"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W12",
+      "category": "同一性",
+      "name": "DreamOのID・物体・衣服参照",
+      "tools": "DreamO",
+      "workflow": "目的をID/IP/Try-Onに区分→各参照画像→組み合わせ生成",
+      "good_for": "衣服・帽子・商品等と人物の参照合成",
+      "caveats": "顔IDと全体IPは別タスク。公式READMEではStyleと他条件の同時利用に制限。低VRAMはoffloadの速度低下を伴う。",
+      "validation": "顔と服を別々に採点、サイズ感、縫い目、ロゴ、背景の混入",
+      "sourceIds": [
+        "dreamo"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W13",
+      "category": "同一性",
+      "name": "ストーリー用の系列一貫性手法",
+      "tools": "StoryDiffusion/StoryMaker",
+      "workflow": "複数シーンの設計→基準キャラ・マスク等→系列生成→カットを選別",
+      "good_for": "研究比較、長い物語の絵コンテ",
+      "caveats": "StoryDiffusionはSD1.5/SDXL系の一貫注意機構。StoryMakerは顔だけでなく服や体を対象。最新DiTへそのまま移植不可。",
+      "validation": "全身・衣装・道具・複数人物、物語の時系列、ベース互換性",
+      "sourceIds": [
+        "storydiffusion",
+        "storymaker"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W14",
+      "category": "ポーズ・視点",
+      "name": "ControlNetの目的別条件選択",
+      "tools": "OpenPose/深度/法線/Canny/Lineart等の対応ControlNet",
+      "workflow": "欲しい制約だけ抽出→生成→不足条件を追加",
+      "good_for": "ポーズ、建築、商品配置、構図の維持",
+      "caveats": "OpenPoseは骨格、Depthは奥行き、輪郭は外形。顔IDや色は別。古いSD1.5の説明を現行全モデルへ一般化しない。",
+      "validation": "関節数、前後関係、奥行き、輪郭一致、適用開始/終了時刻",
+      "sourceIds": [
+        "controlnet"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W15",
+      "category": "ポーズ・視点",
+      "name": "GUIアングル指定で再描画",
+      "tools": "Qwen Multiangle/AnyAngleStudio＋対応モデル/LoRA",
+      "workflow": "カメラ・角度UI→指示/条件→画像再生成",
+      "good_for": "設定画、構図ラフ、動画の始終点候補",
+      "caveats": "UIの3D表示だけでは出力が本物の3Dにはならない。背面情報は推定。ノード版・対応LoRA・参照予算が必要。",
+      "validation": "前後整合、見えない装飾、別視点で形が変わるか、実際の画像入力数",
+      "sourceIds": [
+        "multiangle",
+        "angle_lora",
+        "qwen_t8"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W16",
+      "category": "ポーズ・視点",
+      "name": "3D下地から2Dを制御",
+      "tools": "Blender＋深度/法線/輪郭パス＋対応画像モデル",
+      "workflow": "3Dで構図・レンズ・照明を固定→条件画像をrender→画像化→合成",
+      "good_for": "建築・商品・繰り返す背景、厳密なパース",
+      "caveats": "AI後処理で寸法や文字が変わる可能性。正確な図面が必要ならレンダリングを主成果にする。",
+      "validation": "同じカメラでの形状差、消失点、物体の寸法比、マスク外",
+      "sourceIds": [
+        "blender",
+        "controlnet"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W17",
+      "category": "LoRA・学習",
+      "name": "kohya系の再現可能な学習",
+      "tools": "kohya-ss/sd-scripts＋kohya_ss GUI",
+      "workflow": "権利確認→画像/キャプション→基盤選択→小規模学習→保存checkpointで比較",
+      "good_for": "既存SD/SDXL資産、細かな学習設定、Anima等対応版の研究",
+      "caveats": "GUIとbackendの対応が同時とは限らない。LR/rank/optimizerはモデル間で流用しない。",
+      "validation": "未学習角度・衣装・背景、学習画像の丸写し、過学習、VRAM/RAMログ",
+      "sourceIds": [
+        "sdscripts",
+        "kohya_gui",
+        "sds_config"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W18",
+      "category": "LoRA・学習",
+      "name": "AI Toolkitで新型DiTを学習",
+      "tools": "Ostris AI Toolkit",
+      "workflow": "対応モデル確認→データとcaption→モデル別preset→validation→LoRA書き出し",
+      "good_for": "FLUX/Qwen/Krea等、複数参照edit学習の候補",
+      "caveats": "ツールMITと重み・LoRAの使用権は別。現行READMEはモデルが多数だが同じ設定/VRAMで動く意味ではない。",
+      "validation": "基盤checkpointの厳密一致、trigger、参照画像control、量子化、保存形式",
+      "sourceIds": [
+        "aitoolkit"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W19",
+      "category": "LoRA・学習",
+      "name": "OneTrainerでGUI学習・マスク",
+      "tools": "OneTrainer",
+      "workflow": "データ管理→masked training/LoRA等を選ぶ→validation→出力",
+      "good_for": "GUIでcaption/マスク/バケットを管理したいとき",
+      "caveats": "対応モデル・学習方式は別々に確認。CPU offload/EMAやキャッシュはRAM・ディスクにも負荷。",
+      "validation": "マスク範囲、衣装を変える評価、元モデル比較、epoch別採用率",
+      "sourceIds": [
+        "onetrainer"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W20",
+      "category": "LoRA・学習",
+      "name": "サービス内LoRAを使う",
+      "tools": "PixAI等のサービス内学習",
+      "workflow": "権利を持つ素材→公開範囲確認→caption校正→モデル別学習→評価",
+      "good_for": "環境構築を減らす、コミュニティ資産を使う",
+      "caveats": "参照・学習・公開は別の行為。無料キャンペーンを現在の恒久価格としない。外部アップロードは今回未実施。",
+      "validation": "素材の保持/削除/公開条件、モデル固有trigger、料金、衣装の固定化",
+      "sourceIds": [
+        "pixai_lora",
+        "pixai_models"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W21",
+      "category": "LoRA・学習",
+      "name": "caption・選別を学習前処理にする",
+      "tools": "VLM/タグ付け＋人の確認＋bucket対応trainer",
+      "workflow": "重複除去→多様性確保→画像名とcaption対応→誤認識修正→holdoutを確保",
+      "good_for": "学習失敗・手戻りの抑制",
+      "caveats": "タグに書かない＝学習されない、ではない。全画像の正方形化も唯一解ではない。左右反転は非対称装飾/文字を壊す。",
+      "validation": "衣装・角度・照明の分布、caption漏れ/誤り、holdout独立性、合成データの自己増幅",
+      "sourceIds": [
+        "sds_config",
+        "aitoolkit",
+        "onetrainer"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W22",
+      "category": "部分編集",
+      "name": "モデル内の指示編集と注釈",
+      "tools": "Qwen2.1等の指示編集モデル",
+      "workflow": "元画像＋編集箇所の説明/注釈→編集→元画像との差分確認",
+      "good_for": "服・背景・文字の変更、複数素材合成",
+      "caveats": "自然言語の局所指示はマスク外ピクセル不変の保証ではない。厳密維持は合成で守る。",
+      "validation": "顔・背景・ロゴの不要変化、元画像との差分、連続編集の劣化",
+      "sourceIds": [
+        "qwen21",
+        "qwen21_diffusers"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W23",
+      "category": "部分編集",
+      "name": "マスク付きinpaint/outpaint",
+      "tools": "BrushNet/BrushEdit、PowerPaint、対応inpaintモデル",
+      "workflow": "領域選択→境界/余白を決める→描き直し→元画像にマスク合成",
+      "good_for": "物体の差替え、キャンバス拡張、小さい破綻修正",
+      "caveats": "モデルとマスク形式が異なる。BrushNetも対応実装/重みの区分が必要。境界、影、反射を別途確認。",
+      "validation": "マスク境界・肌や布の継ぎ目、削除物の影、outpaintの反復模様",
+      "sourceIds": [
+        "brushnet",
+        "powerpaint",
+        "krita_ai"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W24",
+      "category": "部分編集",
+      "name": "生成モデルを使わず不要物を消す",
+      "tools": "LaMa/修復ブラシ/クローン",
+      "workflow": "対象と影をマスク→背景補完→手動で継ぎ目整理",
+      "good_for": "単純背景のゴミ取り、文字修正前の消去",
+      "caveats": "見えなかった背景を真実として復元するわけではない。商品や記録写真は補完箇所を管理。",
+      "validation": "テクスチャ繰り返し、直線、影・鏡映り、手前と奥の関係",
+      "sourceIds": [
+        "lama",
+        "adobe_composite"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W25",
+      "category": "透過・レイヤー",
+      "name": "最初からRGBAを生成",
+      "tools": "Qwen2.1、LayerDiffuse系",
+      "workflow": "透過出力を指定→RGBA保存→白/黒/色背景に重ねて検査",
+      "good_for": "スタンプ、小物、ゲームUI用の切り抜き候補",
+      "caveats": "市松模様を描いたRGB画像と真のalphaを区別。対応保存ノードがalphaを落とす場合がある。",
+      "validation": "alphaチャンネル、輪郭の白黒縁、半透明ガラス/毛髪、最終アプリでの表示",
+      "sourceIds": [
+        "qwen21_comfy",
+        "layerdiffuse"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W26",
+      "category": "透過・レイヤー",
+      "name": "既存画像をオブジェクト層へ分解",
+      "tools": "Qwen-Image-Layered",
+      "workflow": "完成RGB画像→複数RGBA層→各層を移動/再編集→合成",
+      "good_for": "広告の配置替え、前景と背景の分離",
+      "caveats": "元のPSDやベクター文字が戻るわけではない。オブジェクト層と絵師の線画/塗り/影層は別。",
+      "validation": "層を再合成して原図と比較、遮蔽部の補完、半透明境界、層数",
+      "sourceIds": [
+        "layered"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W27",
+      "category": "透過・レイヤー",
+      "name": "描画工程別のイラスト層",
+      "tools": "FixableFlow",
+      "workflow": "線画→フラット色→影→ハイライト→PSD合成",
+      "good_for": "後から色や影を手作業で調整したいイラスト",
+      "caveats": "公開READMEのv0.1/0.1.1は工程の一部対応。使う基盤/LoRAごとの条件確認が必要。",
+      "validation": "線画と塗りのズレ、影の漏れ、blend mode、PSD再編集、各モデルの許諾",
+      "sourceIds": [
+        "fixableflow"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W28",
+      "category": "透過・レイヤー",
+      "name": "背景除去と選択マスク",
+      "tools": "BiRefNet、SAM2",
+      "workflow": "前景抽出または点/boxから対象選択→エッジ修正→alpha化",
+      "good_for": "商品写真の切り抜き、inpaintの領域準備",
+      "caveats": "segmentationの二値maskと髪/ガラスのmattingは別問題。派生RMBG重みは元コードと違う許諾。",
+      "validation": "毛髪・レース・ガラス・影、背景色汚染、対象を欠落させていないか",
+      "sourceIds": [
+        "birefnet",
+        "sam2"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W29",
+      "category": "商品・実写",
+      "name": "商品そのものを残して背景だけ変える",
+      "tools": "切り抜き＋背景生成＋レイヤー合成",
+      "workflow": "実物写真を切り抜き→背景/台座生成→位置と遠近合わせ→影と色を整える",
+      "good_for": "EC商品、厳密なロゴ・寸法・模様が必要な広告",
+      "caveats": "全再生成はラベル・形状を変えるため、商品pixelsを保護する経路も候補に残す。",
+      "validation": "ロゴ全文、色、パーツ数、寸法比、接地影、反射、広告事実性",
+      "sourceIds": [
+        "birefnet",
+        "adobe_composite",
+        "harmonize"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W30",
+      "category": "商品・実写",
+      "name": "照明だけを再設計",
+      "tools": "IC-Light、Photoshop Harmonize",
+      "workflow": "前景＋背景/光条件→relight→元の色/形状と比較→マスク合成",
+      "good_for": "背景差し替え後の馴染ませ、商品/人物の光方向",
+      "caveats": "IC-Lightは生成的処理。元READMEのBRIA背景除去依存のNCに注意。Harmonizeはpixel layer対象。",
+      "validation": "商品色、肌色、二重影、キャッチライト、反射方向、輪郭",
+      "sourceIds": [
+        "iclight",
+        "harmonize"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W31",
+      "category": "高画質化",
+      "name": "保守的な拡大・ノイズ除去",
+      "tools": "Lanczos等の通常resize、Real-ESRGAN、SwinIR",
+      "workflow": "目的の最終pixel数を確定→弱い処理→部分比較",
+      "good_for": "文字や線を壊さず出力寸法を増やす下処理",
+      "caveats": "ニューラル拡大も推定。画像サイズが大きいことと事実の細部が増えたことは別。",
+      "validation": "文字・線幅・モアレ・顔の変化、原寸と縮小、過剰シャープ",
+      "sourceIds": [
+        "realesrgan",
+        "swinir"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W32",
+      "category": "高画質化",
+      "name": "生成的restorationで細部を描き足す",
+      "tools": "SUPIR等の拡散restoration",
+      "workflow": "劣化画像→復元候補→strength比較→必要部分のみ採用",
+      "good_for": "創作画像や古いイラストを再解釈する場合",
+      "caveats": "SUPIRは商用利用に事前許諾が必要。存在しなかった顔・文字・質感を作る可能性がある。",
+      "validation": "本人性・衣服模様・読めなかった文字の捏造、原図と比較、許諾",
+      "sourceIds": [
+        "supir"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W33",
+      "category": "高画質化",
+      "name": "latentから直接高解像度decode",
+      "tools": "NVIDIA PiD",
+      "workflow": "対応latent＋sigma条件→pixel diffusion decoder→高解像度画像",
+      "good_for": "対応モデルでdecode＋upscaleの二重処理を減らす研究",
+      "caveats": "万能な画像upscalerではなくlatent互換性が必要。公式の2048²速度を4K総生成速度と呼ばない。",
+      "validation": "対応VAE/latent空間、early exit品質、VRAM、実pixel数、元ID/文字",
+      "sourceIds": [
+        "pid",
+        "pid_code"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W34",
+      "category": "後処理",
+      "name": "意図しない位置ズレを戻す",
+      "tools": "Qalign",
+      "workflow": "編集前ref＋編集後source→幾何位置合わせ→元画と比較",
+      "good_for": "構図維持の衣装/背景編集",
+      "caveats": "古典CVで位置を合わせる。色合わせ/ID保証ではない。意図的なポーズや視点変更には邪魔。",
+      "validation": "顔・指の局所warping、意図した変更が戻っていないか、alpha維持",
+      "sourceIds": [
+        "qalign"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W35",
+      "category": "後処理",
+      "name": "VAE格子アーティファクトを除く",
+      "tools": "DeGrid",
+      "workflow": "VAE Decode直後→DeGrid→resize/upscale/sharpen",
+      "good_for": "2pixel周期の格子が実際に出る場合",
+      "caveats": "汎用ノイズ除去ではない。細線を損なうことがある。透過は対応確認まで安易に通さない。",
+      "validation": "格子有無、細かい布/網/字画、前後比較、RGBAのalpha",
+      "sourceIds": [
+        "degrid"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W36",
+      "category": "3D素材",
+      "name": "画像から3Dアセットを起こす",
+      "tools": "TRELLIS、Hunyuan3D系",
+      "workflow": "正面・斜め資料→image-to-3D→mesh/texture確認→Blender修正",
+      "good_for": "コンセプト模型、ラフ3D素材",
+      "caveats": "生成三面図の整合は未保証。Gaussian、mesh、textureは出力用途が違う。裏面・トポロジー・rigは別作業。",
+      "validation": "360度形状、UV/裏面、ポリゴン、材質、ゲームエンジン等への受渡し",
+      "sourceIds": [
+        "trellis",
+        "hunyuan3d"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W37",
+      "category": "3D素材",
+      "name": "実3Dと角度プロンプトGUIを分離",
+      "tools": "VNCCS系のPose Studio/3D Factory",
+      "workflow": "欲しい出力が2D条件かGaussian assetかを確認→対応機能を選ぶ",
+      "good_for": "GUI姿勢設計、3D Gaussianの場面配置",
+      "caveats": "同一repo内に多目的機能がある。Pose Studio紹介動画だけから3D Factory実演済みとは言えない。",
+      "validation": "画像以外にPLY/meshが出るか、透明度・camera保存、対応ノード版",
+      "sourceIds": [
+        "vnccs"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W38",
+      "category": "編集UI",
+      "name": "ペイントアプリに生成補助を組み込む",
+      "tools": "Krita AI Diffusion＋対応backend",
+      "workflow": "レイヤー/選択範囲を保持→生成やinpaint→戻して手作業で仕上げる",
+      "good_for": "ノードを毎回触らず絵を描く、局所修正中心",
+      "caveats": "ローカルbackendと任意のcloud backendは別。使える基盤モデル/制御機能をversionごとに確認。",
+      "validation": "レイヤー戻し、選択範囲、undo、色管理、クラウド送信設定",
+      "sourceIds": [
+        "krita_ai",
+        "krita_layers"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W39",
+      "category": "同一性",
+      "name": "Klein専用特徴転送ノード",
+      "tools": "Flux2Klein Enhancer/Identity Feature Transfer Final",
+      "workflow": "別々にVAE encodeした参照→Multi ReferenceLatent→model hook→生成",
+      "good_for": "Klein9Bの複数参照研究",
+      "caveats": "作者repoは検索索引にあるが本確認のopenは404。9B向けblock scheduleを4B/Kreaへそのまま適用しない。導入前に正規配布元再確認。",
+      "validation": "コード出所、対応版、複数refとmask順、参照の過固定、モデルライセンス",
+      "sourceIds": [
+        "enhancer",
+        "klein_docs"
+      ],
+      "reproduced": false
+    },
+    {
+      "id": "W40",
+      "category": "運用",
+      "name": "モデルを替える前に編集で済ませる",
+      "tools": "Krita/Photoshop等の通常編集",
+      "workflow": "修正が文字/配置/切抜き/色補正ならnative編集→生成が必要な部分だけAI",
+      "good_for": "既存素材の軽い変更、ブランドを守る制作",
+      "caveats": "新モデルを足すほど依存と再現性の管理が増える。生成しない方法も同列の選択肢にする。",
+      "validation": "作業時間、変更箇所だけ直せるか、元データが残るか、納品形式",
+      "sourceIds": [
+        "krita_text",
+        "krita_layers",
+        "adobe_composite"
+      ],
+      "reproduced": false
+    }
+  ],
+  "workflowSelectors": [
+    {
+      "workflowId": "W07",
+      "priority": 10,
+      "when": {
+        "artStyles": [
+          "flat-2d-manga",
+          "anime"
+        ],
+        "identityLocks": [
+          "fixed-cast",
+          "mascot"
+        ]
+      },
+      "purpose": "参照の役割を分け、1キャラ1枚ずつ渡す"
+    },
+    {
+      "workflowId": "W03",
+      "priority": 20,
+      "when": {
+        "artStyles": [
+          "flat-2d-manga",
+          "anime"
+        ]
+      },
+      "purpose": "絵は生成し、文字・吹き出しは後から決まった処理で組む"
+    },
+    {
+      "workflowId": "W06",
+      "priority": 30,
+      "when": {
+        "artStyles": [
+          "flat-2d-manga",
+          "anime"
+        ],
+        "identityLocks": [
+          "fixed-cast",
+          "mascot"
+        ]
+      },
+      "purpose": "絵柄・キャラ・骨格を別の条件に分ける"
+    },
+    {
+      "workflowId": "W04",
+      "priority": 40,
+      "when": {
+        "artStyles": [
+          "flat-2d-manga",
+          "anime"
+        ]
+      },
+      "purpose": "構図の決まったコマを ControlNet で清書する"
+    },
+    {
+      "workflowId": "W17",
+      "priority": 50,
+      "when": {
+        "artStyles": [
+          "flat-2d-manga",
+          "anime"
+        ],
+        "identityLocks": [
+          "fixed-cast"
+        ]
+      },
+      "purpose": "固定キャストの LoRA。作るかどうかは10カット試験の再生成率で決める"
+    },
+    {
+      "workflowId": "W01",
+      "priority": 60,
+      "when": {
+        "artStyles": [
+          "flat-2d-manga",
+          "anime"
+        ]
+      },
+      "purpose": "サムネは絵と文字を分け、文字は編集できる形で組む"
+    },
+    {
+      "workflowId": "W07",
+      "priority": 10,
+      "when": {
+        "artStyles": [
+          "photoreal",
+          "ai-footage"
+        ],
+        "identityLocks": [
+          "person+wardrobe",
+          "fixed-cast"
+        ]
+      },
+      "purpose": "顔の基準・衣装シート・構図を別々の参照として渡す"
+    },
+    {
+      "workflowId": "W12",
+      "priority": 20,
+      "when": {
+        "artStyles": [
+          "photoreal"
+        ],
+        "identityLocks": [
+          "person+wardrobe"
+        ]
+      },
+      "purpose": "衣装と人物の合成（低 VRAM では遅い）"
+    },
+    {
+      "workflowId": "W23",
+      "priority": 30,
+      "when": {
+        "artStyles": [
+          "photoreal",
+          "ai-footage"
+        ]
+      },
+      "purpose": "字幕の帯にかぶった所や画像内の英字だけを部分的に直す"
+    },
+    {
+      "workflowId": "W22",
+      "priority": 35,
+      "when": {
+        "artStyles": [
+          "photoreal"
+        ],
+        "identityLocks": [
+          "person+wardrobe"
+        ]
+      },
+      "purpose": "指示編集で部分修正（使うモデルは権利の関門を通ったものだけ）"
+    },
+    {
+      "workflowId": "W40",
+      "priority": 40,
+      "when": {
+        "artStyles": [
+          "photoreal",
+          "ai-footage",
+          "live-footage"
+        ]
+      },
+      "purpose": "直せるものは生成せずに通常の編集で直す"
+    },
+    {
+      "workflowId": "W25",
+      "priority": 10,
+      "when": {
+        "artStyles": [
+          "diagram-mascot"
+        ],
+        "identityLocks": [
+          "mascot"
+        ]
+      },
+      "purpose": "マスコットの姿勢ごとの素材を最初から透過で作る"
+    },
+    {
+      "workflowId": "W28",
+      "priority": 20,
+      "when": {
+        "artStyles": [
+          "diagram-mascot"
+        ]
+      },
+      "purpose": "切り抜いてレイヤーにし、溶かして重ねずに差し替える"
+    },
+    {
+      "workflowId": "W01",
+      "priority": 30,
+      "when": {
+        "artStyles": [
+          "diagram-mascot"
+        ],
+        "identityLocks": [
+          "none",
+          "mascot"
+        ]
+      },
+      "purpose": "サムネは絵と文字を分け、文字は編集できる形で組む"
+    },
+    {
+      "workflowId": "W07",
+      "priority": 10,
+      "when": {
+        "artStyles": [
+          "diagram-mascot"
+        ],
+        "identityLocks": [
+          "person+wardrobe",
+          "fixed-cast"
+        ]
+      },
+      "purpose": "人物と小道具をそろえる"
+    },
+    {
+      "workflowId": "W29",
+      "priority": 25,
+      "when": {
+        "artStyles": [
+          "diagram-mascot"
+        ],
+        "identityLocks": [
+          "person+wardrobe",
+          "fixed-cast"
+        ]
+      },
+      "purpose": "人物を切り抜いて図解の上に合成する（前後関係は合成で直す）"
+    },
+    {
+      "workflowId": "W23",
+      "priority": 30,
+      "when": {
+        "artStyles": [
+          "diagram-mascot"
+        ],
+        "identityLocks": [
+          "person+wardrobe",
+          "fixed-cast"
+        ]
+      },
+      "purpose": "手や指だけ部分的に直す"
+    },
+    {
+      "workflowId": "W29",
+      "priority": 10,
+      "when": {
+        "artStyles": [
+          "live-footage"
+        ]
+      },
+      "purpose": "実物は残して背景だけ変える"
+    },
+    {
+      "workflowId": "W24",
+      "priority": 20,
+      "when": {
+        "artStyles": [
+          "live-footage"
+        ]
+      },
+      "purpose": "生成モデルを使わずに不要物を消す"
+    },
+    {
+      "workflowId": "W40",
+      "priority": 5,
+      "when": {
+        "confidentialAssets": true
+      },
+      "purpose": "外へ出せない素材は、まず通常の編集で済ませる"
+    }
+  ],
+  "licenseCautions": [
+    {
+      "topic": "Qwen-Image-2.1",
+      "finding": "Qwen Research License。研究/評価向け。商用は別途ライセンス確認が必要。旧QwenのApache2を引き継いだとみなさない。"
+    },
+    {
+      "topic": "Anima",
+      "finding": "モデルと派生モデルは独自NC。生成画像の商用利用はモデルカードとLICENSE 2(e)に明示的に認められる。モデル有料APIや組込商用提供とは区別。"
+    },
+    {
+      "topic": "FLUX.2 klein",
+      "finding": "4BはApache2、9Bは別のNC/商用ライセンス条件。蒸留版とBaseの用途・設定を分ける。"
+    },
+    {
+      "topic": "顔ID",
+      "finding": "InstantIDコードのライセンスだけで配布重み/InsightFaceまで商用可とは言えない。"
+    },
+    {
+      "topic": "restoration/背景除去",
+      "finding": "SUPIRは商用事前許可。IC-Lightに付く背景除去モデルやBiRefNet派生重みも個別確認。"
+    }
+  ],
+  "models": [
+    {
+      "id": "gpt-image",
+      "name": "GPT Image（ChatGPT／Codex）",
+      "kind": "image",
+      "access": "service",
+      "contractKeys": [
+        "chatgpt",
+        "codex"
+      ],
+      "mediaGenerationIds": [
+        "gpt-image-2-codex",
+        "gpt-image-2"
+      ],
+      "roles": [
+        "image-primary"
+      ],
+      "fit": {
+        "artStyles": [
+          "flat-2d-manga",
+          "anime",
+          "photoreal",
+          "diagram-mascot"
+        ]
+      },
+      "preference": 10,
+      "rights": {
+        "code": {
+          "license": "非公開サービス",
+          "status": "not-applicable"
+        },
+        "weights": {
+          "license": "非公開サービス（重みは配布されない）",
+          "licenseKind": "proprietary-service",
+          "operatorProductionUse": "not-applicable"
+        },
+        "outputs": {
+          "commercialUse": "allowed",
+          "note": "利用規約上、当事者間では出力は利用者のもの。第三者の権利や著作権の成立までは保証しない。"
+        },
+        "hosting": {
+          "asService": "forbidden",
+          "note": "画像の納品とサービス・アカウントの再提供は別。個人アカウントの共有や自動アクセスの再販はしない。"
+        },
+        "region": {
+          "excludedTerritories": [],
+          "appliesToOutputs": false
+        },
+        "data": {
+          "sendsExternally": true,
+          "note": "プロンプトと参照画像は提供元へ送られる。API と消費者向けアプリで保持期間が違う。"
+        }
+      },
+      "runtime": {
+        "places": [
+          "operator-service"
+        ],
+        "mac": {
+          "supported": "not-applicable"
+        },
+        "cuda": null,
+        "note": "運営者の契約の中で動かす。利用上限（429）に当たったら下書き経路へ切り替える。"
+      },
+      "evidence": {
+        "rightsFindingId": "openai",
+        "rightsFinding": {
+          "risk": "中：エンドポイント別保持と例外",
+          "verifiedAt": "2026-10-22",
+          "sourceUrls": [
+            "https://openai.com/policies/terms-of-use/",
+            "https://developers.openai.com/api/docs/guides/your-data",
+            "https://help.openai.com/en/articles/8914046-temporary-chat-in-chatgpt"
+          ]
+        }
+      },
+      "asOf": "2026-10-22",
+      "reproduced": false
+    },
+    {
+      "id": "flux2-klein-4b",
+      "name": "FLUX.2 [klein] 4B",
+      "kind": "image",
+      "access": "open-weights",
+      "catalogModelId": "black-forest-labs/FLUX.2-klein-4B",
+      "roles": [
+        "image-draft",
+        "image-primary"
+      ],
+      "fit": {
+        "artStyles": [
+          "flat-2d-manga",
+          "anime",
+          "photoreal",
+          "diagram-mascot"
+        ]
+      },
+      "preference": 20,
+      "rights": {
+        "code": {
+          "license": "Apache-2.0",
+          "status": "ok"
+        },
+        "weights": {
+          "license": "Apache-2.0",
+          "licenseKind": "open",
+          "operatorProductionUse": "allowed",
+          "note": "配布・改変には許諾文・変更表示・NOTICE の条件。"
+        },
+        "outputs": {
+          "commercialUse": "allowed",
+          "note": "Apache の表示は肖像・著作権・商標までの保証ではない。"
+        },
+        "hosting": {
+          "asService": "allowed",
+          "note": "Apache の条件で商用ホストも検討できる（ただしオトシゴは画像を生成・中継しない）。"
+        },
+        "region": {
+          "excludedTerritories": [],
+          "appliesToOutputs": false
+        },
+        "data": {
+          "sendsExternally": false,
+          "note": "第三者アプリの『ローカル』表示だけでは通信停止を保証しない。"
+        }
+      },
+      "runtime": {
+        "places": [
+          "operator-mac",
+          "operator-cuda",
+          "operator-rented-gpu"
+        ],
+        "mac": {
+          "supported": true,
+          "minMemoryGiB": 16,
+          "note": "Mac 版 Ollama・MFLUX の経路あり。8GB の動作例は全機種の保証ではない（未実測）。"
+        },
+        "cuda": {
+          "minVramGiB": 8,
+          "note": "公式に約8GB の記載。"
+        }
+      },
+      "evidence": {
+        "rightsFindingId": "flux2_klein",
+        "rightsFinding": {
+          "risk": "中：同一ブランド内でライセンス相違",
+          "verifiedAt": "2026-10-22",
+          "sourceUrls": [
+            "https://bfl.ai/models/flux-2-klein",
+            "https://huggingface.co/black-forest-labs/FLUX.2-klein-4B/blob/main/LICENSE.md"
+          ]
+        },
+        "catalogVariant": {
+          "weightsLicense": "Apache-2.0",
+          "weightsUrl": "https://huggingface.co/black-forest-labs/FLUX.2-klein-4B",
+          "status": "released_weights",
+          "evidenceDate": "2026-10-22"
+        }
+      },
+      "asOf": "2026-10-22",
+      "reproduced": false
+    },
+    {
+      "id": "flux2-klein-9b",
+      "name": "FLUX.2 [klein] 9B",
+      "kind": "image",
+      "access": "open-weights",
+      "catalogModelId": "black-forest-labs/FLUX.2-klein-9B",
+      "roles": [
+        "image-draft",
+        "image-primary"
+      ],
+      "fit": {
+        "artStyles": [
+          "flat-2d-manga",
+          "anime",
+          "photoreal",
+          "diagram-mascot"
+        ]
+      },
+      "preference": 25,
+      "rights": {
+        "code": {
+          "license": "Apache-2.0",
+          "status": "ok"
+        },
+        "weights": {
+          "license": "FLUX Non-Commercial",
+          "licenseKind": "non-commercial",
+          "operatorProductionUse": "forbidden",
+          "note": "同じ klein でも 9B は非商用。商用の重み契約は別。"
+        },
+        "outputs": {
+          "commercialUse": "conditional",
+          "note": "dev 型の出力と重みの区別を読む必要がある。"
+        },
+        "hosting": {
+          "asService": "forbidden"
+        },
+        "region": {
+          "excludedTerritories": [],
+          "appliesToOutputs": false
+        },
+        "data": {
+          "sendsExternally": false
+        }
+      },
+      "runtime": {
+        "places": [
+          "operator-cuda",
+          "operator-rented-gpu"
+        ],
+        "mac": {
+          "supported": "unverified"
+        },
+        "cuda": {
+          "minVramGiB": null
+        }
+      },
+      "evidence": {
+        "rightsFindingId": "flux2_klein",
+        "rightsFinding": {
+          "risk": "中：同一ブランド内でライセンス相違",
+          "verifiedAt": "2026-10-22",
+          "sourceUrls": [
+            "https://bfl.ai/models/flux-2-klein",
+            "https://huggingface.co/black-forest-labs/FLUX.2-klein-4B/blob/main/LICENSE.md"
+          ]
+        },
+        "catalogVariant": {
+          "weightsLicense": "FLUX Non-Commercial",
+          "weightsUrl": "https://huggingface.co/black-forest-labs/FLUX.2-klein-9B",
+          "status": "released_weights",
+          "evidenceDate": "2026-10-22"
+        }
+      },
+      "asOf": "2026-10-22",
+      "reproduced": false
+    },
+    {
+      "id": "flux-dev",
+      "name": "FLUX.1 / FLUX.2 [dev]",
+      "kind": "image",
+      "access": "open-weights",
+      "catalogModelId": "black-forest-labs/FLUX.1-dev",
+      "roles": [
+        "image-primary"
+      ],
+      "fit": {
+        "artStyles": [
+          "anime",
+          "photoreal",
+          "diagram-mascot"
+        ]
+      },
+      "preference": 40,
+      "rights": {
+        "code": {
+          "license": "Apache-2.0",
+          "status": "ok"
+        },
+        "weights": {
+          "license": "FLUX Non-Commercial v2.0",
+          "licenseKind": "non-commercial",
+          "operatorProductionUse": "forbidden",
+          "note": "重みと派生モデルは原則非商用。収益事業・内部本番での利用は区別される。"
+        },
+        "outputs": {
+          "commercialUse": "allowed",
+          "note": "出力の商用利用は認められるが、重みを本番で使う許諾にはならない。"
+        },
+        "hosting": {
+          "asService": "forbidden",
+          "note": "出力の商用許可だけで推論サービスは運営できない。"
+        },
+        "region": {
+          "excludedTerritories": [],
+          "appliesToOutputs": false
+        },
+        "data": {
+          "sendsExternally": false
+        }
+      },
+      "runtime": {
+        "places": [
+          "operator-cuda",
+          "operator-rented-gpu"
+        ],
+        "mac": {
+          "supported": "unverified"
+        },
+        "cuda": {
+          "minVramGiB": null,
+          "note": "dev の参照実装は H100 級。"
+        }
+      },
+      "evidence": {
+        "rightsFindingId": "flux_dev",
+        "rightsFinding": {
+          "risk": "高：重みの商用利用と出力販売が別",
+          "verifiedAt": "2026-10-22",
+          "sourceUrls": [
+            "https://bfl.ai/legal/non-commercial-license-terms"
+          ]
+        },
+        "catalogVariant": {
+          "weightsLicense": "FLUX Non-Commercial",
+          "weightsUrl": "https://huggingface.co/black-forest-labs/FLUX.1-dev",
+          "status": "released_weights",
+          "evidenceDate": "2026-10-22"
+        }
+      },
+      "asOf": "2026-10-22",
+      "reproduced": false
+    },
+    {
+      "id": "z-image-turbo",
+      "name": "Z-Image Turbo",
+      "kind": "image",
+      "access": "open-weights",
+      "catalogModelId": "Tongyi-MAI/Z-Image-Turbo",
+      "roles": [
+        "image-bulk",
+        "image-primary"
+      ],
+      "fit": {
+        "artStyles": [
+          "photoreal"
+        ]
+      },
+      "preference": 15,
+      "rights": {
+        "code": {
+          "license": "Apache-2.0",
+          "status": "ok"
+        },
+        "weights": {
+          "license": "Apache-2.0",
+          "licenseKind": "open",
+          "operatorProductionUse": "allowed",
+          "note": "同梱・外部依存物は別に確認する。"
+        },
+        "outputs": {
+          "commercialUse": "allowed",
+          "note": "生成物の第三者の権利は別に確認する。"
+        },
+        "hosting": {
+          "asService": "allowed"
+        },
+        "region": {
+          "excludedTerritories": [],
+          "appliesToOutputs": false
+        },
+        "data": {
+          "sendsExternally": false
+        }
+      },
+      "runtime": {
+        "places": [
+          "operator-cuda",
+          "operator-rented-gpu"
+        ],
+        "mac": {
+          "supported": "unverified",
+          "note": "MFLUX・sd.cpp の経路はあるが未実測。"
+        },
+        "cuda": {
+          "minVramGiB": 16,
+          "note": "16GB の一般向け GPU という公式記載。8ステップ（CFG なし）。"
+        }
+      },
+      "evidence": {
+        "rightsFindingId": null,
+        "catalogVariant": {
+          "weightsLicense": "Apache-2.0",
+          "weightsUrl": "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo",
+          "status": "released_weights",
+          "evidenceDate": "2026-10-22"
+        }
+      },
+      "asOf": "2026-10-22",
+      "reproduced": false
+    },
+    {
+      "id": "z-image",
+      "name": "Z-Image（非蒸留 base）",
+      "kind": "image",
+      "access": "open-weights",
+      "catalogModelId": "Tongyi-MAI/Z-Image",
+      "roles": [
+        "image-primary"
+      ],
+      "fit": {
+        "artStyles": [
+          "photoreal"
+        ]
+      },
+      "preference": 30,
+      "rights": {
+        "code": {
+          "license": "Apache-2.0",
+          "status": "ok"
+        },
+        "weights": {
+          "license": "Apache-2.0",
+          "licenseKind": "open",
+          "operatorProductionUse": "allowed"
+        },
+        "outputs": {
+          "commercialUse": "allowed"
+        },
+        "hosting": {
+          "asService": "allowed"
+        },
+        "region": {
+          "excludedTerritories": [],
+          "appliesToOutputs": false
+        },
+        "data": {
+          "sendsExternally": false
+        }
+      },
+      "runtime": {
+        "places": [
+          "operator-cuda",
+          "operator-rented-gpu"
+        ],
+        "mac": {
+          "supported": "unverified"
+        },
+        "cuda": {
+          "minVramGiB": null,
+          "note": "28〜50ステップ・CFG あり。必要メモリは未確認。"
+        }
+      },
+      "evidence": {
+        "rightsFindingId": null,
+        "catalogVariant": {
+          "weightsLicense": "Apache-2.0",
+          "weightsUrl": "https://huggingface.co/Tongyi-MAI/Z-Image",
+          "status": "released_weights",
+          "evidenceDate": "2026-10-22"
+        }
+      },
+      "asOf": "2026-10-22",
+      "reproduced": false
+    },
+    {
+      "id": "anima",
+      "name": "Anima（アニメ・イラスト）",
+      "kind": "image",
+      "access": "open-weights",
+      "catalogModelId": "circlestone-labs/Anima",
+      "roles": [
+        "image-primary"
+      ],
+      "fit": {
+        "artStyles": [
+          "flat-2d-manga",
+          "anime"
+        ]
+      },
+      "preference": 30,
+      "rights": {
+        "code": {
+          "license": "未個別確認",
+          "status": "unverified"
+        },
+        "weights": {
+          "license": "CircleStone Non-Commercial + NVIDIA Open Model の依存条件",
+          "licenseKind": "non-commercial",
+          "operatorProductionUse": "conditional",
+          "outputsCommercialExplicit": true,
+          "note": "モデル自体は非商用だが、生成画像の商用利用はモデルカードと LICENSE 2(e) に明記されている。運営者の手元で使う分には合う。"
+        },
+        "outputs": {
+          "commercialUse": "allowed",
+          "note": "生成画像の販売・依頼・商用素材としての利用は可と明記。"
+        },
+        "hosting": {
+          "asService": "forbidden",
+          "note": "モデルを有料 API や製品として提供するのは不可。オトシゴが代わりに動かす形にはしない。"
+        },
+        "region": {
+          "excludedTerritories": [],
+          "appliesToOutputs": false
+        },
+        "data": {
+          "sendsExternally": false
+        }
+      },
+      "runtime": {
+        "places": [
+          "operator-cuda",
+          "operator-rented-gpu"
+        ],
+        "mac": {
+          "supported": "unverified"
+        },
+        "cuda": {
+          "minVramGiB": null,
+          "note": "2B。必要メモリは一次資料で確定できず未実測。"
+        }
+      },
+      "evidence": {
+        "rightsFindingId": null,
+        "catalogVariant": {
+          "weightsLicense": "CircleStone Non-Commercial + NVIDIA Open Modelの依存条件",
+          "weightsUrl": "https://huggingface.co/circlestone-labs/Anima",
+          "status": "released_weights",
+          "evidenceDate": "2026-10-22"
+        }
+      },
+      "asOf": "2026-10-22",
+      "reproduced": false
+    },
+    {
+      "id": "qwen-image-2-1",
+      "name": "Qwen-Image-2.1 / 2.1-Turbo",
+      "kind": "image",
+      "access": "open-weights",
+      "catalogModelId": "Qwen/Qwen-Image-2.1",
+      "roles": [
+        "image-primary",
+        "image-edit"
+      ],
+      "fit": {
+        "artStyles": [
+          "flat-2d-manga",
+          "anime",
+          "photoreal",
+          "diagram-mascot"
+        ]
+      },
+      "preference": 35,
+      "rights": {
+        "code": {
+          "license": "Qwen Research License",
+          "status": "block"
+        },
+        "weights": {
+          "license": "Qwen Research License (2026-09-20)",
+          "licenseKind": "research",
+          "operatorProductionUse": "forbidden",
+          "note": "研究・評価に限る。商用は別ライセンス。旧 Qwen-Image の Apache-2.0 を引き継がない。"
+        },
+        "outputs": {
+          "commercialUse": "unverified",
+          "note": "一般的な商用出力の例外を本文で確認できない。"
+        },
+        "hosting": {
+          "asService": "forbidden"
+        },
+        "region": {
+          "excludedTerritories": [],
+          "appliesToOutputs": false
+        },
+        "data": {
+          "sendsExternally": false
+        }
+      },
+      "runtime": {
+        "places": [
+          "operator-cuda",
+          "operator-rented-gpu"
+        ],
+        "mac": {
+          "supported": "unverified"
+        },
+        "cuda": {
+          "minVramGiB": null
+        }
+      },
+      "evidence": {
+        "rightsFindingId": "qwen21",
+        "rightsFinding": {
+          "risk": "高：Research License",
+          "verifiedAt": "2026-10-22",
+          "sourceUrls": [
+            "https://huggingface.co/Qwen/Qwen-Image-2.1/raw/main/LICENSE",
+            "https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo/raw/main/LICENSE"
+          ]
+        },
+        "catalogVariant": {
+          "weightsLicense": "Qwen Research License (2026-09-20)",
+          "weightsUrl": "https://huggingface.co/Qwen/Qwen-Image-2.1",
+          "status": "released_weights",
+          "evidenceDate": "2026-10-22"
+        }
+      },
+      "asOf": "2026-10-22",
+      "reproduced": false
+    },
+    {
+      "id": "noobai-xl",
+      "name": "NoobAI-XL 1.1",
+      "kind": "image",
+      "access": "open-weights",
+      "roles": [
+        "image-primary"
+      ],
+      "fit": {
+        "artStyles": [
+          "flat-2d-manga",
+          "anime"
+        ]
+      },
+      "preference": 40,
+      "rights": {
+        "code": {
+          "license": "SDXL 系",
+          "status": "caution"
+        },
+        "weights": {
+          "license": "NoobAI 独自条件",
+          "licenseKind": "non-commercial",
+          "operatorProductionUse": "forbidden",
+          "note": "モデルと派生物の商業化を禁止。"
+        },
+        "outputs": {
+          "commercialUse": "forbidden",
+          "note": "モデルで作った生成物も商業化の禁止対象に含む。"
+        },
+        "hosting": {
+          "asService": "forbidden"
+        },
+        "region": {
+          "excludedTerritories": [],
+          "appliesToOutputs": false
+        },
+        "data": {
+          "sendsExternally": false
+        }
+      },
+      "runtime": {
+        "places": [
+          "operator-cuda",
+          "operator-rented-gpu"
+        ],
+        "mac": {
+          "supported": "unverified"
+        },
+        "cuda": {
+          "minVramGiB": null
+        }
+      },
+      "evidence": {
+        "rightsFindingId": "noob11",
+        "rightsFinding": {
+          "risk": "高：生成物も非商用と明記",
+          "verifiedAt": "2026-10-22",
+          "sourceUrls": [
+            "https://huggingface.co/Laxhar/noobai-XL-1.1/raw/main/README.md"
+          ]
+        }
+      },
+      "asOf": "2026-10-22",
+      "reproduced": false
+    },
+    {
+      "id": "pony-v7",
+      "name": "Pony V7",
+      "kind": "image",
+      "access": "open-weights",
+      "roles": [
+        "image-primary"
+      ],
+      "fit": {
+        "artStyles": [
+          "flat-2d-manga",
+          "anime"
+        ]
+      },
+      "preference": 40,
+      "rights": {
+        "code": {
+          "license": "Pony Diffusion License",
+          "status": "caution"
+        },
+        "weights": {
+          "license": "Pony Diffusion License（現行）",
+          "licenseKind": "community",
+          "operatorProductionUse": "conditional",
+          "revenueThresholdUsd": 1000000,
+          "professionalAnimation": "separate-license",
+          "note": "年売上 US$1M 未満の小規模商用は可。ただしホスト・API と、プロの映画・アニメ制作は売上に関係なく別許諾。"
+        },
+        "outputs": {
+          "commercialUse": "conditional",
+          "note": "出力は派生物から外れるが、生成に使う商用の用途の許諾は飛ばせない。"
+        },
+        "hosting": {
+          "asService": "forbidden",
+          "note": "小規模なら有料推論も可、ではない。"
+        },
+        "region": {
+          "excludedTerritories": [],
+          "appliesToOutputs": false
+        },
+        "data": {
+          "sendsExternally": false
+        }
+      },
+      "runtime": {
+        "places": [
+          "operator-cuda",
+          "operator-rented-gpu"
+        ],
+        "mac": {
+          "supported": "unverified"
+        },
+        "cuda": {
+          "minVramGiB": null
+        }
+      },
+      "evidence": {
+        "rightsFindingId": "pony7",
+        "rightsFinding": {
+          "risk": "高：小規模売上でもサービス・映像制限",
+          "verifiedAt": "2026-10-22",
+          "sourceUrls": [
+            "https://purplesmart.ai/license",
+            "https://purplesmart.ai/pony/content7x"
+          ]
+        }
+      },
+      "asOf": "2026-10-22",
+      "reproduced": false
+    },
+    {
+      "id": "illustrious-xl-v0",
+      "name": "Illustrious XL early-release v0",
+      "kind": "image",
+      "access": "open-weights",
+      "roles": [
+        "image-primary"
+      ],
+      "fit": {
+        "artStyles": [
+          "flat-2d-manga",
+          "anime"
+        ]
+      },
+      "preference": 40,
+      "rights": {
+        "code": {
+          "license": "SDXL 系",
+          "status": "caution"
+        },
+        "weights": {
+          "license": "Illustrious v0 の追加利用条件",
+          "licenseKind": "community",
+          "operatorProductionUse": "conditional",
+          "derivativeTerms": "restrictive",
+          "note": "微調整・マージの公開やレシピ開示を求め、閉じた派生の収益化を禁じる記載。研究用途の説明もある。"
+        },
+        "outputs": {
+          "commercialUse": "conditional",
+          "note": "出力の拡散は制限しないが、第三者の権利と非独自性を留保。"
+        },
+        "hosting": {
+          "asService": "forbidden"
+        },
+        "region": {
+          "excludedTerritories": [],
+          "appliesToOutputs": false
+        },
+        "data": {
+          "sendsExternally": false,
+          "note": "利用規約にコンテンツの改善・学習利用の記載がある。"
+        }
+      },
+      "runtime": {
+        "places": [
+          "operator-cuda",
+          "operator-rented-gpu"
+        ],
+        "mac": {
+          "supported": "unverified"
+        },
+        "cuda": {
+          "minVramGiB": null
+        }
+      },
+      "evidence": {
+        "rightsFindingId": "illustrious0",
+        "rightsFinding": {
+          "risk": "高：派生モデルの追加条件",
+          "verifiedAt": "2026-10-22",
+          "sourceUrls": [
+            "https://huggingface.co/OnomaAIResearch/Illustrious-xl-early-release-v0",
+            "https://huggingface.co/OnomaAIResearch/Illustrious-xl-early-release-v0/raw/main/TERM_OF_USE"
+          ]
+        }
+      },
+      "asOf": "2026-10-22",
+      "reproduced": false
+    },
+    {
+      "id": "hunyuan-image-3",
+      "name": "HunyuanImage-3.0",
+      "kind": "image",
+      "access": "open-weights",
+      "catalogModelId": "tencent/HunyuanImage-3.0",
+      "roles": [
+        "image-primary"
+      ],
+      "fit": {
+        "artStyles": [
+          "photoreal",
+          "anime"
+        ]
+      },
+      "preference": 50,
+      "rights": {
+        "code": {
+          "license": "Tencent Hunyuan Community License",
+          "status": "caution"
+        },
+        "weights": {
+          "license": "Tencent Hunyuan Community License",
+          "licenseKind": "community",
+          "operatorProductionUse": "conditional",
+          "note": "許諾の領域は EU・英国・韓国を除く世界。"
+        },
+        "outputs": {
+          "commercialUse": "conditional",
+          "note": "領域外での出力の使用・複製・配布・表示を明示的に禁止。"
+        },
+        "hosting": {
+          "asService": "conditional"
+        },
+        "region": {
+          "excludedTerritories": [
+            "EU",
+            "UK",
+            "KR"
+          ],
+          "appliesToOutputs": true,
+          "note": "日本で作っても世界へ無条件に配信できるとは言えない。"
+        },
+        "data": {
+          "sendsExternally": false
+        }
+      },
+      "runtime": {
+        "places": [
+          "operator-rented-gpu"
+        ],
+        "mac": {
+          "supported": false
+        },
+        "cuda": {
+          "minVramGiB": 240,
+          "note": "推奨は 80GB×3 枚以上。"
+        }
+      },
+      "evidence": {
+        "rightsFindingId": "hunyuan3",
+        "rightsFinding": {
+          "risk": "高：地域制限が出力にも及ぶ",
+          "verifiedAt": "2026-10-22",
+          "sourceUrls": [
+            "https://github.com/Tencent-Hunyuan/HunyuanImage-3.0/blob/main/LICENSE"
+          ]
+        },
+        "catalogVariant": {
+          "weightsLicense": "Tencent Hunyuan Community License",
+          "weightsUrl": "https://huggingface.co/tencent/HunyuanImage-3.0",
+          "status": "released_weights",
+          "evidenceDate": "2026-10-22"
+        }
+      },
+      "asOf": "2026-10-22",
+      "reproduced": false
+    },
+    {
+      "id": "minimax-h3",
+      "name": "MiniMax H3 系（FastH3 等の派生を含む）",
+      "kind": "video",
+      "access": "open-weights",
+      "roles": [
+        "video-i2v",
+        "video-t2v"
+      ],
+      "fit": {
+        "artStyles": [
+          "anime",
+          "photoreal",
+          "ai-footage"
+        ]
+      },
+      "preference": 40,
+      "rights": {
+        "code": {
+          "license": "MiniMax のモデルライセンス",
+          "status": "caution"
+        },
+        "weights": {
+          "license": "MiniMax H3 ライセンス（2026-10-19 確認）",
+          "licenseKind": "community",
+          "operatorProductionUse": "conditional",
+          "note": "EU・英国・韓国・米国が適用地域の外。"
+        },
+        "outputs": {
+          "commercialUse": "conditional",
+          "note": "出力の地域外での使用・配布・表示も制限。公の場での AI 生成表示の条件もある。"
+        },
+        "hosting": {
+          "asService": "conditional"
+        },
+        "region": {
+          "excludedTerritories": [
+            "EU",
+            "UK",
+            "KR",
+            "US"
+          ],
+          "appliesToOutputs": true,
+          "note": "全世界公開を前提にするなら、許諾を確認するまで標準構成から外す。"
+        },
+        "data": {
+          "sendsExternally": false
+        }
+      },
+      "runtime": {
+        "places": [
+          "operator-cuda",
+          "operator-rented-gpu"
+        ],
+        "mac": {
+          "supported": "unverified"
+        },
+        "cuda": {
+          "minVramGiB": null
+        }
+      },
+      "evidence": {
+        "rightsFindingId": null,
+        "videoGuidePages": "p17-18"
+      },
+      "asOf": "2026-10-22",
+      "reproduced": false
+    },
+    {
+      "id": "instantid",
+      "name": "InstantID（InsightFace の顔重みに依存）",
+      "kind": "face-id",
+      "access": "open-weights",
+      "roles": [
+        "face-id"
+      ],
+      "fit": {
+        "artStyles": [
+          "photoreal",
+          "anime"
+        ]
+      },
+      "preference": 50,
+      "rights": {
+        "code": {
+          "license": "Apache-2.0",
+          "status": "ok"
+        },
+        "weights": {
+          "license": "公開 checkpoint は研究用途。InsightFace の学習済みモデルは非商用研究用",
+          "licenseKind": "research",
+          "operatorProductionUse": "forbidden",
+          "faceIdWeightsCommercial": false,
+          "note": "コードが Apache でも、顔の重みは非商用。自動取得も例外ではない。"
+        },
+        "outputs": {
+          "commercialUse": "unverified",
+          "note": "顔一致画像を売るなら顔重みの別の商用許諾が要るかを確認する。"
+        },
+        "hosting": {
+          "asService": "forbidden"
+        },
+        "region": {
+          "excludedTerritories": [],
+          "appliesToOutputs": false
+        },
+        "data": {
+          "sendsExternally": false,
+          "note": "顔写真と embedding の保存先・保持期間を別に審査する。"
+        }
+      },
+      "runtime": {
+        "places": [
+          "operator-cuda",
+          "operator-rented-gpu"
+        ],
+        "mac": {
+          "supported": "unverified"
+        },
+        "cuda": {
+          "minVramGiB": null
+        }
+      },
+      "evidence": {
+        "rightsFindingId": "instantid",
+        "rightsFinding": {
+          "risk": "高：コードと顔重みは別",
+          "verifiedAt": "2026-10-22",
+          "sourceUrls": [
+            "https://github.com/instantX-research/InstantID",
+            "https://github.com/deepinsight/insightface"
+          ]
+        }
+      },
+      "asOf": "2026-10-22",
+      "reproduced": false
+    },
+    {
+      "id": "pulid",
+      "name": "PuLID（InsightFace の顔エンコーダに依存）",
+      "kind": "face-id",
+      "access": "open-weights",
+      "roles": [
+        "face-id"
+      ],
+      "fit": {
+        "artStyles": [
+          "photoreal",
+          "anime"
+        ]
+      },
+      "preference": 50,
+      "rights": {
+        "code": {
+          "license": "Apache-2.0",
+          "status": "ok"
+        },
+        "weights": {
+          "license": "本体は Apache。標準実装の InsightFace（antelopev2）は非商用研究条件",
+          "licenseKind": "research",
+          "operatorProductionUse": "forbidden",
+          "faceIdWeightsCommercial": false,
+          "note": "PuLID の生成物であることだけでは顔エンコーダの制約を回避できない。"
+        },
+        "outputs": {
+          "commercialUse": "unverified"
+        },
+        "hosting": {
+          "asService": "forbidden"
+        },
+        "region": {
+          "excludedTerritories": [],
+          "appliesToOutputs": false
+        },
+        "data": {
+          "sendsExternally": false
+        }
+      },
+      "runtime": {
+        "places": [
+          "operator-cuda",
+          "operator-rented-gpu"
+        ],
+        "mac": {
+          "supported": "unverified"
+        },
+        "cuda": {
+          "minVramGiB": null
+        }
+      },
+      "evidence": {
+        "rightsFindingId": "pulid",
+        "rightsFinding": {
+          "risk": "高：Apache 本体だけでクリアしない",
+          "verifiedAt": "2026-10-22",
+          "sourceUrls": [
+            "https://github.com/ToTheBeginning/PuLID",
+            "https://github.com/ToTheBeginning/PuLID/blob/main/pulid/pipeline_flux.py",
+            "https://github.com/deepinsight/insightface"
+          ]
+        }
+      },
+      "asOf": "2026-10-22",
+      "reproduced": false
+    },
+    {
+      "id": "wan2-2-ti2v-5b",
+      "name": "Wan2.2 TI2V-5B",
+      "kind": "video",
+      "access": "open-weights",
+      "roles": [
+        "video-i2v",
+        "video-t2v"
+      ],
+      "fit": {
+        "artStyles": [
+          "flat-2d-manga",
+          "anime",
+          "photoreal",
+          "diagram-mascot",
+          "ai-footage"
+        ]
+      },
+      "preference": 10,
+      "rights": {
+        "code": {
+          "license": "Apache-2.0",
+          "status": "ok"
+        },
+        "weights": {
+          "license": "Apache-2.0",
+          "licenseKind": "open",
+          "operatorProductionUse": "allowed"
+        },
+        "outputs": {
+          "commercialUse": "allowed",
+          "note": "画像とモデルの両方に商用条件が要る（先頭画像の権利も見る）。"
+        },
+        "hosting": {
+          "asService": "allowed"
+        },
+        "region": {
+          "excludedTerritories": [],
+          "appliesToOutputs": false
+        },
+        "data": {
+          "sendsExternally": "optional",
+          "note": "公式には API とローカルの2種類のプロンプト拡張がある。API 側を選ぶと文章が外へ出る。"
+        }
+      },
+      "runtime": {
+        "places": [
+          "operator-cuda",
+          "operator-rented-gpu"
+        ],
+        "mac": {
+          "supported": "unverified",
+          "note": "Mac でそのまま動く手順としては扱わない。"
+        },
+        "cuda": {
+          "minVramGiB": 8,
+          "note": "ComfyUI の標準 offload で 8GB の案内（速度は保証しない）。公式の比較の起点は 24GB 級。"
+        }
+      },
+      "evidence": {
+        "rightsFindingId": null,
+        "videoGuidePages": "p11, p25, p29-34"
+      },
+      "asOf": "2026-10-22",
+      "reproduced": false
+    },
+    {
+      "id": "ltx-2-5",
+      "name": "LTX-2.5（LTX Desktop のローカル Fast 経路を含む）",
+      "kind": "video",
+      "access": "open-weights",
+      "roles": [
+        "video-i2v",
+        "video-t2v",
+        "video-av"
+      ],
+      "fit": {
+        "artStyles": [
+          "anime",
+          "photoreal",
+          "ai-footage"
+        ]
+      },
+      "preference": 20,
+      "rights": {
+        "code": {
+          "license": "LTX のライセンス（コードの許諾は未個別確認）",
+          "status": "unverified"
+        },
+        "weights": {
+          "license": "LTX-2 系ライセンス",
+          "licenseKind": "community",
+          "operatorProductionUse": "conditional",
+          "revenueThresholdUsd": 10000000,
+          "note": "関連会社を含む年商が US$1,000万以上なら、所定の非商用用途を除き有償ライセンス。"
+        },
+        "outputs": {
+          "commercialUse": "conditional",
+          "note": "売上の閾値の条件は原文で確認する。"
+        },
+        "hosting": {
+          "asService": "conditional"
+        },
+        "region": {
+          "excludedTerritories": [],
+          "appliesToOutputs": false
+        },
+        "data": {
+          "sendsExternally": "optional",
+          "note": "LTX Desktop にはクラウドとローカルの text encoder の選択がある。API の Pro はローカル Fast とは別。"
+        }
+      },
+      "runtime": {
+        "places": [
+          "operator-mac",
+          "operator-cuda",
+          "operator-rented-gpu"
+        ],
+        "mac": {
+          "supported": true,
+          "minMemoryGiB": 32,
+          "note": "LTX Desktop のローカル経路は Apple Silicon で 32GiB 以上が条件。32GiB 未満と Intel Mac は非対応。"
+        },
+        "cuda": {
+          "minVramGiB": 15,
+          "note": "Desktop の Fast 経路は CUDA で 15GiB 以上。一般の Python パイプラインは 32GB。"
+        }
+      },
+      "evidence": {
+        "rightsFindingId": null,
+        "videoGuidePages": "p16, p21-22, p25, p84-85"
+      },
+      "asOf": "2026-10-22",
+      "reproduced": false
+    },
+    {
+      "id": "grok-imagine",
+      "name": "Grok Imagine（画像・動画）",
+      "kind": "video",
+      "access": "service",
+      "contractKeys": [
+        "grok"
+      ],
+      "mediaGenerationIds": [
+        "grok-imagine-video-hermes",
+        "grok-imagine-video-api",
+        "grok-imagine-image-hermes",
+        "grok-imagine-image-api"
+      ],
+      "roles": [
+        "video-i2v"
+      ],
+      "fit": {
+        "artStyles": [
+          "flat-2d-manga",
+          "anime",
+          "photoreal",
+          "ai-footage",
+          "diagram-mascot"
+        ]
+      },
+      "preference": 10,
+      "rights": {
+        "code": {
+          "license": "非公開サービス",
+          "status": "not-applicable"
+        },
+        "weights": {
+          "license": "非公開サービス",
+          "licenseKind": "proprietary-service",
+          "operatorProductionUse": "not-applicable"
+        },
+        "outputs": {
+          "commercialUse": "unverified",
+          "note": "この調査一式では出力の条件を一次資料で確認していない。契約先の規約を確認する。"
+        },
+        "hosting": {
+          "asService": "forbidden",
+          "note": "サービスのアクセスを再提供しない。"
+        },
+        "region": {
+          "excludedTerritories": [],
+          "appliesToOutputs": false
+        },
+        "data": {
+          "sendsExternally": true,
+          "note": "先頭画像とプロンプトは提供元へ送られる。"
+        }
+      },
+      "runtime": {
+        "places": [
+          "operator-service"
+        ],
+        "mac": {
+          "supported": "not-applicable"
+        },
+        "cuda": null
+      },
+      "evidence": {
+        "rightsFindingId": null
+      },
+      "asOf": "2026-10-22",
+      "reproduced": false
+    },
+    {
+      "id": "veo",
+      "name": "Veo（Google の Flow・Gemini 契約の枠）",
+      "kind": "video",
+      "access": "service",
+      "contractKeys": [
+        "google-ai"
+      ],
+      "mediaGenerationIds": [
+        "lovart-veo-3-1",
+        "lovart-veo-3-1-fast",
+        "lovart-veo-3"
+      ],
+      "roles": [
+        "video-i2v",
+        "video-t2v"
+      ],
+      "fit": {
+        "artStyles": [
+          "photoreal",
+          "ai-footage",
+          "anime"
+        ]
+      },
+      "preference": 15,
+      "rights": {
+        "code": {
+          "license": "非公開サービス",
+          "status": "not-applicable"
+        },
+        "weights": {
+          "license": "非公開サービス",
+          "licenseKind": "proprietary-service",
+          "operatorProductionUse": "not-applicable"
+        },
+        "outputs": {
+          "commercialUse": "conditional",
+          "note": "契約・地域・残り枠と、現実と誤認されうる映像の開示条件を利用先で確認する。"
+        },
+        "hosting": {
+          "asService": "forbidden"
+        },
+        "region": {
+          "excludedTerritories": [],
+          "appliesToOutputs": false,
+          "note": "利用資格と地域は契約先で確認する。"
+        },
+        "data": {
+          "sendsExternally": true,
+          "note": "Google へ送る画像・音声・プロンプトを確認する。無料と課金でデータの扱いが違う。"
+        }
+      },
+      "runtime": {
+        "places": [
+          "operator-service"
+        ],
+        "mac": {
+          "supported": "not-applicable"
+        },
+        "cuda": null,
+        "note": "Web/Flow の枠、API の料金、Colab の compute unit は別の財布。"
+      },
+      "evidence": {
+        "rightsFindingId": "gemini_api",
+        "videoGuidePages": "p15",
+        "rightsFinding": {
+          "risk": "高：無料と課金設定のデータ条件",
+          "verifiedAt": "2026-10-22",
+          "sourceUrls": [
+            "https://ai.google.dev/gemini-api/terms"
+          ]
+        }
+      },
+      "asOf": "2026-10-22",
+      "reproduced": false
+    }
+  ],
+  "accelerations": [
+    {
+      "id": "D01",
+      "category": "蒸留",
+      "name": "SD/SDXL Turbo",
+      "hardware": "対応するSD/SDXL runtime。特定GPUの最低VRAMを固定しない",
+      "constraints": "1–4 step。SDXL-Turboは512×512基準、CFG/negative prompt無効。通常SDXLの設定を流用しない",
+      "license": "重みはStabilityの当該ライセンスを別確認",
+      "platform": "unverified"
+    },
+    {
+      "id": "D02",
+      "category": "蒸留",
+      "name": "SDXL Lightning",
+      "hardware": "Diffusers/ComfyUI等、通常のSDXL対応GPU",
+      "constraints": "1/2/4/8step別checkpoint。指定stepとscheduler/prediction typeを合わせる。1stepは実験的",
+      "license": "openrail++およびbase/fine-tune条件",
+      "platform": "unverified"
+    },
+    {
+      "id": "D03",
+      "category": "蒸留",
+      "name": "LCM / LCM-LoRA",
+      "hardware": "Diffusers/ComfyUI/sd.cpp等で対象モデル対応が必要",
+      "constraints": "LCMSchedulerが必要。LCM本体とLoRAではguidance推奨が異なる。LCMでnegative promptが効かない場合を区別",
+      "license": "LoRAとbaseのライセンスが別",
+      "platform": "unverified"
+    },
+    {
+      "id": "D04",
+      "category": "蒸留",
+      "name": "Hyper-SD",
+      "hardware": "対応ベースモデルを実行できる環境",
+      "constraints": "SD系1–8/12step、SD3 4/8/16、Flux 8/16など別設定。CFG-preserved版とCFGなしを区別",
+      "license": "baseと配布LoRA条件を両方確認",
+      "platform": "unverified"
+    },
+    {
+      "id": "D05",
+      "category": "蒸留",
+      "name": "FLUX.1 schnell",
+      "hardware": "Diffusers/ComfyUI/sd.cpp/MLX等",
+      "constraints": "1–4step、guidance_scale=0。量子化やoffloadと併用可だがtext encoderのRAMも必要",
+      "license": "Apache-2.0重み。別LoRAは別条件",
+      "platform": "unverified"
+    },
+    {
+      "id": "D06",
+      "category": "蒸留",
+      "name": "SD3.5 Large Turbo",
+      "hardware": "ComfyUI/Diffusers等",
+      "constraints": "4step。CLIP-L/GとT5の負荷は残る",
+      "license": "Stabilityの当該model card/許諾を確認",
+      "platform": "unverified"
+    },
+    {
+      "id": "D07",
+      "category": "蒸留",
+      "name": "Z-Image Turbo",
+      "hardware": "Diffusers/ComfyUI/Nunchaku/sd.cpp/MFLUX/LightX2V等の対応版",
+      "constraints": "8 NFE、CFGなし。通常Z-Image/Omni/Editとは別。APIのnum_inference_stepsがNFEと同じとは限らない",
+      "license": "Apache-2.0、使用adapter別条件",
+      "platform": "cross-platform"
+    },
+    {
+      "id": "D08",
+      "category": "蒸留",
+      "name": "FLUX.2 klein 4B",
+      "hardware": "Diffusers/ComfyUI/sd.cpp/LightX2V/MFLUX等",
+      "constraints": "公式例4step、guidance=1。4B/9B、Base/distilled、Flux1を混同しない",
+      "license": "4BはApache-2.0。9B等へ一般化不可",
+      "platform": "cross-platform"
+    },
+    {
+      "id": "D09",
+      "category": "蒸留",
+      "name": "SANA / SANA-Sprint",
+      "hardware": "公式Python、Diffusers、ComfyUI、対象Nunchaku",
+      "constraints": "小型linear DiT＋高圧縮DC-AE。Sprintはone/few-step、VAEをSDXL用で置換不可",
+      "license": "コードApache-2.0、各重みの条件別",
+      "platform": "unverified"
+    },
+    {
+      "id": "D10",
+      "category": "蒸留",
+      "name": "LightX2V派生Lightning/Turbo",
+      "hardware": "モデル別LightX2V script/対応loader",
+      "constraints": "同名Lightningでも対象model/revision別。LongCat Edit-Turboは専用重み8step CFGなし",
+      "license": "engine Apache-2.0と重み・LoRAのライセンスは別",
+      "platform": "unverified"
+    },
+    {
+      "id": "Q01",
+      "category": "量子化",
+      "name": "FP16 / BF16",
+      "hardware": "runtimeとGPUのdtype support依存",
+      "constraints": "BF16の広い指数範囲とFP16 overflowに注意。VAEだけFP32が必要な場合あり",
+      "license": "runtimeと重み別",
+      "platform": "unverified"
+    },
+    {
+      "id": "Q02",
+      "category": "量子化",
+      "name": "FP8 weight storage / layerwise casting",
+      "hardware": "保存とnative FP8演算の対応条件は異なる",
+      "constraints": "保存FP8→計算BF16/FP16は省メモリ方式。これだけでFP8 GEMMにはならない",
+      "license": "各runtime/weight条件",
+      "platform": "unverified"
+    },
+    {
+      "id": "Q03",
+      "category": "量子化",
+      "name": "FP8 native compute / torchao / ModelOpt系",
+      "hardware": "torchao FP8はCC>=8.9を公式推奨。個別kernel条件あり",
+      "constraints": "scaled FP8、per-tensor/per-channel、activation quantを区別。ロード時の元重み＋量子化重みpeakでOOMあり",
+      "license": "torchao/ModelOpt/モデル条件別",
+      "platform": "cuda-only"
+    },
+    {
+      "id": "Q04",
+      "category": "量子化",
+      "name": "bitsandbytes NF4 / INT8",
+      "hardware": "bitsandbytes対応backend/device/versionを別確認",
+      "constraints": "NF4は主にW4A16。VAE/CLIP全体が自動4bit化されるわけではない",
+      "license": "runtimeとweight条件別",
+      "platform": "unverified"
+    },
+    {
+      "id": "Q05",
+      "category": "量子化",
+      "name": "GGUF Q2–Q8",
+      "hardware": "sd.cpp: CPU/CUDA/Vulkan/Metal等。Diffusers: model loader",
+      "constraints": "GGUFは容器/量子化形式であって全model互換ではない。Diffusersでは各forwardでdequant",
+      "license": "元重み＋converter/runtime。remote kernel実行は別審査",
+      "platform": "cross-platform"
+    },
+    {
+      "id": "Q06",
+      "category": "量子化",
+      "name": "SVDQuant / Nunchaku INT4",
+      "hardware": "NVIDIA sm75/80/86/89対応、Windows/Linux。wheel ABI一致",
+      "constraints": "W4A4＋16bit低rank補正＋融合kernel。量子化済み形式/LoRA loaderが専用",
+      "license": "Apache-2.0 engine、base/量子化weight許諾別",
+      "platform": "cuda-only"
+    },
+    {
+      "id": "Q07",
+      "category": "量子化",
+      "name": "NVFP4",
+      "hardware": "NunchakuはBlackwell sm120、PyTorch>=2.7/CUDA>=12.8",
+      "constraints": "FP4重みとscale/packingを含む。任意FP4 checkpointを相互交換不可。HopperはNunchaku4bit非対応",
+      "license": "各engineとcheckpoint条件別",
+      "platform": "cuda-only"
+    },
+    {
+      "id": "Q08",
+      "category": "量子化",
+      "name": "Nunchaku Lite",
+      "hardware": "NVIDIA sm75/80/86/89/120。H100/H200非対応",
+      "constraints": "通常Diffusers module構造を維持。fused QKV checkpointと非fused configは不一致。Hub kernel trust opt-inあり",
+      "license": "Diffusers＋kernel＋checkpointを別確認",
+      "platform": "cuda-only"
+    },
+    {
+      "id": "Q09",
+      "category": "量子化",
+      "name": "Quanto / AutoRound / SDNQ / MXFP8等",
+      "hardware": "dtypeごとのbackend/device supportが必要",
+      "constraints": "選択肢として捕捉。全方式の全GPU互換と品質は未検証",
+      "license": "個別runtimeとmodel card確認待ち",
+      "platform": "unverified"
+    },
+    {
+      "id": "O01",
+      "category": "実行最適化",
+      "name": "torch.compile / regional compile",
+      "hardware": "主に対応PyTorch compiler backend",
+      "constraints": "初回compile、解像度/shape/LoRA変更の再compile、graph breakを計測。repeated block compileでcold削減",
+      "license": "PyTorch/Diffusers/依存kernel",
+      "platform": "unverified"
+    },
+    {
+      "id": "O02",
+      "category": "実行最適化",
+      "name": "SDPA / xFormers / FlashAttention",
+      "hardware": "各GPU世代、dtype、head shape、OS、wheel依存",
+      "constraints": "一つのattention演算に全部が同時加算されるのではなくbackend選択。モデルでfast path使用確認",
+      "license": "個別実装license/依存",
+      "platform": "unverified"
+    },
+    {
+      "id": "O03",
+      "category": "実行最適化",
+      "name": "SageAttention",
+      "hardware": "主にNVIDIA、各Sage世代とCUDA/torchを照合",
+      "constraints": "量子化attention。量子化weightとは別軸。third-party Windows wheelを公式成果と混同しない",
+      "license": "Sage公式と配布wheel出所を確認",
+      "platform": "cuda-only"
+    },
+    {
+      "id": "O04",
+      "category": "キャッシュ",
+      "name": "TeaCache",
+      "hardware": "対応実装があるGPU/runtime",
+      "constraints": "近似計算省略、閾値とmodel calibrationが重要。CFGとの制約は実装依存",
+      "license": "研究実装＋base条件",
+      "platform": "unverified"
+    },
+    {
+      "id": "O05",
+      "category": "キャッシュ",
+      "name": "First Block Cache / Double FBCache / ParaAttention",
+      "hardware": "ParaAttentionまたはruntime integration",
+      "constraints": "第1block残差から再利用判断。4step蒸留で同じ効果とは限らない",
+      "license": "各implementation license",
+      "platform": "unverified"
+    },
+    {
+      "id": "O06",
+      "category": "キャッシュ",
+      "name": "Cache-DiT / TaylorSeer / MagCache / PAB等",
+      "hardware": "Diffusers/SGLang等対応版",
+      "constraints": "SGLang Cache-DiTとFSDP非互換、layerwise offload可。SCM<8step無効。DMD calibratorとTaylorSeer排他",
+      "license": "runtimeとcache実装条件",
+      "platform": "unverified"
+    },
+    {
+      "id": "O07",
+      "category": "メモリ",
+      "name": "CPU model / sequential / group offload",
+      "hardware": "GPU+十分なsystem RAM/PCIe帯域",
+      "constraints": "model単位とlayer単位で速度差。stream prefetchはRAM増大。disk offloadは最終手段",
+      "license": "runtime依存",
+      "platform": "unverified"
+    },
+    {
+      "id": "O08",
+      "category": "メモリ",
+      "name": "VAE slicing / tiling / tiny AE",
+      "hardware": "高解像度/複数batchで特に有用",
+      "constraints": "slicingはbatch、tilingは空間。denoiser重みOOMを解決しない。tiny AEは同品質ではない",
+      "license": "VAE/AE weight条件別",
+      "platform": "unverified"
+    },
+    {
+      "id": "O09",
+      "category": "分散",
+      "name": "xDiT / Ulysses / Ring / PipeFusion / CFG parallel",
+      "hardware": "複数GPU、NCCL/RCCL等通信/相互接続",
+      "constraints": "VRAM分割とlatency/throughput改善は別。家庭用PCIeで必ず速いとは限らない。TACO-DiTはclosed商用",
+      "license": "xDiT Apache-2.0、TACO-DiT別",
+      "platform": "cuda-only"
+    },
+    {
+      "id": "E01",
+      "category": "エンジン",
+      "name": "Diffusers",
+      "hardware": "PyTorch CUDA/ROCm/MPS/XPU/CPUとmodel依存",
+      "constraints": "API組込みと新モデル追従向き。moduleごとの量子化/offload設定が必要",
+      "license": "コードと重み別",
+      "platform": "cross-platform"
+    },
+    {
+      "id": "E02",
+      "category": "エンジン",
+      "name": "LightX2V",
+      "hardware": "NVIDIA/AMD/各NPU等はmodel別。Macアプリ対象も限定",
+      "constraints": "画像/動画/編集推論。全最適化が全モデル/全hardwareで使えるわけではない",
+      "license": "Apache-2.0 engine、重み別",
+      "platform": "unverified"
+    },
+    {
+      "id": "E03",
+      "category": "エンジン",
+      "name": "stable-diffusion.cpp",
+      "hardware": "CPU AVX系列、CUDA、Vulkan、Metal、OpenCL、SYCL。Win/Linux/Mac等",
+      "constraints": "軽量CLI/C API/server。LoRA/ControlNet/edit対応は個別、SD1.5 ControlNetなど範囲確認",
+      "license": "MIT engine、モデル重み別",
+      "platform": "cross-platform"
+    },
+    {
+      "id": "E04",
+      "category": "エンジン",
+      "name": "NVIDIA TensorRT Diffusion",
+      "hardware": "NVIDIA GPU。FP8/FP4はkernel/architecture条件",
+      "constraints": "export/engine buildの時間・VRAMと推論を分ける。static batch/shape制約。ONNX済みweights選択可",
+      "license": "TensorRT配布物とOSS demo/model別",
+      "platform": "cuda-only"
+    },
+    {
+      "id": "E05",
+      "category": "エンジン",
+      "name": "ONNX Runtime",
+      "hardware": "CUDA/DirectML/CPU等EP別",
+      "constraints": "ONNXは万能互換ではない。unsupported op、dynamic shape、LoRA差分のexport条件確認",
+      "license": "ORTコード/EP/model別",
+      "platform": "unverified"
+    },
+    {
+      "id": "E06",
+      "category": "エンジン",
+      "name": "OpenVINO GenAI",
+      "hardware": "Intel CPU/GPU/NPU。全modelが全device対応という意味ではない",
+      "constraints": "Optimum export、C++/Python。TorchとRNG既定差あり。NPUでの対象pipeline要確認",
+      "license": "OpenVINO/各model条件別",
+      "platform": "unverified"
+    },
+    {
+      "id": "E07",
+      "category": "エンジン",
+      "name": "SGLang Diffusion",
+      "hardware": "NVIDIA/AMD/Intel XPU/Ascend/Apple等はpath別",
+      "constraints": "generate/serve/OpenAI互換。conditioning cacheはexact、denoise cacheはapprox",
+      "license": "SGLang及び個別kernel/model条件",
+      "platform": "unverified"
+    },
+    {
+      "id": "E08",
+      "category": "エンジン",
+      "name": "vLLM-Omni",
+      "hardware": "GPU/NPU等、model/runtime path別",
+      "constraints": "LLM vLLM本体とOmniを混同しない。multi-stage/batchingサービス向き",
+      "license": "Apache-2.0とmodel条件",
+      "platform": "unverified"
+    },
+    {
+      "id": "E09",
+      "category": "エンジン",
+      "name": "stable-fast / OneDiff",
+      "hardware": "主にNVIDIA系、version-specific",
+      "constraints": "旧benchmarkを現Torchへ一般化不可。OneDiff公開版とEnterpriseの機能差",
+      "license": "stable-fast MIT、OneDiff Apache-2.0/商用別",
+      "platform": "cuda-only"
+    },
+    {
+      "id": "M01",
+      "category": "Mac",
+      "name": "MLX公式examples",
+      "hardware": "Apple Silicon/MLX",
+      "constraints": "教育・実験用。汎用GUIではない。TE解放、量子化、CLI可能",
+      "license": "MIT code、モデルlicense別",
+      "platform": "mac-only"
+    },
+    {
+      "id": "M02",
+      "category": "Mac",
+      "name": "MFLUX",
+      "hardware": "Apple Silicon MLX。M1向けfloat16 modeの記載あり",
+      "constraints": "Apple公式アプリではない。CLI/Python、LoRA/controlはモデル別。初回自動downloadあり",
+      "license": "MIT code、weights別",
+      "platform": "mac-only"
+    },
+    {
+      "id": "M03",
+      "category": "Mac",
+      "name": "Draw Things",
+      "hardware": "Apple Silicon/iPhone/iPad、独立serverはMac/Linux CUDA",
+      "constraints": "アプリ全体公開ではなく公開engine部分。HTTPとgRPCを区別。公式Comfy gRPC連携あり",
+      "license": "公開code GPL-3.0、app/weights別",
+      "platform": "mac-only"
+    },
+    {
+      "id": "M04",
+      "category": "Mac",
+      "name": "Core ML Stable Diffusion",
+      "hardware": "Apple Silicon CPU/GPU/Neural Engine、変換済みCore ML",
+      "constraints": "PyTorch checkpoint直読の汎用engineではない。converter/attention/compute unit別",
+      "license": "MIT code、weights別",
+      "platform": "mac-only"
+    },
+    {
+      "id": "M05",
+      "category": "Mac",
+      "name": "Diffusers MPS / sd.cpp Metal",
+      "hardware": "Apple Silicon、unified RAM",
+      "constraints": "CUDA専用kernelは使えない。RAM共有でも容量・帯域・swap限界あり",
+      "license": "runtime/model別",
+      "platform": "mac-only"
+    },
+    {
+      "id": "U01",
+      "category": "UI",
+      "name": "ComfyUI",
+      "hardware": "Win/Linux/macOS、NVIDIA/AMD/Intel/Apple等は条件別",
+      "constraints": "グラフ/部分再実行/API/VRAM管理。native、custom、Partner(API)を区別",
+      "license": "GPL-3.0、node/modelは別",
+      "platform": "cross-platform"
+    },
+    {
+      "id": "U02",
+      "category": "UI",
+      "name": "Forge / Forge Neo / reForge",
+      "hardware": "各forkの環境/依存に従う",
+      "constraints": "3つは別管理。NeoはHaoming02 repoのneo branch。原README statusに2024年項目あり",
+      "license": "AGPL-3.0系、extension/model別",
+      "platform": "unverified"
+    },
+    {
+      "id": "U03",
+      "category": "UI",
+      "name": "SD.Next",
+      "hardware": "NVIDIA/AMD/Intel/Apple/CPU",
+      "constraints": "SDNQやoffload統合。Nunchaku module置換でfine-tuneを無視するUI実装に注意",
+      "license": "Apache-2.0、weights/extension別",
+      "platform": "cross-platform"
+    },
+    {
+      "id": "U04",
+      "category": "UI",
+      "name": "InvokeAI",
+      "hardware": "対応GPU/OS条件",
+      "constraints": "Canvas、boards、node workflow。Nano Banana/GPT Image等API-only表記をlocalと混同しない",
+      "license": "Apache-2.0、各model別",
+      "platform": "unverified"
+    },
+    {
+      "id": "U05",
+      "category": "UI",
+      "name": "SwarmUI",
+      "hardware": "backend hardware依存",
+      "constraints": "生成フォームとComfy graph、多backend管理。API/remoteを明示",
+      "license": "MIT＋依存GPL/モデル条件",
+      "platform": "unverified"
+    },
+    {
+      "id": "U06",
+      "category": "UI",
+      "name": "Krita AI Diffusion",
+      "hardware": "Krita＋local/remote backend",
+      "constraints": "選択領域inpaint、outpaint、描画guidance。Krita本体公式機能とは区別",
+      "license": "GPL-3.0、Krita/weights別",
+      "platform": "unverified"
+    },
+    {
+      "id": "U07",
+      "category": "UI",
+      "name": "Fooocus",
+      "hardware": "NVIDIA最低4GBは公式記載だが条件付き",
+      "constraints": "limited LTS bugfix only。新architecture導入計画なし",
+      "license": "GPL-3.0、weights別",
+      "platform": "unverified"
+    },
+    {
+      "id": "A01",
+      "category": "自動化",
+      "name": "ComfyUI direct API / comfy-cli",
+      "hardware": "local server＋shell/HTTP client",
+      "constraints": "prompt_id受付→history/ws→出力取得を追う。API formatとUI graphに差",
+      "license": "API callerとserver各license",
+      "platform": "unverified"
+    },
+    {
+      "id": "A02",
+      "category": "自動化",
+      "name": "Comfy-Org comfy-mcp",
+      "hardware": "local Comfy＋comfy-cli、MCP client",
+      "constraints": "公式beta。local実行でもPartner nodeの外部API/課金あり。認証/インストールは本調査では未実行",
+      "license": "AGPL-3.0-or-later/商用dual。CLIはGPL別配布",
+      "platform": "unverified"
+    },
+    {
+      "id": "A03",
+      "category": "自動化",
+      "name": "Comfy-Org comfy-skills",
+      "hardware": "対応agent＋Cloud MCP",
+      "constraints": "公式だがCloud用。local engineやGPU最適化ではない",
+      "license": "MIT skills、Cloud terms別",
+      "platform": "unverified"
+    },
+    {
+      "id": "A04",
+      "category": "自動化",
+      "name": "第三者MCP adapters",
+      "hardware": "Rust/Python/Node bridge＋既存engine",
+      "constraints": "septagram、james-see等。配布元/権限/出力path/timeoutを見る。未監査",
+      "license": "adapter licenseとengine/model別",
+      "platform": "unverified"
+    },
+    {
+      "id": "A05",
+      "category": "自動化",
+      "name": "native CLI / OpenAI-compatible local API",
+      "hardware": "各engine環境",
+      "constraints": "Codex/Claude Codeからshell/HTTPで統合可能。MCP必須ではない。providerのOpenAIとは無関係",
+      "license": "各engine/model別",
+      "platform": "unverified"
+    },
+    {
+      "id": "A06",
+      "category": "自動化",
+      "name": "DrawHeadlessThings",
+      "hardware": "Apple Siliconのみ",
+      "constraints": "第三者WIP。REST compose/edit/restore＋MCP。API安定性未保証",
+      "license": "元engine GPLとwrapperの条件別確認",
+      "platform": "mac-only"
+    }
+  ]
+}

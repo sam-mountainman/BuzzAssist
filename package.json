@@ -38,6 +38,7 @@
     "config/koya-manga-quality-incidents.json",
     "config/koya-reading-dictionary.json",
     "config/narrated-story-script-package.schema.json",
+    "config/optimal-config/",
     "config/parallel-plans/",
     "config/strategy-brief.schema.json",
     "lib/*.mjs",
