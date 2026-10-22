@@ -109,7 +109,9 @@ import {
   AGENT_SELF_ATTESTED,
   CHANGE_ACTOR_AGENT,
   CHANGE_ID_PATTERN,
+  approvedChangeTransitions,
   expandAppliedRecords,
+  reachesThroughApprovedChanges,
 } from "../lib/harnessLearningChangeRecords.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -848,7 +850,7 @@ export function isAgentAppliedChange(record) {
     && CHANGE_ID_PATTERN.test(String(record.changeId || ""));
 }
 
-export function isActuallyApplied(record, readCanonical, hashCanonical = null) {
+export function isActuallyApplied(record, readCanonical, hashCanonical = null, transitions = null) {
   if (!record?.id) return false;
   // 昇格記録には、何をどこへ書いたかが要る。
   if (!record.reviewer || !String(record.reviewer).trim()) return false;
@@ -879,9 +881,14 @@ export function isActuallyApplied(record, readCanonical, hashCanonical = null) {
   // ハッシュは、証跡があるように見えて何も担保していない。
   // 正本が変わっていれば「別の版に対する記録」なので、文言が残っていても
   // その記録は現在の版を保証しない。
+  // 例外は、記録の版から今の版までの変更が全部、差分の承認キューで当てた変更
+  // （巻き戻していないもの）としてつながっているときだけ。同じ正本へ続けて approve すると、
+  // 前の記録が一律に失効して未反映へ戻っていた（2026-10-22 の棚卸しで、印と本文がそろった
+  // 52件のうち7件しか数えられなかった）。直接の編集が挟まれば移り変わりが途切れ、今までどおり失効する。
   if (record.targetSha256 && typeof hashCanonical === "function") {
     const current = hashCanonical(record.targetPath, record);
-    if (current && current !== record.targetSha256) return false;
+    if (current && current !== record.targetSha256
+      && !reachesThroughApprovedChanges(transitions, record.targetPath, record.targetSha256, current)) return false;
   }
   return true;
 }
@@ -890,10 +897,11 @@ export function summarizeProposals(proposals, applied, readCanonical = null, has
   // approve が書いた「適用した変更」の行（1変更に1行）は、提案ごとの反映記録として数える。
   // 巻き戻した変更と、巻き戻しの行そのものは反映記録に数えない（lib/harnessLearningChangeRecords.mjs）。
   const records = expandAppliedRecords(applied);
+  const transitions = approvedChangeTransitions(applied);
   const appliedIds = new Set(
     readCanonical
       ? records
-        .filter((entry) => isActuallyApplied(entry, readCanonical, hashCanonical))
+        .filter((entry) => isActuallyApplied(entry, readCanonical, hashCanonical, transitions))
         .map((entry) => entry.id)
       : records.map((entry) => entry.id),
   );
