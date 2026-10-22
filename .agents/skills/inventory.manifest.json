@@ -12,9 +12,9 @@
     {
       "id": "buzzassist:platform-craft",
       "name": "platform-craft",
-      "version": "1.9.0",
-      "contentSha256": "sha256:f50d3865600abfd8872447249863252cdad849dfb03ea96e7c04f4d8a683d866",
-      "bundleSha256": "sha256:bc3b2f0facb689bfe7a73c96ce989e9dd20cd4b0d42e8f0a3a2b477b1300a8e3",
+      "version": "1.9.1",
+      "contentSha256": "sha256:1b2e137dca32a1fa4529412f527cebb797b3a390ac958e048439c779abf04906",
+      "bundleSha256": "sha256:8693c3ee1937c74f583f756517b06ff99183da0dcef78adc60b4239cb155a5fc",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",
@@ -37,20 +37,20 @@
         "developmentOnly": false
       },
       "approval": {
-        "reviewer": "sam-mountainman",
-        "approvedAt": "2026-09-27T17:41:02.624Z",
-        "version": "1.9.0",
-        "contentSha256": "sha256:f50d3865600abfd8872447249863252cdad849dfb03ea96e7c04f4d8a683d866",
-        "bundleSha256": "sha256:bc3b2f0facb689bfe7a73c96ce989e9dd20cd4b0d42e8f0a3a2b477b1300a8e3",
+        "reviewer": "higataiyu",
+        "approvedAt": "2026-10-22T09:24:20.060Z",
+        "version": "1.9.1",
+        "contentSha256": "sha256:1b2e137dca32a1fa4529412f527cebb797b3a390ac958e048439c779abf04906",
+        "bundleSha256": "sha256:8693c3ee1937c74f583f756517b06ff99183da0dcef78adc60b4239cb155a5fc",
         "attestedBy": "human-verified"
       }
     },
     {
       "id": "buzzassist:harness-parallel-execution",
       "name": "harness-parallel-execution",
-      "version": "1.3.1",
-      "contentSha256": "sha256:56fe9e64c89a01513308288fd7fb8234439408f2acc6ac89b67d76ac287a177b",
-      "bundleSha256": "sha256:5c4e04f53664179db36a3db758086b88ae6c627d9752d0da27a36567197b9591",
+      "version": "1.3.2",
+      "contentSha256": "sha256:8526e40d7dd1047001ec11b8c940717bcd07161b6acaac77516473c7475b506b",
+      "bundleSha256": "sha256:88ab0814ae0cbaa745e091ec247c79c2a29fcff71113e0618c2f53ce5e2df459",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",
@@ -73,20 +73,20 @@
         "developmentOnly": false
       },
       "approval": {
-        "reviewer": "sam-mountainman",
-        "approvedAt": "2026-10-09T04:09:16.361Z",
-        "version": "1.3.1",
-        "contentSha256": "sha256:56fe9e64c89a01513308288fd7fb8234439408f2acc6ac89b67d76ac287a177b",
-        "bundleSha256": "sha256:5c4e04f53664179db36a3db758086b88ae6c627d9752d0da27a36567197b9591",
+        "reviewer": "higataiyu",
+        "approvedAt": "2026-10-22T09:24:19.785Z",
+        "version": "1.3.2",
+        "contentSha256": "sha256:8526e40d7dd1047001ec11b8c940717bcd07161b6acaac77516473c7475b506b",
+        "bundleSha256": "sha256:88ab0814ae0cbaa745e091ec247c79c2a29fcff71113e0618c2f53ce5e2df459",
         "attestedBy": "human-verified"
       }
     },
     {
       "id": "buzzassist:harness-self-improvement",
       "name": "harness-self-improvement",
-      "version": "1.7.0",
-      "contentSha256": "sha256:5982bfb9f84ba8e065d29088bde2266efe16ef2afff5ef19881db4e681cf215e",
-      "bundleSha256": "sha256:ddf9b29ad2237344e7c07b1cbf628ea00d8b441b53ca8d8fc0ef1e669037fbd8",
+      "version": "1.7.1",
+      "contentSha256": "sha256:2367b09bd9d7afe7a5a94cb44a9b8adca3c011e5b48c95566623fa9b286fceb0",
+      "bundleSha256": "sha256:593f5f09a9292e9440d00954bd8ba4fa7bf6512e0f78ee25d705408ab86b4d68",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",
@@ -109,20 +109,20 @@
         "developmentOnly": false
       },
       "approval": {
-        "reviewer": "sam-mountainman",
-        "approvedAt": "2026-10-09T04:09:16.434Z",
-        "version": "1.7.0",
-        "contentSha256": "sha256:5982bfb9f84ba8e065d29088bde2266efe16ef2afff5ef19881db4e681cf215e",
-        "bundleSha256": "sha256:ddf9b29ad2237344e7c07b1cbf628ea00d8b441b53ca8d8fc0ef1e669037fbd8",
+        "reviewer": "higataiyu",
+        "approvedAt": "2026-10-22T09:24:19.855Z",
+        "version": "1.7.1",
+        "contentSha256": "sha256:2367b09bd9d7afe7a5a94cb44a9b8adca3c011e5b48c95566623fa9b286fceb0",
+        "bundleSha256": "sha256:593f5f09a9292e9440d00954bd8ba4fa7bf6512e0f78ee25d705408ab86b4d68",
         "attestedBy": "human-verified"
       }
     },
     {
       "id": "buzzassist:manga-video-production",
       "name": "manga-video-production",
-      "version": "1.9.0",
-      "contentSha256": "sha256:af000e9495580398a1674bc529b087e121b0eb447dd23ea05e3c3f02d7c7eb78",
-      "bundleSha256": "sha256:d4aa9c3fcd2a32a6a538e4add96592f023ae1516aac979d09c2e87e8b67794b2",
+      "version": "1.9.1",
+      "contentSha256": "sha256:542deb18bad5b72003b4ebe2c0fa617806f9687762bdd9d9ee6a86c91d6cfede",
+      "bundleSha256": "sha256:19c254dd375dbe3335d36ad4bac18065fb1904fd3c1ac6edbe4bd538ce353f2d",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",
@@ -145,11 +145,11 @@
         "developmentOnly": false
       },
       "approval": {
-        "reviewer": "sam-mountainman",
-        "approvedAt": "2026-09-27T17:41:07.166Z",
-        "version": "1.9.0",
-        "contentSha256": "sha256:af000e9495580398a1674bc529b087e121b0eb447dd23ea05e3c3f02d7c7eb78",
-        "bundleSha256": "sha256:d4aa9c3fcd2a32a6a538e4add96592f023ae1516aac979d09c2e87e8b67794b2",
+        "reviewer": "higataiyu",
+        "approvedAt": "2026-10-22T09:24:19.924Z",
+        "version": "1.9.1",
+        "contentSha256": "sha256:542deb18bad5b72003b4ebe2c0fa617806f9687762bdd9d9ee6a86c91d6cfede",
+        "bundleSha256": "sha256:19c254dd375dbe3335d36ad4bac18065fb1904fd3c1ac6edbe4bd538ce353f2d",
         "attestedBy": "human-verified"
       }
     },
@@ -192,9 +192,9 @@
     {
       "id": "buzzassist:narrated-story-video",
       "name": "narrated-story-video",
-      "version": "1.7.0",
-      "contentSha256": "sha256:7a8928f9cd7f910f501dc49a2467800759476fb9b68e363e0ebf13265e66f15b",
-      "bundleSha256": "sha256:f1980cc22c9e688e1d8e295ab2b41a8d2124949c9a42d7811600e63cd351247b",
+      "version": "1.7.1",
+      "contentSha256": "sha256:abd720aaedd93c747925c8a9318b411343e0d845a08c1b04e35e0d96c00e434a",
+      "bundleSha256": "sha256:ea7a0efca46b8503ada902e3b95c02087aa38b74e9b50ab1918b14540e4eaad2",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",
@@ -217,11 +217,11 @@
         "developmentOnly": false
       },
       "approval": {
-        "reviewer": "sam-mountainman",
-        "approvedAt": "2026-09-27T17:41:03.272Z",
-        "version": "1.7.0",
-        "contentSha256": "sha256:7a8928f9cd7f910f501dc49a2467800759476fb9b68e363e0ebf13265e66f15b",
-        "bundleSha256": "sha256:f1980cc22c9e688e1d8e295ab2b41a8d2124949c9a42d7811600e63cd351247b",
+        "reviewer": "higataiyu",
+        "approvedAt": "2026-10-22T09:24:19.994Z",
+        "version": "1.7.1",
+        "contentSha256": "sha256:abd720aaedd93c747925c8a9318b411343e0d845a08c1b04e35e0d96c00e434a",
+        "bundleSha256": "sha256:ea7a0efca46b8503ada902e3b95c02087aa38b74e9b50ab1918b14540e4eaad2",
         "attestedBy": "human-verified"
       }
     },
