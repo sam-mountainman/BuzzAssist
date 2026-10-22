@@ -390,6 +390,32 @@ test("保存した digest は照合に使う（保存するだけにしない）
   assert.equal(isActuallyApplied(record, read), true);
 });
 
+test("承認キューで続けて当てた変更は、前の反映記録を失効させない（直接の編集・巻き戻しを挟めば失効する）", async () => {
+  const { approvedChangeTransitions } = await import("../lib/harnessLearningChangeRecords.mjs");
+  const sha = (c) => c.repeat(64);
+  const record = { id: "a", reviewer: "x", attestedBy: HUMAN_VERIFIED, targetPath: "docs/x.md", note: "正本へ書いた十分に長い規則本文", targetSha256: sha("a") };
+  const read = () => "buzzassist-learning:a\n正本へ書いた十分に長い規則本文";
+  const change = (id, before, after) => ({
+    recordType: "canonical-change", changeId: id, targetPath: "docs/x.md", beforeSha256: sha(before), afterSha256: sha(after),
+  });
+  // a → b → c と2件続けて approve した。今の正本は c
+  const chain = [change("chg-000000000001", "a", "b"), change("chg-000000000002", "b", "c")];
+  assert.equal(isActuallyApplied(record, read, () => sha("c"), approvedChangeTransitions(chain)), true);
+  // 移り変わりを渡さなければ従来どおり失効
+  assert.equal(isActuallyApplied(record, read, () => sha("c")), false);
+  // 途中に直接の編集（b → d、記録なし）が入ってから d → e を approve した
+  const broken = [change("chg-000000000001", "a", "b"), change("chg-000000000003", "d", "e")];
+  assert.equal(isActuallyApplied(record, read, () => sha("e"), approvedChangeTransitions(broken)), false);
+  // 間の変更を巻き戻したなら、その変更はつながりに数えない
+  const rolledBack = [...chain, { recordType: "canonical-rollback", changeId: "chg-000000000002" }];
+  assert.equal(isActuallyApplied(record, read, () => sha("c"), approvedChangeTransitions(rolledBack)), false);
+  // 別の正本の変更は、つながりに数えない
+  const otherPath = [{ ...change("chg-000000000001", "a", "c"), targetPath: "docs/y.md" }];
+  assert.equal(isActuallyApplied(record, read, () => sha("c"), approvedChangeTransitions(otherPath)), false);
+  // 文言が消えていれば、つながっていても反映済みにしない
+  assert.equal(isActuallyApplied(record, () => "別の本文", () => sha("c"), approvedChangeTransitions(chain)), false);
+});
+
 test("TTY は人の証明ではない、という前提で組まれている", async () => {
   // 最初の修正は TTY の有無で人と機械を分けた。Codex のレビューで
   // `script -q /dev/null node ...` を通せば isTTY が true になることが
