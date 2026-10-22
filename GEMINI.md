@@ -17,8 +17,6 @@
   `.agents/skills/manga-page-camera/SKILL.md`。そこに書かれた品質ゲート（声の品質・キャラの属性ゲート・ブラインド比較）は Antigravity でも同じに効く。
 - 生の日本語台本から完成動画 → `.agents/skills/platform-craft/SKILL.md` とジャンルのスキル
   （ナレーション物語は `.agents/skills/narrated-story-video/SKILL.md`、漫画は上の2本）。
-- 解説動画（ハーネス `explainer-video`。ジャンルの正本スキルはまだ無い）→ platform-craft と `docs/explainer-video-harness-ja.md`。
-  人の全編の試聴と初見の評価は、Job を動かした文脈とは別の文脈で `node scripts/explainer-video.mjs signoff` から記録する。
 - 複数の作業を同時に流す（「並列で」「一気に」「最短で」、同種の作業が並ぶ）→ `.agents/skills/harness-parallel-execution/SKILL.md`。
   推測で並列化しない。入口は `node scripts/harness-parallel-run.mjs`（決定論層）と `node scripts/harness-parallel-agents.mjs`（LLM判断層）。
 - 訂正・好み・禁止を受けた、こちらの誤りが判明した、実測で新しい事実が分かった → その場の修正で終わらせず

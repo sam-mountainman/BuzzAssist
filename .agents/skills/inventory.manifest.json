@@ -12,9 +12,9 @@
     {
       "id": "buzzassist:platform-craft",
       "name": "platform-craft",
-      "version": "1.9.1",
-      "contentSha256": "sha256:1b2e137dca32a1fa4529412f527cebb797b3a390ac958e048439c779abf04906",
-      "bundleSha256": "sha256:8693c3ee1937c74f583f756517b06ff99183da0dcef78adc60b4239cb155a5fc",
+      "version": "1.10.0",
+      "contentSha256": "sha256:5681f0cb86c6ea01c616b1134f487006d82d46ff150242dd2b98d17c6ad4777e",
+      "bundleSha256": "sha256:7aeeda44facd056f602270670a8b00c44f451e051df2c43293d787323bc1fdf0",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",

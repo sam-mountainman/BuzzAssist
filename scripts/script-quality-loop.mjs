@@ -88,8 +88,8 @@ export function scriptQualityHelp() {
     --work-dir <dir>              台本の作業フォルダ（私有側）
     --generator-context <id>      初稿を書いた会話・タスクの ID（この文脈は採点できない）
     [--generator-host <claude-code|codex>] [--genre ${Object.keys(SCRIPT_QUALITY_GENRES).join("|")}]
-                                  既定は narrated-story。manga は漫画の台本、explainer は解説動画の台本
-                                  （どちらも BuzzAssist 独自の評価基準。contract --genre <id> で採点表を見る）
+                                  既定は narrated-story。manga は漫画の台本
+                                  （BuzzAssist 独自の評価基準。contract --genre <id> で採点表を見る）
     [--channel-pack <dir>]        署名済み Channel Pack。payload/script-quality.json でチャンネル固有の
                                   評価項目を足し、下限を上げられる（下げられない）。項目ごとの採点の目安
                                   （criteria[].anchors、ジャンルの項目は anchors.<項目 id>: [{ score, state }]）と、
@@ -116,7 +116,7 @@ export function scriptQualityHelp() {
 
   record    1つの版を1回として記録する。合格しなかった回は、評価項目 id・機械ゲート id・止まった
             理由のコードだけをチャンネルの非公開台帳へ自動で積む（narrated-story は channel-pack:narrated-story-script、
-            manga は漫画のチャンネルの channel-pack:koya、explainer は解説動画のチャンネルの channel-pack:explainer。
+            manga は漫画のチャンネルの channel-pack:koya。
             本文は入れない。BUZZASSIST_LEARNING_AUTO_CAPTURE=0 で止まる）
     --work-dir <dir> --script <版のファイル> --version <版の名前> --stage <${SCRIPT_STAGES.join("|")}>
     --review <採点ファイル>        { evaluatorId, evaluatorContextId, evaluatorHost, scriptSha256,

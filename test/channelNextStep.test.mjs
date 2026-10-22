@@ -80,7 +80,7 @@ async function createFixture(t) {
   }
   const registry = {
     source: "test",
-    channels: validateChannelRegistry({ channels }, { repoRoot: REPO_ROOT, harnessIds: ["koya-manga-video", "narrated-story-video"], genres: ["narrated-story", "manga", "explainer"] }),
+    channels: validateChannelRegistry({ channels }, { repoRoot: REPO_ROOT, harnessIds: ["koya-manga-video", "narrated-story-video"], genres: ["narrated-story", "manga"] }),
   };
   const receiptsDir = path.join(root, "receipts");
   const evalsDir = path.join(root, "evals");

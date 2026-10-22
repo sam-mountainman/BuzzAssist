@@ -175,12 +175,11 @@ test("create は候補を 2〜5 案・軸を分けて・作業フォルダの中
     await symlink(join(work, "thumbs", "a.png"), join(work, "thumbs", "link.png"));
     await assert.rejects(bad({ candidates: [{ path: "thumbs/link.png", axis: "軸1" }, { path: "thumbs/b.png", axis: "軸2" }] }), /シンボリックリンク/u);
   }
-  // 漫画固有の工程・学習の宛先の無いハーネスは拒否する。
-  await assert.rejects(createSet(work, { harnessId: "explainer-video", stage: "character", setId: "synthetic-x" }), /explainer-video では使えない/u);
+  // 学習の宛先の無いハーネスは拒否する。
   await assert.rejects(createSet(work, { harnessId: "no-such-harness", setId: "synthetic-x" }), /未知のハーネス/u);
   // 文の候補（タイトル）はファイル無しで受ける。
   const titles = await createHumanChoiceSet({
-    workDir: work, harnessId: "explainer-video", stage: "title", setId: "synthetic-titles", question: "どのタイトルで出しますか", now,
+    workDir: work, harnessId: "narrated-story-video", stage: "title", setId: "synthetic-titles", question: "どのタイトルで出しますか", now,
     input: { version: HUMAN_CHOICE_CANDIDATES_VERSION, candidates: [{ text: "合成のタイトル案その一", axis: "数字で具体" }, { text: "合成のタイトル案その二", axis: "問いで引く" }] },
   });
   assert.equal(titles.state.candidates.every((row) => row.kind === "text" && row.text), true);

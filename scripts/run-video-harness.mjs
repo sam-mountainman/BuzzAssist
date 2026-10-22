@@ -89,14 +89,6 @@ function usage() {
     "  記録の場面の行には、その画の中の焦点（cameraFocus: { x, y }、0〜1、左上が 0。顔の位置など）も書ける。焦点は記録 →",
     "  台本パッケージ → Pack の型ごとの焦点の順に決まり、記録と台本パッケージで値が違えば camera-focus-conflict:<場面>:image-vs-package",
     "  で止まる。画の後で決める焦点は記録に書く（台本パッケージに書き足すと台本の品質ループの合格が外れる）。直したら同じ Job を resume する。",
-    "Explainer (explainer-video) options: [--explainer-mode import-delivery|produce] [--explainer-renderer-url URL] [--script-quality-work-dir DIR]",
-    "  既定の import-delivery は、Channel Pack が指す納品の記録（動画・字幕・サムネ・投稿用情報）と台本の SHA を照合して取り込み、",
-    "  完成 MP4 で監査する（制作のスクリプトを起動しない。BuzzAssist の有料の送り口は関所で送る前に止まる）。produce は Pack の",
-    "  制作のコマンドを3つのパスを明示して起動する。どちらも start の時点で決まる（Job の識別子に入る）。台本の品質ループの",
-    "  作業フォルダは --script-quality-work-dir、無ければ Pack の scriptQuality.workDir。人の確認（全編の試聴と初見の評価）は",
-    "  評価者が node scripts/explainer-video.mjs signoff（MCP の signoff_video_harness_job）で署名して記録し、それまで Job は",
-    "  explainer-human-review-pending で awaiting-human-review に止まる。機械の監査・サムネの品質ループ・人の確認の品質ループが",
-    "  全部通れば、resume で completed に確定する。",
     "Common: --want TEXT --title TEXT --options-json FILE",
     "",
     "--confirmed が無い start は durable job を作るだけで、有料APIを呼びません。",
@@ -145,12 +137,8 @@ async function optionsFrom(args) {
     ["operatorImageManifestPath", typeof args.operatorImageManifest === "string" ? resolve(args.operatorImageManifest) : ""],
     ["operatorVideoManifestPath", typeof args.operatorVideoManifest === "string" ? resolve(args.operatorVideoManifest) : ""],
     ["scriptQualityWorkDir", typeof args.scriptQualityWorkDir === "string" ? resolve(args.scriptQualityWorkDir) : ""],
-    ["explainerMode", typeof args.explainerMode === "string" ? args.explainerMode : ""],
-    ["explainerRendererUrl", typeof args.explainerRendererUrl === "string" ? args.explainerRendererUrl : ""],
   ];
   if (args.scriptQualityWorkDir === true) throw new Error("--script-quality-work-dir には台本の品質ループの作業フォルダの path が要る。");
-  if (args.explainerMode === true) throw new Error("--explainer-mode には import-delivery か produce が要る。");
-  if (args.explainerRendererUrl === true) throw new Error("--explainer-renderer-url には手元の HTTP サーバーの URL が要る。");
   if (args.operatorImageManifest === true) throw new Error("--operator-image-manifest には取り込みの記録（manifest JSON）の path が要る。");
   if (args.operatorVideoManifest === true) throw new Error("--operator-video-manifest には取り込みの記録（manifest JSON）の path が要る。");
   for (const [key, value] of mappings) if (value !== undefined && value !== "") options[key] = value;

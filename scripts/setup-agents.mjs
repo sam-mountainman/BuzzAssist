@@ -747,8 +747,6 @@ export const PLUGIN_SOURCE_FILES = Object.freeze([
   "docs/koya-voice-quality-runbook-ja.md",
   // 戦略の道具から制作へ渡す仕様（strategy-brief.mjs draft --from-hyp のヘルプが指す）。
   "docs/strategy-handoff-spec-ja.md",
-  // 解説動画のハーネスの説明（strategy-handoff-spec の 7.1 と run-video-harness の使い方が指す）。
-  "docs/explainer-video-harness-ja.md",
   // 判断の振り分けと、並べて選ぶ手順（human-choice.mjs のヘルプが指す）。
   "docs/human-choice-ja.md",
   // 指示ファイル（地図）が指す先。セットアップの全手順と、地図から移した決まりの全文。

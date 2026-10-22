@@ -263,7 +263,7 @@ async function resolveProductionRouteProbe(declaration, harnessId, { job, runtim
     return runtime.resolveProductionRoute({ declaration, harnessId, job, projectDir: runtime.projectDir });
   }
   // 配備の中の runner（宣言の deploymentEntrypoint）を持つハーネスは、配置表の root と entrypoint を起動して確かめる
-  // （ナレーション物語・解説動画）。上位の入口だけを起動しても、実際に Job の中で動く runner が無いことに気付けない。
+  // （ナレーション物語）。上位の入口だけを起動しても、実際に Job の中で動く runner が無いことに気付けない。
   if (String(declaration?.deploymentEntrypoint || "").trim()) {
     const deployment = job?.deployment && typeof job.deployment === "object"
       ? job.deployment

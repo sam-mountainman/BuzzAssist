@@ -111,10 +111,10 @@ test("状態ファイルの形からループの種類と宛先を決める（�
   assert.deepEqual(asset.humanChecks, ["identity", "hand-safety"]);
   const brief = describeQualityLoopState({
     rounds: [],
-    strategy: { versions: [{ harnessId: "explainer-video" }], history: [] },
+    strategy: { versions: [{ harnessId: "koya-manga-video" }], history: [] },
   });
   assert.equal(brief.loop, "strategy-brief");
-  assert.equal(brief.target, HARNESS_LEARNING_ROUTES["explainer-video"].channel);
+  assert.equal(brief.target, HARNESS_LEARNING_ROUTES["koya-manga-video"].channel);
   // ハーネスの書かれていないブリーフからは宛先を推測しない。
   assert.equal(describeQualityLoopState({ rounds: [], strategy: { versions: [], history: [] } }).skippedReason, "unknown-strategy-brief-harness");
   assert.equal(describeQualityLoopState({ rounds: [], episodeId: `video-narrated-story-video-${"a".repeat(16)}` }).loop, "signed-review");

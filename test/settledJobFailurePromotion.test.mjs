@@ -31,8 +31,6 @@ test("決着した Job の品質ループの置き場を、Job の作業場所�
   };
   const dirs = settledJobQualityWorkDirs(job);
   assert.ok(dirs.includes(path.resolve(jobRunDir)));
-  // 解説動画は Job の作業場所の explainer/ の下に品質ループを置く。
-  assert.ok(dirs.includes(path.resolve(jobRunDir, "explainer")));
   assert.ok(dirs.includes(path.resolve(genreRunDir)));
   assert.equal(new Set(dirs).size, dirs.length, "同じ置き場を二度並べない");
   assert.deepEqual(settledJobQualityWorkDirs({ id: "video-synthetic-b" }), [], "手がかりの無い Job では何も並べない");

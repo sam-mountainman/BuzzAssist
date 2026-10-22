@@ -34,7 +34,7 @@
 // 2つ目の判定（lib/stopHookQualityLoops.mjs）: 品質ループの回し忘れ。完成の主張が無くても、この会話で
 // start / record した品質ループ（台本・途中の成果物・企画ブリーフ）がまだ active なら、同じ周回で1回だけ
 // 差し戻し、reason に周回と点数・次に読むファイル・次の手順を入れる。状態ファイルが壊れていれば合格扱いで
-// 抜けずに直すよう伝える（ナレーション物語・解説動画の完成動画のループは、続きが人の署名と新しい出力を待つ
+// 抜けずに直すよう伝える（ナレーション物語の完成動画のループは、続きが人の署名と新しい出力を待つ
 // ので、壊れた状態だけを見る）。人の判断待ちは差し戻さない。worktree の子では何もしない。付箋（周回の印）は
 // 差し戻し回数と同じ会話ごとの記録（loops）に残す。上の「しないこと」はこちらにも同じく効く。
 // 品質ループの判定は見張りの時計の LOOP_CHECK_MARGIN_MS 前に諦め、完成の主張の差し戻しを失わない。
@@ -628,12 +628,12 @@ export function evaluateStop(input, { env = process.env, home = homedir(), fsApi
 }
 
 /**
- * この会話で扱った Job のうち、完成動画の品質ループを持つもの（ナレーション物語・解説動画）の状態ファイル。
+ * この会話で扱った Job のうち、完成動画の品質ループを持つもの（ナレーション物語）の状態ファイル。
  * 記録を見つけられた Job だけ（プロジェクトは Job の記録のある場所）。
  */
 export function jobBoundLoopRefsFromTranscript(lines, message, { cwd = "", env = process.env, fsApi = fs, pathApi = path } = {}) {
   // 応答のたびに記録を歩かないよう、完成動画のループを持つ Job の ID が記録に無ければ何もしない。
-  // 両方の頭に共通する "-video-" で先にふるう（1行を1回だけ走査する）。
+  // 頭に含まれる "-video-" で先にふるう（1行を1回だけ走査する）。
   const mentionsJobBound = (text) => typeof text === "string" && text.includes("-video-")
     && JOB_BOUND_JOB_ID_PREFIXES.some((prefix) => text.includes(prefix));
   if (!mentionsJobBound(message) && !lines.some(mentionsJobBound)) return [];
@@ -643,7 +643,7 @@ export function jobBoundLoopRefsFromTranscript(lines, message, { cwd = "", env =
     if (!jobBoundLoopKind(jobId)) continue;
     const found = locateJob(jobId, projectDirs, { fsApi, pathApi });
     if (!found || found.unreadable) continue;
-    const ref = jobBoundLoopRef({ jobId, projectDir: found.projectDir, runDir: found.runDir });
+    const ref = jobBoundLoopRef({ jobId, projectDir: found.projectDir });
     if (ref) refs.push(ref);
   }
   return refs;
