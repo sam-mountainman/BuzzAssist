@@ -22,7 +22,7 @@ import {
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HARNESS_IDS = ["koya-manga-video", "narrated-story-video"];
-const GENRES = ["narrated-story", "manga", "explainer"];
+const GENRES = ["narrated-story", "manga"];
 
 function tempRoot(t) {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "channel-registry-")));
@@ -150,7 +150,7 @@ test("台帳: 形の誤り（requireBrief の省略・知らない欄・未完�
   assert.ok(mismatch.includes("channel-script-quality-genre-mismatch:alpha"), mismatch.join(", "));
   assert.equal(validate([
     channel(root, "alpha"),
-    channel(root, "beta", { production: { kind: "external", note: "合成: 既存の仕組み" }, scriptQuality: { genre: "explainer" } }),
+    channel(root, "beta", { production: { kind: "external", note: "合成: 既存の仕組み" }, scriptQuality: { genre: "manga" } }),
   ], { genreForHarness }).length, 2);
   // channels が無ければ空の台帳。
   assert.deepEqual(validateChannelRegistry({ deployments: [] }), []);

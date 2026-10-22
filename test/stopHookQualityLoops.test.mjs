@@ -11,7 +11,6 @@ import {
   assetQualityStatus,
   startAssetQualityLoop,
 } from "../lib/assetQualityLoop.mjs";
-import { EXPLAINER_WORK_DIR } from "../lib/explainerVideo.mjs";
 import { narratedStoryRunPaths } from "../lib/narratedStoryPipeline.mjs";
 import {
   SCRIPT_QUALITY_DIR,
@@ -56,7 +55,6 @@ import {
 const SESSION = "session-loop-synthetic-1";
 const NO_CHANNEL = async () => ({ config: null, source: { kind: "none" }, spec: { kind: "none" } });
 const NARRATED_JOB = "video-narrated-story-video-0011223344556677";
-const EXPLAINER_JOB = "video-explainer-video-8899aabbccddeeff";
 const SAMPLE_JOB = "video-sample-harness-00112233aabbccdd";
 const FINGERPRINT = "quality-failure:0123456789abcdef01234567";
 
@@ -497,37 +495,32 @@ test("続いているループが多いとき: 6件まで詳しく書き、残�
   }
 });
 
-test("完成動画のループ（ナレーション物語・解説）: 続いていても人の判断待ちとして通し、状態が壊れていれば伝える", async () => {
+test("完成動画のループ（ナレーション物語）: 続いていても人の判断待ちとして通し、状態が壊れていれば伝える", async () => {
   const fx = fixture();
   try {
     const projectDir = join(fx.dir, "project");
     const narratedState = jobBoundLoopRef({ jobId: NARRATED_JOB, projectDir }).statePath;
-    const explainerRunDir = join(projectDir, "canvas", "harness-runs", EXPLAINER_JOB);
-    const explainerState = jobBoundLoopRef({ jobId: EXPLAINER_JOB, runDir: explainerRunDir }).statePath;
-    for (const jobId of [NARRATED_JOB, EXPLAINER_JOB]) {
+    for (const jobId of [NARRATED_JOB]) {
       const runDir = join(projectDir, "canvas", "harness-runs", jobId);
       mkdirSync(runDir, { recursive: true });
       writeFileSync(join(runDir, "job.json"), JSON.stringify({ id: jobId, status: "awaiting-human-review", projectDir, runDir }));
     }
-    for (const file of [narratedState, explainerState]) {
+    for (const file of [narratedState]) {
       mkdirSync(dirname(file), { recursive: true });
       writeFileSync(file, JSON.stringify({ status: "active", startedAt: "2026-01-01T00:00:00.000Z", rounds: [{ index: 1, score: 70, failureFingerprint: FINGERPRINT }] }));
     }
     writeLines(fx.transcript, [
       { type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "mcp__plugin_buzzassist_buzzassist_mcp__get_video_harness_job", input: { projectDir, jobId: NARRATED_JOB } }] } },
-      { type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "t2", name: "mcp__plugin_buzzassist_buzzassist_mcp__get_video_harness_job", input: { projectDir, jobId: EXPLAINER_JOB } }] } },
     ]);
-    const input = stopInput(fx, { last_assistant_message: "2つの Job は確認待ちです。" });
+    const input = stopInput(fx, { last_assistant_message: "Job は確認待ちです。" });
     const waiting = await decideStop(input, { env: fx.env });
     assert.equal(waiting.action, "none");
     assert.equal(waiting.loopWhy, "loops-settled-or-noted");
 
     writeFileSync(narratedState, "{");
-    writeFileSync(explainerState, JSON.stringify({ status: "active" }));
     const broken = await decideStop(input, { env: fx.env });
     assert.equal(broken.action, "block");
     assert.match(broken.reason, new RegExp(`ナレーション物語の完成動画の品質ループ（Job ${NARRATED_JOB}）の状態ファイルが読めない（JSON として壊れている）`, "u"));
-    assert.match(broken.reason, new RegExp(`解説動画の完成動画の品質ループ（Job ${EXPLAINER_JOB}）の状態ファイルが読めない（品質ループの状態の形になっていない）`, "u"));
     assert.doesNotMatch(broken.reason, /次の手順: /u);
   } finally {
     fx.cleanup();
@@ -657,7 +650,6 @@ test("状態ファイルの置き場は各ループの定義と同じ", () => {
   assert.equal(LOOP_STATE_LAYOUT.strategy.revisionDelta, STRATEGY_BRIEF_REVISION_DELTA_FILE);
   assert.equal(LOOP_STATE_LAYOUT.signedReview.dir, SIGNED_REVIEW_QUALITY_DIR);
   assert.equal(LOOP_STATE_LAYOUT.signedReview.file, SIGNED_REVIEW_QUALITY_STATE_FILE);
-  assert.equal(LOOP_STATE_LAYOUT.explainerWorkDir, EXPLAINER_WORK_DIR);
   // ナレーション物語の Job の作業領域（production 子と signoff が同じ場所を指す定義）。
   const narrated = jobBoundLoopRef({ jobId: NARRATED_JOB, projectDir: workDir }).statePath;
   assert.equal(narrated, join(narratedStoryRunPaths({ deploymentRoot: workDir, jobId: NARRATED_JOB }).runDir, SIGNED_REVIEW_QUALITY_DIR, SIGNED_REVIEW_QUALITY_STATE_FILE));

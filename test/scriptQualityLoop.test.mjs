@@ -748,12 +748,10 @@ test("署名済み Channel Pack の script-quality.json を、信頼した公開
   assert.equal(recorded.state.status, "passed");
 });
 
-test("漫画と解説動画の台本のジャンルを持ち、どちらも全項目に下限があり重みの合計は 100", () => {
+test("漫画の台本のジャンルを持ち、全項目に下限があり重みの合計は 100", () => {
   const manga = createScriptQualityContract({ genre: "manga" }).contract;
-  const explainer = createScriptQualityContract({ genre: "explainer" }).contract;
   assert.deepEqual(manga.rubric.map((row) => row.id), ["source-fidelity", "speaker-attribution", "panel-premise", "bubble-fit", "reading-clarity", "beat-pacing"]);
-  assert.deepEqual(explainer.rubric.map((row) => row.id), ["question-clarity", "first-view-comprehension", "evidence-scope", "discovery-progression", "opening-promise-payoff", "visual-narration-alignment", "pacing", "reading-clarity"]);
-  for (const contract of [manga, explainer]) {
+  for (const contract of [manga]) {
     assert.equal(Math.round(contract.rubric.reduce((sum, row) => sum + row.weight, 0)), 100);
     for (const row of contract.rubric) {
       assert.ok(Number.isFinite(row.minimumScore), `${contract.genre}.${row.id} に下限が無い`);
@@ -765,14 +763,11 @@ test("漫画と解説動画の台本のジャンルを持ち、どちらも全�
   }
   const floor = (contract, id) => contract.rubric.find((row) => row.id === id).minimumScore;
   assert.equal(floor(manga, "source-fidelity"), 90, "原文の保持はナレーション物語の意味の保持と同じ高さ");
-  assert.equal(floor(explainer, "evidence-scope"), 85, "根拠が支える範囲を越えた主張は致命傷として高い下限");
   assert.equal(manga.harnessId, "koya-manga-video");
-  assert.equal(explainer.harnessId, null, "解説動画のハーネスはまだ無い");
-  // Pack の設定のジャンル違いは blocker。ハーネスの無いジャンルは設定にジャンルの明記が要る。
+  // Pack の設定のジャンル違いは blocker。
   assert.deepEqual(normalizeScriptChannelConfig({ version: SCRIPT_QUALITY_CHANNEL_CONFIG_VERSION, genre: "narrated-story" }, scriptQualityGenre("manga")).blockers, ["script-quality.genre-mismatch"]);
-  assert.deepEqual(normalizeScriptChannelConfig({ version: SCRIPT_QUALITY_CHANNEL_CONFIG_VERSION }, scriptQualityGenre("explainer")).blockers, ["script-quality.genre-required"]);
-  assert.deepEqual(normalizeScriptChannelConfig({ version: SCRIPT_QUALITY_CHANNEL_CONFIG_VERSION, genre: "explainer" }, scriptQualityGenre("explainer")).blockers, []);
   assert.throws(() => scriptQualityGenre("documentary"), /未知の台本ジャンル/u);
+  assert.throws(() => scriptQualityGenre("explainer"), /未知の台本ジャンル/u, "解説動画の台本のジャンルは 2026-10-22 に廃止した");
 });
 
 test("漫画のジャンルでもループを回せ、評価項目はそのジャンルのもので採点する", async (t) => {
@@ -792,8 +787,8 @@ test("漫画のジャンルでもループを回せ、評価項目はそのジ�
   });
   assert.equal(passed.state.status, "passed");
   const out = [];
-  assert.equal((await runScriptQualityCli(["contract", "--genre", "explainer"], { stdout: { write: (text) => out.push(text) } })).exitCode, 0);
-  assert.equal(JSON.parse(out.join("")).genre, "explainer");
+  assert.equal((await runScriptQualityCli(["contract", "--genre", "manga"], { stdout: { write: (text) => out.push(text) } })).exitCode, 0);
+  assert.equal(JSON.parse(out.join("")).genre, "manga");
 });
 
 test("受け入れ方を宣言しない契約の digest は今までと同じ値（進行中のループを契約の変更で止めない）", () => {

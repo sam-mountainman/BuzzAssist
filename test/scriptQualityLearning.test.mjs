@@ -201,29 +201,6 @@ test("品質ループの record は、合格しなかった回でだけ学習の
   assert.equal(called, false);
 });
 
-test("解説動画の台本の不合格の回は、解説動画のハーネスのチャンネルの非公開台帳へ積む（共有層へ流さない）", async () => {
-  const route = HARNESS_LEARNING_ROUTES["explainer-video"].channel;
-  assert.equal(SCRIPT_LEARNING_ROUTES.explainer, route);
-  const definition = loadTargets()[route];
-  assert.equal(definition.scope, "channel-pack");
-  assert.equal(definition.mode, "review-only");
-  assert.equal(definition.confidential, true);
-  assert.deepEqual([...HARNESS_LEARNING_ROUTES["explainer-video"].genres], [], "ジャンルの正本が無いので genre の宛先を持たない");
-  const harness = captureHarness();
-  const { contract } = createScriptQualityContract({ genre: "explainer" });
-  const input = failingRound({
-    state: { script: { genre: "explainer" } },
-    round: { floorFailures: ["visual-narration-alignment"], failedGateIds: [] },
-    version: { rubricScores: { "visual-narration-alignment": 50 } },
-  });
-  const result = await captureScriptRoundLearning({ ...input, contract, env: {}, now, captureOptions: harness.options });
-  assert.equal(result.target, route);
-  assert.equal(result.captured, 1);
-  assert.equal(harness.rows[0].target, route);
-  assert.equal(harness.rows[0].harness.id, "explainer-video", "台本の契約に harnessId が無くても、宛先のハーネスで記録する");
-  assert.equal(JSON.stringify(harness.rows[0]).includes("合成の"), false, "本文・所見が台帳へ運ばれた");
-});
-
 test("漫画の台本の不合格の回は、漫画のハーネスの既存のチャンネルの宛先（新しい台帳を作らない）へ積む", async () => {
   const route = HARNESS_LEARNING_ROUTES["koya-manga-video"].channel;
   assert.equal(SCRIPT_LEARNING_ROUTES.manga, route);

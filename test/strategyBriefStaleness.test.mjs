@@ -100,7 +100,7 @@ test("前提が変わっていなければ古くない。全角・半角や空�
   };
   assert.deepEqual(evidencePremiseStaleness(spaced).stale, []);
   // ハーネスの id は経路で、内容の前提ではない。
-  assert.deepEqual(evidencePremiseStaleness({ ...brief, production: { ...brief.production, harnessId: "explainer-video" }, evidence: [bound] }).stale, []);
+  assert.deepEqual(evidencePremiseStaleness({ ...brief, production: { ...brief.production, harnessId: "koya-manga-video" }, evidence: [bound] }).stale, []);
 });
 
 test("入口の約束（表現）だけを変えても根拠は古くならない", () => {
