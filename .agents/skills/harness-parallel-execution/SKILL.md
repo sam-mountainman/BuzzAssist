@@ -58,6 +58,10 @@ description: 漫画動画ハーネスとナレーション物語動画ハーネ�
 | ffmpeg のカットレンダー | 単体でCPU 486%。8コア機で6本並列でも短縮3.6% | する | 実測 |
 | Fish Audio TTS | 4本。ネットワーク待ちが支配的 | しない | 設定値 |
 
+<!-- buzzassist-learning:f8b11ac1431b -->
+<!-- buzzassist-learning:af895bf4ea2c -->
+Claude Code の通常サブエージェントは既定10でコア数に依らず、Codex のネイティブ子スレッドは観測で同時3本（4本目は agent thread limit reached）。
+
 **「Claude Code はマシン依存で6体が上限」は誤り**だった。マシン依存なのは
 Workflow ツールの `agent()` プールだけで、通常のサブエージェントは既定10・
 コア数に無関係。ここを混同すると、8コア機で使える枠を4体分過少に見積もる。
