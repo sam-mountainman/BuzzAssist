@@ -69,11 +69,8 @@
 
 ## 4. 解説動画
 
-- 解説動画（ハーネス `explainer-video`。チャンネルの手元の制作が作った完成版の納品を取り込む）は、ジャンルの
-  正本スキルがまだ無い。`.agents/skills/platform-craft/SKILL.md` と `docs/explainer-video-harness-ja.md` を最後まで
-  読んでから、同じ入口（`node scripts/run-video-harness.mjs`）で始める。
-- 人の全編の試聴と初見の評価は、Job を動かした文脈とは別の文脈で `node scripts/explainer-video.mjs signoff`
-  （MCP の `signoff_video_harness_job`）から記録する。それまでの `awaiting-human-review` は正当な停止として報告する。
+- 解説動画のハーネス（`explainer-video`）は 2026-10-22 に廃止した。BuzzAssist に解説動画の入口は無い。
+  解説動画の制作を頼まれたら、対応するハーネスが無いことをそのまま伝え、別のハーネスで代わりに作らない。
 
 ## 5. 並列実行（両ハーネス共通）
 

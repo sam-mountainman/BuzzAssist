@@ -9,7 +9,6 @@ import path, { join } from "node:path";
 import test from "node:test";
 
 import { createAssetQualityContract, assetQualityPaths, recordAssetQualityRound, startAssetQualityLoop } from "../lib/assetQualityLoop.mjs";
-import { createExplainerVideoQualityContract, explainerQualityPaths, resolveExplainerVideoQualityContract } from "../lib/explainerQualityLoop.mjs";
 import { createNarratedQualityContract, narratedQualityPaths, resolveNarratedQualityContract } from "../lib/narratedStoryQualityLoop.mjs";
 import { createScriptQualityContract, recordScriptQualityRound, scriptQualityPaths, startScriptQualityLoop } from "../lib/scriptQualityLoop.mjs";
 import { createStrategyBriefQualityContract, recordStrategyBriefRound, startStrategyBriefLoop, strategyBriefQualityPaths } from "../lib/strategyBriefQualityLoop.mjs";
@@ -42,7 +41,6 @@ test("各ループの新しい契約の最小改善は 5 点で、前の世代�
     [createAssetQualityContract({ harnessId: "koya-manga-video", stage: "character" }).contract, createAssetQualityContract({ harnessId: "koya-manga-video", stage: "character", limitDefaults: LEGACY }).contract],
     [createStrategyBriefQualityContract(), createStrategyBriefQualityContract({ limitDefaults: LEGACY })],
     [createNarratedQualityContract(), createNarratedQualityContract({ limitDefaults: LEGACY })],
-    [createExplainerVideoQualityContract(), createExplainerVideoQualityContract({ limitDefaults: LEGACY })],
   ];
   for (const [current, legacy] of pairs) {
     assert.equal(current.limits.minimumImprovement, 5);
@@ -151,7 +149,7 @@ test("企画ブリーフ: 既定を変える前に始めたループの状態フ
   assert.equal(result.state.status, "passed");
 });
 
-test("署名済みレビューのループ（ナレーション物語・解説動画）: Job の状態・前の Job・評価シートの digest から、始めたときの世代の契約を選ぶ", async (t) => {
+test("署名済みレビューのループ（ナレーション物語）: Job の状態・前の Job・評価シートの digest から、始めたときの世代の契約を選ぶ", async (t) => {
   const root = await tempRoot(t, "signed-legacy-");
   const legacyNarrated = createNarratedQualityContract({ limitDefaults: LEGACY });
   const runDir = join(root, "video-narrated-story-video-0000000000000001");
@@ -172,14 +170,4 @@ test("署名済みレビューのループ（ナレーション物語・解説�
   await writeFile(narratedQualityPaths(runDir).statePath, JSON.stringify({ contractDigest: createNarratedQualityContract().digest, rounds: [] }));
   assert.equal((await resolveNarratedQualityContract({ runDir, predecessorStatePath, sheetDigests: [legacyNarrated.digest] })).limits.minimumImprovement, 5);
 
-  const legacyExplainer = createExplainerVideoQualityContract({ limitDefaults: LEGACY });
-  const workDir = join(root, "video-explainer-video-0000000000000001", "explainer");
-  const sheetPath = join(workDir, "review", "review-sheet.json");
-  assert.equal((await resolveExplainerVideoQualityContract({ workDir, jobsDir: root, sheetPath })).limits.minimumImprovement, 5);
-  await mkdir(path.dirname(sheetPath), { recursive: true });
-  await writeFile(sheetPath, JSON.stringify({ contractDigest: legacyExplainer.digest }));
-  assert.equal((await resolveExplainerVideoQualityContract({ workDir, jobsDir: root, sheetPath })).digest, legacyExplainer.digest);
-  await mkdir(explainerQualityPaths(workDir).dir, { recursive: true });
-  await writeFile(explainerQualityPaths(workDir).statePath, JSON.stringify({ contractDigest: legacyExplainer.digest, rounds: [] }));
-  assert.equal((await resolveExplainerVideoQualityContract({ workDir, jobsDir: root })).digest, legacyExplainer.digest);
 });

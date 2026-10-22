@@ -173,7 +173,7 @@ v3ではさらに、全rubric項目、generatorと異なる実Codex task/Claude 
 ### 漫画以外の品質ループの失敗の格上げ（2026-09-27）
 
 漫画の事故台帳と同じ考え（同じ失敗が2回起きたら、注意書きでなく仕組みにする）を、台本・途中の成果物・企画ブリーフ・
-完成動画の署名済みレビュー（ナレーション物語・解説動画）の品質ループへ広げた。入口は
+完成動画の署名済みレビュー（ナレーション物語。解説動画は 2026-10-22 に廃止）の品質ループへ広げた。入口は
 `node scripts/harness-promote-failures.mjs`、実装は `lib/qualityFailurePromotion.mjs`。
 
 ```bash
@@ -202,7 +202,7 @@ node scripts/harness-promote-failures.mjs enqueue --work-dir <作業フォルダ
 - 子エージェント（`BUZZASSIST_LEARNING_WRITE_FORBIDDEN`）からの enqueue は拒否する。ループの記録の直後から
   自動で呼ぶ形（`autoPromoteQualityLoopFailures`）は `BUZZASSIST_LEARNING_AUTO_CAPTURE=0` でも積まず、例外を投げない。
 - 自動で積む時点: 台本・途中の成果物・企画ブリーフは各 CLI の record のあと。完成動画の署名済みレビューのループ
-  （ナレーション物語・解説動画）は record の CLI が無いので、Job が決着したとき（`captureSettledJobLearning`）に、
+  （ナレーション物語）は record の CLI が無いので、Job が決着したとき（`captureSettledJobLearning`）に、
   Job の作業場所とジャンルの Receipt の置き場から品質ループを探して積む（2026-09-28。本番の経路でだけ走る）。
 - 漫画の最終の品質ループは読まない（上の事故台帳で先に格上げしていて、二重に数えないため）。
 

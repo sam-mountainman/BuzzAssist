@@ -197,13 +197,6 @@ harness-deployments.json（配布物の `config/harness-deployments.example.json
   （`strategy-brief-changed-since-start`）ので、新しい Job として start する。start と resume の関門は
   `lib/channelStartGate.mjs` の1か所（CLI と MCP が同じ判定になる）
 
-**解説動画（`explainer-video`）** は、チャンネルの既存のローカル制作を作り直さずに取り込む。`import-delivery`（既定）は
-有料の呼び出しの関所の中で、納品の記録（`DELIVERY.json`）の成果物と台本の SHA を照合して取り込み、監査する。`produce` は
-Pack の制作の工程を3つのパス（`--production-dir` / `--visuals-dir` / `--output-dir`）を明示して起動する。人の確認（全編の
-試聴と初見の評価）は署名つきの signoff（`explainer-video.mjs signoff` / MCP `signoff_video_harness_job`。`fullLengthViewed: true`・
-`reviewerId` が要る）で記録し、機械の監査・サムネの品質ループ・signoff が揃うと completed に確定する。説明は
-`docs/explainer-video-harness-ja.md`。
-
 ## 実行の記録（RunReceipt）
 
 `lib/harnessRunReceipt.mjs`。本番の実行は必ず記録を残す。詳細は `harness-self-improvement` スキルにあるが、この層で守る規則は1つ:
@@ -331,7 +324,7 @@ snapshot の読み取り側だけを書く。漫画は `lib/koyaMangaProgressSna
 
 | 対象 | 入口 | 本体 | 使う前の照合 |
 |---|---|---|---|
-| 完成動画 | 各ジャンルの signoff と最終監査 | `lib/mangaQualityHarness.mjs` / `lib/narratedStoryQualityLoop.mjs` / `lib/explainerQualityLoop.mjs`（署名済みの signoff を回にするのはナレーション物語と解説動画で共通の `lib/signedReviewQualityLoop.mjs`） | 最終監査・RunReceipt |
+| 完成動画 | 各ジャンルの signoff と最終監査 | `lib/mangaQualityHarness.mjs` / `lib/narratedStoryQualityLoop.mjs`（署名済みの signoff を回にするのは共通の `lib/signedReviewQualityLoop.mjs`） | 最終監査・RunReceipt |
 | 途中の成果物（人物の設定画・背景・本編の画・サムネ・声のテイク・動画クリップ） | `node scripts/asset-quality-loop.mjs` | `lib/assetQualityLoop.mjs` | `lib/assetQualityUseGate.mjs` |
 | 台本 | `node scripts/script-quality-loop.mjs` | `lib/scriptQualityLoop.mjs` | `lib/scriptQualityUseGate.mjs` |
 | 企画（戦略ブリーフ） | `node scripts/strategy-brief.mjs` | `lib/strategyBriefQualityLoop.mjs` | `lib/channelStartGate.mjs`（start / resume） |
@@ -365,14 +358,14 @@ snapshot の読み取り側だけを書く。漫画は `lib/koyaMangaProgressSna
 
 ## 独立レビューの署名（reviewer attestation）
 
-`lib/koyaReviewAttestation.mjs`。漫画動画・ナレーション物語・解説動画の**3つのハーネスが同じ1つの
+`lib/koyaReviewAttestation.mjs`。漫画動画・ナレーション物語の**2つのハーネスが同じ1つの
 実装**を使う。ハーネスごとに違うのは署名対象（subject）の形だけで、鍵・信頼リスト・
 失効・検証の規則はここに1回だけ書く。ジャンルSkillはコマンド例を置き、規則はここを参照する。
 
 **何を解くか。** signoff JSON の `reviewer` / `reviewerContextId` は自己申告で、生成側と
 違う文字列を書けば「独立」に見えてしまう。そこで、運営者が**別経路で信頼した reviewer 公開鍵**
 が、Job識別子・実MP4 SHA・contact sheet SHA・申告した reviewer context（Koya は加えて外側
-Job binding・契約digest・review notes SHA、narrated は signoff 本文 SHA、explainer は加えて納品の記録の SHA）を1つの subject
+Job binding・契約digest・review notes SHA、narrated は signoff 本文 SHA）を1つの subject
 として Ed25519 で署名したことを、**最終監査と RunReceipt の両方**で再検証する。
 
 規則:
@@ -423,8 +416,7 @@ reviewer 鍵を扱うコードや手順を触るとき、Receipt の確定が re
 再試行し、何も再生成・再課金しない。確定待ちの間に成果物 SHA が変わっていれば
 `run-receipt-artifact-drift` で再び止まり、production を勝手に再実行しない。
 
-Koya の subject は `koya-review-attestation-v1`、narrated は `narrated-story-review-attestation-v1`、explainer は
-`explainer-video-review-attestation-v1`。別ハーネスの署名を持ち込んでも schema が違うので通らない。
+Koya の subject は `koya-review-attestation-v1`、narrated は `narrated-story-review-attestation-v1`。別ハーネスの署名を持ち込んでも schema が違うので通らない。
 
 ## 並列制御
 
