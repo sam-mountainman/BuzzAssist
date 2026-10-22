@@ -1,0 +1,20 @@
+{
+  "version": "channel-traits-v1",
+  "channelId": "iq-comparison",
+  "artStyle": "diagram-mascot",
+  "identityLock": "person+wardrobe",
+  "motion": "few-clips",
+  "budgetMonthlyJpy": 10000,
+  "hardware": {
+    "mac": { "memoryGiB": 16 },
+    "cudaVramGiB": 0,
+    "cloudGpu": true,
+    "contracts": ["codex"]
+  },
+  "confidentialAssets": false,
+  "aspect": "16:9",
+  "lengthMinutes": 20,
+  "publishScope": "worldwide",
+  "priority": "lowest-cost",
+  "notes": "例。人物の生成画像と SVG の図解、短い生成動画。月1万円以内。"
+}

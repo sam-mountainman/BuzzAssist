@@ -42,6 +42,7 @@
     "config/parallel-plans/",
     "config/strategy-brief.schema.json",
     "lib/*.mjs",
+    "lib/optimalConfig/",
     "mcp/server.mjs",
     "scripts/*.mjs",
     "scripts/*.sh",

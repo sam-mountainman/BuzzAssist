@@ -1,0 +1,19 @@
+{
+  "version": "channel-traits-v1",
+  "channelId": "mike",
+  "artStyle": "photoreal",
+  "identityLock": "person+wardrobe",
+  "motion": "few-clips",
+  "budgetMonthlyJpy": null,
+  "hardware": {
+    "mac": { "memoryGiB": 16 },
+    "cudaVramGiB": 0,
+    "cloudGpu": true,
+    "contracts": ["chatgpt", "codex", "grok"]
+  },
+  "confidentialAssets": false,
+  "aspect": "16:9",
+  "lengthMinutes": 60,
+  "publishScope": "worldwide",
+  "notes": "例。実写調の長尺の朗読物語。動画は冒頭の数秒だけ。月の予算は未設定。"
+}
