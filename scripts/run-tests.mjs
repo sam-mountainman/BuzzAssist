@@ -51,7 +51,9 @@ const testFiles = readdirSync(testDir)
 // （構文としては正しく、バンドルも通る）。そこは別途、実際にマウントする
 // テストが要る（未着手・要判断）。
 const commands = [
-  { args: ["--test", ...testFiles], countsSkips: true },
+  // Node 23 以降は、出力先がパイプでも既定の reporter が spec になった。
+  // skip は TAP の行から数えるので、どの版でも TAP を明示する。
+  { args: ["--test", "--test-reporter=tap", ...testFiles], countsSkips: true },
   { args: ["scripts/test-fal-payloads.mjs"], countsSkips: false },
   { args: ["scripts/test-setup-distribution.mjs"], countsSkips: false },
 ];
