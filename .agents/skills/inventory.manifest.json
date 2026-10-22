@@ -12,9 +12,9 @@
     {
       "id": "buzzassist:platform-craft",
       "name": "platform-craft",
-      "version": "1.9.1",
-      "contentSha256": "sha256:1b2e137dca32a1fa4529412f527cebb797b3a390ac958e048439c779abf04906",
-      "bundleSha256": "sha256:8693c3ee1937c74f583f756517b06ff99183da0dcef78adc60b4239cb155a5fc",
+      "version": "1.10.0",
+      "contentSha256": "sha256:4f1122a94b17c6ec5f0bd9f870ceb6e798b118a937ee3ac92abe859ede723b7b",
+      "bundleSha256": "sha256:4c190f59a9e3a2875980b0530287fb726632b973cfd1b13477af29d5998a96c9",
       "language": "ja",
       "owner": "BuzzAssist maintainers",
       "origin": "project-canonical",
@@ -37,11 +37,11 @@
         "developmentOnly": false
       },
       "approval": {
-        "reviewer": "higataiyu",
-        "approvedAt": "2026-10-22T09:24:20.060Z",
-        "version": "1.9.1",
-        "contentSha256": "sha256:1b2e137dca32a1fa4529412f527cebb797b3a390ac958e048439c779abf04906",
-        "bundleSha256": "sha256:8693c3ee1937c74f583f756517b06ff99183da0dcef78adc60b4239cb155a5fc",
+        "reviewer": "sam-mountainman",
+        "approvedAt": "2026-10-22T11:16:09.162Z",
+        "version": "1.10.0",
+        "contentSha256": "sha256:4f1122a94b17c6ec5f0bd9f870ceb6e798b118a937ee3ac92abe859ede723b7b",
+        "bundleSha256": "sha256:4c190f59a9e3a2875980b0530287fb726632b973cfd1b13477af29d5998a96c9",
         "attestedBy": "human-verified"
       }
     },

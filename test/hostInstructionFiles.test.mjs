@@ -265,8 +265,7 @@ test("地図から移した決まりは、移した先の文書に全部残っ�
     "`/hooks` で信頼するまで動かさない",
     "`canvas/harness-runs/<Job ID>/run-receipt.json`",
     "誰が何を確認すれば進むかを報告する",
-    // 解説動画・並列・自己改善
-    "`signoff_video_harness_job`",
+    // 並列・自己改善
     "同時に書き込むと壊れる共有の状態ファイル",
     "Claude Code と Codex のどちらから実行しても同じ結果になる",
     "捕捉（capture）は何も書き換えず、統合は既定で dry-run",

@@ -361,9 +361,9 @@ plan-request は依頼の種類（`requestKind`）とブリーフの状態から
 | `post-publish`（公開後の数字から次へ） | `hyp-post-publish`（前のブリーフがあれば `next --from`） |
 | `research`（調べる） | `hyp-research` |
 
-**`requireBrief` の決め方。** 合格したブリーフを制作の条件にするかは運営者が決めます。完成済みの納品を取り込むだけのチャンネル
-（解説動画のハーネス `explainer-video` の import-delivery。`docs/explainer-video-harness-ja.md`）で、ブリーフの独立評価がまだ
-済んでいない・直している間は `false` にしておきます。取り込みは有料の呼び出しをせず、ブリーフの書き方の直し待ちで止める
+**`requireBrief` の決め方。** 合格したブリーフを制作の条件にするかは運営者が決めます。有料の生成をしないチャンネル
+（制作が BuzzAssist の外にある `production: { kind: "external" }` のチャンネルなど）で、ブリーフの独立評価がまだ
+済んでいない・直している間は `false` にしておきます。有料の呼び出しが無いので、ブリーフの書き方の直し待ちで止める
 理由が無いためです。ブリーフの状態は plan-request の理由（`strategyBrief.summary`）と、`--strategy-brief` を渡した start の
 Job（`options.strategyBriefSha256` と `metadata.strategyBrief`）に残ります。運営者が「ブリーフの合格を制作の条件にする」と
 決めたら `true` に変えます（`true` で合格していないブリーフを渡すと、start は Job を作る前に `channel-strategy-brief-not-passed`

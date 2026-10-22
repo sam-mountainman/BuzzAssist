@@ -106,7 +106,7 @@ test("generic MCP definitions expose plan/run, get/list/cancel/resume without se
   const signoff = definitions.find((definition) => definition.name === TOOL_SIGNOFF_VIDEO_HARNESS_JOB);
   assert.deepEqual(signoff.inputSchema.required.sort(), ["confirmed", "jobId", "pass", "reviewPath", "reviewer", "reviewerContextId", "reviewerKeyPath"]);
   assert.deepEqual(Object.keys(signoff.inputSchema.properties).sort(), [
-    "confirmed", "contactSheetPath", "force", "fullLengthViewed", "jobId", "pass", "projectDir", "reviewPath", "reviewer", "reviewerContextId",
+    "confirmed", "contactSheetPath", "force", "jobId", "pass", "projectDir", "reviewPath", "reviewer", "reviewerContextId",
     "reviewerId", "reviewerKeyPath", "reviewerTrustPath", "signoffPath", "videoPath",
   ]);
   // 採点ファイル（品質ループの1回）と、差し戻し（pass=false）を受ける。
@@ -612,48 +612,28 @@ test("R5-REV-02 (real server): without a project root the server refuses run_vid
   }
 });
 
-// 解説動画（explainer-video）の人の確認: 評価者の名前・文脈 id はすべて合成の値。
-test("MCP: signoff_video_harness_job は解説動画の Job を配置表の入口の signoff へ渡し、全編の視聴と評価者の名前を求める", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "explainer-mcp-signoff-"));
-  try {
-    const deploymentRoot = join(dir, "deploy");
-    await mkdir(join(deploymentRoot, "scripts"), { recursive: true });
-    await writeFile(join(deploymentRoot, "scripts", "explainer-video.mjs"), "// fixture\n");
-    const job = { id: "video-explainer-video-0123456789abcdef", harness: { id: "explainer-video" }, deployment: { root: deploymentRoot, entrypoint: "node scripts/explainer-video.mjs" } };
-    const invocations = [];
-    const actions = createVideoHarnessReviewerActions({
-      env: {},
-      readJob: async () => job,
-      execFile: async (command, argv, options) => {
-        invocations.push({ command, argv, options });
-        return { stdout: JSON.stringify({ jobId: job.id, approved: true }), stderr: "" };
-      },
-    });
-    const base = {
-      projectDir: dir,
-      jobId: job.id,
-      confirmed: true,
-      reviewer: "claude",
-      reviewerId: "synthetic-listener",
-      reviewerContextId: "ctx-synthetic-listen-9",
-      reviewerKeyPath: "/secure/outside-repo/reviewer-ed25519.pem",
-      reviewPath: join(dir, "review.json"),
-      pass: true,
-      fullLengthViewed: true,
-    };
-    const signed = await actions.signoff(base);
-    assert.equal(signed.harnessId, "explainer-video");
-    const call = invocations.at(-1);
-    assert.equal(call.argv[0], join(deploymentRoot, "scripts", "explainer-video.mjs"));
-    assert.equal(call.argv[1], "signoff");
-    assert.ok(call.argv.includes("--full-length-viewed") && call.argv.includes("--pass"));
-    assert.equal(call.argv[call.argv.indexOf("--reviewer-id") + 1], "synthetic-listener");
-    const before = invocations.length;
-    await assert.rejects(actions.signoff({ ...base, fullLengthViewed: undefined }), /full-length-viewing-required/u);
-    await assert.rejects(actions.signoff({ ...base, reviewerId: undefined }), /requires reviewerId/u);
-    await assert.rejects(actions.signoff({ ...base, videoPath: join(dir, "other.mp4") }), /does not take videoPath/u);
-    assert.equal(invocations.length, before, "拒否した呼び出しは子 CLI を起動しない");
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
+// 解説動画（explainer-video）のハーネスは 2026-10-22 に廃止した。残った Job の signoff は子 CLI を起動せずに拒否する。
+test("MCP: signoff_video_harness_job は廃止した explainer-video の Job を拒否し、宣言にも残っていない", async () => {
+  const job = { id: "video-explainer-video-0123456789abcdef", harness: { id: "explainer-video" }, deployment: { root: "/synthetic/deploy", entrypoint: "node scripts/explainer-video.mjs" } };
+  let invoked = 0;
+  const actions = createVideoHarnessReviewerActions({
+    env: {},
+    readJob: async () => job,
+    execFile: async () => {
+      invoked += 1;
+      return { stdout: "{}", stderr: "" };
+    },
+  });
+  await assert.rejects(actions.signoff({
+    projectDir: tmpdir(),
+    jobId: job.id,
+    confirmed: true,
+    reviewer: "claude",
+    reviewerContextId: "ctx-synthetic-9",
+    reviewerKeyPath: "/secure/outside-repo/reviewer-ed25519.pem",
+    reviewPath: join(tmpdir(), "review.json"),
+    pass: true,
+  }), /has no reviewer signoff entry/u);
+  assert.equal(invoked, 0);
+  await assert.rejects(stat(join(repoRoot, "config", "harnesses", "explainer-video.harness.json")), { code: "ENOENT" });
 });

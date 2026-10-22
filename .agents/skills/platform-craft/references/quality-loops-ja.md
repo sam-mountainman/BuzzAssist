@@ -14,9 +14,7 @@
 動詞は start / sheet / record / verify / status と、動画を測る measure-video。実装は `lib/assetQualityLoop.mjs`。
 
 - 工程は character / location / scene-image / thumbnail / voice-take / video-clip で、ハーネスごとに使える
-  工程が決まっている（`--harness`）。BuzzAssist の外で映像を組む解説動画の制作から使う口は harness id
-  `explainer-video` で、scene-image・voice-take・thumbnail だけを受ける（人物の設定画・場所・動画クリップは
-  拒否する）。不合格の回は解説動画のチャンネルの非公開台帳（`channel-pack:explainer`）へ積む
+  工程が決まっている（`--harness`）
 - 人物の同一性と、公開面に出る画の手指の安全は、対話端末＋`--human-verified` の人の確認（`verify`）が無いと
   合格にならない。人の確認は対象ごとで、batch では記録できない。対象が多いときは `verify-pages`（下の節）
 - 評価者に渡すシート（`sheet`）には合格点・下限・重み・前の回の点数を載せない。見ると採点がそれに寄る
@@ -83,7 +81,7 @@
 
 ## 台本（`node scripts/script-quality-loop.mjs`）
 
-本体は `lib/scriptQualityLoop.mjs`。ジャンルは narrated-story（既定）・manga・explainer で、評価基準は
+本体は `lib/scriptQualityLoop.mjs`。ジャンルは narrated-story（既定）・manga で、評価基準は
 BuzzAssist 独自のもの。チャンネル固有の型は、署名済み Channel Pack の `script-quality.json` で評価項目を
 足し、下限を上げる（下げられない）。採点表は `contract --genre <id>` で見る。
 
