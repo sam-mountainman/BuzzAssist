@@ -6,15 +6,32 @@
 //   node scripts/optimal-config.mjs gate --model anima [--route otoshigo-hosted] [--traits <file>]
 //   node scripts/optimal-config.mjs trial-plan --traits <file>
 //   node scripts/optimal-config.mjs trial-metrics --trial <試験の記録.json>
+//   node scripts/optimal-config.mjs adopt --traits <file> --trial <file> --production A --backup B --reviewer "$REVIEWER" --human-verified
+//   node scripts/optimal-config.mjs adopted [--project-dir <dir>]
+//
+// adopt は運営者が決めた本番と予備を記録する。人の確認として数えるのは、決めた人が自分の対話端末から
+// --human-verified を付けたときだけ（エージェントは打たない。harness-guard-hook が止める）。機械が書くなら
+// --agent-attested で提案として残り、制作の入口（run-video-harness）はその提案を使わずに止まる。
 //
 // ここは選ぶ・止める・数えるだけで、何も生成しない（有料の呼び出しも、モデルのダウンロードもしない）。
 // 生成は運営者の手元か運営者の契約先で、運営者の確認をもらってから動かす。
 
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
 import { loadOptimalConfigCatalog } from "../lib/optimalConfig/catalog.mjs";
+import {
+  ADOPTION_HUMAN_VERIFIED,
+  appendAdoptionDecision,
+  buildAdoptionDecision,
+  humanAdoptCommand,
+  readAdoptedConfig,
+  resolveAdoptionPath,
+  resolvePackAdoptionPath,
+  signAdoptionDecision,
+} from "../lib/optimalConfig/adoption.mjs";
 import { assertChannelTraits, readChannelTraits } from "../lib/optimalConfig/channelTraits.mjs";
 import { gateModelById, rightsContextFromTraits } from "../lib/optimalConfig/rightsGate.mjs";
 import { selectConfig } from "../lib/optimalConfig/selectConfig.mjs";
@@ -27,7 +44,14 @@ const USAGE = [
   "  node scripts/optimal-config.mjs gate --model <id> [--route <実行場所>] [--traits <traits.json>] [--use evaluation] [--publish-scope japan-only]",
   "  node scripts/optimal-config.mjs trial-plan --traits <traits.json>",
   "  node scripts/optimal-config.mjs trial-metrics --trial <trial.json>",
+  "  node scripts/optimal-config.mjs adopt --traits <traits.json> --trial <trial.json> --production <候補ID> --backup <候補ID>",
+  "      --reviewer \"$REVIEWER\" (--human-verified | --agent-attested) [--project-dir <dir>] [--to project|channel-pack] [--pack-id <id>]",
+  "      [--note <一言>] [--signing-key-path <Ed25519 秘密鍵>]",
+  "      （REVIEWER は決めた人の名前。例: REVIEWER=\"$(id -un)\"）",
+  "  node scripts/optimal-config.mjs adopted [--project-dir <dir>] [--pack-id <id>]",
 ].join("\n");
+
+const BOOLEAN_FLAGS = new Set(["human-verified", "agent-attested"]);
 
 function parseArgs(argv) {
   const [command = "", ...rest] = argv;
@@ -36,6 +60,10 @@ function parseArgs(argv) {
     const arg = rest[index];
     if (!arg.startsWith("--")) throw new Error(`引数の形が違う: ${arg}\n${USAGE}`);
     const key = arg.slice(2);
+    if (BOOLEAN_FLAGS.has(key)) {
+      options[key] = true;
+      continue;
+    }
     const value = rest[index + 1];
     if (value === undefined || value.startsWith("--")) throw new Error(`--${key} には値が要る。\n${USAGE}`);
     options[key] = value;
@@ -59,7 +87,82 @@ function loadTraits(options) {
   throw new Error(`--traits か --project-dir が要る。\n${USAGE}`);
 }
 
-export function runOptimalConfigCommand(argv) {
+function sha256(value) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function interactiveTerminal() {
+  return process.stdin.isTTY === true && process.stdout.isTTY === true;
+}
+
+async function runAdopt(options, { catalog, isInteractive = interactiveTerminal(), attest = null, now } = {}) {
+  for (const key of ["traits", "trial", "production", "backup"]) {
+    if (!options[key]) throw new Error(`adopt には --${key} が要る。\n${USAGE}`);
+  }
+  const traitsPath = path.resolve(options.traits);
+  const trialPath = path.resolve(options.trial);
+  const projectDir = path.resolve(options["project-dir"] || process.cwd());
+  const next = humanAdoptCommand({
+    traitsPath,
+    trialPath,
+    production: String(options.production).toUpperCase(),
+    backup: String(options.backup).toUpperCase(),
+    projectDir: options["project-dir"] ? projectDir : "",
+    note: options.note || "",
+  });
+  const attestationFor = attest || (await import("./harness-learn.mjs")).attestationFor;
+  const verdict = attestationFor({
+    reviewer: options.reviewer || "",
+    isInteractive,
+    agentAttested: options["agent-attested"] === true,
+    humanVerified: options["human-verified"] === true,
+  });
+  if (!verdict.ok) {
+    const error = new Error(`${verdict.message} 決めた人が自分の端末で次を打つ: ${next}`);
+    error.code = "OPTIMAL_CONFIG_ADOPTION_ATTESTATION";
+    error.next = next;
+    throw error;
+  }
+  const rawTraits = readChannelTraits({ traitsPath }).traits;
+  const trialBytes = readFileSync(trialPath);
+  const trial = JSON.parse(trialBytes.toString("utf8"));
+  let decision = buildAdoptionDecision({
+    traits: rawTraits,
+    trial,
+    trialSha256: sha256(trialBytes),
+    production: options.production,
+    backup: options.backup,
+    attestation: verdict.attestation,
+    note: options.note || "",
+    catalog,
+    ...(now ? { now } : {}),
+  });
+  if (options["signing-key-path"]) decision = await signAdoptionDecision(decision, { privateKeyPath: options["signing-key-path"] });
+  const to = options.to || "project";
+  let filePath;
+  if (options.out) filePath = path.resolve(options.out);
+  else if (to === "project") filePath = resolveAdoptionPath(projectDir);
+  else if (to === "channel-pack") {
+    filePath = resolvePackAdoptionPath(projectDir, options["pack-id"] || "");
+    if (!filePath) throw new Error("Channel Pack の元フォルダが見つからない（channel-packs/<id>/ か BUZZASSIST_CHANNEL_PACK）。--to project で作業フォルダへ書く。");
+  } else throw new Error("--to は project か channel-pack。");
+  const written = await appendAdoptionDecision({ filePath, decision });
+  const effective = written.decision.approval.attestedBy === ADOPTION_HUMAN_VERIFIED;
+  return {
+    ok: true,
+    command: "adopt",
+    effective,
+    filePath: written.filePath,
+    decision: written.decision,
+    detail: effective
+      ? `本番 ${written.decision.production.candidateId}・予備 ${written.decision.backup.candidateId} を ${written.decision.approval.reviewer} の確認つきで記録した。run-video-harness はこの作業フォルダでこの構成を使う。`
+        + (to === "project" ? " 配る Pack に入れるなら、Pack の元フォルダの config/optimal-config-adoption.json に写して署名し直す。" : " Pack の元フォルダに書いた。配るには署名し直す。")
+      : `提案（${written.decision.approval.attestedBy}）として残した。人の確認がまだなので、run-video-harness はこの作業フォルダで止まる。決めた人が自分の端末で次を打つ: ${next}`,
+    ...(effective ? {} : { next }),
+  };
+}
+
+export async function runOptimalConfigCommand(argv, runtime = {}) {
   const { command, options } = parseArgs(argv);
   const catalog = loadOptimalConfigCatalog(options.catalog ? path.resolve(options.catalog) : undefined);
   if (command === "select") {
@@ -89,14 +192,26 @@ export function runOptimalConfigCommand(argv) {
     const trial = JSON.parse(readFileSync(path.resolve(options.trial), "utf8"));
     return { ok: true, command, metrics: computeTrialMetrics(trial), recommendation: recommendFromTrial(trial) };
   }
+  if (command === "adopt") return runAdopt(options, { catalog, ...runtime });
+  if (command === "adopted") {
+    const read = await readAdoptedConfig({ projectDir: path.resolve(options["project-dir"] || process.cwd()), packId: options["pack-id"] || "" });
+    return { ok: true, command, ...read };
+  }
   throw new Error(`知らないコマンド: ${command || "（なし）"}\n${USAGE}`);
 }
 
 if (isDirectCli(import.meta.url)) {
   try {
-    process.stdout.write(`${JSON.stringify(runOptimalConfigCommand(process.argv.slice(2)), null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify(await runOptimalConfigCommand(process.argv.slice(2)), null, 2)}\n`);
   } catch (error) {
-    process.stdout.write(`${JSON.stringify({ ok: false, code: error?.code || "OPTIMAL_CONFIG_ERROR", error: error instanceof Error ? error.message : String(error), ...(error?.errors ? { errors: error.errors } : {}) }, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify({
+      ok: false,
+      code: error?.code || "OPTIMAL_CONFIG_ERROR",
+      error: error instanceof Error ? error.message : String(error),
+      ...(error?.errors ? { errors: error.errors } : {}),
+      ...(error?.problems ? { problems: error.problems } : {}),
+      ...(error?.next ? { next: error.next } : {}),
+    }, null, 2)}\n`);
     process.exitCode = 1;
   }
 }
