@@ -35,6 +35,8 @@ import {
 } from "../lib/optimalConfig/adoption.mjs";
 import { assertChannelTraits, readChannelTraits } from "../lib/optimalConfig/channelTraits.mjs";
 import { explainIdeal } from "../lib/optimalConfig/explainIdeal.mjs";
+import { createManualHandoff, importManualHandoff } from "../lib/optimalConfig/execution/manualHandoff.mjs";
+import { detectOllamaImage } from "../lib/optimalConfig/execution/ollamaLocalImage.mjs";
 import { gateModelById, rightsContextFromTraits } from "../lib/optimalConfig/rightsGate.mjs";
 import { selectConfig } from "../lib/optimalConfig/selectConfig.mjs";
 import { computeTrialMetrics, createTrialPlan, recommendFromTrial } from "../lib/optimalConfig/trialRecord.mjs";
@@ -54,6 +56,10 @@ const USAGE = [
   "      [--note <一言>] [--signing-key-path <Ed25519 秘密鍵>]",
   "      （REVIEWER は決めた人の名前。例: REVIEWER=\"$(id -un)\"）",
   "  node scripts/optimal-config.mjs adopted [--project-dir <dir>] [--pack-id <id>]",
+  "  node scripts/optimal-config.mjs local-image-check [--model flux2-klein-4b|z-image-turbo] [--ollama-model <名前>] [--ollama-url http://127.0.0.1:11434]",
+  "      手元の Ollama が動いていてモデルが入っているかを読むだけで確かめる（ダウンロードしない）",
+  "  node scripts/optimal-config.mjs handoff-create --service google-flow --cuts <cuts.json> --work-dir <dir> [--handoff-id <id>] [--channel <id>]",
+  "  node scripts/optimal-config.mjs handoff-import --slot <slot.json>",
 ].join("\n");
 
 const BOOLEAN_FLAGS = new Set(["human-verified", "agent-attested"]);
@@ -203,6 +209,19 @@ export async function runOptimalConfigCommand(argv, runtime = {}) {
     const ideal = JSON.parse(readFileSync(path.resolve(options.ideal), "utf8"));
     const trial = options.trial ? JSON.parse(readFileSync(path.resolve(options.trial), "utf8")) : null;
     return { ok: true, command, ...explainIdeal(traits, ideal, { catalog, trial }) };
+  }
+  if (command === "local-image-check") {
+    return { ok: true, command, ...(await detectOllamaImage({ catalogModelId: options.model || "flux2-klein-4b", modelName: options["ollama-model"] || "", ...(options["ollama-url"] ? { baseUrl: options["ollama-url"] } : {}), ...(runtime.fetchImpl ? { fetchImpl: runtime.fetchImpl } : {}) })) };
+  }
+  if (command === "handoff-create") {
+    for (const key of ["cuts", "work-dir"]) if (!options[key]) throw new Error(`handoff-create には --${key} が要る。\n${USAGE}`);
+    const cuts = JSON.parse(readFileSync(path.resolve(options.cuts), "utf8"));
+    const created = await createManualHandoff({ service: options.service || "google-flow", cuts: Array.isArray(cuts) ? cuts : cuts.cuts, workDir: options["work-dir"], handoffId: options["handoff-id"] || "", channelId: options.channel || "" });
+    return { ok: true, command, ...created };
+  }
+  if (command === "handoff-import") {
+    if (!options.slot) throw new Error(`handoff-import には --slot が要る。\n${USAGE}`);
+    return { ok: true, command, ...(await importManualHandoff({ slotPath: options.slot })) };
   }
   if (command === "adopt") return runAdopt(options, { catalog, ...runtime });
   if (command === "adopted") {
