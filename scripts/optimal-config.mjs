@@ -6,6 +6,7 @@
 //   node scripts/optimal-config.mjs gate --model anima [--route otoshigo-hosted] [--traits <file>]
 //   node scripts/optimal-config.mjs trial-plan --traits <file>
 //   node scripts/optimal-config.mjs trial-metrics --trial <試験の記録.json>
+//   node scripts/optimal-config.mjs explain --traits <file> --ideal <理想.json> [--trial <試験の記録.json>]
 //   node scripts/optimal-config.mjs adopt --traits <file> --trial <file> --production A --backup B --reviewer "$REVIEWER" --human-verified
 //   node scripts/optimal-config.mjs adopted [--project-dir <dir>]
 //
@@ -33,6 +34,7 @@ import {
   signAdoptionDecision,
 } from "../lib/optimalConfig/adoption.mjs";
 import { assertChannelTraits, readChannelTraits } from "../lib/optimalConfig/channelTraits.mjs";
+import { explainIdeal } from "../lib/optimalConfig/explainIdeal.mjs";
 import { gateModelById, rightsContextFromTraits } from "../lib/optimalConfig/rightsGate.mjs";
 import { selectConfig } from "../lib/optimalConfig/selectConfig.mjs";
 import { computeTrialMetrics, createTrialPlan, recommendFromTrial } from "../lib/optimalConfig/trialRecord.mjs";
@@ -44,6 +46,9 @@ const USAGE = [
   "  node scripts/optimal-config.mjs gate --model <id> [--route <実行場所>] [--traits <traits.json>] [--use evaluation] [--publish-scope japan-only]",
   "  node scripts/optimal-config.mjs trial-plan --traits <traits.json>",
   "  node scripts/optimal-config.mjs trial-metrics --trial <trial.json>",
+  "  node scripts/optimal-config.mjs explain --traits <traits.json> --ideal <理想.json> [--trial <trial.json>]",
+  "      理想（artStyle / motion / identityLock / budgetMonthlyJpy / models / places / monthlyAdoptedSeconds）をそのまま",
+  "      構成にできるか。できなければ理由（予算・機材・権利）と近い代わりの案を返す（黙って置き換えない）",
   "  node scripts/optimal-config.mjs adopt --traits <traits.json> --trial <trial.json> --production <候補ID> --backup <候補ID>",
   "      --reviewer \"$REVIEWER\" (--human-verified | --agent-attested) [--project-dir <dir>] [--to project|channel-pack] [--pack-id <id>]",
   "      [--note <一言>] [--signing-key-path <Ed25519 秘密鍵>]",
@@ -191,6 +196,13 @@ export async function runOptimalConfigCommand(argv, runtime = {}) {
     if (!options.trial) throw new Error(`--trial が要る。\n${USAGE}`);
     const trial = JSON.parse(readFileSync(path.resolve(options.trial), "utf8"));
     return { ok: true, command, metrics: computeTrialMetrics(trial), recommendation: recommendFromTrial(trial) };
+  }
+  if (command === "explain") {
+    if (!options.ideal) throw new Error(`--ideal が要る。\n${USAGE}`);
+    const { traits } = loadTraits(options);
+    const ideal = JSON.parse(readFileSync(path.resolve(options.ideal), "utf8"));
+    const trial = options.trial ? JSON.parse(readFileSync(path.resolve(options.trial), "utf8")) : null;
+    return { ok: true, command, ...explainIdeal(traits, ideal, { catalog, trial }) };
   }
   if (command === "adopt") return runAdopt(options, { catalog, ...runtime });
   if (command === "adopted") {
