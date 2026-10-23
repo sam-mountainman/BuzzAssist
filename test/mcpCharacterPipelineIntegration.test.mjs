@@ -109,13 +109,17 @@ test("MCP character pipeline runs candidates, approval packs, and a multi-charac
         scriptText: "田中：残業はつらい。\n佐藤：私が助けます。",
         candidateCount: 3,
         cast: [
-          { name: "田中", description: "28歳、黒髪で冴えない会社員。", invariants: ["黒い短髪", "紺色スーツ"] },
+          { name: "田中", description: "28歳、黒髪で冴えない会社員。", invariants: ["黒い短髪", "紺色スーツ"], candidateVariants: ["丸顔で垂れ目", "面長で切れ長の目", "童顔で小柄"] },
           { name: "佐藤", role: "fixed", description: "55歳、落ち着いた助っ人。", invariants: ["短い白髪", "銀縁眼鏡"] },
         ],
       },
     });
     assert.equal(analyzed.isError, undefined, JSON.stringify(analyzed));
     const workflowId = analyzed.structuredContent.workflow.id;
+    assert.deepEqual(
+      analyzed.structuredContent.workflow.cast.find((cast) => cast.name === "田中").candidateVariants,
+      ["丸顔で垂れ目", "面長で切れ長の目", "童顔で小柄"],
+    );
 
     const candidates = await callTool({
       name: "generate_character_candidates",

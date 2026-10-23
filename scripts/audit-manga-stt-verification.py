@@ -65,6 +65,17 @@ def normalize(text, pronunciation_variants=None):
     return text.translate(SMALL_KANA_FOLD)
 
 
+NONVERBAL_FILLER = re.compile(r"[\s\u3063\u30c3\u30fc〜～]")
+
+
+def is_nonverbal_text(text):
+    source = unicodedata.normalize("NFKC", str(text or ""))
+    if not source.strip():
+        return False
+    rest = NONVERBAL_FILLER.sub("", source)
+    return all(unicodedata.category(ch)[0] in ("P", "S", "Z") for ch in rest)
+
+
 def phoneticize_many(texts, project_dir):
     helper = project_dir / "scripts" / "japanese-reading-kuromoji.mjs"
     completed = subprocess.run(
@@ -210,6 +221,13 @@ def main():
     cursor = 0
     for utterance_index, u in enumerate(manifest["utterances"]):
         a = u["audio"]
+        if is_nonverbal_text(u.get("text", "")):
+            # 記号だけの行（「！」「…ッ！」）は言葉にならない声で、文字で照合できない。以前は空どうしの
+            # 類似度 1.0 で黙って合格し、「…ッ！」は「ッ」1文字との照合で落ちていた。声の有無は
+            # 音声の品質ゲート（nonverbal の音量検査）が採用テイクごとに確かめている。
+            rows.append({"id": u["id"], "nonverbal": True,
+                         "textVerification": "not-applicable-nonverbal", "pass": True})
+            continue
         # Compare against the DISPLAY text (kanji) — the speech text carries
         # pronunciation-corrected kana spellings (しゃしん etc.) that cannot
         # char-match Whisper's kanji output.

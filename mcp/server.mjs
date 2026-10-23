@@ -118,6 +118,7 @@ import {
   videoHarnessToolDefinitions,
 } from "../lib/videoHarnessMcp.mjs";
 import { tmpdir } from "node:os";
+import { GPU_VIDEO_TOOL, gpuVideoToolDefinitions, handleGpuVideoToolCall } from "../lib/gpuVideoMcp.mjs";
 
 const SERVER_NAME = "BuzzAssist Excalidraw Plugin Tools";
 const SERVER_VERSION = "0.1.7";
@@ -2062,6 +2063,7 @@ async function generateExcalidrawVideosBatch(args = {}) {
 function toolDefinitions() {
   return [
     ...videoHarnessToolDefinitions(),
+    ...gpuVideoToolDefinitions(),
     {
       name: TOOL_READ_ME,
       title: "Read Excalidraw MCP Format",
@@ -2435,6 +2437,11 @@ function toolDefinitions() {
                 invariants: { type: "array", items: { type: "string" } },
                 negativePrompt: { type: "string" },
                 stylePrompt: { type: "string" },
+                candidateVariants: {
+                  type: "array",
+                  items: { type: "string" },
+                  description: "Per-candidate design direction for this character (index 0 = candidate A). Use when the written appearance fixes hair/outfit so the default A/B/C axes would look alike.",
+                },
               },
               required: ["name"],
               additionalProperties: false,
@@ -3755,6 +3762,7 @@ async function markCharacterApprovalOnCanvas(args = {}, details = {}) {
 }
 
 async function handleToolCall(params, progress = () => {}) {
+  if (params?.name === GPU_VIDEO_TOOL) return handleGpuVideoToolCall(params);
   if (isVideoHarnessToolName(params?.name)) {
     // clientInfo は initialize で host が名乗った name / version。Job と RunReceipt に
     // どのホストから動かしたかを残すために渡す（lib/harnessHostProvenance.mjs）。

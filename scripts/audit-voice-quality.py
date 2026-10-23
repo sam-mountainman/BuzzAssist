@@ -313,6 +313,18 @@ def canonical_check_digest(check):
     return hashlib.sha256(json.dumps(material, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
 
+def loudest_frame_dbfs(clip, sr, frame_sec=0.05):
+    if clip.size == 0:
+        return -120.0
+    frame = max(1, int(sr * frame_sec))
+    peak = 0.0
+    for start in range(0, len(clip), frame):
+        part = clip[start:start + frame]
+        if part.size:
+            peak = max(peak, float(np.sqrt(np.mean(np.square(part, dtype=np.float64)))))
+    return float(20 * np.log10(peak)) if peak > 0 else -120.0
+
+
 def slice_audio(audio, sr, start, end):
     lo = max(0, int(start * sr))
     hi = min(len(audio), int(end * sr))
@@ -410,16 +422,31 @@ def check_voice_quality(check):
                 except Exception as error:  # noqa: BLE001
                     unavailable.append(f"utmos[{seg_id}]: {str(error)[:120]}")
             expected_text = segment.get("expectedText", "")
+            if segment.get("nonverbal"):
+                # 記号だけの行（「！」「…ッ！」）は言葉にならない声。読み比べも話す速さも測れないので、
+                # 代わりに声が出ているか（最も大きい 50ms の音量）を確かめる。無音なら不合格。
+                peak = loudest_frame_dbfs(clip, sr)
+                row["nonverbal"] = True
+                row["nonverbalPeakDbfs"] = round(peak, 2)
+                floor = float(check.get("nonverbalMinPeakDbfs", -35.0))
+                row["nonverbalVoiced"] = peak >= floor
+                if peak < floor:
+                    problems.append(f"nonverbal[{seg_id}] silent: loudest {peak:.1f} dBFS < {floor}")
+                expected_text = ""
             if expected_text:
                 transcript = transcribe(clip)
                 if transcript is None:
                     unavailable.append(f"cer[{seg_id}]: faster-whisper missing")
                 else:
                     cer = reading_error_rate(expected_text, segment.get("expectedReading", ""), transcript)
-                    row["cer"] = round(cer, 4)
                     row["transcript"] = transcript[:80]
-                    if cer > float(check.get("maxCer", 0.13)):
-                        problems.append(f"cer[{seg_id}] {cer:.3f} > {check.get('maxCer', 0.13)}")
+                    if cer is None:
+                        # 読みが空（記号だけ等）で nonverbal の印が無い。測れなかったことを残し、落ちない。
+                        unavailable.append(f"cer[{seg_id}]: expected reading is empty")
+                    else:
+                        row["cer"] = round(cer, 4)
+                        if cer > float(check.get("maxCer", 0.13)):
+                            problems.append(f"cer[{seg_id}] {cer:.3f} > {check.get('maxCer', 0.13)}")
                 reading = segment.get("expectedReading", "") or to_katakana_reading(expected_text)
                 moras = mora_count_from_reading(fold_kana(reading))
                 if moras and seg_duration > 0.2:
