@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 最適構成エンジンの入口（Claude Code / Codex 共通）。結果は JSON で標準出力へ出す。
 //
-//   node scripts/optimal-config.mjs select --traits examples/optimal-config/traits/koya.json
+//   node scripts/optimal-config.mjs select --traits examples/optimal-config/traits/fixed-cast-manga.json
 //   node scripts/optimal-config.mjs select --project-dir <作業中のプロジェクト> [--pack-id <id>]
 //   node scripts/optimal-config.mjs gate --model anima [--route otoshigo-hosted] [--traits <file>]
 //   node scripts/optimal-config.mjs trial-plan --traits <file>

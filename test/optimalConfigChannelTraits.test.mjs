@@ -23,7 +23,7 @@ test("例の traits（4チャンネル）は検査と JSON Schema の両方を�
   const ajv = new Ajv2020({ allErrors: true, strict: false });
   const validate = ajv.compile(CHANNEL_TRAITS_SCHEMA);
   const names = readdirSync(examplesDir).filter((name) => name.endsWith(".json")).sort();
-  assert.deepEqual(names, ["iq-comparison.json", "koya.json", "mike.json", "unashi.json"]);
+  assert.deepEqual(names, ["diagram-mascot-explainer.json", "fixed-cast-manga.json", "iq-comparison.json", "photoreal-narrated-story.json"]);
   for (const name of names) {
     const traits = JSON.parse(readFileSync(join(examplesDir, name), "utf8"));
     assert.deepEqual(validateChannelTraits(traits), { ok: true, errors: [] }, name);
@@ -32,7 +32,7 @@ test("例の traits（4チャンネル）は検査と JSON Schema の両方を�
 });
 
 test("足りない・おかしい欄は、黙って埋めずに欄ごとの日本語の理由で返す", () => {
-  const traits = example("koya");
+  const traits = example("fixed-cast-manga");
   delete traits.motion;
   traits.artStyle = "watercolor";
   traits.hardware = { ...traits.hardware, mac: { memoryGiB: 0 }, extra: 1 };
@@ -46,7 +46,7 @@ test("足りない・おかしい欄は、黙って埋めずに欄ごとの日�
 });
 
 test("省略できる欄だけ既定値を入れる（公開範囲は全世界、優先は balanced）", () => {
-  const traits = example("mike");
+  const traits = example("photoreal-narrated-story");
   delete traits.publishScope;
   const normalized = assertChannelTraits(traits);
   assert.equal(normalized.publishScope, "worldwide");
@@ -55,7 +55,7 @@ test("省略できる欄だけ既定値を入れる（公開範囲は全世界�
 });
 
 test("Channel Pack の形（channelTraits / optimalConfig.traits）からも取り出せる", () => {
-  const traits = example("unashi");
+  const traits = example("diagram-mascot-explainer");
   assert.equal(traitsFromChannelPack(traits), traits);
   assert.equal(traitsFromChannelPack({ channelTraits: traits }), traits);
   assert.equal(traitsFromChannelPack({ optimalConfig: { traits } }), traits);
@@ -74,7 +74,7 @@ test("Channel Pack の config/channel-traits.json を読み、合成 fixture は
 
     const pack = join(dir, "pack");
     mkdirSync(join(pack, "config"), { recursive: true });
-    writeFileSync(join(pack, "config", "channel-traits.json"), JSON.stringify(example("koya")));
+    writeFileSync(join(pack, "config", "channel-traits.json"), JSON.stringify(example("fixed-cast-manga")));
     process.env.BUZZASSIST_CHANNEL_PACK = pack;
     const read = readChannelTraits({ projectDir: dir });
     assert.equal(read.source.kind, "channel-pack:env");
@@ -90,7 +90,7 @@ test("Channel Pack の config/channel-traits.json を読み、合成 fixture は
 test("絵の種類が無ければ画風プロファイルから推定し、推定したことを残す", () => {
   const dir = mkdtempSync(join(tmpdir(), "bz-traits-"));
   try {
-    const traits = example("mike");
+    const traits = example("photoreal-narrated-story");
     delete traits.artStyle;
     const file = join(dir, "traits.json");
     writeFileSync(file, JSON.stringify(traits));

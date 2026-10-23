@@ -77,13 +77,13 @@ Channel Pack の `config/channel-traits.json` に置く（チャンネル固有�
 5. モデルは役目ごと（本番の画像・下書き・量のカット・動画）に、動けて権利も通る実行場所で並べる。既に払っている契約 → 手元（無料）→ 借り GPU の順。下書きは手元だけ、量のカットは尺が40分以上のときだけ
 6. 機材の判定：Mac のメモリが足りない経路（LTX Desktop のローカルは 32GiB 以上）、CUDA 専用の経路と高速化、契約の無いサービス、Mac で動くか未確認のもの（未確認は選ばない）を外し、理由を返す
 
-例の4チャンネルの当てはめ（`node scripts/optimal-config.mjs select --traits examples/optimal-config/traits/<id>.json`）:
+例の4チャンネル（id は依頼者の名前に由来しない、絵と形式を表す名前にしている）の当てはめ（`node scripts/optimal-config.mjs select --traits examples/optimal-config/traits/<id>.json`）:
 
 | id | 構成 | ワークフロー | モデル |
 |---|---|---|---|
-| koya | R04（動かす2カットは R03） | W07 → W03 → W06 → W04 → W17 → W01 | 本番 GPT Image、下書き klein 4B（Mac）、動画 Grok Imagine |
-| mike | R01＋R06＋R13（冒頭は R03） | W07 → W12 → W23 → W22 → W40 | 本番 GPT Image、量のカット Z-Image Turbo（借り GPU） |
-| unashi | R09（生成動画なし） | W25 → W28 → W01 | 本番 GPT Image、予備 klein 4B |
+| fixed-cast-manga | R04（動かす2カットは R03） | W07 → W03 → W06 → W04 → W17 → W01 | 本番 GPT Image、下書き klein 4B（Mac）、動画 Grok Imagine |
+| photoreal-narrated-story | R01＋R06＋R13（冒頭は R03） | W07 → W12 → W23 → W22 → W40 | 本番 GPT Image、量のカット Z-Image Turbo（借り GPU） |
+| diagram-mascot-explainer | R09（生成動画なし） | W25 → W28 → W01 | 本番 GPT Image、予備 klein 4B |
 | iq-comparison | R09＋R03 | W07 → W28 → W29 → W23 | 下書き klein 4B（Mac）、動画 Wan2.2 TI2V-5B（借り GPU） |
 
 ## 10カット試験の記録

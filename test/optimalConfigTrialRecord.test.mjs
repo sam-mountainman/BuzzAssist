@@ -17,7 +17,7 @@ import {
 } from "../lib/optimalConfig/trialRecord.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const traits = JSON.parse(readFileSync(new URL("../examples/optimal-config/traits/koya.json", import.meta.url), "utf8"));
+const traits = JSON.parse(readFileSync(new URL("../examples/optimal-config/traits/fixed-cast-manga.json", import.meta.url), "utf8"));
 
 function result(cutId, candidateId, overrides = {}) {
   return {
@@ -66,7 +66,7 @@ function fullTrial() {
 }
 
 test("段取りは典型5＋難しい5の10カットで、結果の欄は p18 の最小項目どおり", () => {
-  const trial = createTrialPlan({ channelId: "koya", candidates: [{ id: "A" }, { id: "B" }] });
+  const trial = createTrialPlan({ channelId: "fixed-cast-manga", candidates: [{ id: "A" }, { id: "B" }] });
   assert.equal(trial.cuts.length, 10);
   assert.equal(trial.cuts.filter((cut) => cut.kind === "typical").length, 5);
   assert.equal(trial.cuts.filter((cut) => cut.kind === "hard").length, 5);
@@ -85,7 +85,7 @@ test("欠けた欄・矛盾した数字は日本語の理由で止める", () =>
   assert.ok(errors.some((item) => /素材の送信先/u.test(item.message)));
   assert.ok(errors.some((item) => /不採用の理由/u.test(item.message)), "採用しなかった秒があるのに理由が無い");
   assert.equal(validateTrialResult(result("x", "A", { adoptedSeconds: 9 })).ok, false, "生成した秒数より多くは採用できない");
-  const trial = createTrialPlan({ channelId: "koya", candidates: [{ id: "A" }] });
+  const trial = createTrialPlan({ channelId: "fixed-cast-manga", candidates: [{ id: "A" }] });
   assert.throws(() => addTrialResult(trial, result("unknown-cut", "A")), /段取りに無いカット/u);
   addTrialResult(trial, result("typical-1", "A"));
   assert.throws(() => addTrialResult(trial, result("typical-1", "A")), /既にある/u);
@@ -103,7 +103,7 @@ test("採用秒率・採用1秒あたりの現金・採用1秒あたりの人の
   assert.equal(b.humanMinutesPerAdoptedSecond, Math.round((50 / 30) * 10_000) / 10_000);
   assert.deepEqual(b.rejectionReasons, { "顔が別人になる": 5 });
   assert.deepEqual(recommendFromTrial(trial), { production: "A", fallback: "B", note: recommendFromTrial(trial).note });
-  const partial = createTrialPlan({ channelId: "koya", candidates: [{ id: "A" }] });
+  const partial = createTrialPlan({ channelId: "fixed-cast-manga", candidates: [{ id: "A" }] });
   addTrialResult(partial, result("typical-1", "A"));
   assert.equal(computeTrialMetrics(partial)[0].complete, false);
   assert.equal(recommendFromTrial(partial).production, null, "10カットそろわない候補は提案しない");

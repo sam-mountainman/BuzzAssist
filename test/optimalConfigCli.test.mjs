@@ -7,9 +7,9 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const run = (...args) => spawnSync(process.execPath, ["scripts/optimal-config.mjs", ...args], { cwd: root, encoding: "utf8" });
 
 test("select --traits は候補を JSON で出す", () => {
-  const output = JSON.parse(execFileSync(process.execPath, ["scripts/optimal-config.mjs", "select", "--traits", "examples/optimal-config/traits/koya.json"], { cwd: root, encoding: "utf8" }));
+  const output = JSON.parse(execFileSync(process.execPath, ["scripts/optimal-config.mjs", "select", "--traits", "examples/optimal-config/traits/fixed-cast-manga.json"], { cwd: root, encoding: "utf8" }));
   assert.equal(output.ok, true);
-  assert.equal(output.channelId, "koya");
+  assert.equal(output.channelId, "fixed-cast-manga");
   assert.equal(output.videoConfigs.base, "R04");
   assert.equal(output.candidates[0].models.imagePrimary.modelId, "gpt-image");
 });
