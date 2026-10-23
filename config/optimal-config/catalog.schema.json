@@ -1,0 +1,259 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://buzzassist.local/schemas/optimal-config-catalog-v1.json",
+  "title": "オトシゴのハーネス 最適構成エンジンの構成表 v1",
+  "description": "動画の構成（R01〜R18）、画像のワークフロー（W01〜W40）、構成に関わるモデルと権利の6層、高速化の対応環境。scripts/build-optimal-config-catalog.mjs が作る（手で直さない）。reproduced=false は、調査資料を読んだだけで誰も実際に動かしていないことを表す。",
+  "type": "object",
+  "required": ["version", "as_of", "reproduced", "benchmarked", "note", "sourceDatasets", "runtimePlaces", "rightsLayers", "videoConfigs", "imageWorkflows", "workflowSelectors", "models", "accelerations"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "const": "optimal-config-catalog-v1" },
+    "as_of": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "reproduced": { "const": false },
+    "benchmarked": { "const": false },
+    "note": { "type": "string", "minLength": 1 },
+    "generatedBy": { "type": "string" },
+    "sourceDatasets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "as_of", "provides"],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "as_of": { "type": "string" },
+          "provides": { "type": "string" }
+        }
+      }
+    },
+    "runtimePlaces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "operatorOwned", "sendsDataExternally", "mediaGenerationAllowed"],
+        "properties": {
+          "id": { "$ref": "#/$defs/runtimePlace" },
+          "label": { "type": "string" },
+          "operatorOwned": { "type": "boolean" },
+          "sendsDataExternally": { "type": "boolean" },
+          "mediaGenerationAllowed": { "type": "boolean" }
+        }
+      }
+    },
+    "rightsLayers": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "required": ["id", "key", "label", "question"],
+        "properties": {
+          "id": { "enum": ["A", "B", "C", "D", "E", "F"] },
+          "key": { "enum": ["code", "weights", "outputs", "hosting", "assets", "data"] },
+          "label": { "type": "string" },
+          "question": { "type": "string" }
+        }
+      }
+    },
+    "videoConfigs": {
+      "type": "array",
+      "minItems": 18,
+      "maxItems": 18,
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "role", "summary", "targetTraits", "motionLevel", "identityNeeds", "runtimePlaces", "budgetBand", "skillLevel", "failureModes", "migrateTo", "pdfPages"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^R(0[1-9]|1[0-8])$" },
+          "name": { "type": "string" },
+          "role": { "enum": ["base", "clips", "identity", "operations", "runtime", "confidential", "quality", "trial"] },
+          "summary": { "type": "string" },
+          "targetTraits": {
+            "type": "object",
+            "required": ["artStyles", "identityLocks", "motions"],
+            "properties": {
+              "artStyles": { "type": "array", "items": { "$ref": "#/$defs/artStyle" }, "minItems": 1 },
+              "identityLocks": { "type": "array", "items": { "$ref": "#/$defs/identityLock" }, "minItems": 1 },
+              "motions": { "type": "array", "items": { "$ref": "#/$defs/motion" }, "minItems": 1 }
+            }
+          },
+          "appliesWhen": { "type": "object" },
+          "motionLevel": { "enum": ["none", "low", "medium", "high"] },
+          "identityNeeds": { "type": "string" },
+          "runtimePlaces": { "type": "array", "items": { "$ref": "#/$defs/runtimePlace" } },
+          "budgetBand": { "enum": ["zero", "low", "medium", "high"] },
+          "skillLevel": { "type": "string" },
+          "failureModes": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+          "migrateTo": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["to", "when"],
+              "properties": {
+                "to": { "type": "array", "items": { "type": "string", "pattern": "^R\\d{2}$" } },
+                "when": { "type": "string" }
+              }
+            }
+          },
+          "pdfPages": { "type": "string" }
+        }
+      }
+    },
+    "imageWorkflows": {
+      "type": "array",
+      "minItems": 40,
+      "maxItems": 40,
+      "items": {
+        "type": "object",
+        "required": ["id", "category", "name", "tools", "good_for", "caveats", "validation", "reproduced"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^W(0[1-9]|[1-3][0-9]|40)$" },
+          "category": { "type": "string" },
+          "name": { "type": "string" },
+          "tools": { "type": "string" },
+          "workflow": { "type": "string" },
+          "good_for": { "type": "string" },
+          "caveats": { "type": "string" },
+          "validation": { "type": "string" },
+          "sourceIds": { "type": "array", "items": { "type": "string" } },
+          "reproduced": { "const": false },
+          "requiresModels": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "workflowSelectors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["workflowId", "priority", "when", "purpose"],
+        "properties": {
+          "workflowId": { "type": "string", "pattern": "^W\\d{2}$" },
+          "priority": { "type": "integer" },
+          "when": {
+            "type": "object",
+            "properties": {
+              "artStyles": { "type": "array", "items": { "$ref": "#/$defs/artStyle" } },
+              "identityLocks": { "type": "array", "items": { "$ref": "#/$defs/identityLock" } },
+              "motions": { "type": "array", "items": { "$ref": "#/$defs/motion" } },
+              "confidentialAssets": { "type": "boolean" }
+            },
+            "additionalProperties": false
+          },
+          "purpose": { "type": "string" }
+        }
+      }
+    },
+    "licenseCautions": { "type": "array" },
+    "models": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "kind", "access", "roles", "fit", "preference", "rights", "runtime", "asOf", "reproduced", "evidence"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+          "name": { "type": "string" },
+          "kind": { "enum": ["image", "video", "face-id"] },
+          "access": { "enum": ["service", "open-weights"] },
+          "contractKeys": { "type": "array", "items": { "type": "string" } },
+          "mediaGenerationIds": { "type": "array", "items": { "type": "string" } },
+          "catalogModelId": { "type": "string" },
+          "roles": { "type": "array", "items": { "enum": ["image-primary", "image-draft", "image-bulk", "image-edit", "face-id", "video-i2v", "video-t2v", "video-av"] }, "minItems": 1 },
+          "fit": {
+            "type": "object",
+            "required": ["artStyles"],
+            "properties": { "artStyles": { "type": "array", "items": { "$ref": "#/$defs/artStyle" } } }
+          },
+          "preference": { "type": "integer" },
+          "rights": {
+            "type": "object",
+            "required": ["code", "weights", "outputs", "hosting", "region", "data"],
+            "properties": {
+              "code": {
+                "type": "object",
+                "required": ["license", "status"],
+                "properties": { "status": { "enum": ["ok", "caution", "block", "unverified", "not-applicable"] } }
+              },
+              "weights": {
+                "type": "object",
+                "required": ["license", "licenseKind", "operatorProductionUse"],
+                "properties": {
+                  "licenseKind": { "enum": ["open", "non-commercial", "research", "community", "proprietary-service"] },
+                  "operatorProductionUse": { "enum": ["allowed", "conditional", "forbidden", "unverified", "not-applicable"] },
+                  "faceIdWeightsCommercial": { "type": "boolean" },
+                  "outputsCommercialExplicit": { "type": "boolean" },
+                  "derivativeTerms": { "enum": ["restrictive"] },
+                  "professionalAnimation": { "enum": ["separate-license"] },
+                  "revenueThresholdUsd": { "type": "number" }
+                }
+              },
+              "outputs": {
+                "type": "object",
+                "required": ["commercialUse"],
+                "properties": { "commercialUse": { "enum": ["allowed", "conditional", "forbidden", "unverified"] } }
+              },
+              "hosting": {
+                "type": "object",
+                "required": ["asService"],
+                "properties": { "asService": { "enum": ["allowed", "conditional", "forbidden", "unverified"] } }
+              },
+              "region": {
+                "type": "object",
+                "required": ["excludedTerritories", "appliesToOutputs"],
+                "properties": {
+                  "excludedTerritories": { "type": "array", "items": { "type": "string" } },
+                  "appliesToOutputs": { "type": "boolean" }
+                }
+              },
+              "data": {
+                "type": "object",
+                "required": ["sendsExternally"],
+                "properties": { "sendsExternally": { "enum": [true, false, "optional"] } }
+              }
+            }
+          },
+          "runtime": {
+            "type": "object",
+            "required": ["places", "mac"],
+            "properties": {
+              "places": { "type": "array", "items": { "$ref": "#/$defs/runtimePlace" }, "minItems": 1 },
+              "mac": {
+                "type": "object",
+                "required": ["supported"],
+                "properties": {
+                  "supported": { "enum": [true, false, "unverified", "not-applicable"] },
+                  "minMemoryGiB": { "type": "number" }
+                }
+              },
+              "cuda": {
+                "type": ["object", "null"],
+                "properties": { "minVramGiB": { "type": ["number", "null"] } }
+              }
+            }
+          },
+          "asOf": { "type": "string" },
+          "reproduced": { "const": false },
+          "evidence": { "type": "object" }
+        }
+      }
+    },
+    "accelerations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "platform"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "platform": { "enum": ["cuda-only", "mac-only", "cross-platform", "unverified"] }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "artStyle": { "enum": ["flat-2d-manga", "anime", "photoreal", "diagram-mascot", "ai-footage", "live-footage"] },
+    "identityLock": { "enum": ["none", "mascot", "fixed-cast", "person+wardrobe"] },
+    "motion": { "enum": ["stills-camera", "few-clips", "mostly-video"] },
+    "runtimePlace": { "enum": ["operator-mac", "operator-cuda", "operator-rented-gpu", "operator-service", "otoshigo-hosted"] }
+  }
+}

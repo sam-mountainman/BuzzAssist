@@ -1,0 +1,19 @@
+{
+  "version": "channel-traits-v1",
+  "channelId": "fixed-cast-manga",
+  "artStyle": "flat-2d-manga",
+  "identityLock": "fixed-cast",
+  "motion": "few-clips",
+  "budgetMonthlyJpy": 30000,
+  "hardware": {
+    "mac": { "memoryGiB": 16 },
+    "cudaVramGiB": 0,
+    "cloudGpu": true,
+    "contracts": ["chatgpt", "codex", "grok"]
+  },
+  "confidentialAssets": false,
+  "aspect": "16:9",
+  "lengthMinutes": 22,
+  "publishScope": "worldwide",
+  "notes": "例。固定キャストの2Dフラット漫画。1話あたり動画にするのは最大2カット。"
+}

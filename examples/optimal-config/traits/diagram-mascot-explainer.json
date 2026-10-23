@@ -1,0 +1,19 @@
+{
+  "version": "channel-traits-v1",
+  "channelId": "diagram-mascot-explainer",
+  "artStyle": "diagram-mascot",
+  "identityLock": "mascot",
+  "motion": "stills-camera",
+  "budgetMonthlyJpy": null,
+  "hardware": {
+    "mac": { "memoryGiB": 16 },
+    "cudaVramGiB": 0,
+    "cloudGpu": false,
+    "contracts": ["codex"]
+  },
+  "confidentialAssets": false,
+  "aspect": "16:9",
+  "lengthMinutes": 15,
+  "publishScope": "worldwide",
+  "notes": "例。図解の長尺解説とマスコット。映像はローカルのタイムラインで作り、生成動画は使わない。"
+}
