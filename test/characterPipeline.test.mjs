@@ -477,6 +477,41 @@ test("a weak anonymous candidate can be regenerated without replacing passing ca
   }
 });
 
+test("regeneration rebuilds the variation block from the current candidateVariants", async () => {
+  const projectDir = await mkdtemp(path.join(os.tmpdir(), "buzzassist-character-regenerate-variant-"));
+  try {
+    const workflow = await prepareCharacterWorkflow({
+      projectDir,
+      scriptText: "田中：候補を比べる。",
+      episodeId: "episode-regenerate-variant",
+      candidateCount: 3,
+    });
+    const jobs = await buildCharacterCandidateJobs(workflow);
+    await markCharacterCandidatesGenerating({ projectDir }, workflow.id, jobs);
+    const assetDir = path.join(projectDir, "canvas", "assets");
+    await mkdir(assetDir, { recursive: true });
+    const results = [];
+    for (const [index] of jobs.entries()) {
+      const assetFile = path.join(assetDir, `variant-${index}.png`);
+      await writeFile(assetFile, testRaster(index + 1));
+      results.push({ assetFile });
+    }
+    const firstPass = await recordCharacterCandidateResults({ projectDir, generatorContextId: "candidate-variant-session" }, workflow.id, jobs, results);
+    const cast = firstPass.cast[0];
+    const target = cast.candidates[1];
+    const edited = {
+      ...firstPass,
+      cast: [{ ...cast, candidateVariants: ["first design", "SECOND DESIGN AFTER REVIEW", "third design"] }, ...firstPass.cast.slice(1)],
+    };
+    const [job] = buildCharacterCandidateRegenerationJobs(edited, cast.id, [target.blindLabel]);
+    assert.match(job.prompt, /Variation direction B \(CHARACTER-SPECIFIC DESIGN\): SECOND DESIGN AFTER REVIEW/);
+    assert.equal(job.prompt.split("Variation direction ").length, 2);
+    assert.match(job.pipeline.variationAxis, /SECOND DESIGN AFTER REVIEW/);
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});
+
 test("legacy published A-E labels migrate without reassigning the selected person and explicit F is retired", async () => {
   const projectDir = await mkdtemp(path.join(os.tmpdir(), "buzzassist-character-blind-migration-"));
   try {
