@@ -219,8 +219,25 @@ def main():
     expected_readings = [normalize(text) for text in phonetic[1:]]
     rows = []
     cursor = 0
+    index_by_id = {entry["id"]: position for position, entry in enumerate(manifest["utterances"])}
     for utterance_index, u in enumerate(manifest["utterances"]):
         a = u["audio"]
+        anchor_id = (u.get("timing") or {}).get("simultaneousWithUtteranceId")
+        if anchor_id and not is_nonverbal_text(u.get("text", "")):
+            # 2人同時の行は、組の最初の行と同じ時刻に重ねて鳴る。通しの聞き取りでは1回しか聞こえない
+            # ので、文字の順の照合からは外す。同じ文なら組の最初の行の照合がこの行の照合も兼ねる。
+            # 違う文は重なった音からは確かめられない。声の中身は、重ねる前のテイクごとの音声の
+            # 品質ゲート（聞き取りを含む）が確かめている。どちらの扱いかを行に残す。
+            anchor_index = index_by_id.get(anchor_id)
+            same_text = anchor_index is not None and expected_readings[anchor_index] == expected_readings[utterance_index]
+            rows.append({
+                "id": u["id"],
+                "simultaneousWithUtteranceId": anchor_id,
+                "textVerification": "covered-by-simultaneous-anchor" if same_text
+                else "verified-at-take-simultaneous-overlap",
+                "pass": True,
+            })
+            continue
         if is_nonverbal_text(u.get("text", "")):
             # 記号だけの行（「！」「…ッ！」）は言葉にならない声で、文字で照合できない。以前は空どうしの
             # 類似度 1.0 で黙って合格し、「…ッ！」は「ッ」1文字との照合で落ちていた。声の有無は

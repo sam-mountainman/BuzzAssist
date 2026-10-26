@@ -117,6 +117,10 @@ def utterance_windows(manifest):
     for utterance in manifest["utterances"]:
         timing = utterance.get("timing") or {}
         audio = utterance.get("audio") or {}
+        if timing.get("simultaneousGroupId"):
+            # 2人同時の組の行は、2人の声が同じ時刻に混ざる。1人の声の窓を取れないので、声の基準にも
+            # 境目の照合にも使わない（外した行は結果の simultaneousExcluded に残す）。
+            continue
         base = cut_start[utterance["cutId"]] + float(timing["audioStartInCutSeconds"])
         rows.append({
             "id": utterance["id"],
@@ -221,6 +225,10 @@ def main():
             "minimumProfileFrames": MIN_PROFILE_FRAMES,
         },
         "rows": findings,
+        "simultaneousExcluded": [
+            utterance["id"] for utterance in manifest["utterances"]
+            if (utterance.get("timing") or {}).get("simultaneousGroupId")
+        ],
         "evaluatedBoundaries": len(evaluated),
         "skippedBoundaries": len(findings) - len(evaluated),
         "pass": len(failures) == 0,

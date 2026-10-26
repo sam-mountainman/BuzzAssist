@@ -143,6 +143,11 @@ def main():
         late_tail_jump = late_tail_evidence["jump"]
         late_tail_peak = late_tail_evidence["peak"]
         late_tail_click = late_tail_evidence["isolated"]
+        # 2人同時の組の行は、この行の声が終わったあとも組のほかの人の声が鳴っている。その声を
+        # 「行の後ろの音割れ」と取り違えないよう、組の行では後ろの検査を当てない（行に残す）。
+        simultaneous_group = timing.get("simultaneousGroupId")
+        if simultaneous_group:
+            late_tail_click = False
         body_level = rms_db(body)
         head_level = rms_db(head_samples)
         boundary_jump = max_jump(boundary)
@@ -160,6 +165,8 @@ def main():
         )
         rows.append({
             "id": utterance.get("id"), "startSeconds": round(start, 3), "durationSeconds": round(duration, 3),
+            **({"simultaneousGroupId": simultaneous_group, "lateTailCheck": "not-applicable-simultaneous"}
+               if simultaneous_group else {}),
             "speechStartSeconds": round(head, 3), "bodyRmsDbfs": round(body_level, 2),
             "headRmsDbfs": round(head_level, 2), "boundaryMaximumJump": round(boundary_jump, 4), "pass": passed,
             "onsetJoinFirst1msMaximumJump": round(onset_jump, 4),

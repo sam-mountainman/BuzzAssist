@@ -140,6 +140,22 @@ RunReceiptが確定できない場合、Jobは`failed`にならず、**`awaiting
 再実行で同じ `requestKey` のまま送り直します。サーバーが受理した失敗（`pmj_` の jobId）と、課金済み・課金不明の
 失敗は送り直しません。
 
+## 2人同時の台詞
+
+台本で2行に分けて書いた「同じコマで2人が同時に言う台詞」は、人物設定の `speechDirections` で
+後の行に `"simultaneousWithPrevious": true` を書きます（`speechText`・`performancePrompt` と同じ項目に並べる）。
+
+- 声は人物ごとにいつもどおり作り、コマの時間割（`compileEpisodeTiming`）で前の行と声の出だしをそろえて重ねます。
+  その行の `pauseBeforeSeconds` は使わず、`adjust-gap` でも変えられません。
+- 3人以上は、2行目以降すべてに書くと、全員が組の最初の行にそろいます。同じ組に同じ人物は入れません。
+- 前の行が同じコマに無い・同じ人物のときは、指定の読み込みで止まります。
+- 組の吹き出しは一緒に出して一緒に消し、組の行の音は 1/√人数 に下げて足します（`timing.mixGain`）。
+- 書き出しの点検での扱い：
+  - 聞き取りの照合：組の後の行は、同じ文なら組の最初の行の照合が兼ね（`covered-by-simultaneous-anchor`）、
+    違う文ならテイクごとの音声の品質ゲートの照合で確かめた扱い（`verified-at-take-simultaneous-overlap`）です。
+  - 話者の続き：組の行は外します（`simultaneousExcluded`）。
+  - 波形：組の行は後ろの音割れの検査を当てません（`lateTailCheck: not-applicable-simultaneous`）。
+
 ## 途中で止まった・失敗したJobの再開
 
 どの場合も入口は同じ `node scripts/run-video-harness.mjs resume --job-id ID --project-dir DIR --confirmed`
