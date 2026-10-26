@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 import { runKoyaCharacterAttributeGate } from "../lib/koyaCharacterAttributeAudit.mjs";
+import { recoverKoyaRegisteredCharacterIdentity } from "../lib/koyaCharacterRecovery.mjs";
 import { auditKoyaMangaFinal, writeKoyaVisualSignoff } from "../lib/koyaMangaFinalAudit.mjs";
 import {
   REVIEWER_TRUST_ENV_GUIDANCE,
@@ -139,7 +140,7 @@ function usage() {
     "Koya manga video production (fail-closed)",
     "",
     "node scripts/koya-manga-video.mjs <action> [options]",
-    "actions: contract, channel-contract, wardrobe-readiness, character-bootstrap-status, character-registration-reconcile, character-roster-review-draft, character-roster-audit, cast-readiness, story-review-draft, story-audit, location-plan, location-generate, location-import, location-anchor-review-draft, location-anchor-audit, location-review-draft, location-register, asset-quality-references, thumbnail-plan-draft, thumbnail-audit, handoff-export, handoff-verify, handoff-restore, voice-audition, voice-approve, plan, images, character-review-refresh, character-candidate-migrate-blind, character-candidate-import, character-style-generate, character-style-import, character-style-review-refresh, character-style-record-failure, character-style-compose, character-style-select, character-attribute-gate, character-approve, character-identity-refresh, character-identity-repair, character-identity-repack, character-register, prepare, speech, video-substitute, adjust-gap, standard-cut, repair-onset, repair-tail, sync-contract, refresh-bubbles, render, audit, reviewer-key-create, signoff, full, status",
+    "actions: contract, channel-contract, wardrobe-readiness, character-bootstrap-status, character-registration-reconcile, character-roster-review-draft, character-roster-audit, cast-readiness, story-review-draft, story-audit, location-plan, location-generate, location-import, location-anchor-review-draft, location-anchor-audit, location-review-draft, location-register, asset-quality-references, thumbnail-plan-draft, thumbnail-audit, handoff-export, handoff-verify, handoff-restore, voice-audition, voice-approve, plan, images, character-review-refresh, character-candidate-migrate-blind, character-candidate-import, character-style-generate, character-style-import, character-style-review-refresh, character-style-record-failure, character-style-compose, character-style-select, character-attribute-gate, character-approve, character-identity-refresh, character-identity-recover, character-identity-repair, character-identity-repack, character-register, prepare, speech, video-substitute, adjust-gap, standard-cut, repair-onset, repair-tail, sync-contract, refresh-bubbles, render, audit, reviewer-key-create, signoff, full, status",
     "common: --project-dir DIR --episode-id ID --script-path FILE --title TITLE --protagonist-speaker-id ID_OR_EXACT_NAME --character-bible-path JSON [--story-review-path JSON] [--source-face-review-path JSON] [--generator-host codex|claude|legacy-migration] [--generator-id ID] [--generator-context-id TASK_OR_SESSION_ID] [--retry-failed] [--image-concurrency N|auto] [--qa-concurrency N] [--speech-concurrency N|auto] [--image-fallback-model MODEL] [--qa-fallback-provider grok]",
     "wardrobe-readiness: --episode-id ID [--script-path FILE] [--wardrobe-review-path JSON] (free script-driven outfit gate; writes canvas/assets/<episode-id>/wardrobe-readiness.json. exit 0 = every checked character has an outfit for every scene, exit 2 = pending slots. images/full refuse to start without a passing report for the exact script)",
     "audit: [--video-path MP4] [--revision-delta TEXT] (final audit; from the 2nd quality-loop round on, pass what was fixed for the previous failure, or write audits/koya-final/revision-delta.json; without it the audit stops for a human instead of recording the round)",
@@ -163,7 +164,8 @@ function usage() {
     "source region fallback: inspect the exact source image and pass a koya-source-region-review-v2 JSON whose annotations bind normalized face/hand/prop/evidence/text bounds to the source SHA-256 (legacy koya-source-face-review-v1 remains accepted)",
     `audit: --video-path MP4 [--quick] [--dry-run] [--reviewer-trust-path JSON] (the reviewer trust list comes only from the operator's ${REVIEWER_TRUST_ENV_GUIDANCE}; --reviewer-trust-path is a cross-check and must match that list or the action stops with reviewer-trust-conflict, and without the environment variable it stops with reviewer-trust-unconfigured; the signoff's Ed25519 reviewer attestation is re-verified against it)`,
     "character-approve: --workflow-id ID --cast-id ID_OR_NAME --candidate-label A..E --approval-reason WHY --candidate-review-path JSON --generator-context-id TASK_OR_SESSION [--approved-by NAME] [--identity-generation-import-map-path JSON] (generates or imports a SHA/input-bound pending identity pack; does not register)",
-    "character-identity-repair: --episode-id ID --workflow-id ID --cast-id ID_OR_NAME (--identity-review-path FAILED_REVIEW_JSON | --identity-findings-path FINDINGS_JSON --identity-repair-plan-path REPAIR_PLAN_JSON) --identity-repair-id UNIQUE_ID --generator-host codex|claude --generator-id ID --generator-context-id TASK_OR_SESSION [--identity-generation-import-map-path JSON] (revalidates failed evidence; findings mode applies findingId/ROI repair and SHA-bound import while preserving protected pixels)",
+    "character-identity-repair: --episode-id ID --workflow-id ID --cast-id ID_OR_NAME (--identity-review-path FAILED_REVIEW_JSON [--roi-from-review] | --identity-findings-path FINDINGS_JSON --identity-repair-plan-path REPAIR_PLAN_JSON) --identity-repair-id UNIQUE_ID --generator-host codex|claude --generator-id ID --generator-context-id TASK_OR_SESSION [--identity-generation-import-map-path JSON] (revalidates failed evidence; without --roi-from-review a failed review regenerates whole failed roles; --roi-from-review turns the review's content-failed cells (identity/hair/side-lock/content notes, not grid alignment) into <role>:<cellId> findings and an equal-grid ROI plan bound to the failed review SHA-256, and edits only those cells; an alignment-only review is refused in favour of character-identity-repack; findings mode applies findingId/ROI repair and SHA-bound import; outside-ROI pixels are protected by the prompt and the fresh independent QA, not by compositing)",
+    "character-identity-recover: --workflow-id ID --cast-id ID_OR_NAME --recovery-map-path JSON (for an already registered character whose approved files or identity review were lost; every registered file still on disk must be byte-identical to the registry: validates a koya-character-identity-recovery-map-v1 map whose identity face is restored (registered SHA) or recovered from surviving approved material, and whose turnaround/expression/eyes-open sheets are each origin restored (byte-identical to the registry SHA), origin repacked (scripts/repack-koya-identity-grid.py manifest whose sourceSha256 is the registry SHA), or composed by scripts/compose-koya-identity-grid.py from cells that are recovered (client PDF page/index/extractor, or archive path/member), restored-cell (restored: {sourcePath, sourceSha256 = registry SHA of the same role, bounds [x,y,w,h], path, sha256}; cut with a compose \"crop\" entry so the manifest records cropOf; the crop is re-derived and compared pixel by pixel when both files are decodable PNGs, otherwise the bounds are left in the evidence for the reviewer) or generated (SHA-bound prompt/generator, referenceImages must include that identity face; the face itself is never generated); a character with registered outfit sheets must list outfitSheets: [{storyStage, origin restored|repacked (4x1), ...}] covering exactly the registry's outfit storyStages; copies everything under canvas/assets/character-recoveries/ and stages outfits as identityPack.outfitSheets, writes recovery evidence, returns the character to awaiting-identity-qa and drafts an identity review (outfit sheets included) that also needs recovery.provenanceGapAcknowledged plus recoveredCellsMatchSources / generatedCellsConsistent / repackedSheetsMatchSources / restoredCellsMatchSources when those counts are non-zero; never edits the registry — character-register does that after the independent review, registering outfits as role outfit with their storyStage)",
     "character-identity-refresh: --episode-id ID --workflow-id ID --cast-id ID_OR_NAME --identity-refresh-id UNIQUE_ID --generator-host codex|claude --generator-id ID --generator-context-id TASK_OR_SESSION [--identity-generation-import-map-path JSON] (keeps the already registered identity-face SHA frozen, regenerates or SHA/input-bound imports only turnaround/expression, and stages fresh QA without face reapproval)",
     "character-identity-repack: --episode-id ID --workflow-id ID --cast-id ID_OR_NAME (--identity-review-path FAILED_REVIEW_JSON | --identity-findings-path FINDINGS_JSON --identity-repair-plan-path REPAIR_PLAN_JSON) --identity-repair-id UNIQUE_ID --generator-context-id TASK_OR_SESSION (for turnaround/expression/eye-open boundary failures: archives or binds the failure evidence, redraws nothing, extracts existing views from actual white gutters, and contains them in exact cells with 8% clearance before fresh QA)",
     "character-review-refresh: --workflow-id ID [--cast-id ID_OR_NAME] --generator-host legacy-migration --generator-context-id MIGRATION_ID (rebuilds v2 review drafts from existing anonymous artifacts; no paid generation and no auto-approval)",
@@ -194,7 +196,7 @@ function usage() {
     "images/full wardrobe override: --wardrobe-readiness-override-reason TEXT starts the paid images without a passing wardrobe-readiness report; the reason is recorded in the inventory and the episode state and reported by the final audit",
     "plan/images/full script quality: [--script-quality-work-dir DIR] (from contract v56, before any paid work images/full ask the script quality loop in DIR — default: the folder of --script-path; an outer Job passes its options.scriptQualityWorkDir — whether the exact script bytes were accepted: a person recorded node scripts/script-quality-loop.mjs accept-human --human-verified for them (the usual route for a client-written script), or the loop passed them (when proposing fixes). Otherwise they stop with exit 3, status awaiting-script-quality, script-quality-required:<reason code> and both next commands; the answer is kept in the episode state and checked by the final audit script-quality-accepted. plan only reports the answer)",
     "speech: R194 voice quality gate is always on; [--take-count 2..8] [--max-adaptive-takes 2..8]; --no-voice-quality-gate requires --voice-quality-gate-override-reason",
-    "voice-audition: [--episode-id REGISTRY_SCOPE (default global = fixed cast)] --character-ids id1,id2 [--candidates-path JSON] writes a koya-voice-audition-candidates-v1 template (never overwrites); then --candidates-path JSON [--confirm-paid-preview] has every candidate voice read the same sampleLine through the contract's voice.dialogue adapter and writes the anonymous A-E listening page, the private mapping and the selections file. Without --confirm-paid-preview it only prints how many paid previews are pending (exit 3); existing previews whose SHA-256 still matches are reused, never paid again.",
+    "voice-audition: [--episode-id REGISTRY_SCOPE (default global = fixed cast)] --character-ids id1,id2 [--candidates-path JSON] writes a koya-voice-audition-candidates-v1 template (never overwrites); then --candidates-path JSON [--confirm-paid-preview] has every candidate voice read the same sampleLine through the contract's voice.dialogue adapter (a candidate may name another allowed provider and model, e.g. provider gemini, model gemini-3.8-flash-tts, voiceId Achird, plus a styleInstruction for gemini; the episode contract must list that provider in audio.additionalDialogueAdapters before it can speak) and writes the anonymous A-E listening page, the private mapping and the selections file. Without --confirm-paid-preview it only prints how many paid previews are pending (exit 3); existing previews whose SHA-256 still matches are reused, never paid again.",
     "voice-approve: [--episode-id REGISTRY_SCOPE] [--selections-path JSON] --approved-by NAME (the person who listened; records winnerLabel, selectionReason and previewConfirmed=true in the verdicts before opening the private mapping, then writes the human voice selection (selectionVersion 2) to the character registry)",
     "handoff-verify: --bundle-dir DIR (read-only full manifest/SHA/path/symlink verification)",
     "handoff-restore: --bundle-dir DIR (requires the matching installed production contract, then merges approved registry/profile data)",
@@ -832,6 +834,19 @@ switch (args.action) {
     print({ episodeId: result.episodeId, character: result.finalized.character, showBibleSync: result.showBibleSync, state: result.state });
     break;
   }
+  case "character-identity-recover": {
+    if (!args.workflowId || !args.castId || !args.recoveryMapPath) {
+      throw new Error("character-identity-recover requires --workflow-id, --cast-id and --recovery-map-path.");
+    }
+    const result = await recoverKoyaRegisteredCharacterIdentity({
+      projectDir,
+      workflowId: args.workflowId,
+      castId: args.castId,
+      recoveryMapPath: resolve(args.recoveryMapPath),
+    });
+    print(result);
+    break;
+  }
   case "character-identity-refresh": {
     requireEpisodeId();
     const result = await refreshKoyaRegisteredCharacterIdentityPack({
@@ -844,17 +859,28 @@ switch (args.action) {
   }
   case "character-identity-repair": {
     requireEpisodeId();
+    if (args.roiFromReview !== undefined && args.roiFromReview !== true) {
+      throw new Error("--roi-from-review is a switch and takes no value.");
+    }
     const result = await repairKoyaCharacterIdentityPack({
       ...common,
       workflowId: args.workflowId,
       castId: args.castId,
+      identityRoiFromReview: args.roiFromReview === true,
     });
     print({
       episodeId: result.episodeId,
       workflowId: result.workflowId,
       castId: result.castId,
       repairId: result.repairId,
+      repairMode: result.repairMode,
       failedRoles: result.failedRoles,
+      repairedRoles: result.repairedRoles,
+      targetCells: result.targetCells,
+      alignmentOnlyCells: result.alignmentOnlyCells,
+      alignmentPendingRoles: result.alignmentPendingRoles,
+      repairPlanPath: result.repairPlanPath,
+      repairPlanDigest: result.repairPlanDigest,
       generatedCount: result.generatedCount,
       reusedRequiredRoleCount: result.reusedRequiredRoleCount,
       generationCheckpointPath: result.generationCheckpointPath,

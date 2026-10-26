@@ -33,8 +33,11 @@ never silently passed. Exit 0 = no failures, 3 = at least one check failed.
 All inference is local; audio never leaves the machine.
 """
 import hashlib
+import importlib.metadata
 import json
+import math
 import os
+import re
 import sys
 import unicodedata
 from pathlib import Path
@@ -67,6 +70,35 @@ def load_audio(path, target_sr=16000):
 _TAGGER = None
 
 
+def japanese_integer_surface(digits):
+    """Canonical numeral spelling, before UniDic chooses contextual readings.
+
+    UniDic leaves Arabic digits without a kana feature (1週間 -> 1シュウカン),
+    while spelling the same value in kanji supplies the reading. Do not erase
+    digits or turn every number into the same placeholder: different values
+    must remain distinguishable by the reading gate.
+    """
+    numerals = "〇一二三四五六七八九"
+    if len(digits) > 16 or (len(digits) > 1 and digits.startswith("0")):
+        return "".join(numerals[int(ch)] for ch in digits)
+    value = int(digits)
+    if value == 0:
+        return "零"
+    groups = []
+    for large_unit in ("", "万", "億", "兆"):
+        group, value = value % 10000, value // 10000
+        if group:
+            text = ""
+            for unit_value, unit_name in ((1000, "千"), (100, "百"), (10, "十"), (1, "")):
+                digit, group = divmod(group, unit_value)
+                if digit:
+                    text += (numerals[digit] if digit != 1 or not unit_name else "") + unit_name
+            groups.append(text + large_unit)
+        if not value:
+            break
+    return "".join(reversed(groups))
+
+
 def tagger():
     global _TAGGER
     if _TAGGER is None:
@@ -79,6 +111,9 @@ def to_katakana_reading(text):
     """Morphological reading (katakana). Used for the TRANSCRIPT side and as
     a fallback for expected text when no confirmed reading is supplied."""
     text = unicodedata.normalize("NFKC", text)
+    # Leave decimals untouched rather than inventing a reading for part of a
+    # number. Re-tokenizing the entire surface preserves counter/date context.
+    text = re.sub(r"(?<![\d.])[0-9]+(?![\d.])", lambda match: japanese_integer_surface(match.group()), text)
     try:
         text = "".join(
             (word.feature.kana if getattr(word.feature, "kana", None) else word.surface)
@@ -386,10 +421,19 @@ def check_voice_quality(check):
     if max(lead, tail) > max_edge:
         problems.append(f"edge silence {max(lead, tail):.2f}s > {max_edge}s")
 
-    lufs = integrated_lufs(audio, sr)
-    if lufs is None:
+    try:
+        lufs = integrated_lufs(audio, sr)
+    except ValueError as error:
+        # EBU loudness needs a complete block. Record the missing measurement
+        # locally rather than discarding all other results. Only an explicitly
+        # required loudness gate fails; short replies still get CER/UTMOS QA.
+        lufs = None
+        unavailable.append(f"loudness: {str(error)[:120]}")
+        if check.get("loudness"):
+            problems.append("required loudness measurement unavailable")
+    if lufs is None and not any(p.startswith("loudness:") for p in unavailable):
         unavailable.append("loudness: pyloudnorm missing")
-    else:
+    elif lufs is not None:
         metrics["lufs"] = round(lufs, 2)
         loudness = check.get("loudness") or {}
         if loudness:
@@ -539,6 +583,77 @@ def input_digests(check):
     return digests
 
 
+def file_digest(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def cache_environment():
+    """Bind reusable measurements to the actual offline models and runtime."""
+    from faster_whisper.utils import download_model
+    model_name = os.environ.get("VOICE_QA_WHISPER_MODEL") or "kotoba-tech/kotoba-whisper-v2.0-faster"
+    roots = [Path(download_model(name, local_files_only=True)) for name in (model_name, "small")]
+    roots += [UTMOS_CACHE_DIR, Path.home() / ".cache/torch/hub/checkpoints/utmos22_strong_step7459_v1.pt"]
+    files = {}
+    for root in roots:
+        paths = [root] if root.is_file() else sorted(root.rglob("*"))
+        for path in paths:
+            if path.is_file() and "__pycache__" not in path.parts and ".git" not in path.parts:
+                files[str(path)] = file_digest(path)
+    return {
+        "scriptSha256": file_digest(__file__), "python": sys.version, "executable": sys.executable,
+        "packages": {name: importlib.metadata.version(name) for name in
+                     ("numpy", "soundfile", "pyworld", "torch", "faster-whisper", "ctranslate2", "av", "fugashi", "pyloudnorm", "librosa", "silero-vad", "unidic-lite")},
+        "models": files, "whisperModel": model_name,
+        "speakerBackend": os.environ.get("VOICE_QA_SPEAKER_BACKEND", "resemblyzer"),
+    }
+
+
+def cached_check(check, handler, cache_dir=None, environment=None):
+    inputs = input_digests(check)
+    identity = {"check": check, "inputSha256": inputs, "environment": environment}
+    key = hashlib.sha256(json.dumps(identity, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    cache_path = Path(cache_dir) / f"{key}.json" if cache_dir else None
+    if cache_path and cache_path.exists():
+        try:
+            saved = json.loads(cache_path.read_text(encoding="utf-8"))
+            result = saved["result"]
+            if saved["identity"] == identity and saved["resultSha256"] == hashlib.sha256(
+                    json.dumps(result, ensure_ascii=False, sort_keys=True).encode()).hexdigest():
+                return result
+        except (OSError, ValueError, KeyError, TypeError):
+            pass  # Corrupt/incomplete records are measured again, never passed.
+    outcome = handler(check)
+    # Silent clips can produce -Infinity LUFS. Emit honest unavailable metrics,
+    # not non-standard JSON that makes the Node collector lose the whole batch.
+    def finite_values(value, path="metrics"):
+        if isinstance(value, float) and not math.isfinite(value):
+            outcome.setdefault("unavailable", []).append(f"{path}: non-finite measurement")
+            outcome["status"] = "fail"
+            return None
+        if isinstance(value, dict):
+            return {key: finite_values(child, f"{path}.{key}") for key, child in value.items()}
+        if isinstance(value, list):
+            return [finite_values(child, f"{path}[{i}]") for i, child in enumerate(value)]
+        return value
+    outcome["metrics"] = finite_values(outcome.get("metrics", {}))
+    if outcome.get("unavailable") and outcome.get("status") == "pass":
+        outcome["status"] = "warn"
+    result = {"id": check.get("id", ""), "type": check["type"],
+              "inputSha256": inputs, "checkDigest": canonical_check_digest(check), **outcome}
+    if cache_path and not result.get("unavailable"):
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        saved = {"identity": identity, "result": result,
+                 "resultSha256": hashlib.sha256(json.dumps(result, ensure_ascii=False, sort_keys=True).encode()).hexdigest()}
+        temporary = cache_path.with_suffix(f".{os.getpid()}.tmp")
+        temporary.write_text(json.dumps(saved, ensure_ascii=False, allow_nan=False), encoding="utf-8")
+        temporary.replace(cache_path)
+    return result
+
+
 def main():
     if len(sys.argv) != 2:
         fail("usage: audit-voice-quality.py <config.json>")
@@ -546,16 +661,18 @@ def main():
     checks = config.get("checks", [])
     if not checks:
         fail("config.checks must not be empty")
+    cache_dir = config.get("cacheDir")
+    try:
+        environment_identity = cache_environment() if cache_dir else None
+    except Exception as error:  # Cache availability must not replace measurement availability.
+        print(f"voice QA cache disabled: {type(error).__name__}", file=sys.stderr)
+        cache_dir, environment_identity = None, None
     results = []
     for check in checks:
         handler = HANDLERS.get(check.get("type"))
         if handler is None:
             fail(f"unknown check type: {check.get('type')}")
-        outcome = handler(check)
-        results.append({"id": check.get("id", ""), "type": check["type"],
-                        "inputSha256": input_digests(check),
-                        "checkDigest": canonical_check_digest(check),
-                        **outcome})
+        results.append(cached_check(check, handler, cache_dir, environment_identity))
     overall = "fail" if any(r["status"] == "fail" for r in results) else (
         "warn" if any(r["status"] == "warn" for r in results) else "pass")
     environment = {
@@ -564,7 +681,7 @@ def main():
         "whisperModel": os.environ.get("VOICE_QA_WHISPER_MODEL") or "kotoba-tech/kotoba-whisper-v2.0-faster",
         "speakerBackend": os.environ.get("VOICE_QA_SPEAKER_BACKEND", "resemblyzer"),
     }
-    print(json.dumps({"overall": overall, "environment": environment, "checks": results}, ensure_ascii=False))
+    print(json.dumps({"overall": overall, "environment": environment, "checks": results}, ensure_ascii=False, allow_nan=False))
     sys.exit(0 if overall != "fail" else 3)
 
 

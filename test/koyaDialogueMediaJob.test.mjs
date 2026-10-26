@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -219,8 +220,10 @@ test("a transport-level 429 that the server never acknowledged keeps the base re
   // C-1: HTTP 429 from an edge/WAF/proxy leaves a `local-…` failed journal with
   // charged=false (NonRetryablePaidApiError default). That is not proof the server
   // refunded anything — the app behind the limiter may already hold a dispatched
-  // job under this key. Re-running must stay parked on the base key, not advance
-  // to `:r1` and submit a fresh paid job.
+  // job under this key. Re-running must stay on the base key, not advance to `:r1`
+  // and submit a fresh paid job. The re-run re-sends the *same* requestKey
+  // (review q4-paid-media §3-2): the server is idempotent on it, so a job it already
+  // holds comes back instead of a second charge.
   const stateDir = await mkdtemp(join(tmpdir(), "koya-transport-429-"));
   try {
     const cutPlan = plan();
@@ -261,13 +264,15 @@ test("a transport-level 429 that the server never acknowledged keeps the base re
     assert.equal(journal.error.charged, false);
     const postsAfterRun1 = posts.length;
 
-    // Run 2: even with the edge healthy again, the unacknowledged key must not be
-    // abandoned for `:r1`. The take attaches to the base journal (no HTTP) and stays parked.
+    // Run 2: with the edge healthy again, the unacknowledged key is not abandoned for
+    // `:r1`; the base key is re-sent once and the server's job for it is attached.
     serverMode = "ready";
-    await assert.rejects(() => requestKoyaDialogueMediaJob(cutPlan, 0, context),
-      (error) => error instanceof KoyaUsageLimitError && error.details.status === 429);
-    assert.equal(posts.length, postsAfterRun1, "no new submission after an unacknowledged transport 429");
+    const result = await requestKoyaDialogueMediaJob(cutPlan, 0, context);
+    assert.equal(posts.length, postsAfterRun1 + 1, "exactly one same-key re-send after an unacknowledged transport 429");
+    assert.equal(new Set(posts).size, 1, "only the base requestKey is ever posted");
     assert.ok(!posts.some((key) => key.includes(":r")), "requestKey must never advance past a local- journal");
+    assert.equal(result.job.status, "completed");
+    assert.equal(result.job.requestKey, baseKey);
   } finally {
     await rm(stateDir, { recursive: true, force: true });
   }
@@ -294,7 +299,202 @@ test("a transport-level 402 without server acknowledgement also stays on the bas
     assert.equal(posts.length, 1);
     await assert.rejects(() => requestKoyaDialogueMediaJob(cutPlan, 0, context),
       (error) => error instanceof KoyaUsageLimitError && error.details.status === 402);
-    assert.equal(posts.length, 1, "402 from transport is not a server refund receipt; do not resubmit");
+    // 402 from transport is not a server refund receipt, so the key never advances to `:r1`.
+    // The re-run re-sends the same requestKey (idempotent on the server) and parks again.
+    assert.equal(posts.length, 2);
+    assert.equal(new Set(posts).size, 1, "a transport 402 is re-sent only under the same requestKey");
+    assert.ok(!posts.some((key) => key.includes(":r")));
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+// review q4-paid-media §3-1 / §3-2 ------------------------------------------------
+
+const sha256 = (value) => createHash("sha256").update(value).digest("hex");
+const journalPath = (stateDir, requestKey) => join(stateDir, "jobs", `${sha256(requestKey)}.json`);
+
+async function withoutArtifactOriginEnv(callback) {
+  const saved = process.env.BUZZASSIST_MEDIA_ARTIFACT_ORIGINS;
+  delete process.env.BUZZASSIST_MEDIA_ARTIFACT_ORIGINS;
+  try {
+    return await callback();
+  } finally {
+    if (saved === undefined) delete process.env.BUZZASSIST_MEDIA_ARTIFACT_ORIGINS;
+    else process.env.BUZZASSIST_MEDIA_ARTIFACT_ORIGINS = saved;
+  }
+}
+
+test("Koya dialogue downloads the official broker's Convex storage artifact without BUZZASSIST_MEDIA_ARTIFACT_ORIGINS, and a custom broker still needs it", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "koya-convex-artifact-"));
+  try {
+    await withoutArtifactOriginEnv(async () => {
+      const audio = Buffer.alloc(64);
+      audio.write("RIFF", 0, "ascii");
+      const artifactUrl = "https://happy-otter-123.convex.cloud/api/storage/0f5c2d4e-1a2b-4c3d-8e9f-001122334455";
+      const downloads = [];
+      const artifactFetch = async (url, options) => {
+        downloads.push(url);
+        assert.equal(options.redirect, "error");
+        return {
+          ok: true,
+          status: 200,
+          url,
+          headers: { "content-length": String(audio.length), "content-type": "audio/wav" },
+          arrayBuffer: async () => audio,
+        };
+      };
+      const apiFetch = async (_url, options) => {
+        const body = JSON.parse(options.body);
+        return response(200, { job: completedJob({
+          jobId: `pmj_${"d".repeat(24)}`,
+          requestKey: body.requestKey,
+          inputHash: body.inputHash,
+          result: {
+            ...completedJob().result,
+            artifact: { url: artifactUrl, sha256: sha256(audio), mimeType: "audio/wav", bytes: audio.length },
+          },
+        }) });
+      };
+      const official = createPaidMediaJobBroker({
+        stateDir: join(stateDir, "official"),
+        apiBase: "https://buzzassist.ai/api/media/jobs",
+        apiFetch,
+        sleepFn: async () => {},
+        machineSlots: false,
+      });
+      const result = await requestKoyaDialogueMediaJob(plan(), 0, {
+        sourceDir: stateDir,
+        mediaJobBroker: official,
+        artifactFetch,
+      });
+      assert.deepEqual(result.audioBuffer, audio);
+      assert.deepEqual(downloads, [artifactUrl]);
+
+      const custom = createPaidMediaJobBroker({
+        stateDir: join(stateDir, "custom"),
+        apiBase: "https://broker.invalid/api/media/jobs",
+        apiFetch,
+        sleepFn: async () => {},
+        machineSlots: false,
+      });
+      await assert.rejects(() => requestKoyaDialogueMediaJob(plan(), 0, {
+        sourceDir: stateDir,
+        mediaJobBroker: custom,
+        artifactFetch,
+      }), /origin is not allowlisted/u);
+      assert.equal(downloads.length, 1, "a custom broker's Convex URL is refused before any download");
+    });
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("a pre-deployment 404 that never reached the server is re-sent under the same requestKey once the server is reachable", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "koya-local-404-"));
+  try {
+    const cutPlan = plan();
+    const posts = [];
+    let serverMode = "not-deployed";
+    const apiFetch = async (_url, options) => {
+      assert.equal(options.method, "POST");
+      const body = JSON.parse(options.body);
+      posts.push(body.requestKey);
+      if (serverMode === "not-deployed") return response(404, { error: "not found" });
+      return response(200, { job: completedJob({
+        jobId: `pmj_${"e".repeat(24)}`,
+        requestKey: body.requestKey,
+        inputHash: body.inputHash,
+      }) });
+    };
+    const mediaJobBroker = createPaidMediaJobBroker({
+      stateDir,
+      apiBase: "https://broker.invalid/api/media/jobs",
+      apiFetch,
+      sleepFn: async () => {},
+      machineSlots: false,
+    });
+    const context = { sourceDir: stateDir, mediaJobBroker, artifactReader: async () => Buffer.from("RIFF-dialogue") };
+
+    // Run 1: the route is not deployed yet → 404, never accepted, not charged.
+    await assert.rejects(() => requestKoyaDialogueMediaJob(cutPlan, 0, context), /HTTP 404/u);
+    assert.equal(posts.length, 1);
+    const baseKey = posts[0];
+    const journal = await mediaJobBroker.getLocal({ requestKey: baseKey });
+    assert.equal(journal.status, "failed");
+    assert.match(journal.jobId, /^local-/u);
+    assert.equal(journal.error.charged, false);
+    assert.equal(journal.error.status, 404);
+
+    // Run 2 (server deployed): the same take is re-sent under the same key and completes.
+    serverMode = "ready";
+    const result = await requestKoyaDialogueMediaJob(cutPlan, 0, context);
+    assert.deepEqual(posts, [baseKey, baseKey]);
+    assert.equal(result.job.status, "completed");
+    assert.equal(result.job.jobId, `pmj_${"e".repeat(24)}`);
+
+    // Run 3: the completed take attaches from the journal; nothing is posted again.
+    await requestKoyaDialogueMediaJob(cutPlan, 0, context);
+    assert.equal(posts.length, 2);
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("a charged:null failure and a server-accepted (pmj_) failure are never re-sent by the uncharged-local replay", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "koya-no-replay-"));
+  try {
+    const cutPlan = plan();
+    const posts = [];
+    let serverMode = "not-deployed";
+    const apiFetch = async (_url, options) => {
+      assert.equal(options.method, "POST", "a settled failure must not be polled or recovered here");
+      const body = JSON.parse(options.body);
+      posts.push(body.requestKey);
+      if (serverMode === "not-deployed") return response(404, { error: "not found" });
+      if (serverMode === "accepted-failed") {
+        return response(200, { job: {
+          jobId: `pmj_${"f".repeat(24)}`,
+          requestKey: body.requestKey,
+          inputHash: body.inputHash,
+          status: "failed",
+          reservation: { reservationId: "pmr_released", status: "released" },
+          error: { message: "The adapter rejected the dialogue input.", code: "invalid_request", status: 400, retryable: false, charged: false },
+        } });
+      }
+      return response(200, { job: completedJob({ jobId: `pmj_${"9".repeat(24)}`, requestKey: body.requestKey, inputHash: body.inputHash }) });
+    };
+    const mediaJobBroker = createPaidMediaJobBroker({
+      stateDir,
+      apiBase: "https://broker.invalid/api/media/jobs",
+      apiFetch,
+      sleepFn: async () => {},
+      machineSlots: false,
+    });
+    const context = { sourceDir: stateDir, mediaJobBroker, artifactReader: async () => Buffer.from("RIFF-dialogue") };
+
+    // charged:null — the journal no longer proves the provider was never charged.
+    await assert.rejects(() => requestKoyaDialogueMediaJob(cutPlan, 0, context), /HTTP 404/u);
+    const baseKey = posts[0];
+    const path = journalPath(stateDir, baseKey);
+    const unknown = JSON.parse(await readFile(path, "utf8"));
+    unknown.error.charged = null;
+    await writeFile(path, `${JSON.stringify(unknown, null, 2)}\n`);
+    serverMode = "ready";
+    await assert.rejects(() => requestKoyaDialogueMediaJob(cutPlan, 0, context));
+    assert.equal(posts.length, 1, "a charged:null failure is not re-sent");
+
+    // pmj_ — the server accepted the key and fixed it as failed; the same key is not re-sent.
+    await rm(path, { force: true });
+    serverMode = "accepted-failed";
+    await assert.rejects(() => requestKoyaDialogueMediaJob(cutPlan, 0, context), /rejected the dialogue input/u);
+    assert.equal(posts.length, 2);
+    const accepted = await mediaJobBroker.getLocal({ requestKey: baseKey });
+    assert.equal(accepted.jobId, `pmj_${"f".repeat(24)}`);
+    assert.equal(accepted.error.charged, false);
+    serverMode = "ready";
+    await assert.rejects(() => requestKoyaDialogueMediaJob(cutPlan, 0, context), /rejected the dialogue input/u);
+    assert.equal(posts.length, 2, "a server-accepted failure is not re-sent under the same key");
   } finally {
     await rm(stateDir, { recursive: true, force: true });
   }

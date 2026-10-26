@@ -31,7 +31,7 @@ import { promisify } from "node:util";
 import path from "node:path";
 
 import { channelPackPresent } from "../lib/channelPackResolver.mjs";
-import { resolveKoyaDialogueAdapter, resolveKoyaMangaProductionContract } from "../lib/koyaMangaProductionContract.mjs";
+import { resolveKoyaDialogueAdapter, resolveKoyaDialogueAdapters, resolveKoyaMangaProductionContract } from "../lib/koyaMangaProductionContract.mjs";
 import { CHANNEL_PACK_ENVELOPE_VERSION } from "../lib/channelPackEnvelope.mjs";
 import { requireElevenLabsApiKey } from "../lib/speechGeneration.mjs";
 import { resolveLovartCredentials } from "../lib/lovartMediaGeneration.mjs";
@@ -59,7 +59,7 @@ import {
   resolveFfmpegToolchain,
   resolvePythonRuntime,
 } from "../lib/harnessRuntimeResolver.mjs";
-import { probePaidMediaJobAdapter } from "../lib/paidMediaJobBroker.mjs";
+import { probePaidMediaJobAdapter, resolvePaidMediaJobProviderRoute } from "../lib/paidMediaJobBroker.mjs";
 import { REVIEWER_TRUST_ENV_GUIDANCE, REVIEWER_TRUST_PATH_ENV, preflightReviewerTrust } from "../lib/koyaReviewAttestation.mjs";
 import { resolveCodexCommand } from "./codex-image-bridge.mjs";
 import { appendManagedToolsToPath } from "../lib/prerequisiteTools.mjs";
@@ -498,7 +498,7 @@ async function probeNarratedPaidMediaRuntime({ job, runtime = {}, env = process.
 
   // 運営者の画を取り込む Pack（image.source: operator-file。検証済みの runtime metadata の imageSource）は、
   // 本編の画を有料の Media Job で作らない。画の adapter は「使わない」扱いにして probe しない
-  // （probe すると、使わない adapter が落ちているだけで doctor が止まる）。声と BGM は従来どおり probe する。
+  // （probe すると、使わない adapter が落ちているだけで doctor が止まる）。BGM も実在する運営者の曲だけなら同様。
   const imageNotUsed = persisted?.imageSource === "operator-file"
     ? {
       ok: true,
@@ -508,6 +508,15 @@ async function probeNarratedPaidMediaRuntime({ job, runtime = {}, env = process.
       detail: "Channel Pack の image.source が operator-file（運営者の画を取り込む）なので、画の有料 Media Job を使わず adapter を probe しない",
     }
     : null;
+  const musicNotUsed = persisted?.musicSource === "operator-file"
+    ? {
+      ok: true,
+      status: "not-used",
+      host: "operator-file",
+      ...specs.music,
+      detail: "署名 Channel Pack の全 BGM 区分が実在する operator-file の曲なので、音楽生成 adapter を使わない",
+    }
+    : null;
   const injectedProbe = typeof runtime.mediaAdapterProbe === "function" ? runtime.mediaAdapterProbe : null;
   const apiBase = String(runtime.mediaJobApiBase ?? env.BUZZASSIST_MEDIA_JOB_API_BASE ?? "").trim();
   if (!injectedProbe && !apiBase) {
@@ -515,7 +524,7 @@ async function probeNarratedPaidMediaRuntime({ job, runtime = {}, env = process.
     return {
       tts: { ok: false, status: "route-missing", ...specs.tts, detail },
       image: imageNotUsed || { ok: false, status: "route-missing", host: "buzzassist-media-job", ...specs.image, detail },
-      music: { ok: false, status: "route-missing", ...specs.music, detail },
+      music: musicNotUsed || { ok: false, status: "route-missing", ...specs.music, detail },
     };
   }
   const probe = injectedProbe ?? ((spec) => probePaidMediaJobAdapter(spec, {
@@ -550,12 +559,12 @@ async function probeNarratedPaidMediaRuntime({ job, runtime = {}, env = process.
   const [image, tts, music] = await Promise.all([
     imageNotUsed ? Promise.resolve(null) : safeProbe(specs.image),
     safeProbe(specs.tts),
-    safeProbe(specs.music),
+    musicNotUsed ? Promise.resolve(null) : safeProbe(specs.music),
   ]);
   return {
     tts,
     image: imageNotUsed || { ...image, host: "buzzassist-media-job" },
-    music,
+    music: musicNotUsed || music,
   };
 }
 
@@ -565,21 +574,30 @@ async function probeNarratedPaidMediaRuntime({ job, runtime = {}, env = process.
  * 本番は測っていないオトシゴに課金する、という食い違いが起き得た。本番側も
  * 「doctor が測ったアダプタ＝契約のアダプタ」を有料の音声の前に照合する。
  */
-async function koyaDialogueAdapterSpec(projectDir, runtime = {}) {
-  if (runtime.koyaDialogueAdapter) return runtime.koyaDialogueAdapter;
-  const resolved = await resolveKoyaMangaProductionContract({ projectDir });
-  return resolveKoyaDialogueAdapter(resolved);
+async function koyaDialogueAdapterSpecs(projectDir, runtime = {}, job = null) {
+  if (Array.isArray(runtime.koyaDialogueAdapters) && runtime.koyaDialogueAdapters.length > 0) {
+    return runtime.koyaDialogueAdapters;
+  }
+  if (runtime.koyaDialogueAdapter) return [runtime.koyaDialogueAdapter];
+  // Job が話を指していれば、その話の上書き（人物ごとの提供元 audio.additionalDialogueAdapters を含む）
+  // まで解いた契約で測る。本番の音声の入口も同じ話の契約で「doctor が測った提供元」を照合する。
+  const episodeId = typeof job?.options?.episodeId === "string" ? job.options.episodeId.trim() : "";
+  const resolved = await resolveKoyaMangaProductionContract({ projectDir, ...(episodeId ? { episodeId } : {}) });
+  return resolveKoyaDialogueAdapters(resolved);
 }
 
 /**
  * Koya speech no longer calls ElevenLabs with a local raw key. Probe the exact
  * non-billable BuzzAssist Media Job adapter used by requestKoyaDialogueMediaJob.
  * A raw ELEVENLABS_API_KEY must never make this check pass.
+ *
+ * 人物ごとに別の提供元で話す話は、追加の提供元も同じ非課金 probe で測り、結果を
+ * additionalAdapters に並べる（全部 ready のときだけ ok）。追加の提供元の無い話は従来と同じ形。
  */
-async function probeKoyaDialoguePaidMediaRuntime({ runtime = {}, env = process.env, projectDir = REPO_ROOT } = {}) {
-  let spec;
+async function probeKoyaDialoguePaidMediaRuntime({ runtime = {}, env = process.env, projectDir = REPO_ROOT, job = null } = {}) {
+  let specs;
   try {
-    spec = { ...(await koyaDialogueAdapterSpec(projectDir, runtime)) };
+    specs = (await koyaDialogueAdapterSpecs(projectDir, runtime, job)).map((entry) => ({ ...entry }));
   } catch (error) {
     return {
       ok: false,
@@ -588,8 +606,45 @@ async function probeKoyaDialoguePaidMediaRuntime({ runtime = {}, env = process.e
       detail: `Koya 契約から台詞音声のアダプタを決められない: ${String(error?.message || error).slice(0, 180)}`,
     };
   }
+  const [primary, ...additional] = await Promise.all(specs.map((spec) => probeOneKoyaDialogueAdapter(spec, { runtime, env })));
+  if (additional.length === 0) return primary;
+  const pending = [primary, ...additional].filter((entry) => entry.ok !== true);
+  return {
+    ...primary,
+    ok: pending.length === 0,
+    status: pending.length === 0 ? "ready" : pending[0].status,
+    detail: pending.length === 0
+      ? `${primary.detail}（人物ごとの提供元 ${additional.map((entry) => entry.provider).join(" / ")} も ready）`
+      : `${pending.map((entry) => `${entry.provider || "?"}: ${entry.detail}`).join(" / ")}`.slice(0, 400),
+    additionalAdapters: additional.map((entry) => ({
+      ok: entry.ok === true,
+      status: entry.status,
+      kind: entry.kind,
+      provider: entry.provider,
+      model: entry.model,
+      adapterVersion: entry.adapterVersion,
+      ...(entry.serverVersion ? { serverVersion: entry.serverVersion } : {}),
+    })),
+  };
+}
+
+async function probeOneKoyaDialogueAdapter(adapter, { runtime = {}, env = process.env } = {}) {
+  const spec = { ...adapter };
   const injectedProbe = typeof runtime.mediaAdapterProbe === "function" ? runtime.mediaAdapterProbe : null;
-  const apiBase = String(runtime.mediaJobApiBase ?? env.BUZZASSIST_MEDIA_JOB_API_BASE ?? "").trim();
+  // 提供元ごとの仲介（BUZZASSIST_MEDIA_JOB_API_BASE_<PROVIDER>）があればそこを、無ければ共有の住所を測る。
+  // 本番の Job も同じ規則で送る（lib/koyaDialogueSpeech.mjs の koyaDialogueMediaJobBroker）。
+  let route = { dedicated: false };
+  try {
+    route = resolvePaidMediaJobProviderRoute(spec.provider, env);
+  } catch {
+    route = { dedicated: false };
+  }
+  if (!injectedProbe && route.error) {
+    return { ok: false, status: "route-invalid", ...spec, detail: route.error.slice(0, 200) };
+  }
+  const apiBase = route.dedicated
+    ? route.apiBase
+    : String(runtime.mediaJobApiBase ?? env.BUZZASSIST_MEDIA_JOB_API_BASE ?? "").trim();
   if (!injectedProbe && !apiBase) {
     return {
       ok: false,
@@ -600,6 +655,7 @@ async function probeKoyaDialoguePaidMediaRuntime({ runtime = {}, env = process.e
   }
   const probe = injectedProbe ?? ((input) => probePaidMediaJobAdapter(input, {
     apiBase,
+    ...(route.dedicated ? { apiKey: route.apiKey } : {}),
     ...(runtime.mediaJobStateDir ? { stateDir: runtime.mediaJobStateDir } : {}),
     ...(runtime.mediaJobFetch ? { apiFetch: runtime.mediaJobFetch } : {}),
   }));
@@ -976,7 +1032,7 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "",
   if (!notUsed.paidMedia) {
     const tts = narratedMedia?.tts
       ?? (harnessId === "koya-manga-video"
-        ? await probeKoyaDialoguePaidMediaRuntime({ runtime, env: runtimeEnv, projectDir: path.resolve(projectDir) })
+        ? await probeKoyaDialoguePaidMediaRuntime({ runtime, env: runtimeEnv, projectDir: path.resolve(projectDir), job })
         : (runtime.ttsProbe
           ? await runtime.ttsProbe()
           : await probeSecretVia(() => requireElevenLabsApiKey({}), {

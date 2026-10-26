@@ -132,6 +132,14 @@ RunReceiptが確定できない場合、Jobは`failed`にならず、**`awaiting
 `BUZZASSIST_MEDIA_JOB_API_BASE`（仲介の住所）、`BUZZASSIST_MEDIA_JOB_API_KEY`（Bearer で送る API キー）、
 `BUZZASSIST_MEDIA_ARTIFACT_ORIGINS`（成果物の取得元）を置きます。設定ファイルの `env` には書きません。
 
+公式の仲介（`https://buzzassist.ai`）を使うときは、成果物の取得元である Convex のファイル置き場
+（`https://<deployment>.convex.cloud`、https・ラベル1つだけ）を既定で許すので、`BUZZASSIST_MEDIA_ARTIFACT_ORIGINS` は
+要りません（取得した中身は従来どおり SHA-256 で照合します）。`BUZZASSIST_MEDIA_JOB_API_KEY` も置きません
+（置くと BuzzAssist のログインの代わりにそのキーを Bearer で送ります）。台詞のテイクが、サーバーへ届かずに
+失敗した記録（journal の jobId が `local-` のまま・`charged:false`。デプロイ前の 404 など）で止まっているときは、
+再実行で同じ `requestKey` のまま送り直します。サーバーが受理した失敗（`pmj_` の jobId）と、課金済み・課金不明の
+失敗は送り直しません。
+
 ## 途中で止まった・失敗したJobの再開
 
 どの場合も入口は同じ `node scripts/run-video-harness.mjs resume --job-id ID --project-dir DIR --confirmed`
