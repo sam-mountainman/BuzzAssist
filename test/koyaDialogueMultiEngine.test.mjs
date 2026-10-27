@@ -218,8 +218,8 @@ test("契約: 追加の提供元は話の上書きでだけ足せ、基の契約
   await writeOverride({ additionalDialogueAdapters: [{ provider: "elevenlabs", model: "eleven_v3" }] });
   await assert.rejects(
     resolveKoyaMangaProductionContract({ projectDir: root, episodeId: "synthetic-mixed", overridePath }),
-    /repeats provider elevenlabs/u,
-    "主と同じ提供元を重ねない",
+    /repeats elevenlabs\/eleven_v3/u,
+    "主と同じ提供元・型番を重ねない",
   );
   await writeOverride({ additionalDialogueAdapters: [{ provider: "otoshigo", model: "irodori-tts-v4.1-large" }] });
   await assert.rejects(

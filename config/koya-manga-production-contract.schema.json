@@ -137,18 +137,18 @@
       ],
       "properties": {
         "provider": { "enum": ["elevenlabs", "otoshigo", "gemini"] },
-        "model": { "enum": ["eleven_v3", "irodori-tts-v4.1-small", "gemini-3.8-flash-tts"] },
+        "model": { "enum": ["eleven_v3", "eleven_v4", "irodori-tts-v4.1-small", "gemini-3.8-flash-tts"] },
         "adapterVersion": { "enum": ["elevenlabs-dialogue-server-v1", "otoshigo-dialogue-server-v1", "gemini-dialogue-server-v1"] },
         "additionalDialogueAdapters": {
           "type": "array",
-          "maxItems": 2,
+          "maxItems": 3,
           "items": {
             "type": "object",
             "additionalProperties": false,
             "required": ["provider", "model"],
             "properties": {
               "provider": { "enum": ["elevenlabs", "otoshigo", "gemini"] },
-              "model": { "enum": ["eleven_v3", "irodori-tts-v4.1-small", "gemini-3.8-flash-tts"] },
+              "model": { "enum": ["eleven_v3", "eleven_v4", "irodori-tts-v4.1-small", "gemini-3.8-flash-tts"] },
               "adapterVersion": { "enum": ["elevenlabs-dialogue-server-v1", "otoshigo-dialogue-server-v1", "gemini-dialogue-server-v1"] }
             }
           }
