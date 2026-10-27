@@ -1035,6 +1035,83 @@ test("identity generation import binds exact official input and generated source
   }
 });
 
+test("identity generation import accepts a deterministic derivative of the registered sheet only when re-run reproduces it", async () => {
+  const projectDir = await mkdtemp(join(tmpdir(), "koya-identity-derivative-"));
+  try {
+    const canvasDir = join(projectDir, "canvas");
+    await mkdir(join(canvasDir, "assets"), { recursive: true });
+    const facePath = join(canvasDir, "assets/face.png");
+    const registeredPath = join(canvasDir, "assets/registered-turnaround.png");
+    const derivedPath = join(canvasDir, "assets/derived-turnaround.png");
+    const toolPath = join(canvasDir, "assets/copy-tool.mjs");
+    await writeFile(facePath, testRaster(81));
+    await writeFile(registeredPath, testRaster(82));
+    await writeFile(toolPath, "import { copyFileSync } from 'node:fs';\ncopyFileSync(process.argv[2], process.argv[3]);\n");
+    await writeFile(derivedPath, await readFile(registeredPath));
+    const sha = async (path) => createHash("sha256").update(await readFile(path)).digest("hex");
+    const candidateSha256 = await sha(facePath);
+    const registeredSha256 = await sha(registeredPath);
+    await writeFile(join(canvasDir, "characters.json"), JSON.stringify({
+      version: 1,
+      revision: 1,
+      characters: [{
+        id: "cast-1",
+        name: "cast-1",
+        status: "approved",
+        role: "per-video",
+        referenceAssets: [{ id: "turnaround", role: "turnaround", path: "assets/registered-turnaround.png", sha256: registeredSha256, storyStage: "" }],
+      }],
+    }));
+    const generator = { host: "legacy-migration", id: "deterministic-tool", contextId: "derivative-test" };
+    const job = {
+      prompt: "Exact approved turnaround",
+      model: "gpt-image-test",
+      aspectRatio: "16:9",
+      imageSize: "2K",
+      quality: "high",
+      referenceImagePaths: [facePath],
+      fileName: "turnaround.png",
+      pipeline: { identityRole: "turnaround", storyStage: "" },
+    };
+    const binding = await buildKoyaIdentityPackJobInput({ workflowId: "workflow-1", castId: "cast-1", candidateSha256, generator, job });
+    const writeMap = async (derivedFromSha256) => {
+      const importMapPath = join(canvasDir, "identity-import.json");
+      await writeFile(importMapPath, JSON.stringify({
+        version: "koya-identity-generation-import-v1",
+        workflowId: "workflow-1",
+        castId: "cast-1",
+        candidateSha256,
+        generator,
+        generationScopeId: "approval:test",
+        entries: [{
+          key: "turnaround:",
+          sourceFile: derivedPath,
+          sourceSha256: await sha(derivedPath),
+          inputSha256: binding.inputSha256,
+          origin: "deterministic-derivative",
+          derivedFrom: { path: registeredPath, sha256: derivedFromSha256 },
+          tool: { path: toolPath, sha256: await sha(toolPath), args: ["{input}", "{output}"] },
+        }],
+      }));
+      return importMapPath;
+    };
+    const run = (importMapPath) => prepareKoyaIdentityGenerationImport({
+      canvasDir, importMapPath, workflowId: "workflow-1", castId: "cast-1", candidateSha256, generator, generationScopeId: "approval:test", jobs: [job],
+    });
+    const imported = await run(await writeMap(registeredSha256));
+    assert.equal(imported.evidence.derivatives[0].reproducedSha256, await sha(derivedPath));
+    assert.deepEqual((await imported.generateImage(job)).buffer, await readFile(derivedPath));
+    await writeFile(derivedPath, testRaster(83));
+    const staleMap = await writeMap(registeredSha256);
+    await assert.rejects(() => run(staleMap), /did not reproduce/u);
+    await writeFile(derivedPath, await readFile(facePath));
+    const wrongSourceMap = await writeMap(candidateSha256);
+    await assert.rejects(() => run(wrongSourceMap), /SHA-256 mismatch|currently registered/u);
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});
+
 test("edge dialogue speakers require an anchored pull-out camera", () => {
   assert.equal(dialogueShotRequiresAnchoredPullout({ x: 0.2, y: 0.15, width: 0.15, height: 0.28 }), true);
   assert.equal(dialogueShotRequiresAnchoredPullout({ x: 0.43, y: 0.3, width: 0.14, height: 0.25 }), false);
