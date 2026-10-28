@@ -129,6 +129,7 @@
     "package:audit": "node scripts/audit-package-tarball.mjs",
     "doctor": "node scripts/harness-doctor.mjs",
     "harness:conformance": "node scripts/harness-conformance.mjs",
+    "harness:inbox": "node scripts/harness-inbox.mjs",
     "hooks:install": "git config core.hooksPath .githooks"
   },
   "engines": {
