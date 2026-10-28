@@ -96,6 +96,7 @@ RunReceipt・Stop フック・学習（harness-learn）・並列実行）を、�
 | B26 | Codex では実行前の関所が動いていない可能性（Codex の呼び出しの形と matcher が合わない）。原則 P13 | `hooks/codex-hooks.json`・`scripts/harness-guard-hook.mjs` | 実機の Codex で確かめてから直す | 人（実機の確認） |
 | B27 | 公開リポジトリの追跡ファイルに、顧客の呼称と制作事情が残る（ロードマップ・並列の計画の名前）。 | `docs/buzzassist-video-harness-master-roadmap-ja.md`・`config/parallel-plans/` | ジャンルの名前へ置き換え、顧客の事情は私有の側へ移す | 人（名前を変えると運営者の手順が変わる） |
 | B28 | 漫画の「改善」と数える最小の伸びが1点（中核の既定は採点のぶれを理由に5点）。原則 P3 | `config/koya-manga-production-contract.json` | 次の制作契約の版で5点にする | 次 |
+| B29 | 実行前の関所が、人の確認の印の文字列と、プロセスを起動する語（exec など）が同じ Bash の文字列にあるだけで止める。ファイルを書き換えるだけのコマンド（このリポジトリのコードの編集）も止め、学習の capture の文にその語を書いても止める（この作業で2回当たった）。原則 P13 | `scripts/harness-guard-hook.mjs` の SPAWN_API と human-verified の照合 | 文字列の同居でなく、起動するコマンドの引数に印があるかで見る。誤検知の例を試験に入れる | 次 |
 
 ### C. ジャンル別ハーネスの追加（上位ハーネスの下に入れる）
 
