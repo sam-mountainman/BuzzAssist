@@ -426,7 +426,7 @@ test("AI の予測の封: 人に見せる前に封じ、ページにも状態に
   const { work } = await workspace(t);
   const created = await createSet(work, {
     setId: "synthetic-sealed",
-    input: candidatesInput({ prediction: { index: 1, reason: "寄りの顔が一番強いと予測", predictorContextId: "claude:synthetic-predictor" } }),
+    input: candidatesInput({ recommended: undefined, prediction: { index: 1, reason: "寄りの顔が一番強いと予測", predictorContextId: "claude:synthetic-predictor" } }),
   });
   assert.equal(created.created, true);
   const seal = created.state.predictionSeal;
@@ -459,7 +459,7 @@ test("AI の予測の封: 封の後に中身を書き換えたら比べない（
   const { work } = await workspace(t);
   const created = await createSet(work, {
     setId: "synthetic-tampered",
-    input: candidatesInput({ prediction: { index: 2, reason: "引きの対立が伝わると予測", predictorContextId: "codex:synthetic-predictor" } }),
+    input: candidatesInput({ recommended: undefined, prediction: { index: 2, reason: "引きの対立が伝わると予測", predictorContextId: "codex:synthetic-predictor" } }),
   });
   const file = join(work, "quality", "choices", "thumbnail--synthetic-tampered.prediction.json");
   const body = JSON.parse(await readFile(file, "utf8"));
@@ -472,4 +472,27 @@ test("AI の予測の封: 封の後に中身を書き換えたら比べない（
   });
   assert.deepEqual(record.decision.prediction, { sealOk: false, reason: "prediction-seal-mismatch" });
   assert.equal(humanChoiceLearningCandidates({ state: record.state, decision: record.decision }).some((row) => row.kind === "prediction-miss"), false);
+});
+
+test("AI の予測の封: 推奨と一緒には出さず、封は作り直せず（出し直しは --restart と理由・前の封は history）、一覧に封のファイルを混ぜない", async (t) => {
+  const { work } = await workspace(t);
+  const prediction = { index: 3, reason: "文字が主役の案を選ぶと予測", predictorContextId: "claude:synthetic-predictor" };
+  await assert.rejects(createSet(work, { setId: "synthetic-both", input: candidatesInput({ prediction }) }), /推奨（recommended）を出さない/u);
+  const first = await createSet(work, { setId: "synthetic-immutable", input: candidatesInput({ recommended: undefined, prediction }) });
+  assert.equal(first.created, true);
+  // 人の答えを知った後に予測を合わせ直せないように、封は作り直せない。
+  const again = await createSet(work, { setId: "synthetic-immutable", input: candidatesInput({ recommended: undefined, prediction: { ...prediction, index: 1 } }) });
+  assert.equal(again.created, false);
+  assert.deepEqual(again.issues, ["human-choice-prediction-sealed"]);
+  await assert.rejects(createSet(work, { setId: "synthetic-immutable", restart: true, input: candidatesInput({ recommended: undefined, prediction }) }), /--reason/u);
+  const restarted = await createSet(work, {
+    setId: "synthetic-immutable", restart: true, restartReason: "候補を差し替えた",
+    input: candidatesInput({ recommended: undefined, prediction: { ...prediction, index: 1 } }),
+  });
+  assert.equal(restarted.created, true);
+  assert.equal(restarted.state.history.at(-1).predictionSeal.sha256, first.state.predictionSeal.sha256);
+  assert.notEqual(restarted.state.digest, first.state.digest, "封が変われば組の digest も変わる（古いページの答えは記録しない）");
+  const listed = await listHumanChoiceSets({ workDir: work });
+  assert.deepEqual(listed.entries.map((entry) => entry.setId).sort(), ["synthetic-immutable"]);
+  assert.deepEqual(listed.issues, []);
 });
