@@ -564,11 +564,19 @@ test("契約の緩み: 合格点・下限・項目・ゲート・上限・受け
     acceptance: { mode: "each-evaluator", evaluators: ["e1", "e2"], minimumEvaluatorScore: 85, goalCheck: true },
   };
   assert.deepEqual(qualityContractRelaxations(base, structuredClone(base)), []);
-  // 項目を足して重みが正規化し直されても、残った項目どうしの比が同じなら緩みではない。
+  // 機械ゲートを足す・下限を上げるのは締める向き。
+  const tightened = structuredClone(base);
+  tightened.machineGates = ["g1", "g2", "g3"];
+  tightened.rubric = [{ id: "a", weight: 60, minimumScore: 85 }, { id: "b", weight: 40, minimumScore: 70 }];
+  assert.deepEqual(qualityContractRelaxations(base, tightened), []);
+  // 項目を足すと加重平均が薄まり、不合格が合格に変わりうる（残った項目の比は同じでも人に回す）。
   const added = structuredClone(base);
   added.rubric = [{ id: "a", weight: 48, minimumScore: 80 }, { id: "b", weight: 32, minimumScore: 70 }, { id: "c", weight: 20, minimumScore: 60 }];
-  added.machineGates = ["g1", "g2", "g3"];
-  assert.deepEqual(qualityContractRelaxations(base, added), []);
+  assert.deepEqual(qualityContractRelaxations(base, added), ["criterion-added:c"]);
+  // 同じ id のまま採点の定義を変えると、測る物が変わる。
+  const redefined = structuredClone(base);
+  redefined.rubric[0] = { ...redefined.rubric[0], description: "合成の別の定義" };
+  assert.deepEqual(qualityContractRelaxations(base, redefined), ["criterion-definition-changed:a"]);
   const loose = {
     digest: "b",
     limits: { targetScore: 80, maximumReviewRounds: 9, maximumCost: 10, maximumElapsedMs: 1000, minimumImprovement: 1, maximumStagnantRounds: 2 },

@@ -390,7 +390,7 @@ test("始め直しで基準・止まる条件が緩む（上限を上げる・�
   assert.ok(row.relaxedBy.relaxations.includes("maximumReviewRounds:2->10"));
 });
 
-test("締める方向の始め直し（下限を上げる・項目を足す）は人の確認なしで始められる", async (t) => {
+test("締める方向の始め直し（下限を上げる）は人の確認なしで始められ、項目を足す始め直しは人に回す", async (t) => {
   const root = await workspace(t);
   const configPath = join(root, "script-quality.json");
   await writeFile(configPath, JSON.stringify({ version: SCRIPT_QUALITY_CHANNEL_CONFIG_VERSION, limits: { maximumReviewRounds: 2 } }));
@@ -400,11 +400,21 @@ test("締める方向の始め直し（下限を上げる・項目を足す）�
     version: SCRIPT_QUALITY_CHANNEL_CONFIG_VERSION,
     limits: { maximumReviewRounds: 2 },
     floors: { "meaning-preservation": 95 },
-    criteria: [{ id: "synthetic-extra", label: "合成の追加項目", weight: 5, minimumScore: 70, description: "冒頭の台詞が本編で一字違わず再演される（合成）" }],
   }));
-  const tightened = await start(root, { channelConfig: configPath, restart: true, restartReason: "下限を上げて項目を足した" });
+  const tightened = await start(root, { channelConfig: configPath, restart: true, restartReason: "下限を上げた" });
   assert.equal(tightened.started, true, (tightened.issues || []).join(", "));
   assert.equal(tightened.state.script.history.at(-1).relaxedBy, undefined);
+  // 取りやすい項目を足すと既存の項目の低さが薄まる（実契約で不合格が合格に変わる反例があった）。人に回す。
+  await stopScriptQualityLoop({ workDir: root, reviewer: "合成の人", reason: "止めて項目を足す", humanVerified: true, isInteractive: true, now });
+  await writeFile(configPath, JSON.stringify({
+    version: SCRIPT_QUALITY_CHANNEL_CONFIG_VERSION,
+    limits: { maximumReviewRounds: 2 },
+    floors: { "meaning-preservation": 95 },
+    criteria: [{ id: "synthetic-extra", label: "合成の追加項目", weight: 100, minimumScore: 0, description: "冒頭の台詞が本編で一字違わず再演される（合成）" }],
+  }));
+  const added = await start(root, { channelConfig: configPath, restart: true, restartReason: "項目を足した" });
+  assert.equal(added.started, false);
+  assert.ok(added.issues.includes("script-quality-contract-relaxed:criterion-added:synthetic-extra"), added.issues.join(", "));
 });
 
 test("--restart しても同じ作業フォルダの回数・時間を持ち越し、止まる条件は累計で判定し、累計は人の確認つきの操作でだけ戻せる", async (t) => {
