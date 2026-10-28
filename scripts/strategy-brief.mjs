@@ -95,6 +95,8 @@ export function strategyBriefHelp() {
     [--generator-host <claude-code|codex>]
     [--restart --reason "..."]     止まったループだけ始め直せる（前の状態は history に残る。続いているループは、
                                    人が stop で止めてから）
+                                   採点の基準・止まる条件が緩む始め直し（合格点・下限を下げる、項目・ゲートを外す、上限を上げる）は、
+                                   決めた人が自分の端末から --reviewer <名前> --human-verified も付ける（無ければ始めずに止まる）。
                停滞: 前の最高点から最小改善（5 点）だけ伸びない回を停滞に数える（LLM の採点の約 10 点のぶれより
                小さい伸びを改善と数えない）。2026-09-27 より前に始めたループは、始めたときの 1 点のまま続く
 
@@ -268,6 +270,11 @@ export async function runStrategyBriefCli(argv = process.argv.slice(2), {
         generatorHost: args.generatorHost,
         restart: args.restart === true,
         restartReason: args.reason,
+        // 基準・止まる条件が緩む始め直しだけ、人の確認（--reviewer と --human-verified）を求める。
+        reviewer: args.reviewer,
+        humanVerified: args.humanVerified === true,
+        agentAttested: args.agentAttested === true,
+        isInteractive,
         ...injected,
       });
       print(stdout, result, args.json);

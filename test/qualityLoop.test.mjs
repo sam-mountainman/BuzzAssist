@@ -16,6 +16,7 @@ import {
   findStaleQualityFeedback,
   normalizeQualityAcceptance,
   normalizeQualityRubric,
+  qualityContractRelaxations,
   normalizeRubricAnchors,
   HUMAN_STOP_REASON,
   qualityLimitDefaults,
@@ -552,4 +553,45 @@ test("目的の判定で差し戻しても、回数の上限に届いていれ�
   const human = stopQualityLoopByHuman({ state: reached, reason: "依頼そのものを変えると決めた", reviewer: "operator", attestedBy: "human-verified" });
   assert.equal(human.status, "blocked");
   assert.equal(human.stopReason, HUMAN_STOP_REASON);
+});
+
+test("契約の緩み: 合格点・下限・項目・ゲート・上限・受け入れ方の緩む向きだけを数え、項目の追加は数えない", () => {
+  const base = {
+    digest: "a",
+    limits: { targetScore: 90, maximumReviewRounds: 3, maximumCost: 10, maximumElapsedMs: 1000, minimumImprovement: 5, maximumStagnantRounds: 2 },
+    rubric: [{ id: "a", weight: 60, minimumScore: 80 }, { id: "b", weight: 40, minimumScore: 70 }],
+    machineGates: ["g1", "g2"],
+    acceptance: { mode: "each-evaluator", evaluators: ["e1", "e2"], minimumEvaluatorScore: 85, goalCheck: true },
+  };
+  assert.deepEqual(qualityContractRelaxations(base, structuredClone(base)), []);
+  // 項目を足して重みが正規化し直されても、残った項目どうしの比が同じなら緩みではない。
+  const added = structuredClone(base);
+  added.rubric = [{ id: "a", weight: 48, minimumScore: 80 }, { id: "b", weight: 32, minimumScore: 70 }, { id: "c", weight: 20, minimumScore: 60 }];
+  added.machineGates = ["g1", "g2", "g3"];
+  assert.deepEqual(qualityContractRelaxations(base, added), []);
+  const loose = {
+    digest: "b",
+    limits: { targetScore: 80, maximumReviewRounds: 9, maximumCost: 10, maximumElapsedMs: 1000, minimumImprovement: 1, maximumStagnantRounds: 2 },
+    rubric: [{ id: "a", weight: 50, minimumScore: 60 }],
+    machineGates: ["g1"],
+    acceptance: { mode: "average", evaluators: ["e1"] },
+  };
+  const found = qualityContractRelaxations(base, loose);
+  for (const expected of [
+    "targetScore:90->80",
+    "minimumImprovement:5->1",
+    "maximumReviewRounds:3->9",
+    "criterion-removed:b",
+    "criterion-floor:a:80->60",
+    "gate-removed:g2",
+    "acceptance-mode:each-evaluator->average",
+    "acceptance-evaluator-removed:e2",
+    "acceptance-goal-check-removed",
+  ]) assert.ok(found.includes(expected), `${expected} が無い: ${found.join(", ")}`);
+  const reweighted = structuredClone(base);
+  reweighted.rubric = [{ id: "a", weight: 30, minimumScore: 80 }, { id: "b", weight: 70, minimumScore: 70 }];
+  assert.deepEqual(qualityContractRelaxations(base, reweighted), ["criterion-weights-changed"]);
+  // 前の契約が分からない古い状態は、digest が同じなら変更なし、違えば分からないとして人に回す。
+  assert.deepEqual(qualityContractRelaxations(null, { digest: "same" }, { previousDigest: "same" }), []);
+  assert.deepEqual(qualityContractRelaxations(null, { digest: "new" }, { previousDigest: "old" }), ["contract-terms-unknown"]);
 });

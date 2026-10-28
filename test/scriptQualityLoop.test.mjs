@@ -347,6 +347,66 @@ test("上限の回数に届くと人待ちで止まり、止まったループ�
   assert.equal(restarted.state.rounds.length, 0);
 });
 
+test("始め直しで基準・止まる条件が緩む（上限を上げる・合格点や下限を下げる）なら、人の確認が無いと始めない", async (t) => {
+  const root = await workspace(t);
+  const configPath = join(root, "script-quality.json");
+  await writeFile(configPath, JSON.stringify({ version: SCRIPT_QUALITY_CHANNEL_CONFIG_VERSION, limits: { maximumReviewRounds: 2 } }));
+  await start(root, { channelConfig: configPath });
+  const texts = [DRAFT, REWRITE];
+  let previous = null;
+  for (const [index, text] of texts.entries()) {
+    const file = `drafts/v${index + 1}.md`;
+    await writeFile(join(root, file), text);
+    await record(root, {
+      scriptPath: file, versionLabel: `v${index + 1}`, stage: index === 0 ? "draft" : "revision",
+      ...(index > 0 ? { revisionDelta: "拍の位置を直した" } : {}),
+      reviewPath: await writeReview(root, `r${index + 1}`, review({
+        context: `ctx-eval-${index + 1}`, script: text, ...(previous ? { base: previous } : {}), rubricScores: scores({ "duration-fit": 30 }),
+      })),
+    });
+    previous = text;
+  }
+  // 上限で止まった後に、署名の無い設定で上限を上げ・合格点を下げて始め直そうとする（基準を緩めて合格させる抜け道）。
+  await writeFile(configPath, JSON.stringify({ version: SCRIPT_QUALITY_CHANNEL_CONFIG_VERSION, limits: { maximumReviewRounds: 10, targetScore: 80 } }));
+  const refused = await start(root, { channelConfig: configPath, restart: true, restartReason: "もう少し回したい" });
+  assert.equal(refused.started, false);
+  assert.ok(refused.issues.includes("script-quality-contract-relaxed-needs-human"), refused.issues.join(", "));
+  assert.ok(refused.issues.some((issue) => issue.startsWith("script-quality-contract-relaxed:maximumReviewRounds:2->10")), refused.issues.join(", "));
+  assert.ok(refused.issues.some((issue) => issue.startsWith("script-quality-contract-relaxed:targetScore:")), refused.issues.join(", "));
+  assert.equal(refused.state.status, "needs-human-approval", "状態は書き換えない");
+  // 機械の自己申告（--agent-attested）は人の確認に数えない。
+  const agent = await start(root, {
+    channelConfig: configPath, restart: true, restartReason: "もう少し回したい", reviewer: "合成の人", humanVerified: true, agentAttested: true,
+  });
+  assert.equal(agent.started, false);
+  // 決めた人が自分の端末から --human-verified を付ければ始められ、誰がどの緩みを認めたかが history に残る。
+  const approved = await start(root, {
+    channelConfig: configPath, restart: true, restartReason: "上限を人が決め直した", reviewer: "合成の人", humanVerified: true, isInteractive: true,
+  });
+  assert.equal(approved.started, true);
+  const row = approved.state.script.history.at(-1);
+  assert.equal(row.relaxedBy.reviewer, "合成の人");
+  assert.equal(row.relaxedBy.attestedBy, "human-verified");
+  assert.ok(row.relaxedBy.relaxations.includes("maximumReviewRounds:2->10"));
+});
+
+test("締める方向の始め直し（下限を上げる・項目を足す）は人の確認なしで始められる", async (t) => {
+  const root = await workspace(t);
+  const configPath = join(root, "script-quality.json");
+  await writeFile(configPath, JSON.stringify({ version: SCRIPT_QUALITY_CHANNEL_CONFIG_VERSION, limits: { maximumReviewRounds: 2 } }));
+  await start(root, { channelConfig: configPath });
+  await stopScriptQualityLoop({ workDir: root, reviewer: "合成の人", reason: "止めて設定を締める", humanVerified: true, isInteractive: true, now });
+  await writeFile(configPath, JSON.stringify({
+    version: SCRIPT_QUALITY_CHANNEL_CONFIG_VERSION,
+    limits: { maximumReviewRounds: 2 },
+    floors: { "meaning-preservation": 95 },
+    criteria: [{ id: "synthetic-extra", label: "合成の追加項目", weight: 5, minimumScore: 70, description: "冒頭の台詞が本編で一字違わず再演される（合成）" }],
+  }));
+  const tightened = await start(root, { channelConfig: configPath, restart: true, restartReason: "下限を上げて項目を足した" });
+  assert.equal(tightened.started, true, (tightened.issues || []).join(", "));
+  assert.equal(tightened.state.script.history.at(-1).relaxedBy, undefined);
+});
+
 test("--restart しても同じ作業フォルダの回数・時間を持ち越し、止まる条件は累計で判定し、累計は人の確認つきの操作でだけ戻せる", async (t) => {
   const root = await workspace(t);
   const configPath = join(root, "script-quality.json");
