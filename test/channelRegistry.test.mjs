@@ -18,6 +18,7 @@ import {
   loadChannelRegistry,
   pathOverlap,
   publicTreePlacement,
+  resolveChannelForCall,
   validateChannelRegistry,
   validateChannelRegistryDetailed,
 } from "../lib/channelRegistry.mjs";
@@ -179,6 +180,11 @@ test("台帳: 削除したハーネス・ジャンルを指すだけのチャン
   const registry = { channels: detailed.channels, quarantined: detailed.quarantined };
   assert.equal(findChannel(registry, "alpha").id, "alpha");
   assert.throws(() => findChannel(registry, "retired"), (error) => error.code === CHANNEL_QUARANTINED_CODE && /synthetic-retired-harness/u.test(error.message));
+  // --channel を省いて止めたチャンネルの場所や Pack を渡しても、チャンネル無しとして通さない。
+  assert.throws(() => resolveChannelForCall(registry, { projectDir: path.join(root, "retired", "project") }), { code: CHANNEL_QUARANTINED_CODE });
+  assert.throws(() => resolveChannelForCall(registry, { channelPackPath: path.join(root, "retired", "pack") }), { code: CHANNEL_QUARANTINED_CODE });
+  assert.equal(resolveChannelForCall(registry, { projectDir: path.join(root, "alpha", "project") }).channel.id, "alpha");
+  assert.equal(resolveChannelForCall(registry, { projectDir: path.join(root, "unrelated") }), null);
   // 台帳ファイルから読んでも同じ（止めたチャンネルは quarantined に出る）。
   const file = path.join(root, "harness-deployments.json");
   fs.writeFileSync(file, JSON.stringify(parsed));
