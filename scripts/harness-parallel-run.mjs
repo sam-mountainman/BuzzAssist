@@ -24,6 +24,7 @@ import { fileURLToPath } from "node:url";
 
 import { claudeAutomationPlanLine, isClaudePrintInvocation, notifyClaudeLaunchOnce } from "../lib/claudeAutomationBilling.mjs";
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
+import { childAgentEnvironment } from "../lib/harnessLearningGuard.mjs";
 import {
   MACHINE_SLOT_POOLS,
   machineSlotLeaseEnv,
@@ -471,7 +472,7 @@ async function runJob(job, { logDir, defaults, dryRun, planStartedAt, slotHandle
     const child = spawn(job.command, args, {
       cwd,
       // ジョブのために取った枠は子へ渡す（子の中の有料呼び出しはまずそれを使う）。
-      env: { ...process.env, ...(defaults.env ?? {}), ...(job.env ?? {}), ...machineSlotLeaseEnv(slotHandles) },
+      env: jobEnvironment(job, { defaults, slotEnv: machineSlotLeaseEnv(slotHandles) }),
       stdio: ["ignore", "pipe", "pipe"],
       // 独立したプロセスグループで起動する。こうしないと、タイムアウトで
       // 子だけを殺しても孫（codex exec や ffmpeg が産むもの）が生き残り、
@@ -586,6 +587,19 @@ export async function shutdownRunner(signal) {
   for (const handle of heldSlotHandles) releaseMachineSlot(handle);
   heldSlotHandles.clear();
   process.stderr.write("ロックと端末全体の枠を外しました。\n");
+}
+
+// エージェント（claude・codex）を子として起動するジョブ。子は学習の台帳を書かない（並列の子が同じ台帳へ書くと
+// 重複と競合が起きる。捕捉したい内容は結果に書いて親へ返す。harness-parallel-agents の子と同じ決まり）。
+const AGENT_COMMAND = /(?:^|[\\/])(?:claude|codex)(?:\.(?:cmd|exe|bat|ps1))?$/iu;
+export function isAgentChildInvocation(command) {
+  return AGENT_COMMAND.test(String(command ?? "").trim());
+}
+
+/** ジョブの子プロセスの環境。エージェントを起動するジョブには、計画の env で外せない子の印を付ける。 */
+export function jobEnvironment(job, { defaults = {}, slotEnv = {}, baseEnv = process.env } = {}) {
+  const env = { ...baseEnv, ...(defaults.env ?? {}), ...(job?.env ?? {}), ...slotEnv };
+  return isAgentChildInvocation(job?.command) ? childAgentEnvironment(env) : env;
 }
 
 /**

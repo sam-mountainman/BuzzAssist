@@ -9,6 +9,8 @@ import {
   defaultConcurrency,
   executePlan,
   expandPlanJobs,
+  isAgentChildInvocation,
+  jobEnvironment,
   normalizeLockKey,
   planDigest,
   releaseCrossProcessLock,
@@ -592,4 +594,15 @@ test("自分のものでないロックは解放できない", async () => {
   const next = acquireCrossProcessLock(key);
   assert.ok(next, "外れた後は取れること");
   releaseCrossProcessLock(next);
+});
+
+test("claude・codex を子として起動するジョブには、計画の env でも外せない子の印（学習を書かない）を付ける", () => {
+  for (const command of ["claude", "codex", "/opt/bin/codex", "C:\\tools\\claude.cmd"]) assert.equal(isAgentChildInvocation(command), true, command);
+  for (const command of ["ffmpeg", "node", "claude-helper", "true"]) assert.equal(isAgentChildInvocation(command), false, command);
+  const agent = jobEnvironment({ command: "codex", env: { BUZZASSIST_LEARNING_WRITE_FORBIDDEN: "0", A: "1" } }, { baseEnv: { B: "2" } });
+  assert.equal(agent.BUZZASSIST_LEARNING_WRITE_FORBIDDEN, "child-agent");
+  assert.equal(agent.A, "1");
+  assert.equal(agent.B, "2");
+  const plain = jobEnvironment({ command: "ffmpeg", env: { A: "1" } }, { baseEnv: {} });
+  assert.equal(plain.BUZZASSIST_LEARNING_WRITE_FORBIDDEN, undefined);
 });
