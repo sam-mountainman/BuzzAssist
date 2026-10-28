@@ -128,6 +128,7 @@
     "instructions:check": "node scripts/generate-host-instructions.mjs --check",
     "package:audit": "node scripts/audit-package-tarball.mjs",
     "doctor": "node scripts/harness-doctor.mjs",
+    "harness:conformance": "node scripts/harness-conformance.mjs",
     "hooks:install": "git config core.hooksPath .githooks"
   },
   "engines": {

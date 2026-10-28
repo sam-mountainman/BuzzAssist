@@ -1,6 +1,6 @@
 {
   "id": "koya-manga-video",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "displayName": "漫画動画（固定キャスト・縦組み吹き出し）",
   "note": "クライアント名・チャンネル名はここに書かない。ここは『何が作れるか』の宣言であって、誰のためのものかの記録ではない。ルーターと横断レビューはこのファイルだけを読む。",
   "produces": {
@@ -18,6 +18,11 @@
     {
       "id": "script",
       "what": "日本語の台本",
+      "blocking": true
+    },
+    {
+      "id": "signed-channel-pack",
+      "what": "キャスト・画風・声・承認 SHA を含む署名済み Channel Pack（中身は Koya の引き継ぎの束）。provider secret は含めない。上位の入口（run-video-harness start）は Pack の署名と中身を有料の処理の前に検査する",
       "blocking": true
     },
     {
