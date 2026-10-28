@@ -36,8 +36,8 @@ import {
   assetActiveLoopDetail,
   collectQualityLoopReferences,
   evaluateQualityLoopStop,
-  isLinkedWorktreeDir,
   jobBoundLoopRef,
+  sessionIsLoopEvaluator,
   splitShellSegments,
   withLoopMarks,
 } from "../lib/stopHookQualityLoops.mjs";
@@ -320,7 +320,7 @@ test("status を見ただけ・ツールの結果に出た案内・置き字の�
   }
 });
 
-test("子エージェント・worktree の子・stop_hook_active・スイッチ・Stop 以外では何もしない", async () => {
+test("子エージェント・stop_hook_active・スイッチ・Stop 以外では何もしない（worktree の本体の会話は差し戻す）", async () => {
   const fx = fixture();
   try {
     const workDir = join(fx.dir, "work", "script-e");
@@ -333,23 +333,13 @@ test("子エージェント・worktree の子・stop_hook_active・スイッチ�
     assert.equal((await decideStop(stopInput(fx), { env: { ...fx.env, [STOP_HOOK_SWITCH_ENV]: "off" } })).why, "switched-off");
     assert.equal((await decideStop(stopInput(fx, { hook_event_name: "SubagentStop" }), { env: fx.env })).why, "not-stop");
 
-    // worktree の子: 作業場所の .git がファイルで、本体の .git/worktrees/<名前> を指す。
-    const child = join(fx.dir, "checkout-child");
-    mkdirSync(join(child, "sub"), { recursive: true });
-    writeFileSync(join(child, ".git"), `gitdir: ${join(fx.dir, "main", ".git", "worktrees", "child-1")}\n`);
-    const inChild = await decideStop(stopInput(fx, { cwd: join(child, "sub") }), { env: fx.env });
-    assert.equal(inChild.action, "none");
-    assert.equal(inChild.loopWhy, "worktree-child");
-    assert.equal(isLinkedWorktreeDir(join(child, "sub")), true);
-    assert.equal(isLinkedWorktreeDir(join(fx.dir, "x", ".claude", "worktrees", "agent-1")), true);
-    // 本体（.git がフォルダ）と submodule（.git/modules を指すファイル）は子ではない。
-    const main = join(fx.dir, "main");
-    mkdirSync(join(main, ".git"), { recursive: true });
-    assert.equal(isLinkedWorktreeDir(main), false);
-    const submodule = join(fx.dir, "with-submodule");
-    mkdirSync(submodule, { recursive: true });
-    writeFileSync(join(submodule, ".git"), "gitdir: ../.git/modules/with-submodule\n");
-    assert.equal(isLinkedWorktreeDir(submodule), false);
+    // 作業場所が git の linked worktree でも、子の印も agent_id も無ければ本体の会話として差し戻す
+    // （Claude Code のデスクトップの本体の会話は .claude/worktrees/<名前> で動く）。
+    const worktree = join(fx.dir, "x", ".claude", "worktrees", "main-session");
+    mkdirSync(worktree, { recursive: true });
+    writeFileSync(join(worktree, ".git"), `gitdir: ${join(fx.dir, "main", ".git", "worktrees", "main-session")}\n`);
+    const inWorktree = await decideStop(stopInput(fx, { cwd: worktree }), { env: fx.env });
+    assert.equal(inWorktree.action, "block", "worktree で動く本体の会話でも品質ループの差し戻しは効く");
   } finally {
     fx.cleanup();
   }
@@ -616,6 +606,23 @@ test("評価者の会話（この会話の ID がそのループの評価文脈�
   } finally {
     fx.cleanup();
   }
+});
+
+test("評価者の判定は文脈 ID の完全一致（ホスト名つき可）。作る係として記録された会話は評価者に数えない", () => {
+  const base = { status: "active", rounds: [{ reviews: [] }] };
+  const withEvaluator = (context, extra = {}) => ({ ...base, ...extra, rounds: [{ reviews: [{ evaluatorContextId: context }] }] });
+  assert.equal(sessionIsLoopEvaluator(withEvaluator(SESSION), SESSION), true);
+  assert.equal(sessionIsLoopEvaluator(withEvaluator(`claude:${SESSION}`), SESSION), true);
+  assert.equal(sessionIsLoopEvaluator(withEvaluator(`codex:${SESSION}`), SESSION), true);
+  // 自分の ID を含むだけの別名（作る係が評価者を名乗る抜け道）は評価者ではない。
+  assert.equal(sessionIsLoopEvaluator(withEvaluator(`x-${SESSION}`), SESSION), false);
+  assert.equal(sessionIsLoopEvaluator(withEvaluator(`${SESSION}-r2`), SESSION), false);
+  assert.equal(sessionIsLoopEvaluator(withEvaluator(`claude:x:${SESSION}`), SESSION), false);
+  // 作る係として記録された会話は、評価の記録があっても差し戻しの対象のまま。
+  assert.equal(sessionIsLoopEvaluator(withEvaluator(`claude:${SESSION}`, { generatorContextId: `claude:${SESSION}` }), SESSION), false);
+  assert.equal(sessionIsLoopEvaluator(withEvaluator(SESSION, {
+    script: { versions: [{ producerContextsAll: [`codex:${SESSION}`] }] },
+  }), SESSION), false);
 });
 
 test("途中の成果物の案内の写しは、ループ自身の案内（assetQualityStatus の detail）と同じ文", async () => {
