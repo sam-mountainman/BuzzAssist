@@ -157,6 +157,13 @@ function claimInSentence(sentence) {
  * strong = 完成品（動画・MP4・納品…）についての主張。weak = 文の中に完成品の語は無いが、
  * 発言全体は制作の話をしている主張（「完了しました。Job は…」）。
  */
+/** 完成・合格を主張している文（否定・伝聞を除く）。品質ループの「合格せずに止まったのに完成と言う」の判定にも使う。 */
+export function completionClaimSentences(message) {
+  const text = typeof message === "string" ? message.slice(0, 200_000) : "";
+  if (!text.trim()) return [];
+  return splitSentences(text).filter(claimInSentence);
+}
+
 export function detectCompletionClaim(message) {
   const text = typeof message === "string" ? message.slice(0, 200_000) : "";
   if (!text.trim()) return { claimed: false, strong: false, weak: false };
@@ -591,10 +598,16 @@ export function evaluateStop(input, { env = process.env, home = homedir(), fsApi
   }
   if (located.length === 0) return { action: "none", why: "job-not-found" };
 
-  // 発言が Job を名指ししていればその Job を、していなければこの会話で最後に扱った Job を見る。
-  // 最後の Job の記録が壊れているときに、古い別の Job へ乗り換えて判定しない（読めない＝止めない）。
+  // 発言が名指しした Job と、この会話で最後に扱った Job の両方を見る（合格済みの古い Job を名指しして、最新の
+  // 未決着の Job の判定を逃れられないように）。最後の Job の記録が壊れているときに、古い別の Job へ乗り換えて
+  // 判定しない（読めない＝止めない）。
+  // 「最後に扱った Job」は会話の記録（道具の呼び出し）だけから決める。発言の文に書いた Job ID を数えると、
+  // 古い Job を名指ししただけでそれが「最後」になってしまう。
   const named = new Set(mentioned.result().jobIds);
-  const chosen = named.size > 0 ? located.filter((entry) => named.has(entry.jobId)) : [located[0]];
+  const lastHandled = collectJobReferences(lines, "", { cwd, env }).jobIds[0] || located[0].jobId;
+  const chosen = named.size > 0
+    ? located.filter((entry) => entry.jobId === lastHandled || named.has(entry.jobId))
+    : [located[0]];
   const targets = chosen.filter((entry) => !entry.unreadable);
   if (targets.length === 0) return { action: "none", why: chosen.length > 0 ? "job-unreadable" : "named-job-not-found" };
 
@@ -680,6 +693,7 @@ export async function decideStop(input, { env = process.env, home = homedir(), f
       blockState: state,
       jobLoopRefs: jobBoundLoopRefsFromTranscript(lines, lastMessageOf(input, lines), { cwd, env, fsApi, pathApi }),
       deadline,
+      claimSentences: completionClaimSentences(lastMessageOf(input, lines)),
       ...(loadLoopDetail ? { loadDetail: loadLoopDetail } : {}),
     });
   } catch (error) {

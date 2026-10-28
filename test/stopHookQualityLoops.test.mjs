@@ -235,6 +235,29 @@ test("合格・人の判断待ち・止まったループ・状態ファイル�
   }
 });
 
+test("合格せずに止まったループの成果物を「完成」と言うと1回だけ差し戻し、止まったことを書いた報告は通す", async () => {
+  const fx = fixture();
+  try {
+    const workDir = join(fx.dir, "work", "script-unpassed");
+    const statePath = await startScript(workDir);
+    writeLines(fx.transcript, claudeBash(`node scripts/script-quality-loop.mjs record --work-dir "${workDir}" --script v1.md --version v1 --stage draft --review r.json`, { cwd: fx.dir }));
+    setStatus(statePath, "needs-human-approval", "round-limit");
+    const claim = await decideStop(stopInput(fx, { last_assistant_message: "台本が完成しました。" }), { env: fx.env });
+    assert.equal(claim.action, "block");
+    assert.equal(claim.loopWhy, "loop-unpassed-claim");
+    assert.match(claim.reason, /合格せずに止まっている/u);
+    // 止まったことを書いた報告は状態の報告として通す。
+    const report = await decideStop(stopInput(fx, { last_assistant_message: "台本は上限で止まりました。完成とは言えず、続けるかは人が決めます。" }), { env: fx.env });
+    assert.equal(report.action, "none");
+    // 台本と関係の無い主張は数えない。合格したループも数えない。
+    assert.equal((await decideStop(stopInput(fx, { last_assistant_message: "請求書の下書きが完成しました。" }), { env: fx.env })).action, "none");
+    setStatus(statePath, "passed", "target-reached");
+    assert.equal((await decideStop(stopInput(fx, { last_assistant_message: "台本が完成しました。" }), { env: fx.env })).action, "none");
+  } finally {
+    fx.cleanup();
+  }
+});
+
 test("台本のループが目的の判定待ち（awaiting-goal-check）→ 人の判断待ちにせず、新しい文脈に判定させる手順で1回だけ差し戻す", async () => {
   const fx = fixture();
   try {
