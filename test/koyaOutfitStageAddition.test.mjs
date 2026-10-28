@@ -266,6 +266,9 @@ async function selectedStageRound(projectDir, fixture, { optionId = "gakuran" } 
     results.push({ assetFile });
   }
   const recorded = await recordCharacterStylingVariationResults({ projectDir, castId: cast.id }, workflow.id, planned.round.id, planned.jobs, results);
+  const draft = JSON.parse(await readFile(recorded.reviewDraftPath, "utf8"));
+  assert.equal(draft.storyStage.age, "17歳（高校3年）", "the reviewer sees which story stage and age the round approves");
+  assert.match(draft.storyStageGuidance, /not against the base asset's age/u);
   await passStylingReview(recorded.reviewDraftPath);
   await composeCharacterStylingReviewSheet({ projectDir, workflowId: workflow.id, castId: cast.id, roundId: planned.round.id, reviewPath: recorded.reviewDraftPath });
   await selectCharacterStylingVariation({
@@ -407,6 +410,7 @@ test("登録済みの人物に服の段を足すと、その段の板だけを�
     assert.equal(await sha256Of(archived), before.approval.identityReviewSha256, "the registered identity review is archived before the draft is rewritten");
     const draft = JSON.parse(await readFile(added.identityReviewDraftPath, "utf8"));
     assert.deepEqual(draft.outfitSheets.map((sheet) => sheet.storyStage), ["high-school"]);
+    assert.equal(draft.outfitSheets[0].storyStageAge, "17歳（高校3年）", "the identity reviewer judges the sheet against the stage age");
     assert.equal(added.state.status, "character-identity-review-required");
 
     // 一度置いた後は、同じ入口で置き直さない（点検の続きか、直しの入口で進める）。
