@@ -348,6 +348,12 @@ def main() -> None:
     parser.add_argument("--columns", type=int, required=True)
     parser.add_argument("--rows", type=int, required=True)
     parser.add_argument("--margin-fraction", type=float, default=0.08)
+    # A one-row sheet (the 4x1 outfit sheet) is drawn as free-standing figures
+    # whose widths differ, so a figure often crosses the equal column line.
+    # With this switch the column cuts follow the real white gutters and each
+    # connected drawing stays whole in its own column. Off by default so the
+    # existing grids repack exactly as before.
+    parser.add_argument("--column-gutters", action="store_true")
     args = parser.parse_args()
 
     source_path = Path(args.input).resolve()
@@ -362,7 +368,14 @@ def main() -> None:
     rgb, rule_removal = remove_frame_rules(original_rgb, args.columns, args.rows)
     width, height = rgb.shape[1], rgb.shape[0]
     mask = np.min(rgb, axis=2) < 248
-    column_bounds = [round(width * index / args.columns) for index in range(args.columns + 1)]
+    column_assigned = None
+    column_crossing = None
+    if args.column_gutters:
+        column_bounds = choose_row_boundaries(mask.T, args.columns)
+        assigned_t, column_crossing = assign_rows_by_component(mask.T, column_bounds)
+        column_assigned = assigned_t.T
+    else:
+        column_bounds = [round(width * index / args.columns) for index in range(args.columns + 1)]
     target = Image.new("RGBA", (width, height), (255, 255, 255, 255))
     target_x = [round(width * index / args.columns) for index in range(args.columns + 1)]
     target_y = [round(height * index / args.rows) for index in range(args.rows + 1)]
@@ -374,8 +387,22 @@ def main() -> None:
     row_bounds_by_column: list[list[int]] = []
     assigned_by_column: list[np.ndarray] = []
     crossing_by_column: list[dict[str, int]] = []
+    column_extents: list[tuple[int, int]] = []
+    column_masks: list[np.ndarray] = []
     for column in range(args.columns):
-        strip = mask[:, column_bounds[column]:column_bounds[column + 1]]
+        x0, x1 = column_bounds[column], column_bounds[column + 1]
+        if column_assigned is None:
+            strip = mask[:, x0:x1]
+        else:
+            # The column owns every pixel of the drawings assigned to it, even
+            # the part that pokes past the gutter cut.
+            own = mask & (column_assigned == column)
+            occupied = np.flatnonzero(own.any(axis=0))
+            if len(occupied):
+                x0, x1 = min(x0, int(occupied[0])), max(x1, int(occupied[-1]) + 1)
+            strip = own[:, x0:x1]
+        column_extents.append((x0, x1))
+        column_masks.append(strip)
         bounds = choose_row_boundaries(strip, args.rows)
         assigned, crossing = assign_rows_by_component(strip, bounds)
         row_bounds_by_column.append(bounds)
@@ -384,9 +411,9 @@ def main() -> None:
 
     for row in range(args.rows):
         for column in range(args.columns):
-            x0, x1 = column_bounds[column], column_bounds[column + 1]
+            x0, x1 = column_extents[column]
             bounds = row_bounds_by_column[column]
-            member = mask[:, x0:x1] & (assigned_by_column[column] == row)
+            member = column_masks[column] & (assigned_by_column[column] == row)
             occupied_rows = np.flatnonzero(member.any(axis=1))
             region_top, region_bottom = bounds[row], bounds[row + 1]
             if len(occupied_rows):
@@ -441,6 +468,7 @@ def main() -> None:
         "rowAssignment": crossing_by_column,
         "targetRowBounds": target_y,
         "marginFraction": args.margin_fraction,
+        **({"columnGutters": True, "sourceColumnBounds": column_bounds, "columnAssignment": column_crossing} if args.column_gutters else {}),
         "ruleRemoval": rule_removal,
         "cells": cells,
     }

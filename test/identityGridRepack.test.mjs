@@ -143,3 +143,63 @@ test("a repacked sheet is repacked again from its verified source, not from itse
   assert.equal(tampered.path, path.resolve(output));
   assert.equal(tampered.replaced.length, 0);
 });
+
+// 4x1 の衣装の板。立ち姿と座り姿で幅が違うので、3人目と4人目が等分の列の線（x=400・x=600）を越える。
+// 人物どうしの間には白い隙間がある。
+const DRAW_ROW_SHEET = `
+import sys
+from PIL import Image, ImageDraw
+out = sys.argv[1]
+image = Image.new("RGB", (800, 300), (255, 255, 255))
+draw = ImageDraw.Draw(image)
+for box in ([20, 20, 120, 280], [230, 20, 330, 280], [390, 20, 510, 280], [560, 80, 700, 280]):
+    draw.ellipse(box, fill=(40, 40, 50), outline=(20, 20, 20), width=3)
+image.save(out)
+`;
+
+const ROW_CELL_COMPONENTS = `
+import sys, json, importlib.util
+import numpy as np
+from PIL import Image
+spec = importlib.util.spec_from_file_location("rp", sys.argv[1])
+rp = importlib.util.module_from_spec(spec); spec.loader.exec_module(rp)
+rgb = np.asarray(Image.open(sys.argv[2]).convert("RGB")).astype(int)
+cells = []
+for column in range(4):
+    cell = rgb[:, column * 200:(column + 1) * 200]
+    labels = rp.label_components(cell.min(axis=2) < 248)
+    sizes = np.bincount(labels.ravel())[1:]
+    cells.append(int((sizes >= 6).sum()))
+edges = [int((rgb[:, x].min(axis=1) < 248).sum()) for x in (0, 199, 200, 399, 400, 599, 600, 799)]
+print(json.dumps({"componentsPerCell": cells, "inkOnCellEdges": edges}))
+`;
+
+test("a one-row outfit sheet cuts its columns at the real white gutters so a figure crossing the column line stays whole", async (t) => {
+  const python = await pythonOrSkip(t);
+  if (!python) return;
+  const dir = await mkdtemp(path.join(os.tmpdir(), "identity-repack-row-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const sheet = path.join(dir, "outfit.png");
+  await execFile(python.command, [...python.args, "-c", DRAW_ROW_SHEET, sheet]);
+  const repack = async (name, extra) => {
+    const output = path.join(dir, `${name}.png`);
+    const manifest = path.join(dir, `${name}.manifest.json`);
+    await execFile(python.command, [...python.args, REPACK_SCRIPT, "--input", sheet, "--output", output, "--manifest", manifest, "--columns", "4", "--rows", "1", ...extra]);
+    const { stdout } = await execFile(python.command, [...python.args, "-c", ROW_CELL_COMPONENTS, REPACK_SCRIPT, output]);
+    return { result: JSON.parse(stdout), manifest: JSON.parse(await readFile(manifest, "utf8")) };
+  };
+
+  // 等分の列で切ると、列の線を越えた人物は線の所で切り落とされる（3人目は幅125→113、4人目は145→103）。
+  const straight = await repack("straight", []);
+  const widths = (manifest) => manifest.cells.map((cell) => cell.sourceContentBounds[2]);
+  assert.ok(widths(straight.manifest)[2] < 120 && widths(straight.manifest)[3] < 120, `straight cuts clip the crossing figures: ${widths(straight.manifest)}`);
+  assert.equal(straight.manifest.columnGutters, undefined, "the default keeps the old manifest shape");
+
+  const gutters = await repack("gutters", ["--column-gutters"]);
+  assert.deepEqual(gutters.result.componentsPerCell, [1, 1, 1, 1], "each cell holds exactly one whole figure");
+  assert.deepEqual(gutters.result.inkOnCellEdges, Array(8).fill(0), "no figure touches a cell edge after containment");
+  assert.equal(gutters.manifest.columnGutters, true);
+  assert.equal(gutters.manifest.sourceColumnBounds.length, 5);
+  assert.ok(gutters.manifest.sourceColumnBounds[2] < 390 && gutters.manifest.sourceColumnBounds[3] < 560, "the cuts sit in the gutters before the crossing figures");
+  assert.ok(widths(gutters.manifest)[2] >= 123 && widths(gutters.manifest)[3] >= 143, `whole figures are kept: ${widths(gutters.manifest)}`);
+});
