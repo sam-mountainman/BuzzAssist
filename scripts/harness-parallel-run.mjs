@@ -592,14 +592,18 @@ export async function shutdownRunner(signal) {
 // エージェント（claude・codex）を子として起動するジョブ。子は学習の台帳を書かない（並列の子が同じ台帳へ書くと
 // 重複と競合が起きる。捕捉したい内容は結果に書いて親へ返す。harness-parallel-agents の子と同じ決まり）。
 const AGENT_COMMAND = /(?:^|[\\/])(?:claude|codex)(?:\.(?:cmd|exe|bat|ps1))?$/iu;
-export function isAgentChildInvocation(command) {
-  return AGENT_COMMAND.test(String(command ?? "").trim());
+// env・npx・bash -lc などの包みを通した起動も拾う（引数の中の語・パッケージ名）。拾い過ぎても子が学習を書けなく
+// なるだけ（親へ返せばよい）なので、取りこぼさない側に倒す。
+const AGENT_WORD = /(?:^|[\s\\/"'=;&|(])(?:claude|codex)(?:\.(?:cmd|exe|bat|ps1))?(?=$|[\s"';&|)])|@openai\/codex|@anthropic-ai\/claude-code/iu;
+export function isAgentChildInvocation(command, args = []) {
+  if (AGENT_COMMAND.test(String(command ?? "").trim())) return true;
+  return (Array.isArray(args) ? args : []).some((arg) => AGENT_WORD.test(String(arg ?? "")));
 }
 
 /** ジョブの子プロセスの環境。エージェントを起動するジョブには、計画の env で外せない子の印を付ける。 */
 export function jobEnvironment(job, { defaults = {}, slotEnv = {}, baseEnv = process.env } = {}) {
   const env = { ...baseEnv, ...(defaults.env ?? {}), ...(job?.env ?? {}), ...slotEnv };
-  return isAgentChildInvocation(job?.command) ? childAgentEnvironment(env) : env;
+  return isAgentChildInvocation(job?.command, job?.args) ? childAgentEnvironment(env) : env;
 }
 
 /**

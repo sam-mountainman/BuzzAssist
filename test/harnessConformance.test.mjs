@@ -6,12 +6,13 @@ import test from "node:test";
 import { CONFORMANCE_CONDITIONS, evaluateHarnessConformance, harnessConformanceReport } from "../lib/harnessConformance.mjs";
 import { runHarnessConformanceCli } from "../scripts/harness-conformance.mjs";
 
-test("宣言のある全ハーネスが、上位ハーネスの必須の条件をそろえている（× が無い）", async () => {
+test("宣言のある全ハーネスが、上位ハーネスの必須の条件を全部そろえている（△ も無い）", async () => {
   const report = await harnessConformanceReport();
   assert.ok(report.rows.length >= 2);
   for (const row of report.rows) {
-    const missing = row.gaps.filter((gap) => gap.required && gap.status === "missing");
-    assert.deepEqual(missing.map((gap) => `${gap.condition}: ${gap.detail}`), [], row.harnessId);
+    const required = row.gaps.filter((gap) => gap.required);
+    assert.deepEqual(required.map((gap) => `${gap.condition}: ${gap.detail}`), [], row.harnessId);
+    assert.equal(row.conforms, true, row.harnessId);
     // 署名済みの Channel Pack は、宣言の要件と Core の中身の検査の両方がそろっている。
     assert.equal(row.results["signed-channel-pack"].status, "ok", `${row.harnessId}: ${row.results["signed-channel-pack"].detail}`);
   }
@@ -47,4 +48,18 @@ test("CLI: 表を出し、--strict は必須の条件がそろっていれば 0"
   assert.match(out, /\| 条件 \|/u);
   assert.match(out, /koya-manga-video/u);
   await assert.rejects(runHarnessConformanceCli(["--bogus"], { stdout: { write() {} } }), /知らない引数/u);
+});
+
+test("必須の条件の △（署名の照合が Receipt に無い・保証に証拠が無い）でも、そろっていないと判定する", async () => {
+  const { readFileSync } = await import("node:fs");
+  const declaration = JSON.parse(readFileSync(new URL("../config/harnesses/narrated-story-video.harness.json", import.meta.url), "utf8"));
+  const capabilities = JSON.parse(readFileSync(new URL("../config/harnesses/narrated-story-video.capabilities.json", import.meta.url), "utf8"));
+  const support = { upperAdapters: ["narrated-story-video"], packPayloads: ["narrated-story-video"], signoffSubjects: ["narrated-story-video"], canvasProgress: [] };
+  const broken = structuredClone(declaration);
+  broken.reviewAttestation = { subject: "synthetic-unsupported" };
+  broken.guarantees = broken.guarantees.map((row) => ({ ...row, evidenceAuditIds: [] }));
+  const row = evaluateHarnessConformance({ harnessId: "narrated-story-video", declaration: broken, capabilities, support });
+  assert.equal(row.results["separate-signoff"].status, "partial");
+  assert.equal(row.results["guarantee-evidence"].status, "partial");
+  assert.equal(row.conforms, false);
 });

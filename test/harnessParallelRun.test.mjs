@@ -599,6 +599,11 @@ test("自分のものでないロックは解放できない", async () => {
 test("claude・codex を子として起動するジョブには、計画の env でも外せない子の印（学習を書かない）を付ける", () => {
   for (const command of ["claude", "codex", "/opt/bin/codex", "C:\\tools\\claude.cmd"]) assert.equal(isAgentChildInvocation(command), true, command);
   for (const command of ["ffmpeg", "node", "claude-helper", "true"]) assert.equal(isAgentChildInvocation(command), false, command);
+  // 包みを通した起動（env・npx・bash -lc）も拾う。
+  assert.equal(isAgentChildInvocation("env", ["FOO=1", "codex", "exec", "x"]), true);
+  assert.equal(isAgentChildInvocation("npx", ["@openai/codex", "exec"]), true);
+  assert.equal(isAgentChildInvocation("bash", ["-lc", "cd /tmp && claude -p 'hi'"]), true);
+  assert.equal(isAgentChildInvocation("ffmpeg", ["-i", "claude-notes.mp4"]), false);
   const agent = jobEnvironment({ command: "codex", env: { BUZZASSIST_LEARNING_WRITE_FORBIDDEN: "0", A: "1" } }, { baseEnv: { B: "2" } });
   assert.equal(agent.BUZZASSIST_LEARNING_WRITE_FORBIDDEN, "child-agent");
   assert.equal(agent.A, "1");

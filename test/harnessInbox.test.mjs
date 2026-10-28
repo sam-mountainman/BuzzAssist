@@ -49,7 +49,9 @@ test("人の確認待ち・失敗・計画だけの Job と、作業場所の消
   assert.equal(report.items.some((item) => item.jobId === "video-narrated-story-video-0000000000000004"), false, "完了した Job は出さない");
   // 有料の処理は示すだけ（resume --confirmed の行に確かめる旨を書く）。
   const failed = report.items.find((item) => item.kind === "job-failed");
-  assert.ok(failed.commands.some((command) => /resume .*--confirmed（有料の処理に進む/u.test(command)));
+  assert.ok(failed.commands.some((command) => /resume .*--confirmed$/u.test(command)), failed.commands.join(" | "));
+  assert.match(failed.note, /有料の処理に進む/u);
+  assert.ok(failed.commands.every((command) => command.includes(`--project-dir '${alpha}'`)), "作業場所は単一引用符で包む");
   assert.match(harnessInboxText(report), /次の仕事/u);
   assert.equal(readProjectJobs(path.join(root, "nothing")).length, 0);
 });
