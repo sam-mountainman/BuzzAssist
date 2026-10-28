@@ -290,3 +290,34 @@ test("既定の捕捉関数は harness-learn の唯一の追記経路を使う",
   assert.equal(/appendFile|writeFile|appendJsonl/u.test(source), false, "自動捕捉が台帳へ直接書いている");
   assert.equal(typeof captureLearningProposal, "function");
 });
+
+test("決着した Job の要約を索引の隣へ写す（作業フォルダごと Receipt が消えても状態・ゲート・blocker のコードが残る）", async (t) => {
+  const { mkdtemp, readFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { indexSettledJobReceipt, settlementSnapshot } = await import("../lib/harnessReceiptLearning.mjs");
+  const dir = await mkdtemp(join(tmpdir(), "receipt-snapshot-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const job = {
+    id: "video-synthetic-0123456789abcdef",
+    harness: { id: "narrated-story-video" },
+    status: "awaiting-human-review",
+    blockers: ["quality-loop-below-target: 合成の自由文は写さない /private/path"],
+    knownRemainingIssues: ["human-review-signed"],
+    stages: [{ id: "production", status: "completed" }, { id: "review", status: "waiting" }],
+    updatedAt: "2026-10-29T00:00:00.000Z",
+  };
+  const located = { receipt: { outcome: "fail", gates: { "quality-loop": { verdict: "fail" }, "audio-loudness": { verdict: "pass" } } }, digest: "a".repeat(64), source: "run-receipt", path: join(dir, "gone", "run-receipt.json") };
+  const snapshot = settlementSnapshot({ job, located });
+  assert.deepEqual(snapshot.blockers, ["quality-loop-below-target"]);
+  assert.deepEqual(snapshot.gates, { "quality-loop": "fail", "audio-loudness": "pass" });
+  assert.equal(JSON.stringify(snapshot).includes("/private/path"), false, "自由文・パスは写さない");
+  const indexPath = join(dir, "receipts", "index.jsonl");
+  const result = indexSettledJobReceipt({ job, located, indexPath, now: () => "2026-10-29T00:00:01.000Z" });
+  assert.equal(result.appended, true);
+  const row = JSON.parse((await readFile(indexPath, "utf8")).trim());
+  assert.match(row.snapshot.sha256, /^[0-9a-f]{64}$/u);
+  const written = JSON.parse(await readFile(join(dir, "receipts", row.snapshot.file), "utf8"));
+  assert.equal(written.status, "awaiting-human-review");
+  assert.equal(written.outcome, "fail");
+});
