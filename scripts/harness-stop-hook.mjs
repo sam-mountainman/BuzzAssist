@@ -152,11 +152,6 @@ function claimInSentence(sentence) {
   return false;
 }
 
-/**
- * 最後の発言が完成を主張しているか。
- * strong = 完成品（動画・MP4・納品…）についての主張。weak = 文の中に完成品の語は無いが、
- * 発言全体は制作の話をしている主張（「完了しました。Job は…」）。
- */
 /** 完成・合格を主張している文（否定・伝聞を除く）。品質ループの「合格せずに止まったのに完成と言う」の判定にも使う。 */
 export function completionClaimSentences(message) {
   const text = typeof message === "string" ? message.slice(0, 200_000) : "";
@@ -164,6 +159,11 @@ export function completionClaimSentences(message) {
   return splitSentences(text).filter(claimInSentence);
 }
 
+/**
+ * 最後の発言が完成を主張しているか。
+ * strong = 完成品（動画・MP4・納品…）についての主張。weak = 文の中に完成品の語は無いが、
+ * 発言全体は制作の話をしている主張（「完了しました。Job は…」）。
+ */
 export function detectCompletionClaim(message) {
   const text = typeof message === "string" ? message.slice(0, 200_000) : "";
   if (!text.trim()) return { claimed: false, strong: false, weak: false };
@@ -558,6 +558,37 @@ function lastMessageOf(input, lines) {
     : lastAssistantMessageFromLines(lines);
 }
 
+// 道具の呼び出し・結果だけを残す（エージェントの発言の文は落とす）。Claude Code の assistant の text、Codex の
+// message（agent_message・response_item の message）は、最後の発言そのものが記録に入るので「扱った」に数えない。
+const TOOL_ITEM_TYPES = new Set(["tool_use", "tool_result", "server_tool_use", "mcp_tool_use", "mcp_tool_result"]);
+const MESSAGE_PAYLOAD_TYPES = new Set(["message", "agent_message", "agent_reasoning", "reasoning", "user_message"]);
+export function toolEventsOnly(line) {
+  let entry;
+  try { entry = JSON.parse(line); } catch { return null; }
+  if (!entry || typeof entry !== "object") return null;
+  const content = entry.message?.content;
+  if (entry.type === "assistant" || entry.type === "user") {
+    const items = Array.isArray(content) ? content.filter((item) => TOOL_ITEM_TYPES.has(item?.type)) : [];
+    const result = entry.toolUseResult;
+    if (items.length === 0 && result === undefined) return null;
+    return { items, ...(result !== undefined ? { result } : {}) };
+  }
+  const payloadType = String(entry.payload?.type || entry.msg?.type || entry.type || "");
+  if (MESSAGE_PAYLOAD_TYPES.has(payloadType) || entry.type === "compacted") return null;
+  return entry;
+}
+
+/** 会話の記録で最後に道具から扱った Job（発言の文に書いた Job ID は数えない）。 */
+export function lastToolHandledJobId(lines) {
+  const collector = createReferenceCollector();
+  for (const line of Array.isArray(lines) ? lines : []) {
+    if (typeof line !== "string" || !line.includes("video-")) continue;
+    const events = toolEventsOnly(line);
+    if (events) collector.addText(JSON.stringify(events));
+  }
+  return collector.result().jobIds[0] || "";
+}
+
 /** 記録と最後の発言から Job とプロジェクトの候補を集める（両方の判定が同じ集め方を使う）。 */
 function collectJobReferences(lines, message, { cwd, env }) {
   const collector = createReferenceCollector({ cwd });
@@ -604,7 +635,7 @@ export function evaluateStop(input, { env = process.env, home = homedir(), fsApi
   // 「最後に扱った Job」は会話の記録（道具の呼び出し）だけから決める。発言の文に書いた Job ID を数えると、
   // 古い Job を名指ししただけでそれが「最後」になってしまう。
   const named = new Set(mentioned.result().jobIds);
-  const lastHandled = collectJobReferences(lines, "", { cwd, env }).jobIds[0] || located[0].jobId;
+  const lastHandled = lastToolHandledJobId(lines) || located[0].jobId;
   const chosen = named.size > 0
     ? located.filter((entry) => entry.jobId === lastHandled || named.has(entry.jobId))
     : [located[0]];
@@ -694,6 +725,7 @@ export async function decideStop(input, { env = process.env, home = homedir(), f
       jobLoopRefs: jobBoundLoopRefsFromTranscript(lines, lastMessageOf(input, lines), { cwd, env, fsApi, pathApi }),
       deadline,
       claimSentences: completionClaimSentences(lastMessageOf(input, lines)),
+      message: lastMessageOf(input, lines),
       ...(loadLoopDetail ? { loadDetail: loadLoopDetail } : {}),
     });
   } catch (error) {

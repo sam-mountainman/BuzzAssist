@@ -317,10 +317,18 @@ test("合格済みの古い Job を名指ししても、この会話で最後に
     writeJob(fx.projectDir, { id: OTHER_JOB_ID, status: "completed", receipt: passingReceipt() });
     // 古い順に OTHER（合格済み）→ JOB（計画だけ）を扱った会話。最後に扱ったのは JOB。
     const lines = [OTHER_JOB_ID, JOB_ID].map((jobId) => JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: jobId, name: "mcp__buzzassist_mcp__get_video_harness_job", input: { projectDir: fx.projectDir, jobId } }] } }));
-    writeFileSync(fx.transcript, `${lines.join("\n")}\n`);
-    const decision = evaluateStop(stopInput(fx, { last_assistant_message: `Job ${OTHER_JOB_ID} の動画が完成しました。` }), { env: fx.env });
-    assert.equal(decision.action, "block", decision.why);
-    assert.deepEqual(decision.jobIds, [JOB_ID]);
+    const claim = `Job ${OTHER_JOB_ID} の動画が完成しました。`;
+    // 最後の発言は記録の末尾にも入る（Claude Code の assistant の text、Codex の agent_message）。発言の文は「扱った」に数えない。
+    const spoken = [
+      JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: claim }] } }),
+      JSON.stringify({ type: "event_msg", payload: { type: "agent_message", message: claim } }),
+    ];
+    for (const withSpoken of [[], spoken]) {
+      writeFileSync(fx.transcript, `${[...lines, ...withSpoken].join("\n")}\n`);
+      const decision = evaluateStop(stopInput(fx, { last_assistant_message: claim }), { env: fx.env });
+      assert.equal(decision.action, "block", `${decision.why} (発言を記録に含む: ${withSpoken.length > 0})`);
+      assert.deepEqual(decision.jobIds, [JOB_ID]);
+    }
   } finally {
     fx.cleanup();
   }

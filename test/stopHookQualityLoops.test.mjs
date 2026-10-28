@@ -249,8 +249,15 @@ test("合格せずに止まったループの成果物を「完成」と言う�
     // 止まったことを書いた報告は状態の報告として通す。
     const report = await decideStop(stopInput(fx, { last_assistant_message: "台本は上限で止まりました。完成とは言えず、続けるかは人が決めます。" }), { env: fx.env });
     assert.equal(report.action, "none");
-    // 台本と関係の無い主張は数えない。合格したループも数えない。
+    // 「予算」「上限」の単語だけでは止まったことの報告にならない。
+    assert.equal((await decideStop(stopInput(fx, { last_assistant_message: "台本が予算内で完成しました。" }), { env: fx.env })).action, "block");
+    // 台本と関係の無い主張は数えない（別の物の「合格」も）。止まったことは別の文に書いてあれば通す。
     assert.equal((await decideStop(stopInput(fx, { last_assistant_message: "請求書の下書きが完成しました。" }), { env: fx.env })).action, "none");
+    assert.equal((await decideStop(stopInput(fx, { last_assistant_message: "回帰テストは合格しました。" }), { env: fx.env })).action, "none");
+    assert.equal((await decideStop(stopInput(fx, { last_assistant_message: "台本の品質ループに合格しました。台本は上限で止まっており、未合格です。" }), { env: fx.env })).action, "none");
+    // 人がそのまま使うと認めた台本（accept-human）は、ループが止まっていても完成と言える。
+    writeFileSync(join(workDir, "quality", "script-human-acceptance.json"), JSON.stringify({ acceptances: [{ attestedBy: "human-verified", scriptSha256: "a".repeat(64) }] }));
+    assert.equal((await decideStop(stopInput(fx, { last_assistant_message: "台本が完成しました。" }), { env: fx.env })).action, "none");
     setStatus(statePath, "passed", "target-reached");
     assert.equal((await decideStop(stopInput(fx, { last_assistant_message: "台本が完成しました。" }), { env: fx.env })).action, "none");
   } finally {
