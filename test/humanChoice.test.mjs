@@ -421,3 +421,55 @@ test("CLI: 選ぶ人の端末では聞きながら答えられ、機械の記録
   assert.equal(JSON.parse(out.join("")).chips.length, HUMAN_CHOICE_STAGES.thumbnail.chips.length);
   await assert.rejects(runHumanChoiceCli(["choose", "--nope"], { stdout }), /不明なオプション/u);
 });
+
+test("AI の予測の封: 人に見せる前に封じ、ページにも状態にも中身を出さず、数える人の選択の後にだけ開いて比べる", async (t) => {
+  const { work } = await workspace(t);
+  const created = await createSet(work, {
+    setId: "synthetic-sealed",
+    input: candidatesInput({ prediction: { index: 1, reason: "寄りの顔が一番強いと予測", predictorContextId: "claude:synthetic-predictor" } }),
+  });
+  assert.equal(created.created, true);
+  const seal = created.state.predictionSeal;
+  assert.match(seal.sha256, /^[0-9a-f]{64}$/u);
+  // 状態とページには、予測した案も理由も出ない（指紋と予測した文脈だけ）。
+  const stateText = JSON.stringify(created.state);
+  assert.equal(stateText.includes("一番強いと予測"), false);
+  const page = await readFile(created.pagePath, "utf8");
+  assert.equal(page.includes("一番強いと予測"), false);
+  assert.equal(page.includes(seal.sha256), false);
+  const sealed = JSON.parse(await readFile(join(work, "quality", "choices", "thumbnail--synthetic-sealed.prediction.json"), "utf8"));
+  const predictedLabel = sealed.label;
+  const other = created.state.candidates.find((row) => row.label !== predictedLabel).label;
+  const rows = [];
+  const record = await recordHumanChoice({
+    workDir: work, stage: "thumbnail", setId: "synthetic-sealed", pick: other, reasons: ["strong-emotion"],
+    reviewer: REVIEWER, humanVerified: true, isInteractive: true, attest: allowHuman, now,
+    captureLearning: async ({ state, decision }) => { rows.push(...humanChoiceLearningCandidates({ state, decision })); return { captured: rows.length }; },
+  });
+  assert.equal(record.decision.prediction.sealOk, true);
+  assert.equal(record.decision.prediction.agreed, false);
+  assert.equal(record.decision.prediction.predictedLabel, predictedLabel);
+  // ずれは採点表の直し案の候補として積む（人の決め手の札つき）。
+  const miss = rows.find((row) => row.kind === "prediction-miss");
+  assert.ok(miss, rows.map((row) => row.kind).join(", "));
+  assert.match(miss.text, /予測のずれ/u);
+});
+
+test("AI の予測の封: 封の後に中身を書き換えたら比べない（指紋が合わない）", async (t) => {
+  const { work } = await workspace(t);
+  const created = await createSet(work, {
+    setId: "synthetic-tampered",
+    input: candidatesInput({ prediction: { index: 2, reason: "引きの対立が伝わると予測", predictorContextId: "codex:synthetic-predictor" } }),
+  });
+  const file = join(work, "quality", "choices", "thumbnail--synthetic-tampered.prediction.json");
+  const body = JSON.parse(await readFile(file, "utf8"));
+  // 人の選択を見てから予測を合わせる（迎合）書き換え。
+  const chosen = created.state.candidates.find((row) => row.label !== body.label).label;
+  await writeFile(file, JSON.stringify({ ...body, label: chosen }));
+  const record = await recordHumanChoice({
+    workDir: work, stage: "thumbnail", setId: "synthetic-tampered", pick: chosen, reasons: ["strong-emotion"],
+    reviewer: REVIEWER, humanVerified: true, isInteractive: true, attest: allowHuman, now,
+  });
+  assert.deepEqual(record.decision.prediction, { sealOk: false, reason: "prediction-seal-mismatch" });
+  assert.equal(humanChoiceLearningCandidates({ state: record.state, decision: record.decision }).some((row) => row.kind === "prediction-miss"), false);
+});
