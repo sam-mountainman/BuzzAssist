@@ -85,7 +85,7 @@ BuzzAssistを次の3層に固定する。
   生成・probe・全decode、権限、Channel Pack、provider capabilityを有料処理前に検査する。
 - フィードバックはproposal追記→重複整理→自動overlay→評価→reviewer名付き人間承認→
   正本昇格の順にした。未承認proposalは正本や完成判定へ使えず、自己採点で自己承認できない。
-- Claude Codeの2セッション、関連workflow、`~/まさお`全320ファイルを内容ハッシュ付きで再監査し、
+- Claude Codeの2セッション、関連workflow、外部の参考資料の全ファイルを内容ハッシュ付きで再監査し、
   Fish/Eleven、Canvas、配布、Skill分岐、Best-of-N、Analytics対象外を台帳へ取り込んだ。
 
 ### まだ外部実証またはRelease操作が必要なもの
@@ -432,7 +432,7 @@ BuzzAssistを次の3層に固定する。
 - [ ] 運営者向け導線を「台本を貼る／ファイルを選ぶ」の1入口にする
 - [ ] 進行中、承認待ち、失敗、完成を専門用語なしで表示する
 - [ ] support bundleへdoctor、Job、Receipt、version情報を秘密なしで出力する
-- [ ] ユーザー提供の「まさお」フォルダーから採用した考え方と、コード・素材の由来を分けて記録する
+- [ ] 外部の参考資料から採用した考え方と、コード・素材の由来を分けて記録する
 - [ ] 第三者VTT・素材・声・BGMのlicense/provenanceをRelease gateへ入れる
 - [ ] Canvas Tunnelはスマホ・別端末閲覧の任意機能として提供する
 

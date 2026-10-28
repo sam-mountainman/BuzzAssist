@@ -78,7 +78,7 @@ node scripts/koya-open-blind-arena.mjs --public <judge-packet.json> --serve
 ```
 
 `bon` がPATHに無い開発環境だけ、`BON_CLI`へ `bin/bon.js` の絶対パスを渡す。
-動画制作ハーネスは「まさお」フォルダの配置を前提にしない。
+動画制作ハーネスは、外部の参考資料を置いた特定のフォルダの配置を前提にしない。
 
 **アリーナは閲覧用**。採用の記録は公式CLI（`character-approve` /
 `character-style-select` に `--selection-reason`）に残す。二重帳簿を作らない。
