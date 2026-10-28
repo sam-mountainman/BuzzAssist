@@ -322,6 +322,9 @@ test("合格済みの古い Job を名指ししても、この会話で最後に
     const spoken = [
       JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: claim }] } }),
       JSON.stringify({ type: "event_msg", payload: { type: "agent_message", message: claim } }),
+      JSON.stringify({ type: "event_msg", payload: { type: "item_completed", item: { type: "AgentMessage", text: claim } } }),
+      JSON.stringify({ type: "event_msg", payload: { type: "task_complete", last_agent_message: claim } }),
+      JSON.stringify({ type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: claim }] } }),
     ];
     for (const withSpoken of [[], spoken]) {
       writeFileSync(fx.transcript, `${[...lines, ...withSpoken].join("\n")}\n`);

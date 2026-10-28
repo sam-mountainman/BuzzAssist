@@ -558,24 +558,33 @@ function lastMessageOf(input, lines) {
     : lastAssistantMessageFromLines(lines);
 }
 
-// 道具の呼び出し・結果だけを残す（エージェントの発言の文は落とす）。Claude Code の assistant の text、Codex の
-// message（agent_message・response_item の message）は、最後の発言そのものが記録に入るので「扱った」に数えない。
-const TOOL_ITEM_TYPES = new Set(["tool_use", "tool_result", "server_tool_use", "mcp_tool_use", "mcp_tool_result"]);
-const MESSAGE_PAYLOAD_TYPES = new Set(["message", "agent_message", "agent_reasoning", "reasoning", "user_message"]);
+// 道具の呼び出し・結果だけを残す（エージェントの発言の文は落とす）。許可した形だけを通す（知らない形は数えない）。
+//   Claude Code: assistant / user の tool_use・tool_result（と toolUseResult）
+//   Codex: response_item の function_call・local_shell_call・custom_tool_call とその出力、
+//          event_msg のコマンド実行・MCP の呼び出し・パッチの始まりと終わり、item_completed のうち道具の項目
+//          （CommandExecution・McpToolCall・FileChange など。AgentMessage・Reasoning・UserMessage は落とす）
+const CLAUDE_TOOL_ITEMS = new Set(["tool_use", "tool_result", "server_tool_use", "mcp_tool_use", "mcp_tool_result"]);
+const CODEX_TOOL_PAYLOADS = new Set([
+  "function_call", "function_call_output", "local_shell_call", "local_shell_call_output", "custom_tool_call", "custom_tool_call_output",
+  "exec_command_begin", "exec_command_end", "mcp_tool_call_begin", "mcp_tool_call_end", "patch_apply_begin", "patch_apply_end",
+]);
+const CODEX_TOOL_ITEM = /^(?:CommandExecution|McpToolCall|FileChange|WebSearch|ImageView|ToolCall)$/u;
 export function toolEventsOnly(line) {
   let entry;
   try { entry = JSON.parse(line); } catch { return null; }
   if (!entry || typeof entry !== "object") return null;
-  const content = entry.message?.content;
   if (entry.type === "assistant" || entry.type === "user") {
-    const items = Array.isArray(content) ? content.filter((item) => TOOL_ITEM_TYPES.has(item?.type)) : [];
+    const content = entry.message?.content;
+    const items = Array.isArray(content) ? content.filter((item) => CLAUDE_TOOL_ITEMS.has(item?.type)) : [];
     const result = entry.toolUseResult;
     if (items.length === 0 && result === undefined) return null;
     return { items, ...(result !== undefined ? { result } : {}) };
   }
-  const payloadType = String(entry.payload?.type || entry.msg?.type || entry.type || "");
-  if (MESSAGE_PAYLOAD_TYPES.has(payloadType) || entry.type === "compacted") return null;
-  return entry;
+  const payload = entry.payload && typeof entry.payload === "object" ? entry.payload : null;
+  if (!payload) return null;
+  if (CODEX_TOOL_PAYLOADS.has(String(payload.type || ""))) return payload;
+  if (payload.type === "item_completed" && CODEX_TOOL_ITEM.test(String(payload.item?.type || ""))) return payload.item;
+  return null;
 }
 
 /** 会話の記録で最後に道具から扱った Job（発言の文に書いた Job ID は数えない）。 */

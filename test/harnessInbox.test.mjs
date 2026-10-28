@@ -75,3 +75,15 @@ test("CLI: 台帳が読めなくても止まらずに、読めないことを次
   const broken = await harnessInbox({ deploymentPath: path.join(tmpdir(), "synthetic-missing-registry.json"), now: () => NOW });
   assert.equal(broken.items[0].kind, "registry-invalid");
 });
+
+test("Job の置き場が読めない（権限・I/O）ときは「仕事が無い」でなく確認の項目として返す", async () => {
+  const registry = { channels: [{ id: "alpha", projectDir: tmpdir(), production: { kind: "harness", harnessId: "narrated-story-video" } }], quarantined: [] };
+  const report = await harnessInbox({
+    registry,
+    now: () => NOW,
+    readJobs: () => { throw Object.assign(new Error("permission denied"), { code: "EACCES" }); },
+  });
+  assert.equal(report.items.length, 1);
+  assert.equal(report.items[0].kind, "jobs-unreadable");
+  assert.match(report.items[0].detail, /EACCES/u);
+});

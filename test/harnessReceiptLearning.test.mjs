@@ -320,4 +320,9 @@ test("決着した Job の要約を索引の隣へ写す（作業フォルダご
   const written = JSON.parse(await readFile(join(dir, "receipts", row.snapshot.file), "utf8"));
   assert.equal(written.status, "awaiting-human-review");
   assert.equal(written.outcome, "fail");
+  // 要約のファイルが失われても（前回の書き込みの失敗）、同じ決着の索引し直しで戻す。行は重複として積まない。
+  await rm(join(dir, "receipts", row.snapshot.file));
+  const again = indexSettledJobReceipt({ job, located, indexPath, now: () => "2026-10-29T00:00:02.000Z" });
+  assert.equal(again.appended, false);
+  assert.equal(JSON.parse(await readFile(join(dir, "receipts", row.snapshot.file), "utf8")).status, "awaiting-human-review");
 });

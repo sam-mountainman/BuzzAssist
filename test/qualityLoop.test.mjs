@@ -606,6 +606,11 @@ test("契約の緩み: 合格点・下限・項目・ゲート・上限・受け
     qualityContractRelaxations(asset, { ...asset, digest: "y", humanChecks: [{ id: "identity", when: "references" }], referencePolicy: "optional", referenceApproval: false }),
     ["human-check-weakened:identity:always->references", "human-check-removed:hand-safety", "reference-policy:required->optional", "reference-approval-removed"],
   );
+  // 動画クリップの契約の characters-or-references: references へ弱めるのは緩み、always へ強めるのは締める向き。
+  const clip = { digest: "c", limits: {}, rubric: [], humanChecks: [{ id: "identity", when: "characters-or-references" }] };
+  assert.deepEqual(qualityContractRelaxations(clip, { ...clip, humanChecks: [{ id: "identity", when: "references" }] }), ["human-check-weakened:identity:characters-or-references->references"]);
+  assert.deepEqual(qualityContractRelaxations(clip, { ...clip, humanChecks: [{ id: "identity", when: "always" }] }), []);
+  assert.deepEqual(qualityContractRelaxations({ ...clip, humanChecks: [{ id: "identity", when: "references" }] }, clip), []);
   // 前の契約が分からない古い状態は、digest が同じなら変更なし、違えば分からないとして人に回す。
   assert.deepEqual(qualityContractRelaxations(null, { digest: "same" }, { previousDigest: "same" }), []);
   assert.deepEqual(qualityContractRelaxations(null, { digest: "new" }, { previousDigest: "old" }), ["contract-terms-unknown"]);

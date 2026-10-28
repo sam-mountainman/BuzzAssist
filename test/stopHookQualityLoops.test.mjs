@@ -255,8 +255,17 @@ test("合格せずに止まったループの成果物を「完成」と言う�
     assert.equal((await decideStop(stopInput(fx, { last_assistant_message: "請求書の下書きが完成しました。" }), { env: fx.env })).action, "none");
     assert.equal((await decideStop(stopInput(fx, { last_assistant_message: "回帰テストは合格しました。" }), { env: fx.env })).action, "none");
     assert.equal((await decideStop(stopInput(fx, { last_assistant_message: "台本の品質ループに合格しました。台本は上限で止まっており、未合格です。" }), { env: fx.env })).action, "none");
-    // 人がそのまま使うと認めた台本（accept-human）は、ループが止まっていても完成と言える。
-    writeFileSync(join(workDir, "quality", "script-human-acceptance.json"), JSON.stringify({ acceptances: [{ attestedBy: "human-verified", scriptSha256: "a".repeat(64) }] }));
+    // 別の成果物が止まったことの報告では免除しない。
+    assert.equal((await decideStop(stopInput(fx, { last_assistant_message: "台本が完成しました。サムネは未合格です。" }), { env: fx.env })).action, "block");
+    // 人がそのまま使うと認めた台本（accept-human）は、ループが止まっていても完成と言える。ただし認めた台本が最新の版と
+    // 同じ SHA のときだけ（別の台本を認めた記録では免除しない）。
+    const latest = "a".repeat(64);
+    const withVersion = JSON.parse(readFileSync(statePath, "utf8"));
+    withVersion.script.versions = [{ scriptSha256: latest }];
+    writeFileSync(statePath, JSON.stringify(withVersion));
+    writeFileSync(join(workDir, "quality", "script-human-acceptance.json"), JSON.stringify({ acceptances: [{ attestedBy: "human-verified", scriptSha256: "b".repeat(64) }] }));
+    assert.equal((await decideStop(stopInput(fx, { last_assistant_message: "台本が完成しました。" }), { env: fx.env })).action, "block");
+    writeFileSync(join(workDir, "quality", "script-human-acceptance.json"), JSON.stringify({ acceptances: [{ attestedBy: "human-verified", scriptSha256: latest }] }));
     assert.equal((await decideStop(stopInput(fx, { last_assistant_message: "台本が完成しました。" }), { env: fx.env })).action, "none");
     setStatus(statePath, "passed", "target-reached");
     assert.equal((await decideStop(stopInput(fx, { last_assistant_message: "台本が完成しました。" }), { env: fx.env })).action, "none");
