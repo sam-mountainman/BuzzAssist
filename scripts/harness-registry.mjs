@@ -14,10 +14,12 @@
 // その結果、同じ規則が2箇所で食い違い、片方だけが古いまま動くバグを
 // 実際に何度も出した。3つ目を足す前に、何が既にあるのかが見える必要がある。
 //
-// このファイルが読むのは config/harnesses/*.harness.json だけで、
+// 公開の config/harnesses と、明示された作業木の外の宣言を読む。公開層には、
 // クライアント名やチャンネル名は入れない。ここは「何が作れるか」の
 // 宣言であって、誰のためのものかの記録ではない。
 
+import { listHarnessDeclarations, harnessCapabilityPath } from "../lib/harnessDeclarationDirs.mjs";
+import { CHILD_PROTOCOL, requiresChildScriptQuality } from "../lib/harnessChildProtocol.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,7 +27,6 @@ import { fileURLToPath } from "node:url";
 import { isDirectCli } from "../lib/cliEntrypoint.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const HARNESS_DIR = path.join(REPO_ROOT, "config", "harnesses");
 
 // 宣言に入っていてはいけない語。この台帳は共有される前提なので、
 // 特定の運営者を指す語が1つでもあれば読み込みを拒否する。
@@ -40,25 +41,13 @@ export const CLIENT_IDENTIFIERS = Object.freeze([
   "narrated-story-deployment",
 ]);
 
-export function loadHarnesses(dir = HARNESS_DIR) {
-  if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir)
-    .filter((name) => name.endsWith(".harness.json"))
-    .map((name) => {
-      const full = path.join(dir, name);
-      let parsed;
-      try {
-        parsed = JSON.parse(fs.readFileSync(full, "utf8"));
-      } catch (error) {
-        throw new Error(`${name} が壊れています: ${error.message}`);
-      }
-      const errors = validateHarness(parsed);
-      if (errors.length > 0) {
-        throw new Error(`${name} の宣言に問題があります:\n${errors.map((e) => `  - ${e}`).join("\n")}`);
-      }
-      return { ...parsed, file: path.relative(REPO_ROOT, full) };
-    })
-    .sort((a, b) => a.id.localeCompare(b.id));
+export function loadHarnesses(options = {}) {
+  const resolved = typeof options === "string" ? { publicDir: options } : options;
+  return listHarnessDeclarations(resolved).map(({ path: full, declaration: parsed }) => {
+    const errors = validateHarness(parsed);
+    if (errors.length > 0) throw new Error(`${path.basename(full)} の宣言に問題があります:\n${errors.map((e) => `  - ${e}`).join("\n")}`);
+    return { ...parsed, file: path.relative(REPO_ROOT, full) };
+  });
 }
 
 // 宣言が緩いと台帳の意味が無くなる。特に guarantees が空のハーネスを
@@ -68,6 +57,12 @@ export function validateHarness(h) {
   if (!h || typeof h !== "object") return ["オブジェクトではありません"];
   for (const key of ["id", "displayName", "status"]) {
     if (typeof h[key] !== "string" || !h[key].trim()) errors.push(`${key} が必要です`);
+  }
+  if (h.childProtocol !== undefined && h.childProtocol !== CHILD_PROTOCOL) errors.push("未知の childProtocol");
+  if (h.childProtocol === CHILD_PROTOCOL) {
+    if (!/^[a-z0-9][a-z0-9-]{0,47}$/u.test(h.id || "")) errors.push("childProtocol の id は48字以内の小文字英数字とハイフンにする");
+    if (h.reviewAttestation?.subject !== h.id) errors.push("childProtocol の reviewAttestation.subject は harness id と同じにする");
+    if (requiresChildScriptQuality(h) && (typeof h.scriptQualityGenre !== "string" || !h.scriptQualityGenre.trim())) errors.push("scriptQualityGenre が必要です");
   }
   if (!h.produces?.kind) errors.push("produces.kind が必要です（何を作るのか）");
   if (!Array.isArray(h.requiresFromOperator) || h.requiresFromOperator.length === 0) {
@@ -239,7 +234,7 @@ function main() {
         process.stdout.write(`   運営者に要るもの: ${blocking.map((r) => r.what).join(" / ")}\n`);
         process.stdout.write(`   保証: ${(h.guarantees ?? []).map((g) => g.id).join(", ")}\n`);
         // 能力カード（lib/harnessCapabilities.mjs）は宣言の隣の別ファイル。無いと plan-request が選ぶ材料を欠く。
-        const card = path.join(HARNESS_DIR, `${h.id}.capabilities.json`);
+        const card = harnessCapabilityPath(h.id);
         process.stdout.write(`   能力カード: ${fs.existsSync(card) ? path.relative(REPO_ROOT, card) : "無い（plan-request が受け取れる入力・前提を示せない）"}\n`);
       }
       break;
@@ -296,7 +291,8 @@ function main() {
   match --want "..."      やりたいことに当たりそうなハーネスを挙げる
   gaps                    横断で見た保証の偏りを出す
 
-  宣言は config/harnesses/*.harness.json。クライアント名は書かない。
+  公開宣言は config/harnesses/*.harness.json。クライアント名は書かない。
+  外の非公開宣言は BUZZASSIST_PRIVATE_HARNESS_DIRS で指定する（layer: private 必須）。
 `);
       process.exit(action ? 2 : 0);
   }

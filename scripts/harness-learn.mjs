@@ -24,6 +24,7 @@
 //   1セッションの個別事象を1スキルにする蓄積は失敗であって機能ではない。
 //   狙うのはクラスレベルの規則。
 
+import { listHarnessDeclarations } from "../lib/harnessDeclarationDirs.mjs";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import { homedir } from "node:os";
@@ -2012,20 +2013,9 @@ export function captureLearningProposal(input, {
   });
 }
 
-/** config/harnesses/*.harness.json を読む。ゲート id の語彙に使う。 */
+/** 公開・非公開の宣言を解決する。ゲート id の語彙に使う。 */
 function loadHarnessDeclarations(repoRoot = REPO_ROOT) {
-  const dir = path.join(repoRoot, "config", "harnesses");
-  if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir)
-    .filter((name) => name.endsWith(".harness.json"))
-    .sort()
-    .flatMap((name) => {
-      try {
-        return [JSON.parse(fs.readFileSync(path.join(dir, name), "utf8"))];
-      } catch {
-        return [];
-      }
-    });
+  return listHarnessDeclarations({ repoRoot }).map(({ declaration }) => declaration);
 }
 
 /**

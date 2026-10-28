@@ -21,6 +21,8 @@
 //   - **必須と任意を混ぜない**。任意の欠落で止めると、canvas だけ使いたい人が
 //     セットアップできなくなる
 
+import { findHarnessDeclaration, listHarnessDeclarations } from "../lib/harnessDeclarationDirs.mjs";
+import { usesChildProtocol } from "../lib/harnessChildProtocol.mjs";
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { mkdtemp, rm, statfs } from "node:fs/promises";
@@ -264,7 +266,7 @@ async function resolveProductionRouteProbe(declaration, harnessId, { job, runtim
   }
   // 配備の中の runner（宣言の deploymentEntrypoint）を持つハーネスは、配置表の root と entrypoint を起動して確かめる
   // （ナレーション物語）。上位の入口だけを起動しても、実際に Job の中で動く runner が無いことに気付けない。
-  if (String(declaration?.deploymentEntrypoint || "").trim()) {
+  if (usesChildProtocol(declaration) || String(declaration?.deploymentEntrypoint || "").trim()) {
     const deployment = job?.deployment && typeof job.deployment === "object"
       ? job.deployment
       : configuredHarnessDeployment(harnessId, runtime);
@@ -417,7 +419,7 @@ export function declaredRuntimeNotUsed(declaration) {
 function configuredImageModel(harnessId = "") {
   if (harnessId && harnessId !== "koya-manga-video") {
     try {
-      const declaration = JSON.parse(readFileSync(path.join(REPO_ROOT, "config", "harnesses", `${harnessId}.harness.json`), "utf8"));
+      const declaration = findHarnessDeclaration(harnessId)?.declaration;
       return String(declaration?.runtime?.imageModel || declaration?.defaults?.imageModel || declaration?.imageModel || "").trim();
     } catch {
       return "";
@@ -829,8 +831,7 @@ export async function runHarnessDoctor({ projectDir = REPO_ROOT, harnessId = "",
   // それは前提不足ではなく配布路の欠落なので、ready と言ってはいけない。
   let declaration = null;
   if (harnessId) {
-    const declarationPath = path.join(REPO_ROOT, "config", "harnesses", `${harnessId}.harness.json`);
-    try { declaration = JSON.parse(readFileSync(declarationPath, "utf8")); } catch { /* 下で落とす */ }
+    declaration = findHarnessDeclaration(harnessId)?.declaration || null;
     const route = await probeProductionRoute(declaration, harnessId, {
       runCommand,
       job,
@@ -1190,12 +1191,7 @@ function render(report) {
 
 /** ハーネス宣言を読み、未知のIDを黙って受け流さない。 */
 function knownHarnessIds(repoRoot = REPO_ROOT) {
-  const dir = path.join(repoRoot, "config", "harnesses");
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((name) => name.endsWith(".harness.json"))
-    .map((name) => name.replace(/\.harness\.json$/u, ""))
-    .sort();
+  return listHarnessDeclarations({ repoRoot }).map(({ declaration }) => declaration.id);
 }
 
 function parseArgs(argv) {
