@@ -516,7 +516,9 @@ export const DISTRIBUTABLE_CONFIG_ENTRIES = Object.freeze([
   "koya-manga-production-contract.schema.json",
   "koya-manga-quality-incidents.json",
   "koya-reading-dictionary.json",
+  "model-routing.json",                 // 工程・仕事をどのモデルへ回すか。lib/modelRouting.mjs が実行時に読む
   "narrated-story-script-package.schema.json", // 台本パッケージの形。台本スキルが出力の形を確かめるのに読む
+  "oss-catalog.json",                   // 使う・使わない OSS の台帳。lib/ossCatalog.mjs が読む
   "parallel-plans",
   "strategy-brief.schema.json",        // 戦略ブリーフの形。企画の品質ループと制作への受け渡しが読む
 ]);

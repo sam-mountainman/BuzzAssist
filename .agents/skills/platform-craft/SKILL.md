@@ -294,6 +294,20 @@ RunReceipt が pass で確かめられない、blockers・`knownRemainingIssues`
   Receipt が消えても、実績とゲートの推移はここから読む
 - 台帳の1チャンネルが削除したハーネス・ジャンルを指すと、そのチャンネルだけが止まる（quarantined）。台帳全体は止めない
 
+### 外のモデルへの振り分けと、使う OSS の台帳
+
+- 論理の検証・事実とライセンスの確認・情報集め・バックエンドの実装とレビューは Codex、完成動画・画・声を見て聞いて
+  判断する・長い資料を通しで読む・検索に根ざした調べものは Antigravity、段取り・統合・人への報告は今のエージェント。
+  工程か仕事から回し先と打つコマンド（呼び出しと記録）を引くのは `node scripts/model-route.mjs <仕事か工程>`（本体
+  `lib/modelRouting.mjs`、既定 `config/model-routing.json`、端末ごとの上書きは `BUZZASSIST_MODEL_ROUTING`）。呼んだら毎回
+  `harness-external-call.mjs record` で記録する。空・時間切れの返事も `--status empty|truncated` で残す
+- 鍵・利用者の声や本文・実在の人の声・署名済み Pack の非公開の中身は外のモデルへ送らない（`--send <種類>` で止まり、
+  上書きでも外せない）。作った呼び出しと同じ文脈で採点しない決まりは、外のモデルに回しても同じ
+- OSS・モデルの重み・素材の入手先・スキルを足す前に `node scripts/oss-catalog.mjs list` で台帳（`config/oss-catalog.json`、
+  本体 `lib/ossCatalog.mjs`）を見る。無ければライセンスを確かめて（`model-route.mjs license-check`）行を足す。reject の物が
+  依存に入ると `oss-catalog.mjs check` と試験が止める。非商用の重み・AGPL・会社の規模で有償の物・LICENSE の無い配布物は
+  顧客に渡す土台に入れない。素材サイトの生ファイルは同梱せず、運営者が取って SHA で記録する
+
 ## Canvas への投影
 
 Canvas への投影の家は3つだけ。Run の状態は `lib/canvasRunProjection.mjs`、決着した成果物は
@@ -679,3 +693,5 @@ AI に音声を聴かせた評価は、独立の文字起こしや元の音源�
 - Stop フックに差し戻されなかったことを、合格の根拠として報告する
 - 承認前の正本スキルで作ったこと（Receipt の `skillApproval`）を伏せて完成を報告する。
   エージェントが `skill-inventory --approve` を打つ・`skills:check:release` の関門を外す
+- OSS の台帳で reject の物を依存に入れる。取り込んだ外部の資料（有料の記事・配布コード）の題名・原文・コードの断片を、
+  公開リポジトリのコード・試験・スキル・コミット・PR に入れる（考え方は自分の言葉で書き、出典の対応は自社用の層に置く）
