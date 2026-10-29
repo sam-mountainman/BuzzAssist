@@ -753,6 +753,7 @@ export const PLUGIN_SOURCE_FILES = Object.freeze([
   // 地図だけが届いて指す先が無いと、運営者の端末で行き止まりになる。
   "docs/agent-setup.md",
   "docs/host-instructions-detail-ja.md",
+  "docs/harness-child-protocol-ja.md",
   "docs/learning/targets.json",
   // 本文つき台帳（proposals.jsonl）は配布しない。公開版 catalog だけ。
   "docs/learning/proposals.public.jsonl",
@@ -762,23 +763,9 @@ export const PLUGIN_SOURCE_FILES = Object.freeze([
   "vite.config.js",
 ]);
 
-async function refreshManagedPluginSource() {
-  if (skipPluginSource) {
-    console.log(`Skipping managed plugin source refresh: ${managedPluginDir}`);
-    return managedPluginRoot;
-  }
-
-  logStep("Refreshing local plugin source");
-  if (dryRun) {
-    console.log(`Would refresh ${managedPluginRoot} from ${repoRoot}`);
-    return managedPluginRoot;
-  }
-
-  const tmpDir = `${managedPluginDir}.tmp-${process.pid}`;
-  const tmpPluginRoot = join(tmpDir, "plugin");
-  await rm(tmpDir, { recursive: true, force: true });
+// setup 本体と配布試験が同じコピー処理を使う。ホスト設定・依存導入・起動は行わない。
+export async function stageManagedPluginSource(tmpPluginRoot) {
   await mkdir(tmpPluginRoot, { recursive: true });
-
   for (const dirName of PLUGIN_SOURCE_DIRECTORIES) {
     await copyIfExists(join(repoRoot, dirName), join(tmpPluginRoot, dirName));
   }
@@ -792,22 +779,22 @@ async function refreshManagedPluginSource() {
   // 有効にならなかった。CLAUDE.md が「必ず先に読め」と定めた正本が、
   // 配布物の中に在るのに届いていない状態だった。
   // 開発機ではリポジトリの .claude/skills アダプタが効くので気づけない。
-/**
- * 配布先の深さに合わせて、スキル内の相対参照を1階層浅くする。
- *
- * 正本は `.agents/skills/<name>/SKILL.md`（リポジトリルートまで ../../../）、
- * 配布先は `skills/<name>/SKILL.md`（プラグインルートまで ../../）。
- * 書き換えずに配ると、全ての参照がプラグインの外を指す。
- */
-async function rewriteSkillRelativeDepth(skillDir) {
-  for (const entry of await readdir(skillDir, { withFileTypes: true, recursive: true })) {
-    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
-    const filePath = join(entry.parentPath ?? entry.path ?? skillDir, entry.name);
-    const original = await readFile(filePath, "utf8");
-    const rewritten = original.replaceAll("../../../", "../../");
-    if (rewritten !== original) await writeFile(filePath, rewritten, "utf8");
+  /**
+   * 配布先の深さに合わせて、スキル内の相対参照を1階層浅くする。
+   *
+   * 正本は `.agents/skills/<name>/SKILL.md`（リポジトリルートまで ../../../）、
+   * 配布先は `skills/<name>/SKILL.md`（プラグインルートまで ../../）。
+   * 書き換えずに配ると、全ての参照がプラグインの外を指す。
+   */
+  async function rewriteSkillRelativeDepth(skillDir) {
+    for (const entry of await readdir(skillDir, { withFileTypes: true, recursive: true })) {
+      if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+      const filePath = join(entry.parentPath ?? entry.path ?? skillDir, entry.name);
+      const original = await readFile(filePath, "utf8");
+      const rewritten = original.replaceAll("../../../", "../../");
+      if (rewritten !== original) await writeFile(filePath, rewritten, "utf8");
+    }
   }
-}
 
   const canonicalSkillsRoot = join(repoRoot, ".agents", "skills");
   const shippedSkillsRoot = join(tmpPluginRoot, "skills");
@@ -836,6 +823,28 @@ async function rewriteSkillRelativeDepth(skillDir) {
   for (const fileName of PLUGIN_SOURCE_FILES) {
     await copyIfExists(join(repoRoot, fileName), join(tmpPluginRoot, fileName));
   }
+
+  return { shippedHarnessSkills };
+}
+
+async function refreshManagedPluginSource() {
+  if (skipPluginSource) {
+    console.log(`Skipping managed plugin source refresh: ${managedPluginDir}`);
+    return managedPluginRoot;
+  }
+
+  logStep("Refreshing local plugin source");
+  if (dryRun) {
+    console.log(`Would refresh ${managedPluginRoot} from ${repoRoot}`);
+    return managedPluginRoot;
+  }
+
+  const tmpDir = `${managedPluginDir}.tmp-${process.pid}`;
+  const tmpPluginRoot = join(tmpDir, "plugin");
+  await rm(tmpDir, { recursive: true, force: true });
+  await mkdir(tmpPluginRoot, { recursive: true });
+
+  const { shippedHarnessSkills } = await stageManagedPluginSource(tmpPluginRoot);
 
   await writeJson(join(tmpDir, ".claude-plugin", "marketplace.json"), {
     $schema: "https://anthropic.com/claude-code/marketplace.schema.json",

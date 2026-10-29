@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -34,6 +34,8 @@ test("operator map wins, while shell syntax and root escapes fail closed", async
   const root = await mkdtemp(join(tmpdir(), "harness-deployment-operator-"));
   try {
     await mkdir(join(root, "config"), { recursive: true });
+    await mkdir(join(root, "scripts"));
+    await writeFile(join(root, "scripts", "operator.mjs"), "// fixture\n");
     await writeFile(join(root, "config", "harness-deployments.example.json"), `${JSON.stringify({
       deployments: [{ harnessId: "fixture", root: ".", entrypoint: "node scripts/fallback.mjs" }],
     })}\n`);
@@ -54,6 +56,37 @@ test("operator map wins, while shell syntax and root escapes fail closed", async
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("#6 entrypoint の symlink と中間フォルダの symlink escape を拒否する", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "deployment-symlink-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const deploymentRoot = join(root, "deployment"); const outside = join(root, "outside");
+  await mkdir(deploymentRoot); await mkdir(outside);
+  await writeFile(join(outside, "runner.mjs"), "// outside\n");
+  await writeFile(join(deploymentRoot, "real.mjs"), "// inside\n");
+  await symlink(join(deploymentRoot, "real.mjs"), join(deploymentRoot, "inside.mjs"));
+  await symlink(join(outside, "runner.mjs"), join(deploymentRoot, "outside.mjs"));
+  await symlink(outside, join(deploymentRoot, "linked"), "junction");
+  for (const name of ["inside.mjs", "outside.mjs", "linked/runner.mjs"]) {
+    assert.throws(() => resolveHarnessDeploymentCommand({ root: deploymentRoot, entrypoint: `node ${name}` }), /symlink|outside its declared root/u, name);
+  }
+});
+
+test("#6 private 子は作業木内を指す配置表より外の宣言の配置を使う", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "deployment-private-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const repoRoot = join(root, "repo"); const external = join(root, "external");
+  await mkdir(join(repoRoot, "scripts"), { recursive: true }); await mkdir(external);
+  await writeFile(join(repoRoot, "scripts", "private.mjs"), "// must not deploy\n");
+  await writeFile(join(external, "child.mjs"), "// external\n");
+  await writeFile(join(external, "synthetic-private.harness.json"), JSON.stringify({ id: "synthetic-private", layer: "private", childProtocol: "buzzassist-child-v1", entrypoint: "node child.mjs" }));
+  const previous = process.env.BUZZASSIST_PRIVATE_HARNESS_DIRS;
+  process.env.BUZZASSIST_PRIVATE_HARNESS_DIRS = external;
+  t.after(() => { if (previous === undefined) delete process.env.BUZZASSIST_PRIVATE_HARNESS_DIRS; else process.env.BUZZASSIST_PRIVATE_HARNESS_DIRS = previous; });
+  const route = resolveHarnessDeployment("synthetic-private", { repoRoot, deployments: new Map([["synthetic-private", { root: repoRoot, entrypoint: "node scripts/private.mjs" }]]) });
+  assert.equal(route.root, await realpath(external));
+  assert.equal(route.entrypoint, "node child.mjs");
 });
 
 

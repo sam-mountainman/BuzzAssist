@@ -5,10 +5,10 @@ import { delimiter, join } from "node:path";
 import test from "node:test";
 
 import { findHarnessDeclaration, listHarnessDeclarations, resolveHarnessDeclarationDirs } from "../lib/harnessDeclarationDirs.mjs";
-import { loadHarnesses, validateHarness } from "../scripts/harness-registry.mjs";
+import { CLIENT_IDENTIFIERS, loadHarnesses, validateHarness } from "../scripts/harness-registry.mjs";
 import { capabilityCardPath } from "../lib/harnessCapabilities.mjs";
 import { loadHarnessDeclaration } from "../lib/harnessReceiptLearning.mjs";
-import { loadHarnessGateRegistry } from "../lib/harnessFeedbackAutoBundle.mjs";
+import { buildSettlementSummary, loadHarnessGateRegistry } from "../lib/harnessFeedbackAutoBundle.mjs";
 import { evaluateHarnessConformance, harnessConformanceReport, loadCoreSupport } from "../lib/harnessConformance.mjs";
 import { resolveHarnessDeployment } from "../lib/harnessDeploymentResolver.mjs";
 
@@ -50,9 +50,12 @@ test("子の宣言は同じ subject と、台本品質を要求するときの g
   assert.ok(validateHarness({ ...base, reviewAttestation: { subject: "narrated-story-video" } }).some((error) => error.includes("subject")));
   assert.ok(validateHarness({ ...base, requiresFromOperator: [{ id: "script-quality-acceptance" }] }).some((error) => error.includes("scriptQualityGenre")));
   assert.ok(validateHarness({ ...base, requiresFromOperator: {} }).some((error) => error.includes("requiresFromOperator")));
+  for (const kind of ["image", "audio", "narrated-story-video", ""]) {
+    assert.ok(validateHarness({ ...base, produces: { kind } }).some((error) => error.includes("produces.kind")), kind);
+  }
 });
 
-test("外の宣言と隣の能力カードを、一覧・学習・feedback・conformance が同じ場所から読む", async (t) => {
+test("外の宣言を一覧・学習・conformance が読み、feedback は公開だけを読む", async (t) => {
   const f = fixture();
   put(f.publicDir, "synthetic-public");
   put(f.privateDir, "synthetic-child", { layer: "private", childProtocol: "buzzassist-child-v1", reviewAttestation: { subject: "synthetic-child" } });
@@ -62,16 +65,77 @@ test("外の宣言と隣の能力カードを、一覧・学習・feedback・con
   t.after(() => { if (previous === undefined) delete process.env.BUZZASSIST_PRIVATE_HARNESS_DIRS; else process.env.BUZZASSIST_PRIVATE_HARNESS_DIRS = previous; });
   assert.equal(capabilityCardPath("synthetic-child"), join(f.privateDir, "synthetic-child.capabilities.json"));
   assert.equal(loadHarnessDeclaration("synthetic-child", f).layer, "private");
-  assert.ok(loadHarnessGateRegistry(f.repoRoot).get("synthetic-child").gateIds.has("synthetic-quality"));
+  const registry = loadHarnessGateRegistry(f.repoRoot);
+  assert.equal(registry.has("synthetic-child"), false);
+  assert.ok(registry.get("synthetic-public").gateIds.has("synthetic-quality"));
+  const settlement = buildSettlementSummary({ job: { harness: { id: "synthetic-child", declarationVersion: "1.0.0" }, status: "failed" },
+    registry, sourceDigest: "a".repeat(64), issueCodeOf: () => "synthetic-quality" });
+  assert.equal(settlement.settlement, null);
+  assert.equal(settlement.harness, null);
   const row = (await harnessConformanceReport({ repoRoot: f.repoRoot })).rows.find((entry) => entry.harnessId === "synthetic-child");
   for (const id of ["upper-adapter", "signed-channel-pack", "separate-signoff"]) assert.equal(row.results[id].status, "ok", id);
   put(f.privateDir, "synthetic-child", { layer: "private", childProtocol: "buzzassist-child-v1", entrypoint: "node child.mjs", reviewAttestation: { subject: "synthetic-child" } });
+  writeFileSync(join(f.privateDir, "child.mjs"), "// fixture\n");
   const route = resolveHarnessDeployment("synthetic-child", { repoRoot: f.repoRoot });
   assert.equal(route.root, f.privateDir, "配置表が無くても宣言だけで子の配置を決める");
   assert.equal(route.entrypoint, "node child.mjs");
   const wrongSubject = evaluateHarnessConformance({ harnessId: "synthetic-child", declaration: declaration("synthetic-child", {
     childProtocol: "buzzassist-child-v1", reviewAttestation: { subject: "narrated-story-video" } }), support: await loadCoreSupport() });
   assert.equal(wrongSubject.results["separate-signoff"].status, "partial");
+});
+
+test("#5 .git の無い cache からでも .git を祖先に持つ宣言は拒否する", () => {
+  const f = fixture();
+  const main = join(f.base, "main", "nested", "declarations");
+  mkdirSync(main, { recursive: true });
+  mkdirSync(join(f.base, "main", ".git"));
+  assert.throws(() => resolveHarnessDeclarationDirs({ ...f, env: { BUZZASSIST_PRIVATE_HARNESS_DIRS: main } }), /作業木/u);
+});
+
+test("#5 separate-git-dir の main も .git ファイルで拒否する", () => {
+  const f = fixture(); const main = join(f.base, "main"); const metadata = join(f.base, "git-metadata");
+  mkdirSync(main); mkdirSync(metadata);
+  writeFileSync(join(main, ".git"), `gitdir: ${metadata}\n`);
+  assert.throws(() => resolveHarnessDeclarationDirs({ ...f, env: { BUZZASSIST_PRIVATE_HARNESS_DIRS: main } }), /作業木/u);
+});
+
+test("#5 大文字小文字が違う同じ作業木は dev/ino で拒否する", (t) => {
+  const f = fixture(); const alias = f.repoRoot.replace(/repo$/u, "REPO");
+  try { realpathSync(alias); } catch { t.skip("case-sensitive filesystem"); return; }
+  assert.throws(() => resolveHarnessDeclarationDirs({ ...f, env: { BUZZASSIST_PRIVATE_HARNESS_DIRS: alias } }), /作業木/u);
+});
+
+test("#5 macOS firmlink 経由で cache から元の作業木を指定できない", (t) => {
+  if (process.platform !== "darwin") { t.skip("macOS firmlink"); return; }
+  const f = fixture(); mkdirSync(join(f.repoRoot, ".git"));
+  const cache = join(f.base, "cache"); mkdirSync(cache);
+  const alias = join("/System/Volumes/Data", f.publicDir);
+  try { realpathSync(alias); } catch { t.skip("data-volume alias unavailable"); return; }
+  assert.throws(() => resolveHarnessDeclarationDirs({ repoRoot: cache, env: { BUZZASSIST_PRIVATE_HARNESS_DIRS: alias } }), /作業木/u);
+});
+
+test("#11 非公開の顧客名は公開宣言を止めず、壊れた1件だけを診断つきで除く", () => {
+  const f = fixture(); put(f.publicDir, "synthetic-public");
+  put(f.privateDir, "synthetic-private", { layer: "private", displayName: CLIENT_IDENTIFIERS[0] });
+  assert.equal(loadHarnesses(f).length, 2);
+  writeFileSync(join(f.privateDir, "broken.harness.json"), "{");
+  const diagnostics = [];
+  assert.deepEqual(loadHarnesses({ ...f, onDiagnostic: (message) => diagnostics.push(message) }).map((row) => row.id), ["synthetic-private", "synthetic-public"]);
+  assert.ok(diagnostics.some((message) => /BUZZASSIST_PRIVATE_HARNESS_DIRS.*broken/u.test(message)));
+  assert.equal(findHarnessDeclaration("synthetic-public", f).declaration.id, "synthetic-public");
+  assert.equal(findHarnessDeclaration("synthetic-private", { ...f, onDiagnostic: (message) => diagnostics.push(message) }).declaration.id, "synthetic-private");
+});
+
+test("#11 読めない外のフォルダや無効な外の宣言は公開の検索を妨げない", () => {
+  const f = fixture(); put(f.publicDir, "synthetic-public");
+  const diagnostics = [];
+  const env = { BUZZASSIST_PRIVATE_HARNESS_DIRS: join(f.base, "missing") };
+  assert.equal(loadHarnesses({ ...f, env, onDiagnostic: (message) => diagnostics.push(message) }).length, 1);
+  assert.ok(diagnostics.some((message) => message.includes("BUZZASSIST_PRIVATE_HARNESS_DIRS")));
+  assert.equal(findHarnessDeclaration("synthetic-public", { ...f, env }).declaration.id, "synthetic-public");
+  put(f.privateDir, "invalid-child", { layer: "private", childProtocol: "buzzassist-child-v1", produces: { kind: "image" } });
+  assert.deepEqual(loadHarnesses({ ...f, onDiagnostic: (message) => diagnostics.push(message) }).map((row) => row.id), ["synthetic-public"]);
+  assert.ok(diagnostics.some((message) => /BUZZASSIST_PRIVATE_HARNESS_DIRS.*invalid-child/u.test(message)));
 });
 
 test("作業木内・作業木へのsymlink・外の宣言から作業木へのsymlinkを拒む", () => {

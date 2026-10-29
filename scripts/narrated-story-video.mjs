@@ -149,7 +149,7 @@ export async function main(argv = process.argv.slice(2)) {
     operatorVideoManifestPath: typeof args.operatorVideoManifest === "string" ? resolve(args.operatorVideoManifest) : "",
     scriptQualityWorkDir: typeof args.scriptQualityWorkDir === "string" ? resolve(args.scriptQualityWorkDir) : "",
   });
-  process.stdout.write(`${JSON.stringify(outcome, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify(outcome)}\n`);
   process.exitCode = outcome.status === "final-audited" ? 0 : 3;
   return outcome;
 }

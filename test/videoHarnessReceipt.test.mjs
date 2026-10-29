@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -156,13 +157,18 @@ async function artifact(root, kind, filename, contents) {
   return { kind, path, sha256: sha256(bytes), bytes: bytes.length };
 }
 
-function job(root) {
+function declarationIdentity(id = "narrated-story-video", path = fileURLToPath(new URL(`../config/harnesses/${id}.harness.json`, import.meta.url))) {
+  return { harnessDeclaration: { path, sha256: sha256(readFileSync(path)) } };
+}
+
+function job(root, declarationPath) {
   return {
     id: "video-narrated-story-video-aaaaaaaaaaaaaaaa",
     runDir: root,
     projectDir: root,
     identityDigest: "1".repeat(64),
     harness: { id: "narrated-story-video" },
+    canonicalIdentity: declarationIdentity("narrated-story-video", declarationPath),
     script: { sha256: "2".repeat(64) },
     channelPackVerification: {
       id: "test-pack",
@@ -503,6 +509,7 @@ async function completedKoyaOuterFixture(root, options = {}) {
     executionIdentityDigest,
     resolvedProductionContract,
     harness: { id: "koya-manga-video" },
+    canonicalIdentity: declarationIdentity("koya-manga-video"),
     script: { path: scriptPath, sha256: sha256(scriptText) },
     channelPackVerification,
     options: {
@@ -1274,7 +1281,7 @@ test("signoff attestation dispatch is driven by the harness declaration and fail
         const outcome = await completedFixture(root);
         // 署名も信頼リストも正しいのに、宣言が無いだけで completed にならない。
         await assert.rejects(
-          createVideoHarnessRunReceipt({ job: job(root), outcome, reviewerTrust: REVIEWER_TRUST, harnessDeclarationsDir: declarationsDir }),
+          createVideoHarnessRunReceipt({ job: job(root, join(declarationsDir, "narrated-story-video.harness.json")), outcome, reviewerTrust: REVIEWER_TRUST, harnessDeclarationsDir: declarationsDir }),
           /reviewer-attestation-unsupported-harness/u,
         );
         // 同じ fixture は出荷宣言では pass する（宣言の欠落だけが原因）。
@@ -1296,7 +1303,7 @@ test("signoff attestation dispatch is driven by the harness declaration and fail
       await writeFile(join(declarationsDir, "narrated-story-video.harness.json"), JSON.stringify(declaration, null, 2));
       const outcome = await completedFixture(root);
       await assert.rejects(
-        createVideoHarnessRunReceipt({ job: job(root), outcome, reviewerTrust: REVIEWER_TRUST, harnessDeclarationsDir: declarationsDir }),
+        createVideoHarnessRunReceipt({ job: job(root, join(declarationsDir, "narrated-story-video.harness.json")), outcome, reviewerTrust: REVIEWER_TRUST, harnessDeclarationsDir: declarationsDir }),
         (error) => !/reviewer-attestation-unsupported-harness/u.test(String(error?.message)) && error instanceof Error,
       );
     } finally {
@@ -1407,10 +1414,15 @@ function plannedJob(root, declarationSha256) {
   };
 }
 
+function historicalReboundJob(root, previousSha) {
+  return reboundJob(plannedJob(root, declarationIdentity().harnessDeclaration.sha256),
+    { harnessDeclaration: { path: NARRATED_DECLARATION_PATH, sha256: previousSha } });
+}
+
 const OLDER_DECLARATION_SHA = "4".repeat(64);
 const onlyChecks = (ids) => Object.fromEntries(ids.map((id) => [id, true]));
 
-test("監査契約を上げる前の版で確定を待っている narrated Job は、共通 Receipt でもその版の必須監査で確定し、足した保証は not-in-force になる", async (t) => {
+test("監査契約を上げる前の narrated Job は、明示的な更新後確定でその版の必須監査を使い、足した保証は not-in-force になる", async (t) => {
   const visual = ["burned-subtitles-legible", "camera-motion-declared", "episode-opening-provenance", "review-layout"];
   // v6→v7 で回ごとの運営者の動画の品質ループの保証を、v7→v8 で台本の品質ループの合格の保証を、v8→v9 で本編の場面の
   // 切り替えと固定の重ね物の保証を、v9→v10 で場面ごとの焦点の保証を、v10→v11 で本編の間の保証を足した。
@@ -1444,7 +1456,7 @@ test("監査契約を上げる前の版で確定を待っている narrated Job 
             includeRequiredAuditIds,
             reportOverrides: { contractVersion: version },
           });
-          const result = await createVideoHarnessRunReceipt({ job: plannedJob(root, OLDER_DECLARATION_SHA), outcome, now: () => "2026-09-25T00:00:00.000Z" });
+          const result = await createVideoHarnessRunReceipt({ job: historicalReboundJob(root, OLDER_DECLARATION_SHA), outcome, now: () => "2026-09-25T00:00:00.000Z" });
           assert.equal(result.receipt.outcome, "pass", JSON.stringify(result.receipt.summary));
           assert.deepEqual([...result.receipt.summary.notInForceGates].sort(), notInForce);
           for (const id of notInForce) assert.equal(result.receipt.gates[id].verdict, "skip", "測っていないものを pass と書かない");
@@ -1468,14 +1480,14 @@ test("効力のある契約の必須監査が欠ければ、過去の版の Job 
   const v10 = await pastNarratedAudits(`${NARRATED_SERIES}-v10`);
   const v11 = Object.keys(CHECKS);
   const cases = [
-    ["v4 の Job で v4 の必須監査（声のテイク）が欠けた", plannedJob, OLDER_DECLARATION_SHA, `${NARRATED_SERIES}-v4`, v4.filter((id) => id !== "voiceTakeQuality")],
-    ["v5 の Job で途中の成果物の品質ループの監査が欠けた", plannedJob, OLDER_DECLARATION_SHA, `${NARRATED_SERIES}-v5`, v5.filter((id) => id !== "sceneImageAssetLoopPassed")],
-    ["v6 の Job で見た目の実測（カメラの動き）の監査が欠けた", plannedJob, OLDER_DECLARATION_SHA, `${NARRATED_SERIES}-v6`, v6.filter((id) => id !== "cameraMotionMeasured")],
-    ["v7 の Job で運営者の動画の品質ループの監査が欠けた", plannedJob, OLDER_DECLARATION_SHA, `${NARRATED_SERIES}-v7`, v7.filter((id) => id !== "operatorVideoAssetLoopPassed")],
-    ["v8 の Job で台本の品質ループの合格の監査が欠けた", plannedJob, OLDER_DECLARATION_SHA, `${NARRATED_SERIES}-v8`, v8.filter((id) => id !== "scriptQualityAccepted")],
-    ["v9 の Job で本編の場面の切り替えの監査が欠けた", plannedJob, OLDER_DECLARATION_SHA, `${NARRATED_SERIES}-v9`, v9.filter((id) => id !== "sceneTransitionMeasured")],
-    ["v9 の Job で固定の重ね物の監査が欠けた", plannedJob, OLDER_DECLARATION_SHA, `${NARRATED_SERIES}-v9`, v9.filter((id) => id !== "fixedOverlaysMeasured")],
-    ["v10 の Job で場面ごとの焦点の監査が欠けた", plannedJob, OLDER_DECLARATION_SHA, `${NARRATED_SERIES}-v10`, v10.filter((id) => id !== "cameraFocusMeasured")],
+    ["v4 の Job で v4 の必須監査（声のテイク）が欠けた", historicalReboundJob, OLDER_DECLARATION_SHA, `${NARRATED_SERIES}-v4`, v4.filter((id) => id !== "voiceTakeQuality")],
+    ["v5 の Job で途中の成果物の品質ループの監査が欠けた", historicalReboundJob, OLDER_DECLARATION_SHA, `${NARRATED_SERIES}-v5`, v5.filter((id) => id !== "sceneImageAssetLoopPassed")],
+    ["v6 の Job で見た目の実測（カメラの動き）の監査が欠けた", historicalReboundJob, OLDER_DECLARATION_SHA, `${NARRATED_SERIES}-v6`, v6.filter((id) => id !== "cameraMotionMeasured")],
+    ["v7 の Job で運営者の動画の品質ループの監査が欠けた", historicalReboundJob, OLDER_DECLARATION_SHA, `${NARRATED_SERIES}-v7`, v7.filter((id) => id !== "operatorVideoAssetLoopPassed")],
+    ["v8 の Job で台本の品質ループの合格の監査が欠けた", historicalReboundJob, OLDER_DECLARATION_SHA, `${NARRATED_SERIES}-v8`, v8.filter((id) => id !== "scriptQualityAccepted")],
+    ["v9 の Job で本編の場面の切り替えの監査が欠けた", historicalReboundJob, OLDER_DECLARATION_SHA, `${NARRATED_SERIES}-v9`, v9.filter((id) => id !== "sceneTransitionMeasured")],
+    ["v9 の Job で固定の重ね物の監査が欠けた", historicalReboundJob, OLDER_DECLARATION_SHA, `${NARRATED_SERIES}-v9`, v9.filter((id) => id !== "fixedOverlaysMeasured")],
+    ["v10 の Job で場面ごとの焦点の監査が欠けた", historicalReboundJob, OLDER_DECLARATION_SHA, `${NARRATED_SERIES}-v10`, v10.filter((id) => id !== "cameraFocusMeasured")],
     ["v11 の Job で本編の間の監査が欠けた", plannedJob, declarationSha256, `${NARRATED_SERIES}-v11`, v11.filter((id) => id !== "narrationPacingMeasured")],
     // 今の宣言で計画された Job が、audit-report で古い版を名乗っても、宣言が書かれた版（v11）で測る。
     ["今の宣言で計画された Job が v10 を名乗った", plannedJob, declarationSha256, `${NARRATED_SERIES}-v10`, v10],
@@ -1486,7 +1498,7 @@ test("効力のある契約の必須監査が欠ければ、過去の版の Job 
     ["今の宣言で計画された Job が v5 を名乗った", plannedJob, declarationSha256, `${NARRATED_SERIES}-v5`, v5],
     ["今の宣言で計画された Job が v4 を名乗った", plannedJob, declarationSha256, `${NARRATED_SERIES}-v4`, v4],
     // 計画時の宣言の記録が無い Job は、今の宣言で計画されたものとして扱う（欠落を免除にしない）。
-    ["計画時の宣言の記録が無い Job が v4 を名乗った", (root) => job(root), "", `${NARRATED_SERIES}-v4`, v4],
+    ["計画時の宣言の記録が無い Job が v4 を名乗った", (root) => ({ ...job(root), canonicalIdentity: undefined }), "", `${NARRATED_SERIES}-v4`, v4],
   ];
   for (const [name, makeJob, planned, version, audits] of cases) {
     await t.test(name, async () => {
@@ -1499,7 +1511,7 @@ test("効力のある契約の必須監査が欠ければ、過去の版の Job 
         });
         await assert.rejects(
           createVideoHarnessRunReceipt({ job: makeJob(root, planned), outcome }),
-          /共通RunReceiptがpassにならなかった/u,
+          name.includes("記録が無い") ? /canonical-identity-drift/u : /共通RunReceiptがpassにならなかった/u,
         );
       } finally {
         await rm(root, { recursive: true, force: true });
@@ -1526,7 +1538,7 @@ test("効力のある契約の必須監査が欠ければ、過去の版の Job 
         reportOverrides: { contractVersion: `${NARRATED_SERIES}-v4` },
       });
       await assert.rejects(
-        createVideoHarnessRunReceipt({ job: plannedJob(root, OLDER_DECLARATION_SHA), outcome }),
+        createVideoHarnessRunReceipt({ job: historicalReboundJob(root, OLDER_DECLARATION_SHA), outcome }),
         /必須監査集合がHarness宣言と一致しない/u,
       );
     } finally {
@@ -1673,7 +1685,7 @@ test("漫画: 更新でリポジトリの契約が上がっても、付け替え
       source: "job-pinned-at-doctor",
     };
     // 計画は古いコード（0.1.26）、確定は今のコード（0.1.28）。要約に要る欄だけを合成で持たせる。
-    const currentJob = { ...fixture.job, canonicalIdentity: { core: { version: "0.1.28", sha256: "8".repeat(64) } } };
+    const currentJob = { ...fixture.job, canonicalIdentity: { ...fixture.job.canonicalIdentity, core: { version: "0.1.28", sha256: "8".repeat(64) } } };
     const plannedCanonicalIdentity = { core: { version: "0.1.26", sha256: "6".repeat(64) } };
     const job = reboundJob(currentJob, plannedCanonicalIdentity, { pinnedProductionContract });
     const result = await createVideoHarnessRunReceipt({ job, outcome: fixture.outcome });

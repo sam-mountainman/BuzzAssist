@@ -24,7 +24,7 @@
 //   1セッションの個別事象を1スキルにする蓄積は失敗であって機能ではない。
 //   狙うのはクラスレベルの規則。
 
-import { listHarnessDeclarations } from "../lib/harnessDeclarationDirs.mjs";
+import { assertOutsideRepositoryWorktrees, listHarnessDeclarations } from "../lib/harnessDeclarationDirs.mjs";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import { homedir } from "node:os";
@@ -96,6 +96,7 @@ import {
   learningOverlayCopies,
   appendJsonlRows,
   migrateLegacyLearningState,
+  operatorLearningStateDir,
   resolveLearningState,
   sameIgnoringOverlayTimestamp,
   sharedLedgerPath,
@@ -1924,7 +1925,7 @@ export function normalizeProposalMetadata(metadata) {
   return out;
 }
 
-export function buildProposal({ kind, target, text, evidence, session, now, metadata }) {
+export function buildProposal({ kind, target, text, evidence, session, now, metadata }, { privateHarness = null } = {}) {
   if (!PROPOSAL_KINDS.has(kind)) {
     throw new Error(`kind は ${[...PROPOSAL_KINDS].join(" / ")} のいずれかにしてください: ${kind}`);
   }
@@ -1939,7 +1940,13 @@ export function buildProposal({ kind, target, text, evidence, session, now, meta
   if (!normalizedSession) {
     throw new Error("session が必要です。同じセッション内の重複捕捉を水増ししないため --session を指定してください");
   }
-  requireTarget(target);
+  if (privateHarness) {
+    if (privateHarness.layer !== "private" || !/^[a-z0-9][a-z0-9-]{0,80}$/u.test(privateHarness.id || "")
+      || !/^(?:platform|genre|channel-pack):[a-z0-9][a-z0-9-]{0,79}$/u.test(target)
+      || !Array.isArray(privateHarness.learningTargets) || !privateHarness.learningTargets.includes(target)) {
+      throw new Error("private-harness-learning-target-invalid");
+    }
+  } else requireTarget(target);
   const entry = {
     kind,
     target,
@@ -1973,11 +1980,12 @@ export function captureLearningProposal(input, {
   env = process.env,
   channelId = "",
   channelScope = null,
+  privateHarness = null,
 } = {}) {
   // 子エージェントの印があれば、台帳へ書く前に止める（Canvas feedback や Receipt の
   // 自動捕捉もこの関数を通るので、CLI だけでなくここでも見る）。
   assertLearningWriteAllowed(env, "capture");
-  const proposal = buildProposal(input);
+  const proposal = buildProposal(input, { privateHarness });
   const scope = channelLearningScopeOf(channelScope ?? (String(channelId || "").trim() || null), { env });
   if (scope && !isChannelPackTarget(resolveTarget(proposal.target))) {
     throw channelScopeError(
@@ -1989,10 +1997,10 @@ export function captureLearningProposal(input, {
   // 行に残すチャンネルの印（ID には入れない。同じ観測は同じ提案として数える）。
   const built = scope ? { ...proposal, channel: scope.channelId } : proposal;
   const verdict = channelTermsInSharedEntry(built, signals);
-  if (!verdict.ok) throw new Error(verdict.message);
+  if (!privateHarness && !verdict.ok) throw new Error(verdict.message);
   const vocabulary = privateVocabulary === undefined ? defaultPrivateVocabulary() : privateVocabulary;
   const privateVerdict = privateTermsInSharedEntry(built, vocabulary);
-  if (!privateVerdict.ok) throw new Error(privateVerdict.message);
+  if (!privateHarness && !privateVerdict.ok) throw new Error(privateVerdict.message);
   // 語彙の照合とは別の層として、文字列の形（注入・隠しコメント・不可視文字・
   // 資格情報・端末パス）を見る。検出しても捨てずに blocked として残す。
   const entry = blockProposalIfUnsafe(built, { homeRoot });
@@ -2001,6 +2009,17 @@ export function captureLearningProposal(input, {
   if (ledgerPathResolver === ledgerPathFor) ensureLearningStateReady({ env });
   // 台帳（チャンネルの保存先・チャンネルの無い Job の保存先の宣言）は、捕捉と同じ env で読む。
   const ledgerPath = ledgerPathResolver(entry.target, "proposals", { ...(scope ? { channel: scope } : {}), env });
+  if (privateHarness) {
+    // 外の宣言の固有語を、既知の platform/genre 宛を名乗って共有台帳へ入れない。
+    const privateRoot = canonicalPotentialPathSync(path.join(operatorLearningStateDir({ env }), "private-harnesses", privateHarness.id));
+    const delta = path.relative(privateRoot, canonicalPotentialPathSync(ledgerPath));
+    if (!delta || delta === ".." || delta.startsWith(`..${path.sep}`) || path.isAbsolute(delta)) {
+      throw new Error("private-harness-learning-store-invalid: private proposals require the operator's harness store");
+    }
+    let ancestor = path.dirname(ledgerPath);
+    while (!fs.existsSync(ancestor) && path.dirname(ancestor) !== ancestor) ancestor = path.dirname(ancestor);
+    assertOutsideRepositoryWorktrees(ancestor);
+  }
   assertCaptureLedgerIsolation(entry.target, ledgerPath, ledgerPathResolver);
   return lock(ledgerPath, () => {
     const duplicate = read(ledgerPath).some((row) => {
@@ -2008,7 +2027,7 @@ export function captureLearningProposal(input, {
       return id === entry.id && row?.session === entry.session;
     });
     if (!duplicate) append(ledgerPath, entry);
-    const catalog = duplicate ? { written: false } : refreshCatalog(ledgerPath);
+    const catalog = duplicate || privateHarness ? { written: false } : refreshCatalog(ledgerPath);
     return { entry, ledgerPath, appended: !duplicate, catalog };
   });
 }

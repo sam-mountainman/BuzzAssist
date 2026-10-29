@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -15,6 +15,61 @@ import {
   receiptLearningCandidates,
 } from "../lib/harnessReceiptLearning.mjs";
 import { captureLearningProposal, proposalId } from "../scripts/harness-learn.mjs";
+
+test("#9 private 子の不合格 Receipt を宣言の学習先の運営者専用台帳へ実際に捕捉する", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "private-receipt-learning-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const external = join(root, "declarations"); mkdirSync(external);
+  const harnessId = "synthetic-private-learning";
+  const target = "genre:synthetic-private-craft";
+  writeFileSync(join(external, `${harnessId}.harness.json`), JSON.stringify({ id: harnessId, layer: "private", childProtocol: "buzzassist-child-v1",
+    learningTargets: [target], guarantees: [{ id: "synthetic-quality", evidenceAuditIds: ["syntheticQuality"] }] }));
+  const learningDir = join(root, "operator-learning");
+  const env = { BUZZASSIST_PRIVATE_HARNESS_DIRS: external, BUZZASSIST_LEARNING_DIR: learningDir, BUZZASSIST_LEARNING_AUTO_SYNC: "0" };
+  const receipt = { version: "harness-run-receipt-v1", finalized: true, outcome: "fail", harnessBuild: { harness: { id: harnessId, version: "1.0.0" }, declaredGates: ["synthetic-quality"] },
+    gates: { "synthetic-quality": { verdict: "fail" } }, summary: { failedGates: ["synthetic-quality"] }, knownRemainingIssues: [] };
+  const receiptPath = join(root, "run-receipt.json"); const bytes = JSON.stringify(receipt); writeFileSync(receiptPath, bytes);
+  const job = { id: `video-${harnessId}-${"0".repeat(16)}`, status: "failed", harness: { id: harnessId }, runDir: root,
+    artifacts: [{ kind: "run-receipt", path: receiptPath, sha256: createHash("sha256").update(bytes).digest("hex") }] };
+  let sharedHooks = 0;
+  const sharedHook = async () => { sharedHooks++; return {}; };
+  const options = { job, env, syncOverlays: sharedHook, promoteFailures: sharedHook, queueFeedback: sharedHook, receiptIndexPath: join(root, "index.jsonl"),
+    captureOptions: { signals: { terms: [], castIds: [] }, privateVocabulary: null, refreshCatalog: () => ({ written: false }) } };
+  const result = await captureSettledJobLearning(options);
+  assert.equal(result.captured, 1, JSON.stringify(result));
+  assert.equal(result.target, target);
+  const files = readdirSync(learningDir, { recursive: true }).filter((file) => file.endsWith("proposals.jsonl"));
+  assert.equal(files.length, 1);
+  assert.ok(files[0].startsWith(`private-harnesses/${harnessId}/`), files[0]);
+  const rows = readFileSync(join(learningDir, files[0]), "utf8").trim().split("\n").map(JSON.parse);
+  assert.equal(rows[0].target, target);
+  assert.equal(rows[0].createdBy, "auto-receipt");
+  assert.match(rows[0].text, /synthetic-quality/u);
+  assert.equal(existsSync(join(learningDir, "shared", "proposals.jsonl")), false);
+  assert.equal(existsSync(join(root, "index.jsonl")), false, "private の索引も共有へ出さない");
+  assert.equal(sharedHooks, 0);
+  assert.equal((await captureSettledJobLearning(options)).duplicates, 1);
+});
+
+test("#9 private の宣言から共有の target を選んでも公開の台帳へ捕捉できない", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "private-capture-isolation-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const h = captureHarness();
+  assert.throws(() => captureLearningProposal({ kind: "fact", target: "platform:platform-craft", text: "合成の非公開観測を保存する", session: "synthetic-private" }, {
+    ...h.options, env: { BUZZASSIST_LEARNING_DIR: root },
+    privateHarness: { id: "synthetic-private", layer: "private", learningTargets: ["platform:platform-craft"] },
+    ledgerPathResolver: () => join(root, "shared", "proposals.jsonl"),
+  }), /private-harness-learning-store-invalid/u);
+  assert.equal(h.rows.length, 0);
+});
+
+test("#9 公開の新しい子も宣言の channel-pack 学習先で捕捉する", async () => {
+  const h = captureHarness();
+  const result = await captureSettledJobLearning({ job: { id: "synthetic-public-job", status: "failed", harness: { id: "synthetic-public-child" }, knownRemainingIssues: ["synthetic-failure"] },
+    env: {}, captureOptions: h.options, receiptIndexPath: TEST_RECEIPT_INDEX, loadDeclaration: () => ({ layer: undefined, learningTargets: ["channel-pack:narrated-story"] }) });
+  assert.ok(result.captured > 0, JSON.stringify(result));
+  assert.equal(result.target, "channel-pack:narrated-story");
+});
 
 // すべて合成データ。台本・人名・端末パスに見える文字列は「本文へ運ばれないこと」を
 // 確かめるためだけに置いている。
@@ -257,7 +312,11 @@ test("子エージェント・無効化・未決着・未知のハーネス・�
   assert.equal((await captureSettledJobLearning({ receiptIndexPath: TEST_RECEIPT_INDEX, job, env: childAgentEnvironment({}), capture })).skippedReason, "child-agent");
   assert.equal((await captureSettledJobLearning({ receiptIndexPath: TEST_RECEIPT_INDEX, job, env: { BUZZASSIST_LEARNING_AUTO_CAPTURE: "0" }, capture })).skippedReason, "disabled");
   assert.equal((await captureSettledJobLearning({ receiptIndexPath: TEST_RECEIPT_INDEX, job: { ...job, status: "cancelled" }, env: {}, capture })).skippedReason, "not-settled");
-  assert.equal((await captureSettledJobLearning({ receiptIndexPath: TEST_RECEIPT_INDEX, job: { ...job, harness: { id: "unknown-harness" } }, env: {}, capture })).skippedReason, "unknown-harness-route");
+  let sharedHooks = 0;
+  const sharedHook = async () => { sharedHooks++; return {}; };
+  assert.equal((await captureSettledJobLearning({ receiptIndexPath: TEST_RECEIPT_INDEX, job: { ...job, runDir: tmpdir(), harness: { id: "unknown-harness" } }, env: {}, capture,
+    syncOverlays: sharedHook, queueFeedback: sharedHook, promoteFailures: sharedHook })).skippedReason, "unknown-harness-route");
+  assert.equal(sharedHooks, 0, "宣言が消えた private Job を共有の処理へ流さない");
   assert.equal(calls, 0);
 
   // Channel Pack の台帳が共有台帳と分離されていなければ、Job を止めずに理由だけ返す。

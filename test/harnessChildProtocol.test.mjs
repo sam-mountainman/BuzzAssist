@@ -17,6 +17,7 @@ import { readVideoHarnessJob } from "../lib/videoHarnessJob.mjs";
 import { receiptLearningCandidates } from "../lib/harnessReceiptLearning.mjs";
 import { evaluateJobSettlement } from "../scripts/harness-stop-hook.mjs";
 import { runHarnessDoctor } from "../scripts/harness-doctor.mjs";
+import { DECODABLE_AV_BASE64 } from "./helpers/decodableAvFixture.mjs";
 import { acceptScriptForTests } from "./helpers/scriptQualityAcceptance.mjs";
 
 const execFile = promisify(execFileCallback);
@@ -24,62 +25,44 @@ const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const id = "synthetic-child-video";
 const moduleUrl = (name) => new URL(`../lib/${name}.mjs`, import.meta.url).href;
 
-// 子も宣言も試験中の外の一時フォルダだけに作る。API はなく、ffmpeg の合成素材だけ。
+// 子も宣言も試験用の一時フォルダ。API・動画生成はなく、既存の小さなMP4を実デコードする。
 function childSource() {
   return `
 import assert from 'node:assert/strict';
-import { execFile as callback } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
 import { verifyVideoHarnessUpstreamExecution } from ${JSON.stringify(moduleUrl("videoHarnessJob"))};
-import { resolveFfmpegToolchain } from ${JSON.stringify(moduleUrl("harnessRuntimeResolver"))};
 import { assertScriptQualityWorkDirBoundToJob } from ${JSON.stringify(moduleUrl("scriptQualityUseGate"))};
-import { loadReviewerTrust, signChildReviewSignoff, verifyChildReviewSignoff } from ${JSON.stringify(moduleUrl("koyaReviewAttestation"))};
-import { CHILD_AUDIT_VERSION, CHILD_SIGNOFF_VERSION } from ${JSON.stringify(moduleUrl("harnessChildProtocol"))};
+import { loadReviewerTrust, verifyChildReviewSignoff } from ${JSON.stringify(moduleUrl("koyaReviewAttestation"))};
+import { CHILD_AUDIT_VERSION } from ${JSON.stringify(moduleUrl("harnessChildProtocol"))};
 const action = process.argv[2];
 const args = {};
 for (let i = 3; i < process.argv.length; i++) {
   const name = process.argv[i].slice(2);
   args[name] = ['pass', 'fail'].includes(name) ? true : process.argv[++i];
 }
-if (action === 'help') { console.log('synthetic child: full / signoff'); process.exit(0); }
+if (action === 'help') { console.log('synthetic child: full'); process.exit(0); }
 const jobPath = args['upstream-job-path'] || join(args['project-dir'], 'canvas', 'harness-runs', args['job-id'], 'job.json');
 const job = JSON.parse(await readFile(jobPath, 'utf8'));
 const dir = join(job.runDir, 'synthetic-output');
 await mkdir(dir, { recursive: true });
 const video = join(dir, 'final.mp4');
 const sheet = join(dir, 'contact-sheet.png');
-const signoffPath = join(dir, 'signoff.json');
+const signoffPath = args['review-signoff-path'];
 const digest = async (file) => createHash('sha256').update(await readFile(file)).digest('hex');
 const json = async (file, value) => writeFile(file, JSON.stringify(value, null, 2));
 const trust = await loadReviewerTrust({ trustPath: args['reviewer-trust-path'] || '' });
-if (action === 'signoff') {
-  assert.notEqual(args['reviewer-context-id'], 'production:' + job.id);
-  const review = JSON.parse(await readFile(args['review-path'], 'utf8'));
-  const body = { ...review, version: CHILD_SIGNOFF_VERSION, approved: args.pass === true && !args.fail,
-    reviewer: 'synthetic-reviewer', reviewerContextId: args['reviewer-context-id'], generatorContextId: 'production:' + job.id,
-    videoSha256: await digest(video), contactSheetSha256: await digest(sheet) };
-  await json(signoffPath, await signChildReviewSignoff({ signoff: body, harnessId: job.harness.id, jobId: job.id,
-    identityDigest: job.identityDigest, privateKeyPath: args['reviewer-key-path'], trust }));
-  console.log(JSON.stringify({ signoffPath }));
-  process.exit(0);
-}
 assert.equal(action, 'full');
 await verifyVideoHarnessUpstreamExecution({ upstreamJobPath: jobPath, upstreamJobId: args['upstream-job-id'],
   upstreamJobRevision: Number(args['upstream-job-revision']), upstreamExecutionBinding: args['upstream-execution-binding'],
   harnessId: job.harness.id, scriptPath: args['script-path'] });
 assertScriptQualityWorkDirBoundToJob({ job, scriptQualityWorkDir: args['script-quality-work-dir'] });
 assert.equal(JSON.parse(await readFile(join(args['channel-pack-dir'], 'synthetic.json'), 'utf8')).synthetic, true);
-const exec = promisify(callback);
 if (!existsSync(video)) {
-  const tools = await resolveFfmpegToolchain();
-  const run = (argv) => exec(tools.ffmpeg.command, [...(tools.ffmpeg.args || []), '-hide_banner', '-loglevel', 'error', ...argv], { timeout: 30000 });
-  await run(['-f', 'lavfi', '-i', 'testsrc2=size=160x90:rate=12:duration=1', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1',
-    '-c:v', 'libx264', '-threads', '1', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', video]);
-  await run(['-i', video, '-frames:v', '1', '-threads', '1', sheet]);
+  await writeFile(video, Buffer.from(${JSON.stringify(DECODABLE_AV_BASE64)}, 'base64'));
+  await writeFile(sheet, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'));
 }
 const videoSha256 = await digest(video), contactSheetSha256 = await digest(sheet);
 const signed = existsSync(signoffPath) ? JSON.parse(await readFile(signoffPath, 'utf8')) : null;
@@ -87,7 +70,7 @@ if (signed) assert.equal(verifyChildReviewSignoff(signed, { harnessId: job.harne
   identityDigest: job.identityDigest, videoSha256, contactSheetSha256, trust }).pass, true);
 const pass = signed?.approved === true;
 const issues = pass ? [] : ['independent-contact-sheet-signoff-required'];
-const auditChecks = { syntheticQuality: { pass: true, detail: 'ffmpeg synthetic fixture' }, separateSignoff: { pass } };
+const auditChecks = { syntheticQuality: { pass: true, detail: 'existing encoded fixture' }, separateSignoff: { pass } };
 const report = { version: CHILD_AUDIT_VERSION, harnessId: job.harness.id, jobId: job.id, contractVersion: '1.0.0',
   status: pass ? 'pass' : 'awaiting-human-review', knownRemainingIssues: issues, videoSha256, contactSheetSha256, auditChecks,
   ...(signed ? { independentSignoff: { path: signoffPath, sha256: await digest(signoffPath), reviewer: signed.reviewer,
@@ -99,7 +82,7 @@ await json(runReceiptPath, { status: report.status, auditChecks });
 const artifacts = {};
 for (const [kind, path] of [['final-video', video], ['contact-sheet', sheet], ['audit-report', reportPath]]) artifacts[kind] = { path, sha256: await digest(path) };
 console.log('synthetic log before final JSON');
-console.log(JSON.stringify({ status: pass ? 'final-audited' : 'awaiting-human-review', knownRemainingIssues: issues, artifacts, runReceiptPath, auditChecks }, null, 2));
+console.log(JSON.stringify({ status: pass ? 'final-audited' : 'awaiting-human-review', knownRemainingIssues: issues, artifacts, runReceiptPath, auditChecks }));
 process.exit(pass ? 0 : 3);
 `;
 }
@@ -249,6 +232,9 @@ test("子の終了コード・状態・成果物SHAの不整合を拒否し、fa
   await assert.rejects(call(0, result), /exit-status-mismatch/u);
   await assert.rejects(call(3, { ...result, status: "final-audited" }), /exit-status-mismatch/u);
   await assert.rejects(call(3, { ...result, artifacts: { video: { path: "x", sha256: "bad" } } }), /artifact-invalid/u);
+  const artifactPath = join(f.projectDir, "synthetic-artifact.mp4");
+  await writeFile(artifactPath, "actual bytes");
+  await assert.rejects(call(3, { ...result, artifacts: { "final-video": { path: artifactPath, sha256: "a".repeat(64) } } }), /SHA-256/u);
   await assert.rejects(call(3, { ...result, knownRemainingIssues: null }), /result-invalid/u);
   const failed = await call(2, { ...result, status: "failed", knownRemainingIssues: ["synthetic-failure"] });
   assert.equal(failed.status, "failed");

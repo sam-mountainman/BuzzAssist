@@ -280,7 +280,7 @@ function requireEpisodeId() {
 }
 
 function print(payload) {
-  process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify(payload)}\n`);
 }
 
 // full reuses --retry-failed for images; re-sending a paid clip must be its own

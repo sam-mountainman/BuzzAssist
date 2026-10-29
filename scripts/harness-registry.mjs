@@ -18,7 +18,7 @@
 // クライアント名やチャンネル名は入れない。ここは「何が作れるか」の
 // 宣言であって、誰のためのものかの記録ではない。
 
-import { listHarnessDeclarations, harnessCapabilityPath } from "../lib/harnessDeclarationDirs.mjs";
+import { listHarnessDeclarations, harnessCapabilityPath, reportPrivateHarnessFailure } from "../lib/harnessDeclarationDirs.mjs";
 import { CHILD_PROTOCOL, requiresChildScriptQuality } from "../lib/harnessChildProtocol.mjs";
 import fs from "node:fs";
 import path from "node:path";
@@ -43,10 +43,15 @@ export const CLIENT_IDENTIFIERS = Object.freeze([
 
 export function loadHarnesses(options = {}) {
   const resolved = typeof options === "string" ? { publicDir: options } : options;
-  return listHarnessDeclarations(resolved).map(({ path: full, declaration: parsed }) => {
+  return listHarnessDeclarations({ toleratePrivateErrors: true, ...resolved }).flatMap(({ path: full, declaration: parsed, layer }) => {
     const errors = validateHarness(parsed);
-    if (errors.length > 0) throw new Error(`${path.basename(full)} の宣言に問題があります:\n${errors.map((e) => `  - ${e}`).join("\n")}`);
-    return { ...parsed, file: path.relative(REPO_ROOT, full) };
+    if (errors.length > 0) {
+      const error = new Error(`${path.basename(full)} の宣言に問題があります: ${errors.join("; ")}`);
+      if (layer !== "private" || resolved.toleratePrivateErrors === false) throw error;
+      reportPrivateHarnessFailure(error, full, resolved);
+      return [];
+    }
+    return [{ ...parsed, file: path.relative(REPO_ROOT, full) }];
   });
 }
 
@@ -60,6 +65,7 @@ export function validateHarness(h) {
   }
   if (h.childProtocol !== undefined && h.childProtocol !== CHILD_PROTOCOL) errors.push("未知の childProtocol");
   if (h.childProtocol === CHILD_PROTOCOL) {
+    if (h.produces?.kind !== "video") errors.push("childProtocol の produces.kind は video に限る");
     if (!/^[a-z0-9][a-z0-9-]{0,47}$/u.test(h.id || "")) errors.push("childProtocol の id は48字以内の小文字英数字とハイフンにする");
     if (h.reviewAttestation?.subject !== h.id) errors.push("childProtocol の reviewAttestation.subject は harness id と同じにする");
     if (requiresChildScriptQuality(h) && (typeof h.scriptQualityGenre !== "string" || !h.scriptQualityGenre.trim())) errors.push("scriptQualityGenre が必要です");
@@ -73,7 +79,7 @@ export function validateHarness(h) {
   }
   // クライアントを特定できる情報を宣言へ入れない。ここは共有される。
   const text = JSON.stringify(h);
-  for (const banned of CLIENT_IDENTIFIERS) {
+  for (const banned of h.layer === "private" ? [] : CLIENT_IDENTIFIERS) {
     if (text.includes(banned)) {
       errors.push(`クライアントを特定できる語が入っています: ${banned}`);
     }
