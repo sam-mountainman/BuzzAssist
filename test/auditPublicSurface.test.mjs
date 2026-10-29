@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 
 
 
-import { auditPublicSurface, collectSensitiveTerms } from "../scripts/audit-public-surface.mjs";
+import { PRIVATE_PUSH_CHECK_ENV, auditPublicSurface, collectSensitiveTerms, runPrivatePushCheck } from "../scripts/audit-public-surface.mjs";
 import { channelPackPresent } from "../lib/channelPackResolver.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -660,4 +660,19 @@ test("名前を伏せても、Channel Pack の本文をそのまま写したフ�
   assert.equal(withoutPack.packTextFindings.length, 0);
   assert.ok(withoutPack.unchecked.some((entry) => entry.includes("パック本文の写し")), JSON.stringify(withoutPack.unchecked));
   assert.equal(withoutPack.status, "incomplete");
+});
+
+test("端末ごとの追加の検査: 設定が無ければ何もしない、設定があれば push の範囲を渡し、失敗・起動できないときは止める", () => {
+  const lines = ["refs/heads/topic aaa refs/heads/topic bbb"];
+  assert.deepEqual(runPrivatePushCheck(lines, { env: {}, gitConfig: () => "" }), { configured: false, ok: true });
+  const calls = [];
+  const spawnImpl = (command, options) => { calls.push({ command, input: options.input, shell: options.shell }); return { status: 0 }; };
+  assert.deepEqual(runPrivatePushCheck(lines, { env: { [PRIVATE_PUSH_CHECK_ENV]: "synthetic-check" }, spawnImpl, gitConfig: () => "unused" }), { configured: true, ok: true });
+  assert.deepEqual(calls, [{ command: "synthetic-check", input: "refs/heads/topic aaa refs/heads/topic bbb\n", shell: true }]);
+  // 環境変数が無ければ git の設定を使う。
+  assert.equal(runPrivatePushCheck(lines, { env: {}, spawnImpl, gitConfig: () => "from-git-config" }).ok, true);
+  assert.equal(calls.at(-1).command, "from-git-config");
+  assert.deepEqual(runPrivatePushCheck(lines, { env: {}, spawnImpl: () => ({ status: 1 }), gitConfig: () => "x" }), { configured: true, ok: false, reason: "終了コード 1" });
+  const spawnError = Object.assign(new Error("missing"), { code: "ENOENT" });
+  assert.deepEqual(runPrivatePushCheck(lines, { env: {}, spawnImpl: () => ({ error: spawnError, status: null }), gitConfig: () => "x" }), { configured: true, ok: false, reason: "起動できない: ENOENT" });
 });

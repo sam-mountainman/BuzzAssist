@@ -307,6 +307,9 @@ RunReceipt が pass で確かめられない、blockers・`knownRemainingIssues`
   本体 `lib/ossCatalog.mjs`）を見る。無ければライセンスを確かめて（`model-route.mjs license-check`）行を足す。reject の物が
   依存に入ると `oss-catalog.mjs check` と試験が止める。非商用の重み・AGPL・会社の規模で有償の物・LICENSE の無い配布物は
   顧客に渡す土台に入れない。素材サイトの生ファイルは同梱せず、運営者が取って SHA で記録する
+- 公開リポジトリに語の一覧を置けない照合（取り込んだ外部の資料の題名・原文など）は、端末の環境変数
+  `BUZZASSIST_PRIVATE_PUSH_CHECK` か git の設定 `buzzassist.privatePushCheck` に検査のコマンドを書く。pre-push の公開面の
+  検査が同じ push の範囲を渡して走らせ、失敗・起動できないときは push を止める（`scripts/audit-public-surface.mjs`）
 
 ## Canvas への投影
 
