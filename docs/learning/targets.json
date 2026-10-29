@@ -60,14 +60,6 @@
       "packId": "narrated-story",
       "confidential": true
     },
-    "channel-pack:explainer": {
-      "mode": "review-only",
-      "canonical": "docs/explainer-requirements-ledger.md",
-      "reason": "解説動画（explainer-video）のハーネスは 2026-10-22 に廃止した。この宛先は運営者の端末に残る既存の台帳を読むためだけに残す（新しい捕捉はどの経路からも来ない）。以下は廃止前の説明: 解説動画のチャンネルの要求台帳。Job の確定時の捕捉・人の確認（完成動画の品質ループ）・途中の成果物と台本の品質ループの不合格から自動で拾った候補を積む。承認と監査の記録そのものなので機械は書き足さない。保存先はチャンネルごと（運営者の配置表の channelLearning、無ければ学習の置き場の channels/<チャンネルの id>）で、チャンネルの無い Job だけが Channel Pack の既定の置き場（channel-packs/explainer）を使う。チャンネル固有の事実は共有層へ流さない。",
-      "scope": "channel-pack",
-      "packId": "explainer",
-      "confidential": true
-    },
     "platform:platform-craft": {
       "mode": "auto-guidance",
       "canonical": ".agents/skills/platform-craft/SKILL.md",

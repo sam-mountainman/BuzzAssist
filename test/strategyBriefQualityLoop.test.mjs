@@ -354,3 +354,19 @@ test("人が stop で止めると回・時間を数えずに blocked（human-sto
   assert.equal(restarted.state.strategy.history.at(-1).stopReason, "human-stopped");
   assert.equal(restarted.state.strategy.history.at(-1).humanStop.reviewer, "synthetic-operator");
 });
+
+test("上限で止まったループを同じ契約で始め直すと上限が0に戻るので、人の確認が無いと始めない（累計を持ち越さないループ）", async (t) => {
+  const root = await workspace(t);
+  await start(root);
+  const statePath = path.join(root, "quality", "strategy-brief-loop.json");
+  const state = JSON.parse(await readFile(statePath, "utf8"));
+  await writeFile(statePath, JSON.stringify({ ...state, status: "needs-human-approval", stopReason: "round-limit", nextAction: "human-review" }));
+  const refused = await start(root, { restart: true, restartReason: "もう一度回したい" });
+  assert.equal(refused.started, false);
+  assert.ok(refused.issues.includes("strategy-brief-contract-relaxed:limit-reset:round-limit"), refused.issues.join(", "));
+  const approved = await start(root, {
+    restart: true, restartReason: "人が上限を決め直した", reviewer: "synthetic-operator", humanVerified: true, isInteractive: true,
+  });
+  assert.equal(approved.started, true);
+  assert.deepEqual(approved.state.strategy.history.at(-1).relaxedBy.relaxations, ["limit-reset:round-limit"]);
+});

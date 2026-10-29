@@ -152,6 +152,13 @@ function claimInSentence(sentence) {
   return false;
 }
 
+/** 完成・合格を主張している文（否定・伝聞を除く）。品質ループの「合格せずに止まったのに完成と言う」の判定にも使う。 */
+export function completionClaimSentences(message) {
+  const text = typeof message === "string" ? message.slice(0, 200_000) : "";
+  if (!text.trim()) return [];
+  return splitSentences(text).filter(claimInSentence);
+}
+
 /**
  * 最後の発言が完成を主張しているか。
  * strong = 完成品（動画・MP4・納品…）についての主張。weak = 文の中に完成品の語は無いが、
@@ -551,6 +558,46 @@ function lastMessageOf(input, lines) {
     : lastAssistantMessageFromLines(lines);
 }
 
+// 道具の呼び出し・結果だけを残す（エージェントの発言の文は落とす）。許可した形だけを通す（知らない形は数えない）。
+//   Claude Code: assistant / user の tool_use・tool_result（と toolUseResult）
+//   Codex: response_item の function_call・local_shell_call・custom_tool_call とその出力、
+//          event_msg のコマンド実行・MCP の呼び出し・パッチの始まりと終わり、item_completed のうち道具の項目
+//          （CommandExecution・McpToolCall・FileChange など。AgentMessage・Reasoning・UserMessage は落とす）
+const CLAUDE_TOOL_ITEMS = new Set(["tool_use", "tool_result", "server_tool_use", "mcp_tool_use", "mcp_tool_result"]);
+const CODEX_TOOL_PAYLOADS = new Set([
+  "function_call", "function_call_output", "local_shell_call", "local_shell_call_output", "custom_tool_call", "custom_tool_call_output",
+  "exec_command_begin", "exec_command_end", "mcp_tool_call_begin", "mcp_tool_call_end", "patch_apply_begin", "patch_apply_end",
+]);
+const CODEX_TOOL_ITEM = /^(?:CommandExecution|McpToolCall|FileChange|WebSearch|ImageView|ToolCall)$/u;
+export function toolEventsOnly(line) {
+  let entry;
+  try { entry = JSON.parse(line); } catch { return null; }
+  if (!entry || typeof entry !== "object") return null;
+  if (entry.type === "assistant" || entry.type === "user") {
+    const content = entry.message?.content;
+    const items = Array.isArray(content) ? content.filter((item) => CLAUDE_TOOL_ITEMS.has(item?.type)) : [];
+    const result = entry.toolUseResult;
+    if (items.length === 0 && result === undefined) return null;
+    return { items, ...(result !== undefined ? { result } : {}) };
+  }
+  const payload = entry.payload && typeof entry.payload === "object" ? entry.payload : null;
+  if (!payload) return null;
+  if (CODEX_TOOL_PAYLOADS.has(String(payload.type || ""))) return payload;
+  if (payload.type === "item_completed" && CODEX_TOOL_ITEM.test(String(payload.item?.type || ""))) return payload.item;
+  return null;
+}
+
+/** 会話の記録で最後に道具から扱った Job（発言の文に書いた Job ID は数えない）。 */
+export function lastToolHandledJobId(lines) {
+  const collector = createReferenceCollector();
+  for (const line of Array.isArray(lines) ? lines : []) {
+    if (typeof line !== "string" || !line.includes("video-")) continue;
+    const events = toolEventsOnly(line);
+    if (events) collector.addText(JSON.stringify(events));
+  }
+  return collector.result().jobIds[0] || "";
+}
+
 /** 記録と最後の発言から Job とプロジェクトの候補を集める（両方の判定が同じ集め方を使う）。 */
 function collectJobReferences(lines, message, { cwd, env }) {
   const collector = createReferenceCollector({ cwd });
@@ -591,10 +638,16 @@ export function evaluateStop(input, { env = process.env, home = homedir(), fsApi
   }
   if (located.length === 0) return { action: "none", why: "job-not-found" };
 
-  // 発言が Job を名指ししていればその Job を、していなければこの会話で最後に扱った Job を見る。
-  // 最後の Job の記録が壊れているときに、古い別の Job へ乗り換えて判定しない（読めない＝止めない）。
+  // 発言が名指しした Job と、この会話で最後に扱った Job の両方を見る（合格済みの古い Job を名指しして、最新の
+  // 未決着の Job の判定を逃れられないように）。最後の Job の記録が壊れているときに、古い別の Job へ乗り換えて
+  // 判定しない（読めない＝止めない）。
+  // 「最後に扱った Job」は会話の記録（道具の呼び出し）だけから決める。発言の文に書いた Job ID を数えると、
+  // 古い Job を名指ししただけでそれが「最後」になってしまう。
   const named = new Set(mentioned.result().jobIds);
-  const chosen = named.size > 0 ? located.filter((entry) => named.has(entry.jobId)) : [located[0]];
+  const lastHandled = lastToolHandledJobId(lines) || located[0].jobId;
+  const chosen = named.size > 0
+    ? located.filter((entry) => entry.jobId === lastHandled || named.has(entry.jobId))
+    : [located[0]];
   const targets = chosen.filter((entry) => !entry.unreadable);
   if (targets.length === 0) return { action: "none", why: chosen.length > 0 ? "job-unreadable" : "named-job-not-found" };
 
@@ -680,6 +733,8 @@ export async function decideStop(input, { env = process.env, home = homedir(), f
       blockState: state,
       jobLoopRefs: jobBoundLoopRefsFromTranscript(lines, lastMessageOf(input, lines), { cwd, env, fsApi, pathApi }),
       deadline,
+      claimSentences: completionClaimSentences(lastMessageOf(input, lines)),
+      message: lastMessageOf(input, lines),
       ...(loadLoopDetail ? { loadDetail: loadLoopDetail } : {}),
     });
   } catch (error) {

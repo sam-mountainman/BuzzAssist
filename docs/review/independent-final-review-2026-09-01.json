@@ -12,7 +12,7 @@
       "c742a064-52b0-463d-8ac5-5b200ab858a8",
       "f4a4ec5b-ebf0-458f-9adc-91d1affdd657"
     ],
-    "externalFolderLabel": "external masao source folder",
+    "externalFolderLabel": "external reference folder",
     "excludedByUser": [
       "YouTube Analytics integration",
       "YouTube Reporting/Data learning loop",
@@ -170,13 +170,13 @@
       "boundary": "Four source files verify by exact SHA and all 46 declared IDs are unique, but the declared ID set is self-authored and most findings are not bound to exact source turns."
     },
     {
-      "id": "REQ-MASAO-REVIEW",
-      "requirement": "Review every file in the external masao source folder and adopt only safe, relevant mechanisms",
+      "id": "REQ-EXTERNAL-REFERENCE-REVIEW",
+      "requirement": "Review every file in the external reference folder and adopt only safe, relevant mechanisms",
       "status": "verified-documentary-audit",
       "evidence": [
-        "docs/masao-quality-harness-integration.md"
+        "(moved out of the public repository on 2026-10-29)"
       ],
-      "decision": "320 non-git files were classified. Akapen and Best-of-N inform optional review patterns; neither codebase is bundled. The 21 yt-quality-loop paths contain only identical placeholder CLAUDE.md files and were not adopted."
+      "decision": "320 non-git files were classified. The external single-proposal review skill and the side-by-side comparison tool inform optional review patterns; neither codebase is bundled. The 21 yt-quality-loop paths contain only identical placeholder CLAUDE.md files and were not adopted."
     }
   ],
   "findings": [
@@ -432,7 +432,7 @@
       "coworkSuites": "hard-denied"
     }
   },
-  "masaoFolderReview": {
+  "externalReferenceFolderReview": {
     "totalFilesIncludingGit": 418,
     "nonGitFiles": 320,
     "nonGitBytes": 55065806,
@@ -443,7 +443,7 @@
     "placeholderClaudeFiles": 33,
     "ytQualityLoopPlaceholderPaths": 21,
     "codeOrSkillCandidates": 10,
-    "decision": "Use principles, not an implicit runtime dependency. Akapen is reference-only; Best-of-N is an optional external viewer; analytics and yt-quality-loop are excluded."
+    "decision": "Use principles, not an implicit runtime dependency. The external review skill is reference-only; the comparison tool is an optional external viewer; analytics and yt-quality-loop are excluded."
   },
   "unverifiedExternalConditions": [
     "Live Fish Audio generation and billing",
