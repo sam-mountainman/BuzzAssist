@@ -36,8 +36,8 @@ import {
   assetActiveLoopDetail,
   collectQualityLoopReferences,
   evaluateQualityLoopStop,
-  isLinkedWorktreeDir,
   jobBoundLoopRef,
+  sessionIsLoopEvaluator,
   splitShellSegments,
   withLoopMarks,
 } from "../lib/stopHookQualityLoops.mjs";
@@ -235,6 +235,45 @@ test("合格・人の判断待ち・止まったループ・状態ファイル�
   }
 });
 
+test("合格せずに止まったループの成果物を「完成」と言うと1回だけ差し戻し、止まったことを書いた報告は通す", async () => {
+  const fx = fixture();
+  try {
+    const workDir = join(fx.dir, "work", "script-unpassed");
+    const statePath = await startScript(workDir);
+    writeLines(fx.transcript, claudeBash(`node scripts/script-quality-loop.mjs record --work-dir "${workDir}" --script v1.md --version v1 --stage draft --review r.json`, { cwd: fx.dir }));
+    setStatus(statePath, "needs-human-approval", "round-limit");
+    const claim = await decideStop(stopInput(fx, { last_assistant_message: "台本が完成しました。" }), { env: fx.env });
+    assert.equal(claim.action, "block");
+    assert.equal(claim.loopWhy, "loop-unpassed-claim");
+    assert.match(claim.reason, /合格せずに止まっている/u);
+    // 止まったことを書いた報告は状態の報告として通す。
+    const report = await decideStop(stopInput(fx, { last_assistant_message: "台本は上限で止まりました。完成とは言えず、続けるかは人が決めます。" }), { env: fx.env });
+    assert.equal(report.action, "none");
+    // 「予算」「上限」の単語だけでは止まったことの報告にならない。
+    assert.equal((await decideStop(stopInput(fx, { last_assistant_message: "台本が予算内で完成しました。" }), { env: fx.env })).action, "block");
+    // 台本と関係の無い主張は数えない（別の物の「合格」も）。止まったことは別の文に書いてあれば通す。
+    assert.equal((await decideStop(stopInput(fx, { last_assistant_message: "請求書の下書きが完成しました。" }), { env: fx.env })).action, "none");
+    assert.equal((await decideStop(stopInput(fx, { last_assistant_message: "回帰テストは合格しました。" }), { env: fx.env })).action, "none");
+    assert.equal((await decideStop(stopInput(fx, { last_assistant_message: "台本の品質ループに合格しました。台本は上限で止まっており、未合格です。" }), { env: fx.env })).action, "none");
+    // 別の成果物が止まったことの報告では免除しない。
+    assert.equal((await decideStop(stopInput(fx, { last_assistant_message: "台本が完成しました。サムネは未合格です。" }), { env: fx.env })).action, "block");
+    // 人がそのまま使うと認めた台本（accept-human）は、ループが止まっていても完成と言える。ただし認めた台本が最新の版と
+    // 同じ SHA のときだけ（別の台本を認めた記録では免除しない）。
+    const latest = "a".repeat(64);
+    const withVersion = JSON.parse(readFileSync(statePath, "utf8"));
+    withVersion.script.versions = [{ scriptSha256: latest }];
+    writeFileSync(statePath, JSON.stringify(withVersion));
+    writeFileSync(join(workDir, "quality", "script-human-acceptance.json"), JSON.stringify({ acceptances: [{ attestedBy: "human-verified", scriptSha256: "b".repeat(64) }] }));
+    assert.equal((await decideStop(stopInput(fx, { last_assistant_message: "台本が完成しました。" }), { env: fx.env })).action, "block");
+    writeFileSync(join(workDir, "quality", "script-human-acceptance.json"), JSON.stringify({ acceptances: [{ attestedBy: "human-verified", scriptSha256: latest }] }));
+    assert.equal((await decideStop(stopInput(fx, { last_assistant_message: "台本が完成しました。" }), { env: fx.env })).action, "none");
+    setStatus(statePath, "passed", "target-reached");
+    assert.equal((await decideStop(stopInput(fx, { last_assistant_message: "台本が完成しました。" }), { env: fx.env })).action, "none");
+  } finally {
+    fx.cleanup();
+  }
+});
+
 test("台本のループが目的の判定待ち（awaiting-goal-check）→ 人の判断待ちにせず、新しい文脈に判定させる手順で1回だけ差し戻す", async () => {
   const fx = fixture();
   try {
@@ -320,7 +359,7 @@ test("status を見ただけ・ツールの結果に出た案内・置き字の�
   }
 });
 
-test("子エージェント・worktree の子・stop_hook_active・スイッチ・Stop 以外では何もしない", async () => {
+test("子エージェント・stop_hook_active・スイッチ・Stop 以外では何もしない（worktree の本体の会話は差し戻す）", async () => {
   const fx = fixture();
   try {
     const workDir = join(fx.dir, "work", "script-e");
@@ -333,23 +372,13 @@ test("子エージェント・worktree の子・stop_hook_active・スイッチ�
     assert.equal((await decideStop(stopInput(fx), { env: { ...fx.env, [STOP_HOOK_SWITCH_ENV]: "off" } })).why, "switched-off");
     assert.equal((await decideStop(stopInput(fx, { hook_event_name: "SubagentStop" }), { env: fx.env })).why, "not-stop");
 
-    // worktree の子: 作業場所の .git がファイルで、本体の .git/worktrees/<名前> を指す。
-    const child = join(fx.dir, "checkout-child");
-    mkdirSync(join(child, "sub"), { recursive: true });
-    writeFileSync(join(child, ".git"), `gitdir: ${join(fx.dir, "main", ".git", "worktrees", "child-1")}\n`);
-    const inChild = await decideStop(stopInput(fx, { cwd: join(child, "sub") }), { env: fx.env });
-    assert.equal(inChild.action, "none");
-    assert.equal(inChild.loopWhy, "worktree-child");
-    assert.equal(isLinkedWorktreeDir(join(child, "sub")), true);
-    assert.equal(isLinkedWorktreeDir(join(fx.dir, "x", ".claude", "worktrees", "agent-1")), true);
-    // 本体（.git がフォルダ）と submodule（.git/modules を指すファイル）は子ではない。
-    const main = join(fx.dir, "main");
-    mkdirSync(join(main, ".git"), { recursive: true });
-    assert.equal(isLinkedWorktreeDir(main), false);
-    const submodule = join(fx.dir, "with-submodule");
-    mkdirSync(submodule, { recursive: true });
-    writeFileSync(join(submodule, ".git"), "gitdir: ../.git/modules/with-submodule\n");
-    assert.equal(isLinkedWorktreeDir(submodule), false);
+    // 作業場所が git の linked worktree でも、子の印も agent_id も無ければ本体の会話として差し戻す
+    // （Claude Code のデスクトップの本体の会話は .claude/worktrees/<名前> で動く）。
+    const worktree = join(fx.dir, "x", ".claude", "worktrees", "main-session");
+    mkdirSync(worktree, { recursive: true });
+    writeFileSync(join(worktree, ".git"), `gitdir: ${join(fx.dir, "main", ".git", "worktrees", "main-session")}\n`);
+    const inWorktree = await decideStop(stopInput(fx, { cwd: worktree }), { env: fx.env });
+    assert.equal(inWorktree.action, "block", "worktree で動く本体の会話でも品質ループの差し戻しは効く");
   } finally {
     fx.cleanup();
   }
@@ -616,6 +645,23 @@ test("評価者の会話（この会話の ID がそのループの評価文脈�
   } finally {
     fx.cleanup();
   }
+});
+
+test("評価者の判定は文脈 ID の完全一致（ホスト名つき可）。作る係として記録された会話は評価者に数えない", () => {
+  const base = { status: "active", rounds: [{ reviews: [] }] };
+  const withEvaluator = (context, extra = {}) => ({ ...base, ...extra, rounds: [{ reviews: [{ evaluatorContextId: context }] }] });
+  assert.equal(sessionIsLoopEvaluator(withEvaluator(SESSION), SESSION), true);
+  assert.equal(sessionIsLoopEvaluator(withEvaluator(`claude:${SESSION}`), SESSION), true);
+  assert.equal(sessionIsLoopEvaluator(withEvaluator(`codex:${SESSION}`), SESSION), true);
+  // 自分の ID を含むだけの別名（作る係が評価者を名乗る抜け道）は評価者ではない。
+  assert.equal(sessionIsLoopEvaluator(withEvaluator(`x-${SESSION}`), SESSION), false);
+  assert.equal(sessionIsLoopEvaluator(withEvaluator(`${SESSION}-r2`), SESSION), false);
+  assert.equal(sessionIsLoopEvaluator(withEvaluator(`claude:x:${SESSION}`), SESSION), false);
+  // 作る係として記録された会話は、評価の記録があっても差し戻しの対象のまま。
+  assert.equal(sessionIsLoopEvaluator(withEvaluator(`claude:${SESSION}`, { generatorContextId: `claude:${SESSION}` }), SESSION), false);
+  assert.equal(sessionIsLoopEvaluator(withEvaluator(SESSION, {
+    script: { versions: [{ producerContextsAll: [`codex:${SESSION}`] }] },
+  }), SESSION), false);
 });
 
 test("途中の成果物の案内の写しは、ループ自身の案内（assetQualityStatus の detail）と同じ文", async () => {

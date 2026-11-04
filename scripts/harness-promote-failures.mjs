@@ -68,7 +68,7 @@ export function promoteFailuresHelp() {
   --job <id>         制作の Job の ID（その Job のチャンネルを使う）
   --json             結果を JSON で出す
 
-  格上げの段（まさおさんの記事の「失敗の昇格ラダー」）:
+  格上げの段:
     口頭（評価者の採点・所見だけ）→ 注意書き（Gotcha）→ 検査スクリプト → 通過必須の関門
     - 同じ失敗が別の版で ${DEFAULT_PROMOTION_THRESHOLD} 回出たら1つ上げる（同じ成果物の採点し直しは1回に数える）
     - 機械で判定できる失敗は、注意書きを飛ばして検査スクリプトへ

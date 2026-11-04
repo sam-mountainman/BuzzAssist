@@ -156,6 +156,7 @@ test("real harness CLIs launched through a symlinked path (not realpath'd) run t
     await cp(resolve("lib", "cliEntrypoint.mjs"), join(real, "lib", "cliEntrypoint.mjs"));
     await cp(resolve("lib", "machineSlots.mjs"), join(real, "lib", "machineSlots.mjs"));
     await cp(resolve("lib", "claudeAutomationBilling.mjs"), join(real, "lib", "claudeAutomationBilling.mjs"));
+    await cp(resolve("lib", "harnessLearningGuard.mjs"), join(real, "lib", "harnessLearningGuard.mjs"));
     await cp(resolve("config", "harnesses"), join(real, "config", "harnesses"), { recursive: true });
     for (const name of scripts) await cp(resolve("scripts", name), join(real, "scripts", name));
 

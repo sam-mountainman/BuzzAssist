@@ -16,6 +16,7 @@ import {
   findStaleQualityFeedback,
   normalizeQualityAcceptance,
   normalizeQualityRubric,
+  qualityContractRelaxations,
   normalizeRubricAnchors,
   HUMAN_STOP_REASON,
   qualityLimitDefaults,
@@ -552,4 +553,65 @@ test("目的の判定で差し戻しても、回数の上限に届いていれ�
   const human = stopQualityLoopByHuman({ state: reached, reason: "依頼そのものを変えると決めた", reviewer: "operator", attestedBy: "human-verified" });
   assert.equal(human.status, "blocked");
   assert.equal(human.stopReason, HUMAN_STOP_REASON);
+});
+
+test("契約の緩み: 合格点・下限・項目・ゲート・上限・受け入れ方・人の確認・参照の要件の緩む向きを数え、締める向きは数えない", () => {
+  const base = {
+    digest: "a",
+    limits: { targetScore: 90, maximumReviewRounds: 3, maximumCost: 10, maximumElapsedMs: 1000, minimumImprovement: 5, maximumStagnantRounds: 2 },
+    rubric: [{ id: "a", weight: 60, minimumScore: 80 }, { id: "b", weight: 40, minimumScore: 70 }],
+    machineGates: ["g1", "g2"],
+    acceptance: { mode: "each-evaluator", evaluators: ["e1", "e2"], minimumEvaluatorScore: 85, goalCheck: true },
+  };
+  assert.deepEqual(qualityContractRelaxations(base, structuredClone(base)), []);
+  // 機械ゲートを足す・下限を上げるのは締める向き。
+  const tightened = structuredClone(base);
+  tightened.machineGates = ["g1", "g2", "g3"];
+  tightened.rubric = [{ id: "a", weight: 60, minimumScore: 85 }, { id: "b", weight: 40, minimumScore: 70 }];
+  assert.deepEqual(qualityContractRelaxations(base, tightened), []);
+  // 項目を足すと加重平均が薄まり、不合格が合格に変わりうる（残った項目の比は同じでも人に回す）。
+  const added = structuredClone(base);
+  added.rubric = [{ id: "a", weight: 48, minimumScore: 80 }, { id: "b", weight: 32, minimumScore: 70 }, { id: "c", weight: 20, minimumScore: 60 }];
+  assert.deepEqual(qualityContractRelaxations(base, added), ["criterion-added:c"]);
+  // 同じ id のまま採点の定義を変えると、測る物が変わる。
+  const redefined = structuredClone(base);
+  redefined.rubric[0] = { ...redefined.rubric[0], description: "合成の別の定義" };
+  assert.deepEqual(qualityContractRelaxations(base, redefined), ["criterion-definition-changed:a"]);
+  const loose = {
+    digest: "b",
+    limits: { targetScore: 80, maximumReviewRounds: 9, maximumCost: 10, maximumElapsedMs: 1000, minimumImprovement: 1, maximumStagnantRounds: 2 },
+    rubric: [{ id: "a", weight: 50, minimumScore: 60 }],
+    machineGates: ["g1"],
+    acceptance: { mode: "average", evaluators: ["e1"] },
+  };
+  const found = qualityContractRelaxations(base, loose);
+  for (const expected of [
+    "targetScore:90->80",
+    "minimumImprovement:5->1",
+    "maximumReviewRounds:3->9",
+    "criterion-removed:b",
+    "criterion-floor:a:80->60",
+    "gate-removed:g2",
+    "acceptance-mode:each-evaluator->average",
+    "acceptance-evaluator-removed:e2",
+    "acceptance-goal-check-removed",
+  ]) assert.ok(found.includes(expected), `${expected} が無い: ${found.join(", ")}`);
+  const reweighted = structuredClone(base);
+  reweighted.rubric = [{ id: "a", weight: 30, minimumScore: 80 }, { id: "b", weight: 70, minimumScore: 70 }];
+  assert.deepEqual(qualityContractRelaxations(base, reweighted), ["criterion-weights-changed"]);
+  // 途中の成果物の契約: 人の確認の欄・参照の要件を弱めるのも緩む向き。
+  const asset = { digest: "x", limits: {}, rubric: [], humanChecks: [{ id: "identity", when: "always" }, { id: "hand-safety", when: "always" }], referencePolicy: "required", referenceApproval: true };
+  assert.deepEqual(qualityContractRelaxations(asset, structuredClone(asset)), []);
+  assert.deepEqual(
+    qualityContractRelaxations(asset, { ...asset, digest: "y", humanChecks: [{ id: "identity", when: "references" }], referencePolicy: "optional", referenceApproval: false }),
+    ["human-check-weakened:identity:always->references", "human-check-removed:hand-safety", "reference-policy:required->optional", "reference-approval-removed"],
+  );
+  // 動画クリップの契約の characters-or-references: references へ弱めるのは緩み、always へ強めるのは締める向き。
+  const clip = { digest: "c", limits: {}, rubric: [], humanChecks: [{ id: "identity", when: "characters-or-references" }] };
+  assert.deepEqual(qualityContractRelaxations(clip, { ...clip, humanChecks: [{ id: "identity", when: "references" }] }), ["human-check-weakened:identity:characters-or-references->references"]);
+  assert.deepEqual(qualityContractRelaxations(clip, { ...clip, humanChecks: [{ id: "identity", when: "always" }] }), []);
+  assert.deepEqual(qualityContractRelaxations({ ...clip, humanChecks: [{ id: "identity", when: "references" }] }, clip), []);
+  // 前の契約が分からない古い状態は、digest が同じなら変更なし、違えば分からないとして人に回す。
+  assert.deepEqual(qualityContractRelaxations(null, { digest: "same" }, { previousDigest: "same" }), []);
+  assert.deepEqual(qualityContractRelaxations(null, { digest: "new" }, { previousDigest: "old" }), ["contract-terms-unknown"]);
 });

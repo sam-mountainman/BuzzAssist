@@ -503,7 +503,7 @@ test("作業フォルダから品質ループの状態ファイルを全部見�
 
     const help = spawnSync(process.execPath, [cli, "--help"], { encoding: "utf8", env, cwd: REPO_ROOT });
     assert.equal(help.status, 0);
-    assert.match(help.stdout, /失敗の昇格ラダー/u);
+    assert.match(help.stdout, /格上げの段:\n\s+口頭/u);
     const noArgs = spawnSync(process.execPath, [cli, "enqueue"], { encoding: "utf8", env, cwd: REPO_ROOT });
     assert.equal(noArgs.status, 2);
     const child = spawnSync(process.execPath, [cli, "enqueue", "--work-dir", workDir], { encoding: "utf8", env: childAgentEnvironment(env), cwd: REPO_ROOT });

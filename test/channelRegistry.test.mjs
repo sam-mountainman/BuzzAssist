@@ -8,6 +8,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  CHANNEL_QUARANTINED_CODE,
   CHANNEL_REGISTRY_INVALID_CODE,
   CHANNEL_REGISTRY_PATH_ENV,
   CHANNEL_UNKNOWN_CODE,
@@ -17,7 +18,9 @@ import {
   loadChannelRegistry,
   pathOverlap,
   publicTreePlacement,
+  resolveChannelForCall,
   validateChannelRegistry,
+  validateChannelRegistryDetailed,
 } from "../lib/channelRegistry.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -129,15 +132,16 @@ test("台帳: 形の誤り（requireBrief の省略・知らない欄・未完�
     channel(root, "alpha", { strategy: { workDir: path.join(root, "alpha", "strategy") } }),
     channel(root, "beta", { requireBreif: true }),
     channel(root, "gamma", { projectDir: "<作業フォルダ>" }),
-    channel(root, "delta", { production: { kind: "harness", harnessId: "synthetic-unknown-harness" } }),
+    channel(root, "delta", { production: { kind: "harness", harnessId: "synthetic-unknown-harness" }, requireBreif: true }),
     channel(root, "epsilon", { production: { kind: "external" } }),
-    channel(root, "zeta", { scriptQuality: { genre: "synthetic-genre" } }),
+    channel(root, "zeta", { scriptQuality: { genre: "synthetic-genre" }, projectDir: "<作業フォルダ>" }),
     channel(root, "Bad Id"),
   ]));
   for (const expected of [
     "channel-strategy-invalid:alpha",
     "channel-unknown-key:beta",
     "channel-path-placeholder:gamma",
+    // 宣言に無いハーネス・ジャンルは、同じ行にほかの問題があれば今までどおり台帳全体を止める理由に数える。
     "channel-harness-unknown:delta",
     "channel-production-invalid:epsilon",
     "channel-script-quality-genre-unknown:zeta",
@@ -154,6 +158,39 @@ test("台帳: 形の誤り（requireBrief の省略・知らない欄・未完�
   ], { genreForHarness }).length, 2);
   // channels が無ければ空の台帳。
   assert.deepEqual(validateChannelRegistry({ deployments: [] }), []);
+});
+
+test("台帳: 削除したハーネス・ジャンルを指すだけのチャンネルはそのチャンネルだけ止め、ほかのチャンネルは使える", (t) => {
+  const root = tempRoot(t);
+  const parsed = {
+    channels: [
+      channel(root, "alpha"),
+      channel(root, "retired", { production: { kind: "harness", harnessId: "synthetic-retired-harness" }, scriptQuality: { genre: "synthetic-retired-genre" } }),
+    ],
+    channelLearning: [{ channel: "retired", target: "channel-pack:synthetic-retired", root: path.join(root, "retired", "learning") }],
+  };
+  const detailed = validateChannelRegistryDetailed(parsed, { repoRoot: REPO_ROOT, harnessIds: HARNESS_IDS, genres: GENRES });
+  assert.deepEqual(detailed.channels.map((entry) => entry.id), ["alpha"]);
+  assert.deepEqual(detailed.quarantined.map((entry) => entry.id), ["retired"]);
+  assert.deepEqual(detailed.quarantined[0].issues.map((entry) => entry.code).sort(), [
+    "channel-harness-unknown:retired",
+    "channel-script-quality-genre-unknown:retired",
+  ]);
+  assert.deepEqual(validateChannelRegistry(parsed, { repoRoot: REPO_ROOT, harnessIds: HARNESS_IDS, genres: GENRES }).map((entry) => entry.id), ["alpha"]);
+  const registry = { channels: detailed.channels, quarantined: detailed.quarantined };
+  assert.equal(findChannel(registry, "alpha").id, "alpha");
+  assert.throws(() => findChannel(registry, "retired"), (error) => error.code === CHANNEL_QUARANTINED_CODE && /synthetic-retired-harness/u.test(error.message));
+  // --channel を省いて止めたチャンネルの場所や Pack を渡しても、チャンネル無しとして通さない。
+  assert.throws(() => resolveChannelForCall(registry, { projectDir: path.join(root, "retired", "project") }), { code: CHANNEL_QUARANTINED_CODE });
+  assert.throws(() => resolveChannelForCall(registry, { channelPackPath: path.join(root, "retired", "pack") }), { code: CHANNEL_QUARANTINED_CODE });
+  assert.equal(resolveChannelForCall(registry, { projectDir: path.join(root, "alpha", "project") }).channel.id, "alpha");
+  assert.equal(resolveChannelForCall(registry, { projectDir: path.join(root, "unrelated") }), null);
+  // 台帳ファイルから読んでも同じ（止めたチャンネルは quarantined に出る）。
+  const file = path.join(root, "harness-deployments.json");
+  fs.writeFileSync(file, JSON.stringify(parsed));
+  const loaded = loadChannelRegistry({ repoRoot: REPO_ROOT, deploymentPath: file, harnessIds: HARNESS_IDS, genres: GENRES });
+  assert.deepEqual(loaded.channels.map((entry) => entry.id), ["alpha"]);
+  assert.deepEqual(loaded.quarantined.map((entry) => entry.id), ["retired"]);
 });
 
 test("台帳: 同じハーネスのチャンネルでも学習の保存先はチャンネルごとに別（既定は学習の置き場の channels/<id>）", (t) => {

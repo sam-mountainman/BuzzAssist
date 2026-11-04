@@ -21,7 +21,7 @@
 //   - **pack が無い環境では構造規則だけ見る**。語が引けないことを
 //     「問題なし」と報告しない
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -756,6 +756,32 @@ function render(report) {
   return lines.join("\n");
 }
 
+export const PRIVATE_PUSH_CHECK_ENV = "BUZZASSIST_PRIVATE_PUSH_CHECK";
+export const PRIVATE_PUSH_CHECK_GIT_CONFIG = "buzzassist.privatePushCheck";
+
+/**
+ * 端末ごとの追加の検査（任意）。公開リポジトリに語の一覧を置けない物（取り込んだ外部の資料の題名・原文など）は、
+ * 端末の環境変数 BUZZASSIST_PRIVATE_PUSH_CHECK か git の設定 buzzassist.privatePushCheck に検査のコマンドを書くと、
+ * 同じ push の範囲（pre-push の stdin の行）を渡して走らせる。0 以外で終われば push を止める。
+ * 設定してあるのに起動できないときも止める（黙って飛ばすと、検査したつもりで公開される）。
+ */
+export function runPrivatePushCheck(lines, { env = process.env, projectDir = REPO_ROOT, spawnImpl = spawnSync, gitConfig } = {}) {
+  let command = String(env?.[PRIVATE_PUSH_CHECK_ENV] || "").trim();
+  if (!command) {
+    try {
+      command = typeof gitConfig === "function"
+        ? String(gitConfig(PRIVATE_PUSH_CHECK_GIT_CONFIG) || "").trim()
+        : execFileSync("git", ["-C", projectDir, "config", "--get", PRIVATE_PUSH_CHECK_GIT_CONFIG], { encoding: "utf8" }).trim();
+    } catch {
+      command = ""; // 設定が無い（git は終了コード 1）
+    }
+  }
+  if (!command) return { configured: false, ok: true };
+  const result = spawnImpl(command, { shell: true, cwd: projectDir, input: `${lines.join("\n")}\n`, stdio: ["pipe", "inherit", "inherit"], env });
+  if (result?.error) return { configured: true, ok: false, reason: `起動できない: ${result.error.code || result.error.message}` };
+  return result?.status === 0 ? { configured: true, ok: true } : { configured: true, ok: false, reason: `終了コード ${result?.status ?? "不明"}` };
+}
+
 if (isDirectCli(import.meta.url)) {
   const asJson = process.argv.includes("--json");
   const stagedOnly = process.argv.includes("--staged");
@@ -774,6 +800,10 @@ if (isDirectCli(import.meta.url)) {
     else if (requireSignals && range.incomplete.length > 0) {
       process.stdout.write("--require-signals: 未検査の区分があるコミットを通しません。\n");
       process.exitCode = 3;
+    } else {
+      const extra = runPrivatePushCheck(input);
+      if (extra.configured) process.stdout.write(`端末の追加の検査: ${extra.ok ? "通過" : `止める（${extra.reason}）`}\n`);
+      if (!extra.ok) process.exitCode = 4;
     }
   } else {
   const revisionIndex = process.argv.indexOf("--revision");

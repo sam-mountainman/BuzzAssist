@@ -58,7 +58,7 @@ test("relative BESTOFN_ROOT resolves from the requested working directory", asyn
   });
 });
 
-test("does not discover a machine-specific Masao checkout", async () => {
+test("does not probe machine-specific checkouts outside the project", async () => {
   const attempted = [];
   const invocation = await resolveBestOfNInvocation({
     env: { HOME: "/portable/home" },
@@ -70,7 +70,7 @@ test("does not discover a machine-specific Masao checkout", async () => {
   });
   assert.equal(invocation.source, "PATH");
   assert.ok(attempted.length > 0);
-  assert.ok(attempted.every((path) => !path.includes("まさお")));
+  assert.ok(attempted.every((path) => /^[\\/]project[\\/]/u.test(path)), attempted.join(", "));
 });
 
 test("falls back to bon on PATH and passes arguments without a shell", async () => {

@@ -294,7 +294,7 @@ test("最後の発言が入力に無ければ記録の末尾から取り、Codex
   }
 });
 
-test("発言が Job を名指ししていればその Job だけを見る（別の合格済み Job を名指しした完成報告は通す）", async () => {
+test("発言が Job を名指ししていればその Job と最後に扱った Job を見る（最後の Job も合格済みなら完成報告は通す）", async () => {
   const fx = fixture();
   try {
     writeJob(fx.projectDir, { id: JOB_ID, status: "planned" });
@@ -305,6 +305,33 @@ test("発言が Job を名指ししていればその Job だけを見る（別�
     const named = evaluateStop(stopInput(fx, { last_assistant_message: `Job ${JOB_ID} の動画が完成しました。` }), { env: fx.env });
     assert.equal(named.action, "block");
     assert.match(named.reason, /計画だけで、有料生成はまだ始まっていない/u);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test("合格済みの古い Job を名指ししても、この会話で最後に扱った未決着の Job は判定から外れない", async () => {
+  const fx = fixture();
+  try {
+    writeJob(fx.projectDir, { id: JOB_ID, status: "planned" });
+    writeJob(fx.projectDir, { id: OTHER_JOB_ID, status: "completed", receipt: passingReceipt() });
+    // 古い順に OTHER（合格済み）→ JOB（計画だけ）を扱った会話。最後に扱ったのは JOB。
+    const lines = [OTHER_JOB_ID, JOB_ID].map((jobId) => JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: jobId, name: "mcp__buzzassist_mcp__get_video_harness_job", input: { projectDir: fx.projectDir, jobId } }] } }));
+    const claim = `Job ${OTHER_JOB_ID} の動画が完成しました。`;
+    // 最後の発言は記録の末尾にも入る（Claude Code の assistant の text、Codex の agent_message）。発言の文は「扱った」に数えない。
+    const spoken = [
+      JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: claim }] } }),
+      JSON.stringify({ type: "event_msg", payload: { type: "agent_message", message: claim } }),
+      JSON.stringify({ type: "event_msg", payload: { type: "item_completed", item: { type: "AgentMessage", text: claim } } }),
+      JSON.stringify({ type: "event_msg", payload: { type: "task_complete", last_agent_message: claim } }),
+      JSON.stringify({ type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: claim }] } }),
+    ];
+    for (const withSpoken of [[], spoken]) {
+      writeFileSync(fx.transcript, `${[...lines, ...withSpoken].join("\n")}\n`);
+      const decision = evaluateStop(stopInput(fx, { last_assistant_message: claim }), { env: fx.env });
+      assert.equal(decision.action, "block", `${decision.why} (発言を記録に含む: ${withSpoken.length > 0})`);
+      assert.deepEqual(decision.jobIds, [JOB_ID]);
+    }
   } finally {
     fx.cleanup();
   }

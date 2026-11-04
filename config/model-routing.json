@@ -1,0 +1,56 @@
+{
+  "version": "buzzassist-model-routing-v1",
+  "note": "どの工程・仕事をどのモデルへ回すかの既定。呼び出しは agent-cli-bridge（Codex は codex exec、Gemini は Antigravity の agy）で行い、呼ぶたびに node scripts/harness-external-call.mjs record で記録する（本文は残さない）。端末ごとに使えるモデルが違うので、運営者は BUZZASSIST_MODEL_ROUTING（JSON のパス）で上書きできる。上書きでも neverSend は外せない。",
+  "providers": {
+    "codex": {
+      "bridgeProvider": "codex",
+      "ledgerHost": "codex",
+      "models": ["gpt-6-astra", "gpt-6-sol"],
+      "effort": "max",
+      "strengths": ["論理の検証", "事実の確認", "情報集め", "バックエンドの実装とレビュー", "ライセンスの事実確認"]
+    },
+    "antigravity": {
+      "bridgeProvider": "gemini",
+      "ledgerHost": "antigravity",
+      "models": ["gemini-4-argon-high"],
+      "effort": "high",
+      "strengths": ["完成動画・画像・音声を見て聞いて判断する", "長い資料や動画を通しで読む", "Google 検索に根ざした調べもの"]
+    },
+    "host": {
+      "bridgeProvider": "",
+      "ledgerHost": "",
+      "models": [],
+      "effort": "",
+      "strengths": ["全体の段取り", "人への報告と判断シート", "ほかのモデルの結果の統合"]
+    }
+  },
+  "tasks": {
+    "code-review": { "provider": "codex", "mode": "review", "what": "ハーネスのコードの不具合探し・差分のレビュー" },
+    "logic-review": { "provider": "codex", "mode": "ask", "what": "設計・判断・数字の論理の検証" },
+    "fact-check": { "provider": "codex", "mode": "ask", "what": "台本・資料の事実（版・日付・機能名）の確認" },
+    "license-check": { "provider": "codex", "mode": "ask", "what": "OSS・素材・モデルのライセンスと商用可否の事実確認" },
+    "information-gathering": { "provider": "codex", "mode": "ask", "what": "情報集め・一次資料の取得と整理" },
+    "backend-implementation": { "provider": "codex", "mode": "edit", "what": "サーバー・CLI・データの処理の実装" },
+    "perceptual-review": { "provider": "antigravity", "mode": "ask", "what": "完成動画・途中の画像・声のテイクを見て聞いて採点する" },
+    "long-document-reading": { "provider": "antigravity", "mode": "ask", "what": "長い資料・字幕・動画を通しで読んで要点を返す" },
+    "grounded-web-research": { "provider": "antigravity", "mode": "ask", "what": "Google 検索に根ざした調べもの（出典の URL つき）" },
+    "orchestration": { "provider": "host", "mode": "", "what": "段取り・統合・人への報告（いま動いているエージェントがする）" }
+  },
+  "stages": {
+    "final-video-review": "perceptual-review",
+    "asset-review": "perceptual-review",
+    "voice-take-review": "perceptual-review",
+    "script-fact-check": "fact-check",
+    "script-logic-review": "logic-review",
+    "harness-code-review": "code-review",
+    "oss-license-check": "license-check",
+    "competitor-research": "grounded-web-research",
+    "transcript-reading": "long-document-reading"
+  },
+  "neverSend": [
+    { "id": "secrets", "what": "鍵・トークン・パスワード・署名の秘密鍵・課金の情報" },
+    { "id": "end-user-data", "what": "利用者の音声・本文・個人の情報" },
+    { "id": "real-person-voice", "what": "実在の人の声のデータ（話者埋め込み・参照音声・その生成音）" },
+    { "id": "private-channel-pack", "what": "署名済み Channel Pack の非公開の中身（キャスト・承認記録）をそのまま" }
+  ]
+}

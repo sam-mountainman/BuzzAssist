@@ -37,7 +37,9 @@
     "config/koya-manga-production-contract.schema.json",
     "config/koya-manga-quality-incidents.json",
     "config/koya-reading-dictionary.json",
+    "config/model-routing.json",
     "config/narrated-story-script-package.schema.json",
+    "config/oss-catalog.json",
     "config/parallel-plans/",
     "config/strategy-brief.schema.json",
     "lib/*.mjs",
@@ -128,6 +130,10 @@
     "instructions:check": "node scripts/generate-host-instructions.mjs --check",
     "package:audit": "node scripts/audit-package-tarball.mjs",
     "doctor": "node scripts/harness-doctor.mjs",
+    "harness:conformance": "node scripts/harness-conformance.mjs",
+    "harness:inbox": "node scripts/harness-inbox.mjs",
+    "harness:model-route": "node scripts/model-route.mjs list",
+    "oss:catalog": "node scripts/oss-catalog.mjs check",
     "hooks:install": "git config core.hooksPath .githooks"
   },
   "engines": {
